@@ -1,0 +1,9 @@
+OPT NATIVE, INLINE
+MODULE 'target/PE/base'
+
+PROC FastNew(a, noClear=FALSE:BOOL) RETURNS mem:ARRAY REPLACEMENT
+	mem := NATIVE {FastNew(} (noClear) BUT a {)} ENDNATIVE !!ARRAY
+ENDPROC
+PROC FastDispose(a:ARRAY, b) REPLACEMENT
+	NATIVE {FastDispose(} a {,} b {)} ENDNATIVE
+ENDPROC NILA

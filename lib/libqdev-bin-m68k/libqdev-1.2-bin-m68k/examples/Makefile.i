@@ -1,0 +1,30 @@
+#
+# 'qdev'
+# by Burnt Chip Dominators
+#
+-include ../../tools/Makefile.i
+-include ../../tools/Makefile.stubs
+-include ../../lib/Makefile.i
+
+PROGGY = example
+
+
+MAINLIB = $(MAINLIBP)/$(LIBRARY)
+CFLAGS = -O $(STDCPU) $(STDCFLAGS) -I../$(INCPATH) -Wall
+CFLAGS += $(EXTFLAGS)
+LDFLAGS = $(STDLDFLAGS)
+LIBS = $(MAINLIB) $(STDLPATH) $(LIBNIX) $(LIBAMIGA)
+
+
+platform: $(PROGGY)
+
+$(MAINLIB): $(COBJECTS)
+	make -C ../../lib
+
+$(PROGGY): $(PROGGY).c $(MAINLIB)
+	$(CC) $(CFLAGS) $(LDFLAGS) $(PROGGY).c -o $@ $(LIBS)
+
+clean:
+
+cleanall:
+	-rm -f $(PROGGY)

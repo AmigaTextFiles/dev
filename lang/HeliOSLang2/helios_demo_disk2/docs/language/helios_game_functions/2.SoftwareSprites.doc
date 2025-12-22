@@ -1,0 +1,1179 @@
+
+***********************
+HeliOS software sprites
+***********************
+
+HeliOS runs software sprites using an interrupt controlled sprite handler
+which processes a series of sprite data structures defining the imagery
+and dynamics of each sprite.
+
+The HeliOS sprite handler runs under the HeliOS game operating system and
+does not function when the Amiga operating system is active.
+
+The sprite control data structure, called "SpriteCtrl", is quite large and
+contains many fields used only internally by the HeliOS system, so it is
+best to only study and learn the main control fields to begin with.
+
+The HeliOS system precalculates as much as possible of the information
+required to display each software sprite, so every sprite structure
+contains much data calculated specifically to allow it to run within a
+particular display slice.  For this reason you need to initialise each
+sprite to run in a particular display slice and you must rigourously
+observe the requirement that sprites are "locked" to individual slices.
+
+The general dynamic control fields of software sprites are very similar
+to those of other HeliOS objects, such as hardware sprites or animations,
+and this allows you to apply similar techniques to all HeliOS objects.
+
+
+********************************
+Defining HeliOS software sprites
+********************************
+
+---------------------------------------------------------------
+Low-level direct sprite allocation or automatic sprite creation
+---------------------------------------------------------------
+
+You can define sprites by setting up all the control structures yourself
+or by using powerful but simple-to-use automated HeliOS routines.
+
+At the "lowest" level a HeliOS sprite may be defined by allocating a sprite
+control data structure, which then must be initialised for a particular
+display slice after setting it up with the various parameters you require.
+This method would require that you create and set up imagery bitmaps and
+collision masks etc. and the fact that you are setting up all these things
+under your own control allows you to set up special effects which would not
+always be so easy using the HeliOS automated routines.
+
+However, although this "do-it-yourself" method gives you maximum control
+over all features of the sprite for advanced applications, it is usually
+easier and better to allow HeliOS to make the sprite for you automatically.
+
+Normally you want to create a sprite with specific imagery, so HeliOS
+provides a useful function which extracts images from a "source" bitmap
+and creates fully specified sprites complete with image bitmap, collision
+mask, and background storage bitmap etc.  This really is the best and
+easiest method of creating any sprite, and it can even be used to create
+"blank" sprites which can later have their imagery re-rendered and collison
+masks recreated.
+
+In most practical cases you will probably be creating sets of sprites to
+be used as animation frames, so the HeliOS automated functions provide
+for extracting sets of several similar-sized sprites.  Creating a single
+sprite should be regarded as a simple instance of using the multi-sprite
+creation facility: you simply specify that HeliOS should create a "set"
+consisting of just one sprite.
+
+The main sprite creation function is called MAKESPRITESET and it constructs
+a set of similar sized sprites with imagery extracted from a master imagery
+bitmap which you can create in any art software package.
+
+The newly created sprites are stored in a table with a definition header so
+that you can access them easily by reference to a single pointer.
+
+Here are definitions of some of the useful HeliOS automatic sprite creation
+functions:
+
+  MAKESPRITESET
+
+  ( BMap(l), X(w), Y(w), Wid(w), Hgt(w), Spt#(w)  - - - SpriteSet(l) )
+                                                        or null
+
+  Builds a set of Spt# sprites, including sprite control structures,
+  collision masks etc.
+
+  The sprites are all Wid x Hgt in size, and their imagery is copied
+  from the designated BitMap starting at position X,Y.
+
+  The sprite imagery is copied sequentially, from left to right, and
+  when the right edge of the source BitMap is reached the process
+  moves down to the next available pixel row and starts again from
+  the left edge.
+
+  The SpriteControl structures of the new sprites are copied into a
+  SpriteSet table which has the following format:
+
+  Number of sprites (w)
+  Width             (w)
+  Height            (w)
+  Depth             (w)
+  1st SpriteControl structure pointer(l)
+  2nd SpriteControl structure pointer(l)
+  etc. etc.
+
+  The first sprite pointer is offset 8 bytes from the start of the table.
+
+
+  FREESPRITESET
+
+  ( SpriteSet(l) - - - )
+
+  Deallocates a set of sprites created using MAKESPRITESET.
+
+  This routine will safely accept a null parameter.
+
+Once you have created a set of sprites, the sprite set must be initialised
+to work in a particular display slice.  Here is a function to do that:
+
+  INITSPRITESET
+
+  ( SliceControl(l), SpriteSet(l) - - - )
+
+  Initialises a set of sprites to work correctly with a particular
+  slice.
+
+  This function allocates and initialises everything for double or
+  triple buffering etc., as required, and fully prepares the sprites
+  for use in the designated slice.
+
+  This operation does all kind of precalculations for blitting etc.
+  which depend on slice display characteristics, so you must not
+  attempt to use initialised sprites in other slices.
+
+Having created a set of initialised sprites you might want to duplicate
+one or more of the sprites, so here is a function to do that:
+
+  CLONESPRITE
+
+  ( SpriteControl(l) - - - SpriteControl(l) )
+
+  Clones a sprite, including FULL initialisation.
+
+  It is best to use this function AFTER initialising the sprite to be
+  cloned since this will save having to re-initialise the new sprite.
+
+  FREESPRITE
+
+  ( SpriteControl(l) - - - )
+
+  Deallocates and frees a sprite, including all subsidiary structures.
+
+  This routine will safely accept a null parameter.
+
+A fully initialised sprite consists of a fairly complex assemblage of
+subsidiary structures with many precalculated factors: fortunately you
+do not need to learn anything about all this since HeliOS provides you
+with a simple control interface via the sprite control data structure.
+
+Because HeliOS does all the hard work for you, the task of actually using
+sprites in your programs is amazingly simple, with many very powerful
+automated functions.
+
+The sprite will be fully controlled when "on screen" by the data which
+you store in the sprite control structure: you could regard the sprite
+data structure as a "control panel" for the sprite, with a series of
+switches and dynamic settings which you can change at any time to
+generate required effects.
+
+----------------------------------------
+Setting up sprite dynamic control fields
+----------------------------------------
+
+Here are some of the fields which you will perhaps want to initialise as
+a minimum requirement before installing a sprite:
+
+SpriteCtrl_Flags         -> Set to "1" when installing a normal sprite
+                            Set to "-1" to make sprite initially immobile
+                            Set to "-2" to make sprite initially invisible
+
+SpriteCtrl_XPos          -> Logical X-coordinate
+SpriteCtrl_YPos          -> Logical Y-coordinate
+
+SpriteCtrl_Relativity    -> Whether the sprite coordinates are treated as
+                            playfield or display relative
+
+SpriteCtrl_WrapCorrect   -> Whether the sprite coordinates are to be
+                            automatically "wrapped" as the sprite reaches
+                            the edge of the playfield
+
+See below for more details about the various control fields.
+
+You might use code something like this:
+
+      MyNewSprite SETSTRUCTURE1
+
+                         SpriteCtrl_Flags        STRUCTURE1 1!L
+      MySpriteStartXPos  SpriteCtrl_XPos         STRUCTURE1 0!L
+      MySpriteStartYPos  SpriteCtrl_YPos         STRUCTURE1 0!L
+                         SpriteCtrl_WrapCorrect  STRUCTURE1 1!L
+
+**************************************
+Installing and removing HeliOS sprites
+**************************************
+
+Once you have created and initialised a "SpriteCtrl" structure you need to
+install it into the HeliOS interrupt driven sprite handler.
+
+This is done by using the function INSTALLSPRITE which is defined as
+follows:
+
+  INSTALLSPRITE
+
+  ( SpriteCtrl(l) - - - )
+
+  Installs a "software" sprite (BOB) into the HeliOS sprite control
+  system.
+
+You might use code something like this:
+
+  MyNewSprite INSTALLSPRITE
+
+From now on the sprite will be processed under interrupt control while
+ever and whenever the HeliOS game operating system is switched on.
+
+The sprite may be stopped on screen or rendered invisible by using the
+control parameters within its data structure, but it will always be
+processed by the HeliOS sprite handler until it is specifically removed.
+
+To remove a HeliOS sprite you can use the function REMOVESPRITE:
+
+  REMOVESPRITE
+
+  ( SpriteCtrl(l) - - - )
+
+  Removes a "software" sprite (BOB) from the HeliOS sprite control
+  system.
+
+
+You might use code something like this:
+
+  MyNewSprite REMOVESPRITE
+
+Another (sometimes more useful) method of removing a sprite is to store
+the value "-3" into the "SpriteCtrl_Flags" field of the sprite control
+structure (see below).
+
+****************************************************
+Using the fields in HeliOS sprite control structures
+****************************************************
+
+HeliOS sprites are controlled entirely be storing parameters into control 
+structures either before the sprite is installed or while the sprite is 
+running.
+
+The name of the structure which controls HeliOS sprites is "SpriteCtrl".
+
+The SpriteCtrl structure is quite large, and has several "private" fields
+and other fields which you do not need to learn about initially for the
+purposes of creating simple sprites.
+
+Do not worry about the size of this structure, and do not try to learn
+what everything does all at once: learn each function as you need it.
+
+--------------------
+Future compatibility
+--------------------
+
+The "SpriteCtrl" structure may be extended in the future, so always refer
+to fields within this structure by their symbolic names rather than using
+numerically coded offsets to avoid compatibility problems.
+
+--------------------
+Structure definition
+--------------------
+
+Here is the current definition of the "SpriteCtrl" structure:
+
+   WORD   SpriteCtrl_Flags            -> Control flags
+   APTR   SpriteCtrl_ImgPlanes        -> Pointer to image planes
+   APTR   SpriteCtrl_TgtPlanes1       -> Pointer to display buffer 1 planes
+   APTR   SpriteCtrl_TgtPlanes2       -> Pointer to display buffer 2 planes
+   APTR   SpriteCtrl_MaskPlane        -> Pointer to shadow mask plane
+   WORD   SpriteCtrl_BltSize          -> Blitter parameter
+   WORD   SpriteCtrl_Channels         -> Blitter parameter
+   WORD   SpriteCtrl_Minterm          -> Blitter parameter
+   WORD   SpriteCtrl_TgtMod           -> Blitter parameter
+   WORD   SpriteCtrl_TgtBPR           -> Blitter parameter
+   WORD   SpriteCtrl_Depth            -> Blitter parameter
+   WORD   SpriteCtrl_PlaneOnOff       -> Blitter parameter
+   WORD   SpriteCtrl_LastXPos1        -> For HeliOS internal use
+   WORD   SpriteCtrl_LastYPos1        -> For HeliOS internal use
+   WORD   SpriteCtrl_LastXPos2        -> For HeliOS internal use
+   WORD   SpriteCtrl_LastYPos2        -> For HeliOS internal use
+   WORD   SpriteCtrl_Height           -> Pixel height
+   WORD   SpriteCtrl_Width            -> Pixel width
+   WORD   SpriteCtrl_DownLimit        -> For HeliOS internal use
+   WORD   SpriteCtrl_RightLimit       -> For HeliOS internal use
+   APTR   SpriteCtrl_BackDrop         -> For HeliOS internal use
+   APTR   SpriteCtrl_SaveBMap1        -> Display save buffer 1
+   APTR   SpriteCtrl_SaveBMap2        -> Display save buffer 2
+   APTR   SpriteCtrl_ImgBMap          -> Imagery BitMap
+   APTR   SpriteCtrl_TgtBMapPtr       -> For HeliOS internal use
+   APTR   SpriteCtrl_MaskBMap         -> Shadow mask BitMap
+   APTR   SpriteCtrl_SavePlanes1      -> Pointer to save planes 1
+   APTR   SpriteCtrl_SavePlanes2      -> Pointer to save planes 2
+   LONG   SpriteCtrl_TgtOff1          -> For HeliOS internal use
+   LONG   SpriteCtrl_TgtOff2          -> For HeliOS internal use
+   APTR   SpriteCtrl_Strip            -> For HeliOS internal use
+   APTR   SpriteCtrl_XOffPtr          -> For HeliOS internal use
+   APTR   SpriteCtrl_YOffPtr          -> For HeliOS internal use
+   APTR   SpriteCtrl_DSControl        -> Pointer to SliceControl structure
+   WORD   SpriteCtrl_DBFlag           -> For HeliOS internal use
+   WORD   SpriteCtrl_XMargin          -> For HeliOS internal use
+   WORD   SpriteCtrl_YMargin          -> For HeliOS internal use
+   APTR   SpriteCtrl_CollPlane        -> Pointer to collision mask plane
+   APTR   SpriteCtrl_CollMask         -> Collision mask BitMap
+   APTR   SpriteCtrl_TgtMaskPlane     -> Pointer to display mask plane
+   APTR   SpriteCtrl_HSprite1         -> For HeliOS internal use
+   APTR   SpriteCtrl_HSprite2         -> For HeliOS internal use
+   WORD   SpriteCtrl_BPR              -> For HeliOS internal use
+
+   LONG   SpriteCtrl_CollHitMask      -> Collision HitMask
+   LONG   SpriteCtrl_CollMeMask       -> Collision MeMask
+   WORD   SpriteCtrl_CollForth        -> Collision HeliOS function CFA
+   APTR   SpriteCtrl_CollCode         -> Collision machine code pointer
+
+   WORD   SpriteCtrl_AutoRemove       -> For HeliOS internal use
+
+   WORD   SpriteCtrl_LeftZoneOffset   -> For HeliOS internal use
+   WORD   SpriteCtrl_RightZoneOffset  -> For HeliOS internal use
+   WORD   SpriteCtrl_UpZoneOffset     -> For HeliOS internal use
+   WORD   SpriteCtrl_DownZoneOffset   -> For HeliOS internal use
+   WORD   SpriteCtrl_LowerBorder      -> For HeliOS internal use
+   WORD   SpriteCtrl_RightBorder      -> For HeliOS internal use
+
+   WORD   SpriteCtrl_CountDown        -> CountDown timer
+   WORD   SpriteCtrl_CDFlags          -> CountDown flags
+   WORD   SpriteCtrl_CDForth          -> CountDown HeliOS function CFA
+   APTR   SpriteCtrl_CDCode           -> CountDown machine code pointer
+   WORD   SpriteCtrl_BeforeForth      -> HeliOS CFA executed before sprite
+   APTR   SpriteCtrl_BeforeCode       -> Machine code executed before sprite
+   WORD   SpriteCtrl_AfterForth       -> HeliOS CFA executed after sprite
+   APTR   SpriteCtrl_AfterCode        -> Machine code executed after sprite
+
+   APTR   SpriteCtrl_DispRowTable     -> For HeliOS internal use
+   APTR   SpriteCtrl_SprRowTable      -> For HeliOS internal use
+
+   WORD   SpriteCtrl_RemForth         -> HeliOS CFA executed at closedown
+   APTR   SpriteCtrl_RemCode          -> Machine code executed at closedown
+   APTR   SpriteCtrl_Anim             -> For HeliOS internal use
+
+   APTR   SpriteCtrl_ControlSection   -> For HeliOS internal use
+
+   WORD   SpriteCtrl_XPos             -> Logical X-coordinate
+   WORD   SpriteCtrl_YPos             -> Logical Y-coordinate
+   WORD   SpriteCtrl_RenderXPos       -> Display X-coordinate
+   WORD   SpriteCtrl_RenderYPos       -> Display Y-coordinate
+   APTR   SpriteCtrl_XPosPtr          -> Pointer to logical X-coordinate
+   APTR   SpriteCtrl_YPosPtr          -> Pointer to logical Y-coordinate
+   APTR   SpriteCtrl_XAdd             -> Pointer to X-additive value
+   APTR   SpriteCtrl_YAdd             -> Pointer to Y-additive value
+   WORD   SpriteCtrl_XOrigin          -> Coordinate origin X-offset
+   WORD   SpriteCtrl_YOrigin          -> Coordinate origin Y-offset
+
+   APTR   SpriteCtrl_CollHandler      -> Pointer to collision handler
+   APTR   SpriteCtrl_CollTable        -> Pointer to collision routine table
+   LONG   SpriteCtrl_HitMask          -> Hitmask
+   LONG   SpriteCtrl_MeMask           -> MeMask
+   WORD   SpriteCtrl_CollFlag         -> Collision flag
+   WORD   SpriteCtrl_CollideAlways    -> Off screen collision flag
+   WORD   SpriteCtrl_DummyFlag        -> Dummy sprite flag
+   LONG   SpriteCtrl_ID               -> Internal ID
+
+   LONG   SpriteCtrl_FrameMask        -> Frame on/off mask
+   WORD   SpriteCtrl_Flash            -> Flash flag
+   WORD   SpriteCtrl_FlashBit         -> Flash bit definition
+   WORD   SpriteCtrl_Relativity       -> Relativity flag
+   WORD   SpriteCtrl_WrapCorrect      -> Wrap correction flag
+   WORD   SpriteCtrl_PtrUpdate        -> External pointer update flag
+
+   WORD   SpriteCtrl_VisiZone         -> Visibility zone flag
+   WORD   SpriteCtrl_VisiHit          -> Visibility zone hit flag
+   WORD   SpriteCtrl_VisiForth        -> HeliOS CFA executed at VisiZone hit
+   APTR   SpriteCtrl_VisiCode         -> Assembler code executed at VisiZone hit
+   WORD   SpriteCtrl_LeftZone         -> Left VisiZone boundary
+   WORD   SpriteCtrl_RightZone        -> Right VisiZone boundary
+   WORD   SpriteCtrl_UpZone           -> Top VisiZone boundary
+   WORD   SpriteCtrl_DownZone         -> Bottom VisiZone boundary
+   WORD   SpriteCtrl_DispZone         -> Display zone flag
+   WORD   SpriteCtrl_DispForth        -> HeliOS CFA executed at DispZone hit
+   APTR   SpriteCtrl_DispCode         -> Assembler code executed at DispZone hit
+   WORD   SpriteCtrl_Running          -> Activity status flag
+   WORD   SpriteCtrl_OnScreen         -> OnScreen status flag
+   APTR   SpriteCtrl_UserDataPtr      -> User data pointer
+   WORD   SpriteCtrl_UserData1        -> User data
+   WORD   SpriteCtrl_UserData2        -> User data
+   WORD   SpriteCtrl_UserData3        -> User data
+   WORD   SpriteCtrl_UserData4        -> User data
+   WORD   SpriteCtrl_UserData5        -> User data
+   WORD   SpriteCtrl_UserData6        -> User data
+   WORD   SpriteCtrl_UserStatus       -> User status flag
+
+---------------------------------------------------------------------
+A detailed description of each field of the SpriteCtrl data structure
+---------------------------------------------------------------------
+
+Here is an expanded and commented definition of the "SpriteAnim" structure:
+
+   WORD  SpriteCtrl_Flags             -> Control Flags
+
+   This field is used internally by the HeliOS sprite handler and can also
+   be specified by the user-program which is running the sprite.
+
+   Note that ALL active sprites may be have their "Flags" control fields
+   overridden by storing a non-zero value in the HeliOS "SPRITEFLAGS"
+   variable.
+
+   The behaviour of the "Flags" value thus imposed will be exactly the same
+   as the normal "Flags" values detailed below.
+
+   e.g.
+
+   7 SPRITEFLAGS !L
+
+   Would cause ALL sprites to skip display updating until you restored
+   the SPRITEFLAGS variable to 0.
+
+   and
+
+   8 SPRITEFLAGS !L
+
+   Would cause ALL sprites to skip display updating for one frame, after
+   which the SPRITEFLAGS variable would be automatically reset to 0.
+
+
+   Currently the only control flag values which can be specified by the
+   user are:
+
+   * 6 -> Do not save or restore background at all
+
+     This would be used if you wanted the sprite to be continually rendered
+     into the display bitmap without restoring the display, thus leaving a
+     "trail" of sprite images.
+
+   * 7 -> Do not restore background ALREADY SAVED by a "normal" sprite
+
+     This would be used if you wanted a normal sprite to stop restoring the
+     display backdrop for a continuous period.
+
+     An example of when this might be used is if you were in the process of
+     modifying the backdrop behind the sprite for a number of frames and you
+     wanted to retain the new backdrop imagery without the sprite restoring
+     old imagery.
+
+   * 8 -> Do not restore background ALREADY SAVED by a sprite for 1 frame
+
+     This is like using a "Flags" value of 7 except that it only applies for
+     a single frame, after which normal background restoration is restored.
+
+     Note that in this case the "Flags" value is reset automatically to 1,
+     so if you do not want this outcome you will need to provide your own
+     custom control code.
+
+     An example of when this might be used is if you have made a one-off
+     modification of the display background and you do not want sprites to
+     restore the old imagery for the first subsequent frame.  Once the "false"
+     redraw with the old imagery has been avoided, normal sprite updating and
+     background restoration is recommenced.
+
+   * 9 -> Do not restore background ALREADY SAVED by a sprite for the next
+          2 frames
+
+     This is like using a "Flags" value of 8 except that it applies for 2
+     frames as required for double buffered sprite displays.
+
+   * -1 -> Causes the sprite to stop moving by not adding the XAdd and YAdd
+           field values to the position coordinates.
+
+   * -2 -> Causes the sprite to become invisible and immobile.
+
+   * -3 -> Causes the sprite to stop and auto-remove itself at once.
+
+     This is a very useful and efficient way of removing a sprite: it is
+     slightly more efficient than using the REMOVESPRITE function and can
+     often be implemented more usefully.
+
+   APTR   SpriteCtrl_ImgPlanes        -> Pointer to image planes
+
+   This is a pointer to the start of the bitplane pointer array within
+   the sprite image BitMap structure.
+
+   APTR   SpriteCtrl_TgtPlanes1       -> Pointer to display buffer 1 planes
+
+   This is a pointer to the start of the bitplane pointer array within
+   the display double-buffer 1 BitMap structure.
+
+   APTR   SpriteCtrl_TgtPlanes2       -> Pointer to display buffer 2 planes
+
+   This is a pointer to the start of the bitplane pointer array within
+   the display double-buffer 2 BitMap structure.
+
+   APTR   SpriteCtrl_MaskPlane        -> Pointer to shadow mask plane
+
+   This is a pointer to the start of the sprite image shadow mask plane.
+
+   WORD   SpriteCtrl_BltSize          -> Blitter parameter
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_Channels         -> Blitter parameter
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_Minterm          -> Blitter parameter
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_TgtMod           -> Blitter parameter
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_TgtBPR           -> Blitter parameter
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_Depth            -> Blitter parameter
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_PlaneOnOff       -> Blitter parameter
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_LastXPos1        -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_LastYPos1        -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_LastXPos2        -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_LastYPos2        -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_Height           -> Pixel height
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_Width            -> Pixel width
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_DownLimit        -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_RightLimit       -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_BackDrop         -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_SaveBMap1        -> Display save buffer 1
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_SaveBMap2        -> Display save buffer 2
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_ImgBMap          -> Imagery BitMap
+
+   This is a pointer to the sprite imagery BitMap structure.
+
+   APTR   SpriteCtrl_TgtBMapPtr       -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_MaskBMap         -> Shadow mask BitMap
+
+   This is a pointer to the sprite imagery shadow mask BitMap structure.
+
+   APTR   SpriteCtrl_SavePlanes1      -> Pointer to save planes 1
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_SavePlanes2      -> Pointer to save planes 2
+
+   Do not use this field.
+
+   LONG   SpriteCtrl_TgtOff1          -> For HeliOS internal use
+
+   Do not use this field.
+
+   LONG   SpriteCtrl_TgtOff2          -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_Strip            -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_XOffPtr          -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_YOffPtr          -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_DSControl        -> Pointer to SliceControl structure
+
+   This field contains a pointer to the SliceControl structure which is
+   associated with the display slice using this sprite.
+
+   WORD   SpriteCtrl_DBFlag           -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_XMargin          -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_YMargin          -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_CollPlane        -> Pointer to collision mask plane
+
+   This field contains a pointer to the sprite collision mask plane.
+
+   APTR   SpriteCtrl_CollMask         -> Collision mask BitMap
+
+   This field contains a pointer to the sprite collision mask BitMap.
+
+   APTR   SpriteCtrl_TgtMaskPlane     -> Pointer to display mask plane
+
+   This field contains a pointer to the display collision mask plane.
+
+   APTR   SpriteCtrl_HSprite1         -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_HSprite2         -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_BPR              -> For HeliOS internal use
+
+   Do not use this field.
+
+   LONG   SpriteCtrl_CollHitMask      -> Collision HitMask
+
+   This field contains the sprite's 32-bit collision HitMask.
+
+   LONG   SpriteCtrl_CollMeMask       -> Collision MeMask
+
+   This field contains the sprite's 32-bit collision MeMask.
+
+   WORD  SpriteCtrl_CollForth         -> HeliOS CFA executed at collision
+
+   This field contains either null or the CFA of a HeliOS function which
+   you wish to be executed when a sprite collision is processed.
+
+   APTR  SpriteCtrl_CollCode          -> Assembler code executed at collision
+
+   This field contains either null or a pointer to a machine code routine
+   which you wish to be executed when a sprite collision is processed.
+
+   WORD   SpriteCtrl_AutoRemove       -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_LeftZoneOffset   -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_RightZoneOffset  -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_UpZoneOffset     -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_DownZoneOffset   -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_LowerBorder      -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_RightBorder      -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD   SpriteCtrl_CountDown        -> CountDown timer
+
+   If this field is set to a non-null value it will act as an automatic
+   countdown timer to allow you to implement functions which execute after
+   a chosen elapsed time.
+
+   The timer counts sprite processing frames and after the specified
+   number of frames has elapsed three possible functions will be carried
+   out:
+
+   1.  The "SpriteCtrl_CDFlags" value will be stored into the
+       "SpriteCtrl_Flags" field.
+
+   2.  If non-null the CFA stored in the "SpriteCtrl_CDForth" field will
+       be executed.
+
+   3.  If non-null the pointer stored in the "SpriteCtrl_CDCode" field
+       will be executed as machine code.
+
+   WORD   SpriteCtrl_CDFlags          -> CountDown flags
+
+   This field only functions when the CountDown function has been activated
+   by setting the "SpriteCtrl_CountDown" field of the sprite structure to a
+   non-null value.
+
+   The "SpriteCtrl_CDFlags" field contains a 16-bit "flags" value which will
+   be placed in the "SpriteCtrl_Flags" field of the sprite structure when
+   the CountDown has been completed.
+
+   WORD   SpriteCtrl_CDForth          -> CountDown HeliOS function CFA
+
+   This field contains either null or the CFA of a HeliOS function which
+   you wish to be executed after a "CountDown" has completed.
+
+   APTR   SpriteCtrl_CDCode           -> CountDown machine code pointer
+
+   This field contains either null or a pointer to a machine code routine
+   which you wish to be executed after a "CountDown" has completed.
+
+   WORD  SpriteCtrl_BeforeForth       -> HeliOS CFA executed "Before" sprite
+
+   This field contains either null or the CFA of a HeliOS function which
+   you wish to be executed before each sprite frame is processed.
+
+   APTR  SpriteCtrl_BeforeCode        -> Assembler code executed "Before" sprite
+
+   This field contains either null or a pointer to a machine code routine
+   which you wish to be executed before each sprite frame is processed.
+
+   WORD  SpriteCtrl_AfterForth        -> HeliOS CFA executed "After" sprite
+
+   This field contains either null or the CFA of a HeliOS function which
+   you wish to be executed after each sprite frame is processed.
+
+   APTR  SpriteCtrl_AfterCode         -> Assembler code executed "After" sprite
+
+   This field contains either null or a pointer to a machine code routine
+   which you wish to be executed after each sprite frame is processed.
+
+
+   APTR   SpriteCtrl_DispRowTable     -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_SprRowTable      -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD  SpriteCtrl_RemForth          -> HeliOS CFA executed at closedown
+
+   This field contains either null or the CFA of a HeliOS function which
+   you wish to be executed when the sprite is removed.
+
+   APTR  SpriteCtrl_RemCode           -> Assembler code executed at closedown
+
+   This field contains either null or a pointer to a machine code routine
+   which you wish to be executed when the sprite is removed.
+
+   APTR   SpriteCtrl_Anim             -> For HeliOS internal use
+
+   Do not use this field.
+
+   APTR   SpriteCtrl_ControlSection   -> For HeliOS internal use
+
+   Do not use this field.
+
+   WORD  SpriteCtrl_XPos              -> Logical X-coordinate
+
+   This field is contains the current sprite object X-Coordinate.
+
+   This is the "logical" X-coordinate and may not be the same as the bitmap
+   pixel position, for example in the case of auto-wrapping displays which
+   have a "doubled" first screen.
+
+   WORD  SpriteCtrl_YPos              -> Logical Y-coordinate
+
+   This field is contains the current sprite object Y-Coordinate.
+
+   This is the "logical" Y-coordinate and may not be the same as the bitmap
+   pixel position, for example in the case of auto-wrapping displays which
+   have a "doubled" first screen.
+
+   WORD  SpriteCtrl_RenderXPos        -> Display X-coordinate
+
+   This field is contains the current sprite object X pixel position in
+   the display bitmap.
+
+   In auto-wrapping displays this may not be the same as the XPos value.
+
+   WORD  SpriteCtrl_RenderYPos        -> Display Y-coordinate
+
+   This field is contains the current sprite object Y pixel position in
+   the display bitmap.
+
+   In auto-wrapping displays this may not be the same as the YPos value.
+
+   APTR  SpriteCtrl_XPosPtr           -> Pointer to logical X-coordinate
+
+   If non-null this field contains a pointer to a 16-bit value which will
+   be used instead of the "XPos" field to specify the X-coordinate.
+
+   APTR  SpriteCtrl_YPosPtr           -> Pointer to logical Y-coordinate
+
+   If non-null this field contains a pointer to a 16-bit value which will
+   be used instead of the "YPos" field to specify the Y-coordinate.
+
+   APTR  SpriteCtrl_XAdd              -> Pointer to X-additive value
+
+   If non-null this field contains a pointer to a 16-bit value which will
+   be added accumulatively to the X-coordinate at each sprite frame.
+
+   APTR  SpriteCtrl_YAdd              -> Pointer to Y-additive value
+
+   If non-null this field contains a pointer to a 16-bit value which will
+   be added accumulatively to the Y-coordinate at each sprite frame.
+
+   WORD  SpriteCtrl_XOrigin           -> Coordinate origin X-offset
+
+   If non-null this field contains a 16-bit offset value which will be
+   added to the X-coordinate non-accumulatively for each frame.
+
+   This field allows you to position an object on screen offset by the
+   specified amount.
+
+   WORD  SpriteCtrl_YOrigin           -> Coordinate origin Y-offset
+
+   If non-null this field contains a 16-bit offset value which will be
+   added to the Y-coordinate non-accumulatively for each frame.
+
+   This field allows you to position an object on screen offset by the
+   specified amount.
+
+   APTR  SpriteCtrl_CollHandler       -> Pointer to collision handler
+
+   If you are using HeliOS automatic collision detection for this object
+   this field must point to a previously initialised collision handler.
+
+   See also "CollisionDetection.doc".
+
+   APTR  SpriteCtrl_CollTable         -> Pointer to collision routine table
+
+   If you are using HeliOS automatic collision detection for this object
+   this field must point to a previously initialised collision table.
+
+   See also "CollisionDetection.doc".
+
+   LONG  SpriteCtrl_HitMask           -> Hitmask
+
+   If you are using HeliOS automatic collision detection for this object
+   this field must contain a HitMask.
+
+   See also "CollisionDetection.doc".
+
+   LONG  SpriteCtrl_MeMask            -> MeMask
+
+   If you are using HeliOS automatic collision detection for this object
+   this field must contain a MeMask.
+
+   See also "CollisionDetection.doc".
+
+   WORD  SpriteCtrl_CollFlag          -> Collision flag
+
+   This flag enables or disables collision detection for a sprite.
+
+   WORD  SpriteCtrl_CollideAlways     -> Off screen collision flag
+
+   This flag enables or disables full off-screen collision detection for
+   a sprite.
+
+   Off screen collision detection would normally be disabled, since it
+   causes the HeliOS system to check the object for collisions even when
+   it is positioned off screen.
+
+   Only use this when necessary since collision detection takes quite a
+   lot of CPU time.
+
+   WORD  SpriteCtrl_DummyFlag         -> Dummy anim flag
+
+   This field causes the sprite to be run "in the background" as an
+   invisible "dummy sprite".
+
+   The sprite can still be moved and processed and may also be used for
+   collision detection.
+
+   LONG  SpriteCtrl_ID                -> Internal ID
+
+   This field is used internally by HeliOS.
+
+   LONG  SpriteCtrl_FrameMask         -> Frame on/off mask
+
+   This field, if non-null, contains a 32-bit mask longword which is used
+   to specify "active" and "dead" frames within the sprite sequence.
+
+   This bitmask, if specified, will have its bits read sequentially and will
+   only allow sprite frames to be processed when the current bit is set.
+
+   The bits of the mask are automatically rotated on each frame.
+
+   WORD  SpriteCtrl_Flash             -> Flash flag
+
+   If non-null this field specifies the duration (in sprite frames) of
+   a "flash" event during which the on-screen sprite may be switched on
+   and off rapidly to simulate a "flashing" effect.
+
+   The "SpriteCtrl_Flash" field is automatically decremented by "1" each
+   frame (down to a final value of zero) by the HeliOS system.
+
+   WORD  SpriteCtrl_FlashBit          -> Flash bit definition
+
+   If a "flash" event has been specified this field contains a value which
+   specifies a particular bit in the "SpriteCtrl_Flash" field which will
+   be tested and used to specify whether this frame is "On" or "Off".
+
+   The on-screen sprite image will be switched "Off" whenever the specified
+   "flashbit" is set.
+
+   WORD  SpriteCtrl_Relativity        -> Relativity flag
+
+   This flag specifies whether sprite position coordinates are defined
+   with respect to the display top left corner or the playfield (which may
+   be larger than the screen display) top left corner:
+
+   0 -> Coordinates are relative to playfield
+
+   1 -> Coordinates are relative to display
+
+   WORD  SpriteCtrl_WrapCorrect       -> Wrap correction flag
+
+   This flag uses bits 0 and 1 to control X and Y wrap correct functions.
+
+   If no bits are set (i.e. flag = 0) there is no wrap correction in either
+   X or Y direction.
+
+   If bit 0 is set there is wrap correction in the X direction.
+
+   If bit 1 is set there is wrap correction in the Y direction.
+
+   If bits 0 and 1 are set there is wrap correction in both X and Y
+   direction.
+
+   This flag specifies whether sprite position coordinate calculation
+   performs automatic wrapping when an object reaches the edge of the
+   playfield.
+
+   The auto-wrap function is usually used in conjunction with over sized
+   displays to perform automatic "barrel" scrolling.  To use this function
+   you MUST create a special display bitmap with the first visible screen
+   area repeated exactly at the far end of the display, like this:
+
+
+   -------------------------------------------------------------------
+   ^           ^   Several more screens..... ^           ^           ^
+     1st screen                               Last screen  1st screen
+                                                            repeated
+
+   If you use this function HeliOS will always fully automatically set
+   your object coordinates to a legal on-playfield value: if you specify
+   a coordinate which is larger than the playfield dimension the object
+   will be "wrapped" back onto the start of the playfield.
+
+   WORD  SpriteCtrl_PtrUpdate         -> External pointer update flag
+
+   This flag specifies whether or not you want the HeliOS system to write
+   any recalculated position coordinates originally specified by a pointer
+   to an external location back to that location.
+
+   In other words, you can specify whether HeliOS should either update or
+   leave alone XPosPtr and YPosPtr locations if it recalculates coordinates
+   for "wrapping" etc.
+
+   WORD  SpriteCtrl_VisiZone          -> Visibility zone flag
+
+   If non-null this field specifies that HeliOS should automatically check
+   object coordinates against a user-defined "visibility" zone.
+
+   The way zone checking works is specified as follows by the "VisiZone"
+   parameter:
+
+   VisiZone = -4
+
+         The supplied VisiZone coordinates are used as limiting values
+         and object coordinates are automaticaly reset to remain within
+         the specified boundary.  The VisiForth and VisiCode fields are
+         not executed in this mode.
+
+   Visi-Zone = -2 or -3
+
+         When the object hits the specified boundary of the "VisiZone" the
+         "VisiZone" value is stored into the "Flags" field of the object
+         and then the VisiForth and VisiCode fields are executed (if non-
+         null).
+
+         The VisiHit field specifies which boundary was hit.
+
+         The specified "VisiZone" values have the following effects:
+
+         -2 -> The object becomes instantly invisible
+
+         -3 -> The object instantly auto-removes itself
+
+   Visi-Zone = Any other non-null value
+
+         When the object hits the specified boundary of the "VisiZone" the
+         VisiForth and VisiCode fields are executed (if non-null).
+
+         The VisiHit field specifies which boundary was hit.
+
+
+   WORD  SpriteCtrl_VisiHit           -> Visibility zone hit flag
+
+         This field specifies which boundary was hit in the event of a
+         VisiZone collision, as follows:
+
+         Bit 0 set -> Left boundary hit
+         Bit 1 set -> Right boundary hit
+         Bit 2 set -> Top boundary hit
+         Bit 3 set -> Bottom boundary hit
+
+         Two bits can be set in the event of an exact corner collision.
+
+         You can use this field within your VisiForth or VisiCode routines
+         to determine which boundary was hit and perform an appropriate
+         action (such as motion-reflection, for example).
+
+   WORD  SpriteCtrl_VisiForth     -> HeliOS CFA executed at VisiZone hit
+
+   This field contains either null or the CFA of a HeliOS function which
+   you wish to be executed when a "VisiZone hit" occurs.
+
+   APTR  SpriteCtrl_VisiCode      -> Assembler code executed at VisiZone hit
+
+   This field contains either null or a pointer to a machine code routine
+   which you wish to be executed when a "VisiZone hit" occurs.
+
+   WORD  SpriteCtrl_LeftZone      -> Left VisiZone boundary
+
+   This field specifies the left VisiZone boundary in terms of the size
+   of the zone measured from the left edge of the display.
+
+   This value is always a positive number and specifies a distance in pixels
+   from the edge of the display - remember that this field does NOT specify
+   a coordinate, but an offset!
+
+   WORD  SpriteCtrl_RightZone     -> Right VisiZone boundary
+
+   This field specifies the right VisiZone boundary in terms of the size
+   of the zone measured from the right edge of the display.
+
+   This value is always a positive number and specifies a distance in pixels
+   from the edge of the display - remember that this field does NOT specify
+   a coordinate, but an offset!
+
+   WORD  SpriteCtrl_UpZone        -> Top VisiZone boundary
+
+   This field specifies the top VisiZone boundary in terms of the size
+   of the zone measured from the top edge of the display.
+
+   This value is always a positive number and specifies a distance in pixels
+   from the edge of the display - remember that this field does NOT specify
+   a coordinate, but an offset!
+
+   WORD  SpriteCtrl_DownZone      -> Bottom VisiZone boundary
+
+   This field specifies the bottom VisiZone boundary in terms of the size
+   of the zone measured from the bottom edge of the display.
+
+   This value is always a positive number and specifies a distance in pixels
+   from the edge of the display - remember that this field does NOT specify
+   a coordinate, but an offset!
+
+   WORD  SpriteCtrl_DispZone      -> Display zone flag
+
+   When an object moves beyond the display boundaries HeliOS does not
+   render the object to the display bitmap, but you can also use the
+   "DispZone" functions to specify other actions.
+
+   This field, if set to a value of "-2" or "-3", specifies that HeliOS
+   should store the DispZone value into the "Flags" field of the object
+   and carry out the specified action of "invisibility" or "auto-removal"
+   when an object moves off-screen.
+
+   The specified "DispZone" values have the following effects:
+
+         -2 -> The object becomes instantly invisible
+
+         -3 -> The object instantly auto-removes itself
+
+   WORD  SpriteCtrl_DispForth     -> HeliOS CFA executed at DispZone hit
+
+   When an object moves beyond the display boundaries HeliOS does not
+   render the object to the display bitmap, but you can also use the
+   "DispZone" functions to specify other actions.
+
+   This field contains either null or the CFA of a HeliOS function which
+   you wish to be executed when an object moves off screen.
+
+   APTR  SpriteCtrl_DispCode      -> Assembler code executed at DispZone hit
+
+   When an object moves beyond the display boundaries HeliOS does not
+   render the object to the display bitmap, but you can also use the
+   "DispZone" functions to specify other actions.
+
+   This field contains either null or a pointer to a machine code routine
+   which you wish to be executed when an object moves off screen.
+
+   WORD  SpriteCtrl_Running       -> Activity status flag
+
+   This field is set by the HeliOS system and tells you whether or not an
+   object is currently still operating and installed into its interrupt
+   driven HeliOS handler.
+
+   WORD  SpriteCtrl_OnScreen      -> OnScreen status flag
+
+   This field is set by the HeliOS system and tells you whether or not an
+   object is currently on screen.
+
+   APTR  SpriteCtrl_UserDataPtr   -> User data pointer
+
+   This is a "free" field which you can use as you wish.
+
+   WORD  SpriteCtrl_UserData1     -> User data
+
+   This is a "free" field which you can use as you wish.
+
+   WORD  SpriteCtrl_UserData2     -> User data
+
+   This is a "free" field which you can use as you wish.
+
+   WORD  SpriteCtrl_UserData3     -> User data
+
+   This is a "free" field which you can use as you wish.
+
+   WORD  SpriteCtrl_UserData4     -> User data
+
+   This is a "free" field which you can use as you wish.
+
+   WORD  SpriteCtrl_UserData5     -> User data
+
+   This is a "free" field which you can use as you wish.
+
+   WORD  SpriteCtrl_UserData6     -> User data
+
+   This is a "free" field which you can use as you wish.
+
+   WORD  SpriteCtrl_UserStatus    -> User status flag
+
+   This is a "free" field which you can use as you wish.
+
+   The "User" fields are entirely for your own use, and allow you to
+   maintain object-specific data areas which can be used in a variety
+   of ways: for example, to specify coordinate addition pointers etc.
+
+
+*************************************************************************
+End
+*************************************************************************

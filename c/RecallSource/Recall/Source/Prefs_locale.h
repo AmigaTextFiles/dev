@@ -1,0 +1,1072 @@
+#ifndef PREFS_LOCALE_H
+#define PREFS_LOCALE_H
+
+
+/****************************************************************************/
+
+
+/* This file was created automatically by CatComp.
+ * Do NOT edit by hand!
+ */
+
+
+#ifndef EXEC_TYPES_H
+#include <exec/types.h>
+#endif
+
+#ifdef CATCOMP_ARRAY
+#undef CATCOMP_NUMBERS
+#undef CATCOMP_STRINGS
+#define CATCOMP_NUMBERS
+#define CATCOMP_STRINGS
+#endif
+
+#ifdef CATCOMP_BLOCK
+#undef CATCOMP_STRINGS
+#define CATCOMP_STRINGS
+#endif
+
+
+/****************************************************************************/
+
+
+#ifdef CATCOMP_NUMBERS
+
+#define MSG_EVENTS 0
+#define MSG_TEXTS 1
+#define MSG__ADD 2
+#define MSG__COPY 3
+#define MSG__CUT 4
+#define MSG__PASTE 5
+#define MSG__MAKEDIR 6
+#define MSG__ENTERDIR 7
+#define MSG__ROOT 8
+#define MSG__PARENT 9
+#define MSG__SAVE 10
+#define MSG__TEST 11
+#define MSG__CANCEL 12
+#define MSG_TEXTPOPUPGADGETS 13
+#define MSG_ATTRIBUTES 14
+#define MSG__GROUP 15
+#define MSG__FLASH 16
+#define MSG__CONFIRM 17
+#define MSG__POSTPONE 18
+#define MSG__MULTITASK 19
+#define MSG__CENTRE 20
+#define MSG__TYPE 21
+#define MSG_REQUESTER 22
+#define MSG_RECOVERYALERT 23
+#define MSG_DEADENDALERT 24
+#define MSG_CLI 25
+#define MSG_WB 26
+#define MSG_INPUT 27
+#define MSG__SHOW 28
+#define MSG_ALWAYS 29
+#define MSG_DAILY 30
+#define MSG_STARTUP 31
+#define MSG_NEVER 32
+#define MSG__SCREEN 33
+#define MSG__DIR 34
+#define MSG__STACK 35
+#define MSG__PRIORITY 36
+#define MSG__TIMEOUT 37
+#define MSG_DATES 38
+#define MSG_WEEKDAYS 39
+#define MSG__TIME 40
+#define MSG__DATE 41
+#define MSG_EXACT 42
+#define MSG_BEFORE 43
+#define MSG_AFTER 44
+#define MSG_MON 45
+#define MSG_TUE 46
+#define MSG_WED 47
+#define MSG_THU 48
+#define MSG_FRI 49
+#define MSG_SAT 50
+#define MSG_SUN 51
+#define MSG_ANYMONTH 52
+#define MSG_JANUARY 53
+#define MSG_FEBRUARY 54
+#define MSG_MARCH 55
+#define MSG_APRIL 56
+#define MSG_MAY 57
+#define MSG_JUNE 58
+#define MSG_JULY 59
+#define MSG_AUGUST 60
+#define MSG_SEPTEMBER 61
+#define MSG_OCTOBER 62
+#define MSG_NOVEMBER 63
+#define MSG_DECEMBER 64
+#define MSG__HOUR 65
+#define MSG__MINUTES 66
+#define MSG__MONDAY 67
+#define MSG__TUESDAY 68
+#define MSG__WEDNESDAY 69
+#define MSG__THURSDAY 70
+#define MSG__FRIDAY 71
+#define MSG__SATURDAY 72
+#define MSG__SUNDAY 73
+#define MSG__DATEPERIOD 74
+#define MSG__DATEREPEAT 75
+#define MSG__TIMEPERIOD 76
+#define MSG__TIMEREPEAT 77
+#define MSG_ALLDAY 78
+#define MSG_DATEPOPUPGADGETS 79
+#define MSG_ABOUT 80
+#define MSG_VERSION 81
+#define MSG_UNREGISTERED 82
+#define MSG_ABOUTTEXT 83
+#define MSG__OK 84
+#define MSG_SEARCH 85
+#define MSG__FIND 86
+#define MSG__FINDSTRING 87
+#define MSG__REPLACESTRING 88
+#define MSG__IGNORECASE 89
+#define MSG__ONLYWHOLEWORDS 90
+#define MSG__REPLACEMODE 91
+#define MSG_MACROS 92
+#define MSG_PROJECT 93
+#define MSG_K_NEW 94
+#define MSG_K_OPEN 95
+#define MSG_K_INCLUDE 96
+#define MSG_IMPORT 97
+#define MSG_K_SAVE 98
+#define MSG_K_SAVEAS 99
+#define MSG_EXPORT 100
+#define MSG_K_ICONIFY 101
+#define MSG_K_TEST 102
+#define MSG_K_QUIT 103
+#define MSG_EDIT 104
+#define MSG_K_LASTSAVED 105
+#define MSG_DISPLAYERS 106
+#define MSG_K_FIND 107
+#define MSG_K_FINDNEXT 108
+#define MSG_K_REPLACE 109
+#define MSG_K_REPLACENEXT 110
+#define MSG_SETTINGS 111
+#define MSG_K_EVENTS 112
+#define MSG_K_TEXTS 113
+#define MSG_K_DATES 114
+#define MSG_K_ATTRIBUTES 115
+#define MSG_K_ACKNOWLEDGE 116
+#define MSG_K_SAVEWHENEXIT 117
+#define MSG_MODULES 118
+#define MSG_K_AFFECTALL 119
+#define MSG_K_PARSEDIRS 120
+#define MSG_K_SIMPLEREFRESH 121
+#define MSG_K_CLOSEWB 122
+#define MSG_K_OWNSCREEN 123
+#define MSG_K_BACKDROP 124
+#define MSG_K_SHANGHAI 125
+#define MSG_K_USESCREENFONT 126
+#define MSG_K_SELECTFONT 127
+#define MSG_K_SELECTSCREENMODE 128
+#define MSG_K_ADJUSTPALETTE 129
+#define MSG_K_OPENSETTINGS 130
+#define MSG_K_SAVESETTINGS 131
+#define MSG_K_SAVESETTINGSAS 132
+#define MSG_HELP 133
+#define MSG_K_HELPABOUT 134
+#define MSG_K_HELPAUTHOR 135
+#define MSG_K_HELPCONTENTS 136
+#define MSG_K_HELPINDEX 137
+#define MSG_K_HELPHELP 138
+#define MSG_K_HELPCHECKER 139
+#define MSG_K_HELPPREFERENCES 140
+#define MSG_K_HELPEVENTS 141
+#define MSG_K_HELPTEXTS 142
+#define MSG_K_HELPDATES 143
+#define MSG_K_HELPATTRIBUTES 144
+#define MSG_ACTIVEMODULES 145
+#define MSG_LIBRARYNOTFOUND 146
+#define MSG_COULDNOTOPENWB 147
+#define MSG_COULDNOTCLOSEWB 148
+#define MSG_IFFERROR1 149
+#define MSG_IFFERROR2 150
+#define MSG_NOTFOUND 151
+#define MSG_COULDNOTICONIFY 152
+#define MSG_BUFFERTOOLARGE 153
+#define MSG_STILLVISITORS 154
+#define MSG_REPLACEWITH 155
+#define MSG_REPLACEEVENTGADGETS 156
+#define MSG_NOTFOUNDASENTIREWORD 157
+#define MSG_PROJECTCHANGED 158
+#define MSG_PROJECTCHANGEDBUTTONS 159
+#define MSG_RECALLIOTROUBBLE 160
+#define MSG_OVERWRITE 161
+#define MSG_CLEAR 162
+#define MSG_RESTORE 163
+#define MSG_ENDOFPROJECT 164
+#define MSG_LISTLOCKED 165
+#define MSG_OUTOFMEMORY 166
+#define MSG_REPLACEDNOCCURRENCESOF 167
+#define MSG_MAXEVENTSCANBESAVED 168
+#define MSG_ICONIFY 169
+#define MSG_QUIT 170
+#define MSG_OKCANCEL 171
+#define MSG_RETRYCANCEL 172
+#define MSG_YESNO 173
+#define MSG_OK 174
+#define MSG_RESET 175
+#define MSG_OPENPROJECT 176
+#define MSG_SAVEPROJECT 177
+#define MSG_INCLUDEPROJECT 178
+#define MSG_OPENENVIRONMENT 179
+#define MSG_SAVEENVIRONMENT 180
+#define MSG_SELECTCOMMAND 181
+#define MSG_SELECTDRAWER 182
+#define MSG_SELECTFONT 183
+#define MSG_SELECTSCREENMODE 184
+#define MSG_ADJUSTPALETTE 185
+#define MSG_OPEN 186
+#define MSG_INCLUDE 187
+#define MSG_SAVE 188
+
+#endif /* CATCOMP_NUMBERS */
+
+
+/****************************************************************************/
+
+
+#ifdef CATCOMP_STRINGS
+
+#define MSG_EVENTS_STR "Events"
+#define MSG_TEXTS_STR "Texts"
+#define MSG__ADD_STR "_Add"
+#define MSG__COPY_STR "Cop_y"
+#define MSG__CUT_STR "_Cut"
+#define MSG__PASTE_STR "_Paste"
+#define MSG__MAKEDIR_STR "A_dd folder"
+#define MSG__ENTERDIR_STR "_Enter"
+#define MSG__ROOT_STR "_Root"
+#define MSG__PARENT_STR "_Back"
+#define MSG__SAVE_STR "_Save"
+#define MSG__TEST_STR "_Test"
+#define MSG__CANCEL_STR "Cance_l"
+#define MSG_TEXTPOPUPGADGETS_STR "_Insert|C_ancel"
+#define MSG_ATTRIBUTES_STR "Attributes"
+#define MSG__GROUP_STR "_Group"
+#define MSG__FLASH_STR "_Flash"
+#define MSG__CONFIRM_STR "Co_nfirm"
+#define MSG__POSTPONE_STR "_Postpone"
+#define MSG__MULTITASK_STR "_Multitask"
+#define MSG__CENTRE_STR "_Centre"
+#define MSG__TYPE_STR "_Type"
+#define MSG_REQUESTER_STR "Requester"
+#define MSG_RECOVERYALERT_STR "Yellow alert"
+#define MSG_DEADENDALERT_STR "Red alert"
+#define MSG_CLI_STR "CLI"
+#define MSG_WB_STR "WB"
+#define MSG_INPUT_STR "Input"
+#define MSG__SHOW_STR "_Show"
+#define MSG_ALWAYS_STR "Always"
+#define MSG_DAILY_STR "Daily"
+#define MSG_STARTUP_STR "Startup"
+#define MSG_NEVER_STR "Never"
+#define MSG__SCREEN_STR "Scr_een"
+#define MSG__DIR_STR "_Dir"
+#define MSG__STACK_STR "St_ack"
+#define MSG__PRIORITY_STR "Pr_iority"
+#define MSG__TIMEOUT_STR "Time_out"
+#define MSG_DATES_STR "Dates"
+#define MSG_WEEKDAYS_STR "Weekdays"
+#define MSG__TIME_STR "_Time"
+#define MSG__DATE_STR "_Date"
+#define MSG_EXACT_STR "Exact"
+#define MSG_BEFORE_STR "Before"
+#define MSG_AFTER_STR "After"
+#define MSG_MON_STR "Mon"
+#define MSG_TUE_STR "Tue"
+#define MSG_WED_STR "Wed"
+#define MSG_THU_STR "Thu"
+#define MSG_FRI_STR "Fri"
+#define MSG_SAT_STR "Sat"
+#define MSG_SUN_STR "Sun"
+#define MSG_ANYMONTH_STR "Any month"
+#define MSG_JANUARY_STR "January"
+#define MSG_FEBRUARY_STR "February"
+#define MSG_MARCH_STR "March"
+#define MSG_APRIL_STR "April"
+#define MSG_MAY_STR "May"
+#define MSG_JUNE_STR "June"
+#define MSG_JULY_STR "July"
+#define MSG_AUGUST_STR "August"
+#define MSG_SEPTEMBER_STR "September"
+#define MSG_OCTOBER_STR "October"
+#define MSG_NOVEMBER_STR "November"
+#define MSG_DECEMBER_STR "December"
+#define MSG__HOUR_STR "H_our"
+#define MSG__MINUTES_STR "M_in"
+#define MSG__MONDAY_STR "_Monday"
+#define MSG__TUESDAY_STR "Tuesda_y"
+#define MSG__WEDNESDAY_STR "_Wednesday"
+#define MSG__THURSDAY_STR "T_hursday"
+#define MSG__FRIDAY_STR "_Friday"
+#define MSG__SATURDAY_STR "_Saturday"
+#define MSG__SUNDAY_STR "S_unday"
+#define MSG__DATEPERIOD_STR "_Period"
+#define MSG__DATEREPEAT_STR "_Repeat"
+#define MSG__TIMEPERIOD_STR "P_eriod"
+#define MSG__TIMEREPEAT_STR "Repe_at"
+#define MSG_ALLDAY_STR "All day"
+#define MSG_DATEPOPUPGADGETS_STR "_Edit|_New|Cop_y|_Cut|_Paste|C_ancel"
+#define MSG_ABOUT_STR "About Recall Preferences"
+#define MSG_VERSION_STR "Recall V%s"
+#define MSG_UNREGISTERED_STR "Unregistered"
+#define MSG_ABOUTTEXT_STR "%s V%s - %s\n\nCompiled on %s - %s\n\nRegistered to:\n%s\n%s\n%s\n%s\n%s\n\nScreen: '%s'\n\nProject contains %ld events.\n\nMove the mousepointer over an object or menu item and press HELP to display help for that object."
+#define MSG__OK_STR "_OK"
+#define MSG_SEARCH_STR "Find/Replace"
+#define MSG__FIND_STR "Find _Next"
+#define MSG__FINDSTRING_STR "_Find"
+#define MSG__REPLACESTRING_STR "_Replace"
+#define MSG__IGNORECASE_STR "_Ignore case"
+#define MSG__ONLYWHOLEWORDS_STR "_Only whole words"
+#define MSG__REPLACEMODE_STR "Replace _mode"
+#define MSG_MACROS_STR "Macros"
+#define MSG_PROJECT_STR "Project"
+#define MSG_K_NEW_STR "N\0New"
+#define MSG_K_OPEN_STR "O\0Open..."
+#define MSG_K_INCLUDE_STR "I\0Include..."
+#define MSG_IMPORT_STR "Import"
+#define MSG_K_SAVE_STR "S\0Save"
+#define MSG_K_SAVEAS_STR "A\0Save as..."
+#define MSG_EXPORT_STR "Export"
+#define MSG_K_ICONIFY_STR ".\0Iconify"
+#define MSG_K_TEST_STR "T\0Test"
+#define MSG_K_QUIT_STR "Q\0Quit"
+#define MSG_EDIT_STR "Edit"
+#define MSG_K_LASTSAVED_STR "L\0Last saved"
+#define MSG_DISPLAYERS_STR "View"
+#define MSG_K_FIND_STR "F\0Find..."
+#define MSG_K_FINDNEXT_STR "/\0Find next"
+#define MSG_K_REPLACE_STR "R\0Replace..."
+#define MSG_K_REPLACENEXT_STR "Replace next"
+#define MSG_SETTINGS_STR "Settings"
+#define MSG_K_EVENTS_STR "1\0Events"
+#define MSG_K_TEXTS_STR "2\0Texts"
+#define MSG_K_DATES_STR "3\0Dates"
+#define MSG_K_ATTRIBUTES_STR "4\0Attributes"
+#define MSG_K_ACKNOWLEDGE_STR "Acknowledge"
+#define MSG_K_SAVEWHENEXIT_STR "Save when exit"
+#define MSG_MODULES_STR "Modules"
+#define MSG_K_AFFECTALL_STR "Affect all events"
+#define MSG_K_PARSEDIRS_STR "Parse dirs"
+#define MSG_K_SIMPLEREFRESH_STR "Simple refresh"
+#define MSG_K_CLOSEWB_STR "Close Workbench"
+#define MSG_K_OWNSCREEN_STR "Own screen"
+#define MSG_K_BACKDROP_STR "Backdrop"
+#define MSG_K_SHANGHAI_STR "Shanghai"
+#define MSG_K_USESCREENFONT_STR "Use screen font"
+#define MSG_K_SELECTFONT_STR "Select font..."
+#define MSG_K_SELECTSCREENMODE_STR "Select screenmode..."
+#define MSG_K_ADJUSTPALETTE_STR "Adjust palette..."
+#define MSG_K_OPENSETTINGS_STR "Open..."
+#define MSG_K_SAVESETTINGS_STR "Save"
+#define MSG_K_SAVESETTINGSAS_STR "Save as..."
+#define MSG_HELP_STR "Help"
+#define MSG_K_HELPABOUT_STR "?\0About..."
+#define MSG_K_HELPAUTHOR_STR "About the author..."
+#define MSG_K_HELPCONTENTS_STR "Contents..."
+#define MSG_K_HELPINDEX_STR "Index..."
+#define MSG_K_HELPHELP_STR "Help..."
+#define MSG_K_HELPCHECKER_STR "Recall checker..."
+#define MSG_K_HELPPREFERENCES_STR "Recall Preferences..."
+#define MSG_K_HELPEVENTS_STR "Events..."
+#define MSG_K_HELPTEXTS_STR "Texts..."
+#define MSG_K_HELPDATES_STR "Dates..."
+#define MSG_K_HELPATTRIBUTES_STR "Attributes..."
+#define MSG_ACTIVEMODULES_STR "There are %ld active modules running.\nPerform anyway?"
+#define MSG_LIBRARYNOTFOUND_STR "%s.library %ld not found."
+#define MSG_COULDNOTOPENWB_STR "Could not open Workbench"
+#define MSG_COULDNOTCLOSEWB_STR "Could not close Workbench"
+#define MSG_IFFERROR1_STR "IFF-scan aborted: File is corrupt."
+#define MSG_IFFERROR2_STR "Not a Recall IFF file!"
+#define MSG_NOTFOUND_STR "'%s'\nnot found!"
+#define MSG_COULDNOTICONIFY_STR "Could not iconify application."
+#define MSG_BUFFERTOOLARGE_STR "String too large.\nMax %ld characters are allowed."
+#define MSG_STILLVISITORS_STR "Cannot quit. There are\n%ld alien window(s) on the screen."
+#define MSG_REPLACEWITH_STR "Replace '%s' with '%s' ?"
+#define MSG_REPLACEEVENTGADGETS_STR "Next|Replace|Replace all|Cancel"
+#define MSG_NOTFOUNDASENTIREWORD_STR "'%s'\nnot found as an entire word."
+#define MSG_PROJECTCHANGED_STR "%ld changes have been done to\n'%s'. %s anyway?"
+#define MSG_PROJECTCHANGEDBUTTONS_STR "%s|Save, then %s|Cancel"
+#define MSG_RECALLIOTROUBBLE_STR "Recall I/O trouble"
+#define MSG_OVERWRITE_STR "File already exists:\n'%s'\nOverwrite?"
+#define MSG_CLEAR_STR "Clear"
+#define MSG_RESTORE_STR "Restore"
+#define MSG_ENDOFPROJECT_STR "End of project"
+#define MSG_LISTLOCKED_STR "Cannot perform action.\nList is locked by a module."
+#define MSG_OUTOFMEMORY_STR "Out of memory!"
+#define MSG_REPLACEDNOCCURRENCESOF_STR "Replace %ld occurrences of\n'%s'\nwith\n'%s'"
+#define MSG_MAXEVENTSCANBESAVED_STR "Max %ld events can be saved in\nthis unregistered version."
+#define MSG_ICONIFY_STR "Iconify"
+#define MSG_QUIT_STR "Quit"
+#define MSG_OKCANCEL_STR "OK|Cancel"
+#define MSG_RETRYCANCEL_STR "Retry|Cancel"
+#define MSG_YESNO_STR "Yes|No"
+#define MSG_OK_STR "OK"
+#define MSG_RESET_STR "Reset"
+#define MSG_OPENPROJECT_STR "Open project"
+#define MSG_SAVEPROJECT_STR "Save project"
+#define MSG_INCLUDEPROJECT_STR "Include project"
+#define MSG_OPENENVIRONMENT_STR "Open environment"
+#define MSG_SAVEENVIRONMENT_STR "Save environment"
+#define MSG_SELECTCOMMAND_STR "Select command"
+#define MSG_SELECTDRAWER_STR "Select drawer"
+#define MSG_SELECTFONT_STR "Select font"
+#define MSG_SELECTSCREENMODE_STR "Select screenmode"
+#define MSG_ADJUSTPALETTE_STR "Adjust palette"
+#define MSG_OPEN_STR "Open"
+#define MSG_INCLUDE_STR "Include"
+#define MSG_SAVE_STR "Save"
+
+#endif /* CATCOMP_STRINGS */
+
+
+/****************************************************************************/
+
+
+#ifdef CATCOMP_ARRAY
+
+struct CatCompArrayType
+{
+    LONG   cca_ID;
+    STRPTR cca_Str;
+};
+
+static const struct CatCompArrayType CatCompArray[] =
+{
+    {MSG_EVENTS,(STRPTR)MSG_EVENTS_STR},
+    {MSG_TEXTS,(STRPTR)MSG_TEXTS_STR},
+    {MSG__ADD,(STRPTR)MSG__ADD_STR},
+    {MSG__COPY,(STRPTR)MSG__COPY_STR},
+    {MSG__CUT,(STRPTR)MSG__CUT_STR},
+    {MSG__PASTE,(STRPTR)MSG__PASTE_STR},
+    {MSG__MAKEDIR,(STRPTR)MSG__MAKEDIR_STR},
+    {MSG__ENTERDIR,(STRPTR)MSG__ENTERDIR_STR},
+    {MSG__ROOT,(STRPTR)MSG__ROOT_STR},
+    {MSG__PARENT,(STRPTR)MSG__PARENT_STR},
+    {MSG__SAVE,(STRPTR)MSG__SAVE_STR},
+    {MSG__TEST,(STRPTR)MSG__TEST_STR},
+    {MSG__CANCEL,(STRPTR)MSG__CANCEL_STR},
+    {MSG_TEXTPOPUPGADGETS,(STRPTR)MSG_TEXTPOPUPGADGETS_STR},
+    {MSG_ATTRIBUTES,(STRPTR)MSG_ATTRIBUTES_STR},
+    {MSG__GROUP,(STRPTR)MSG__GROUP_STR},
+    {MSG__FLASH,(STRPTR)MSG__FLASH_STR},
+    {MSG__CONFIRM,(STRPTR)MSG__CONFIRM_STR},
+    {MSG__POSTPONE,(STRPTR)MSG__POSTPONE_STR},
+    {MSG__MULTITASK,(STRPTR)MSG__MULTITASK_STR},
+    {MSG__CENTRE,(STRPTR)MSG__CENTRE_STR},
+    {MSG__TYPE,(STRPTR)MSG__TYPE_STR},
+    {MSG_REQUESTER,(STRPTR)MSG_REQUESTER_STR},
+    {MSG_RECOVERYALERT,(STRPTR)MSG_RECOVERYALERT_STR},
+    {MSG_DEADENDALERT,(STRPTR)MSG_DEADENDALERT_STR},
+    {MSG_CLI,(STRPTR)MSG_CLI_STR},
+    {MSG_WB,(STRPTR)MSG_WB_STR},
+    {MSG_INPUT,(STRPTR)MSG_INPUT_STR},
+    {MSG__SHOW,(STRPTR)MSG__SHOW_STR},
+    {MSG_ALWAYS,(STRPTR)MSG_ALWAYS_STR},
+    {MSG_DAILY,(STRPTR)MSG_DAILY_STR},
+    {MSG_STARTUP,(STRPTR)MSG_STARTUP_STR},
+    {MSG_NEVER,(STRPTR)MSG_NEVER_STR},
+    {MSG__SCREEN,(STRPTR)MSG__SCREEN_STR},
+    {MSG__DIR,(STRPTR)MSG__DIR_STR},
+    {MSG__STACK,(STRPTR)MSG__STACK_STR},
+    {MSG__PRIORITY,(STRPTR)MSG__PRIORITY_STR},
+    {MSG__TIMEOUT,(STRPTR)MSG__TIMEOUT_STR},
+    {MSG_DATES,(STRPTR)MSG_DATES_STR},
+    {MSG_WEEKDAYS,(STRPTR)MSG_WEEKDAYS_STR},
+    {MSG__TIME,(STRPTR)MSG__TIME_STR},
+    {MSG__DATE,(STRPTR)MSG__DATE_STR},
+    {MSG_EXACT,(STRPTR)MSG_EXACT_STR},
+    {MSG_BEFORE,(STRPTR)MSG_BEFORE_STR},
+    {MSG_AFTER,(STRPTR)MSG_AFTER_STR},
+    {MSG_MON,(STRPTR)MSG_MON_STR},
+    {MSG_TUE,(STRPTR)MSG_TUE_STR},
+    {MSG_WED,(STRPTR)MSG_WED_STR},
+    {MSG_THU,(STRPTR)MSG_THU_STR},
+    {MSG_FRI,(STRPTR)MSG_FRI_STR},
+    {MSG_SAT,(STRPTR)MSG_SAT_STR},
+    {MSG_SUN,(STRPTR)MSG_SUN_STR},
+    {MSG_ANYMONTH,(STRPTR)MSG_ANYMONTH_STR},
+    {MSG_JANUARY,(STRPTR)MSG_JANUARY_STR},
+    {MSG_FEBRUARY,(STRPTR)MSG_FEBRUARY_STR},
+    {MSG_MARCH,(STRPTR)MSG_MARCH_STR},
+    {MSG_APRIL,(STRPTR)MSG_APRIL_STR},
+    {MSG_MAY,(STRPTR)MSG_MAY_STR},
+    {MSG_JUNE,(STRPTR)MSG_JUNE_STR},
+    {MSG_JULY,(STRPTR)MSG_JULY_STR},
+    {MSG_AUGUST,(STRPTR)MSG_AUGUST_STR},
+    {MSG_SEPTEMBER,(STRPTR)MSG_SEPTEMBER_STR},
+    {MSG_OCTOBER,(STRPTR)MSG_OCTOBER_STR},
+    {MSG_NOVEMBER,(STRPTR)MSG_NOVEMBER_STR},
+    {MSG_DECEMBER,(STRPTR)MSG_DECEMBER_STR},
+    {MSG__HOUR,(STRPTR)MSG__HOUR_STR},
+    {MSG__MINUTES,(STRPTR)MSG__MINUTES_STR},
+    {MSG__MONDAY,(STRPTR)MSG__MONDAY_STR},
+    {MSG__TUESDAY,(STRPTR)MSG__TUESDAY_STR},
+    {MSG__WEDNESDAY,(STRPTR)MSG__WEDNESDAY_STR},
+    {MSG__THURSDAY,(STRPTR)MSG__THURSDAY_STR},
+    {MSG__FRIDAY,(STRPTR)MSG__FRIDAY_STR},
+    {MSG__SATURDAY,(STRPTR)MSG__SATURDAY_STR},
+    {MSG__SUNDAY,(STRPTR)MSG__SUNDAY_STR},
+    {MSG__DATEPERIOD,(STRPTR)MSG__DATEPERIOD_STR},
+    {MSG__DATEREPEAT,(STRPTR)MSG__DATEREPEAT_STR},
+    {MSG__TIMEPERIOD,(STRPTR)MSG__TIMEPERIOD_STR},
+    {MSG__TIMEREPEAT,(STRPTR)MSG__TIMEREPEAT_STR},
+    {MSG_ALLDAY,(STRPTR)MSG_ALLDAY_STR},
+    {MSG_DATEPOPUPGADGETS,(STRPTR)MSG_DATEPOPUPGADGETS_STR},
+    {MSG_ABOUT,(STRPTR)MSG_ABOUT_STR},
+    {MSG_VERSION,(STRPTR)MSG_VERSION_STR},
+    {MSG_UNREGISTERED,(STRPTR)MSG_UNREGISTERED_STR},
+    {MSG_ABOUTTEXT,(STRPTR)MSG_ABOUTTEXT_STR},
+    {MSG__OK,(STRPTR)MSG__OK_STR},
+    {MSG_SEARCH,(STRPTR)MSG_SEARCH_STR},
+    {MSG__FIND,(STRPTR)MSG__FIND_STR},
+    {MSG__FINDSTRING,(STRPTR)MSG__FINDSTRING_STR},
+    {MSG__REPLACESTRING,(STRPTR)MSG__REPLACESTRING_STR},
+    {MSG__IGNORECASE,(STRPTR)MSG__IGNORECASE_STR},
+    {MSG__ONLYWHOLEWORDS,(STRPTR)MSG__ONLYWHOLEWORDS_STR},
+    {MSG__REPLACEMODE,(STRPTR)MSG__REPLACEMODE_STR},
+    {MSG_MACROS,(STRPTR)MSG_MACROS_STR},
+    {MSG_PROJECT,(STRPTR)MSG_PROJECT_STR},
+    {MSG_K_NEW,(STRPTR)MSG_K_NEW_STR},
+    {MSG_K_OPEN,(STRPTR)MSG_K_OPEN_STR},
+    {MSG_K_INCLUDE,(STRPTR)MSG_K_INCLUDE_STR},
+    {MSG_IMPORT,(STRPTR)MSG_IMPORT_STR},
+    {MSG_K_SAVE,(STRPTR)MSG_K_SAVE_STR},
+    {MSG_K_SAVEAS,(STRPTR)MSG_K_SAVEAS_STR},
+    {MSG_EXPORT,(STRPTR)MSG_EXPORT_STR},
+    {MSG_K_ICONIFY,(STRPTR)MSG_K_ICONIFY_STR},
+    {MSG_K_TEST,(STRPTR)MSG_K_TEST_STR},
+    {MSG_K_QUIT,(STRPTR)MSG_K_QUIT_STR},
+    {MSG_EDIT,(STRPTR)MSG_EDIT_STR},
+    {MSG_K_LASTSAVED,(STRPTR)MSG_K_LASTSAVED_STR},
+    {MSG_DISPLAYERS,(STRPTR)MSG_DISPLAYERS_STR},
+    {MSG_K_FIND,(STRPTR)MSG_K_FIND_STR},
+    {MSG_K_FINDNEXT,(STRPTR)MSG_K_FINDNEXT_STR},
+    {MSG_K_REPLACE,(STRPTR)MSG_K_REPLACE_STR},
+    {MSG_K_REPLACENEXT,(STRPTR)MSG_K_REPLACENEXT_STR},
+    {MSG_SETTINGS,(STRPTR)MSG_SETTINGS_STR},
+    {MSG_K_EVENTS,(STRPTR)MSG_K_EVENTS_STR},
+    {MSG_K_TEXTS,(STRPTR)MSG_K_TEXTS_STR},
+    {MSG_K_DATES,(STRPTR)MSG_K_DATES_STR},
+    {MSG_K_ATTRIBUTES,(STRPTR)MSG_K_ATTRIBUTES_STR},
+    {MSG_K_ACKNOWLEDGE,(STRPTR)MSG_K_ACKNOWLEDGE_STR},
+    {MSG_K_SAVEWHENEXIT,(STRPTR)MSG_K_SAVEWHENEXIT_STR},
+    {MSG_MODULES,(STRPTR)MSG_MODULES_STR},
+    {MSG_K_AFFECTALL,(STRPTR)MSG_K_AFFECTALL_STR},
+    {MSG_K_PARSEDIRS,(STRPTR)MSG_K_PARSEDIRS_STR},
+    {MSG_K_SIMPLEREFRESH,(STRPTR)MSG_K_SIMPLEREFRESH_STR},
+    {MSG_K_CLOSEWB,(STRPTR)MSG_K_CLOSEWB_STR},
+    {MSG_K_OWNSCREEN,(STRPTR)MSG_K_OWNSCREEN_STR},
+    {MSG_K_BACKDROP,(STRPTR)MSG_K_BACKDROP_STR},
+    {MSG_K_SHANGHAI,(STRPTR)MSG_K_SHANGHAI_STR},
+    {MSG_K_USESCREENFONT,(STRPTR)MSG_K_USESCREENFONT_STR},
+    {MSG_K_SELECTFONT,(STRPTR)MSG_K_SELECTFONT_STR},
+    {MSG_K_SELECTSCREENMODE,(STRPTR)MSG_K_SELECTSCREENMODE_STR},
+    {MSG_K_ADJUSTPALETTE,(STRPTR)MSG_K_ADJUSTPALETTE_STR},
+    {MSG_K_OPENSETTINGS,(STRPTR)MSG_K_OPENSETTINGS_STR},
+    {MSG_K_SAVESETTINGS,(STRPTR)MSG_K_SAVESETTINGS_STR},
+    {MSG_K_SAVESETTINGSAS,(STRPTR)MSG_K_SAVESETTINGSAS_STR},
+    {MSG_HELP,(STRPTR)MSG_HELP_STR},
+    {MSG_K_HELPABOUT,(STRPTR)MSG_K_HELPABOUT_STR},
+    {MSG_K_HELPAUTHOR,(STRPTR)MSG_K_HELPAUTHOR_STR},
+    {MSG_K_HELPCONTENTS,(STRPTR)MSG_K_HELPCONTENTS_STR},
+    {MSG_K_HELPINDEX,(STRPTR)MSG_K_HELPINDEX_STR},
+    {MSG_K_HELPHELP,(STRPTR)MSG_K_HELPHELP_STR},
+    {MSG_K_HELPCHECKER,(STRPTR)MSG_K_HELPCHECKER_STR},
+    {MSG_K_HELPPREFERENCES,(STRPTR)MSG_K_HELPPREFERENCES_STR},
+    {MSG_K_HELPEVENTS,(STRPTR)MSG_K_HELPEVENTS_STR},
+    {MSG_K_HELPTEXTS,(STRPTR)MSG_K_HELPTEXTS_STR},
+    {MSG_K_HELPDATES,(STRPTR)MSG_K_HELPDATES_STR},
+    {MSG_K_HELPATTRIBUTES,(STRPTR)MSG_K_HELPATTRIBUTES_STR},
+    {MSG_ACTIVEMODULES,(STRPTR)MSG_ACTIVEMODULES_STR},
+    {MSG_LIBRARYNOTFOUND,(STRPTR)MSG_LIBRARYNOTFOUND_STR},
+    {MSG_COULDNOTOPENWB,(STRPTR)MSG_COULDNOTOPENWB_STR},
+    {MSG_COULDNOTCLOSEWB,(STRPTR)MSG_COULDNOTCLOSEWB_STR},
+    {MSG_IFFERROR1,(STRPTR)MSG_IFFERROR1_STR},
+    {MSG_IFFERROR2,(STRPTR)MSG_IFFERROR2_STR},
+    {MSG_NOTFOUND,(STRPTR)MSG_NOTFOUND_STR},
+    {MSG_COULDNOTICONIFY,(STRPTR)MSG_COULDNOTICONIFY_STR},
+    {MSG_BUFFERTOOLARGE,(STRPTR)MSG_BUFFERTOOLARGE_STR},
+    {MSG_STILLVISITORS,(STRPTR)MSG_STILLVISITORS_STR},
+    {MSG_REPLACEWITH,(STRPTR)MSG_REPLACEWITH_STR},
+    {MSG_REPLACEEVENTGADGETS,(STRPTR)MSG_REPLACEEVENTGADGETS_STR},
+    {MSG_NOTFOUNDASENTIREWORD,(STRPTR)MSG_NOTFOUNDASENTIREWORD_STR},
+    {MSG_PROJECTCHANGED,(STRPTR)MSG_PROJECTCHANGED_STR},
+    {MSG_PROJECTCHANGEDBUTTONS,(STRPTR)MSG_PROJECTCHANGEDBUTTONS_STR},
+    {MSG_RECALLIOTROUBBLE,(STRPTR)MSG_RECALLIOTROUBBLE_STR},
+    {MSG_OVERWRITE,(STRPTR)MSG_OVERWRITE_STR},
+    {MSG_CLEAR,(STRPTR)MSG_CLEAR_STR},
+    {MSG_RESTORE,(STRPTR)MSG_RESTORE_STR},
+    {MSG_ENDOFPROJECT,(STRPTR)MSG_ENDOFPROJECT_STR},
+    {MSG_LISTLOCKED,(STRPTR)MSG_LISTLOCKED_STR},
+    {MSG_OUTOFMEMORY,(STRPTR)MSG_OUTOFMEMORY_STR},
+    {MSG_REPLACEDNOCCURRENCESOF,(STRPTR)MSG_REPLACEDNOCCURRENCESOF_STR},
+    {MSG_MAXEVENTSCANBESAVED,(STRPTR)MSG_MAXEVENTSCANBESAVED_STR},
+    {MSG_ICONIFY,(STRPTR)MSG_ICONIFY_STR},
+    {MSG_QUIT,(STRPTR)MSG_QUIT_STR},
+    {MSG_OKCANCEL,(STRPTR)MSG_OKCANCEL_STR},
+    {MSG_RETRYCANCEL,(STRPTR)MSG_RETRYCANCEL_STR},
+    {MSG_YESNO,(STRPTR)MSG_YESNO_STR},
+    {MSG_OK,(STRPTR)MSG_OK_STR},
+    {MSG_RESET,(STRPTR)MSG_RESET_STR},
+    {MSG_OPENPROJECT,(STRPTR)MSG_OPENPROJECT_STR},
+    {MSG_SAVEPROJECT,(STRPTR)MSG_SAVEPROJECT_STR},
+    {MSG_INCLUDEPROJECT,(STRPTR)MSG_INCLUDEPROJECT_STR},
+    {MSG_OPENENVIRONMENT,(STRPTR)MSG_OPENENVIRONMENT_STR},
+    {MSG_SAVEENVIRONMENT,(STRPTR)MSG_SAVEENVIRONMENT_STR},
+    {MSG_SELECTCOMMAND,(STRPTR)MSG_SELECTCOMMAND_STR},
+    {MSG_SELECTDRAWER,(STRPTR)MSG_SELECTDRAWER_STR},
+    {MSG_SELECTFONT,(STRPTR)MSG_SELECTFONT_STR},
+    {MSG_SELECTSCREENMODE,(STRPTR)MSG_SELECTSCREENMODE_STR},
+    {MSG_ADJUSTPALETTE,(STRPTR)MSG_ADJUSTPALETTE_STR},
+    {MSG_OPEN,(STRPTR)MSG_OPEN_STR},
+    {MSG_INCLUDE,(STRPTR)MSG_INCLUDE_STR},
+    {MSG_SAVE,(STRPTR)MSG_SAVE_STR},
+};
+
+#endif /* CATCOMP_ARRAY */
+
+
+/****************************************************************************/
+
+
+#ifdef CATCOMP_BLOCK
+
+static const char CatCompBlock[] =
+{
+    "\x00\x00\x00\x00\x00\x08"
+    MSG_EVENTS_STR "\x00\x00"
+    "\x00\x00\x00\x01\x00\x06"
+    MSG_TEXTS_STR "\x00"
+    "\x00\x00\x00\x02\x00\x06"
+    MSG__ADD_STR "\x00\x00"
+    "\x00\x00\x00\x03\x00\x06"
+    MSG__COPY_STR "\x00"
+    "\x00\x00\x00\x04\x00\x06"
+    MSG__CUT_STR "\x00\x00"
+    "\x00\x00\x00\x05\x00\x08"
+    MSG__PASTE_STR "\x00\x00"
+    "\x00\x00\x00\x06\x00\x0C"
+    MSG__MAKEDIR_STR "\x00"
+    "\x00\x00\x00\x07\x00\x08"
+    MSG__ENTERDIR_STR "\x00\x00"
+    "\x00\x00\x00\x08\x00\x06"
+    MSG__ROOT_STR "\x00"
+    "\x00\x00\x00\x09\x00\x06"
+    MSG__PARENT_STR "\x00"
+    "\x00\x00\x00\x0A\x00\x06"
+    MSG__SAVE_STR "\x00"
+    "\x00\x00\x00\x0B\x00\x06"
+    MSG__TEST_STR "\x00"
+    "\x00\x00\x00\x0C\x00\x08"
+    MSG__CANCEL_STR "\x00"
+    "\x00\x00\x00\x0D\x00\x10"
+    MSG_TEXTPOPUPGADGETS_STR "\x00"
+    "\x00\x00\x00\x0E\x00\x0C"
+    MSG_ATTRIBUTES_STR "\x00\x00"
+    "\x00\x00\x00\x0F\x00\x08"
+    MSG__GROUP_STR "\x00\x00"
+    "\x00\x00\x00\x10\x00\x08"
+    MSG__FLASH_STR "\x00\x00"
+    "\x00\x00\x00\x11\x00\x0A"
+    MSG__CONFIRM_STR "\x00\x00"
+    "\x00\x00\x00\x12\x00\x0A"
+    MSG__POSTPONE_STR "\x00"
+    "\x00\x00\x00\x13\x00\x0C"
+    MSG__MULTITASK_STR "\x00\x00"
+    "\x00\x00\x00\x14\x00\x08"
+    MSG__CENTRE_STR "\x00"
+    "\x00\x00\x00\x15\x00\x06"
+    MSG__TYPE_STR "\x00"
+    "\x00\x00\x00\x16\x00\x0A"
+    MSG_REQUESTER_STR "\x00"
+    "\x00\x00\x00\x17\x00\x0E"
+    MSG_RECOVERYALERT_STR "\x00\x00"
+    "\x00\x00\x00\x18\x00\x0A"
+    MSG_DEADENDALERT_STR "\x00"
+    "\x00\x00\x00\x19\x00\x04"
+    MSG_CLI_STR "\x00"
+    "\x00\x00\x00\x1A\x00\x04"
+    MSG_WB_STR "\x00\x00"
+    "\x00\x00\x00\x1B\x00\x06"
+    MSG_INPUT_STR "\x00"
+    "\x00\x00\x00\x1C\x00\x06"
+    MSG__SHOW_STR "\x00"
+    "\x00\x00\x00\x1D\x00\x08"
+    MSG_ALWAYS_STR "\x00\x00"
+    "\x00\x00\x00\x1E\x00\x06"
+    MSG_DAILY_STR "\x00"
+    "\x00\x00\x00\x1F\x00\x08"
+    MSG_STARTUP_STR "\x00"
+    "\x00\x00\x00\x20\x00\x06"
+    MSG_NEVER_STR "\x00"
+    "\x00\x00\x00\x21\x00\x08"
+    MSG__SCREEN_STR "\x00"
+    "\x00\x00\x00\x22\x00\x06"
+    MSG__DIR_STR "\x00\x00"
+    "\x00\x00\x00\x23\x00\x08"
+    MSG__STACK_STR "\x00\x00"
+    "\x00\x00\x00\x24\x00\x0A"
+    MSG__PRIORITY_STR "\x00"
+    "\x00\x00\x00\x25\x00\x0A"
+    MSG__TIMEOUT_STR "\x00\x00"
+    "\x00\x00\x00\x26\x00\x06"
+    MSG_DATES_STR "\x00"
+    "\x00\x00\x00\x27\x00\x0A"
+    MSG_WEEKDAYS_STR "\x00\x00"
+    "\x00\x00\x00\x28\x00\x06"
+    MSG__TIME_STR "\x00"
+    "\x00\x00\x00\x29\x00\x06"
+    MSG__DATE_STR "\x00"
+    "\x00\x00\x00\x2A\x00\x06"
+    MSG_EXACT_STR "\x00"
+    "\x00\x00\x00\x2B\x00\x08"
+    MSG_BEFORE_STR "\x00\x00"
+    "\x00\x00\x00\x2C\x00\x06"
+    MSG_AFTER_STR "\x00"
+    "\x00\x00\x00\x2D\x00\x04"
+    MSG_MON_STR "\x00"
+    "\x00\x00\x00\x2E\x00\x04"
+    MSG_TUE_STR "\x00"
+    "\x00\x00\x00\x2F\x00\x04"
+    MSG_WED_STR "\x00"
+    "\x00\x00\x00\x30\x00\x04"
+    MSG_THU_STR "\x00"
+    "\x00\x00\x00\x31\x00\x04"
+    MSG_FRI_STR "\x00"
+    "\x00\x00\x00\x32\x00\x04"
+    MSG_SAT_STR "\x00"
+    "\x00\x00\x00\x33\x00\x04"
+    MSG_SUN_STR "\x00"
+    "\x00\x00\x00\x34\x00\x0A"
+    MSG_ANYMONTH_STR "\x00"
+    "\x00\x00\x00\x35\x00\x08"
+    MSG_JANUARY_STR "\x00"
+    "\x00\x00\x00\x36\x00\x0A"
+    MSG_FEBRUARY_STR "\x00\x00"
+    "\x00\x00\x00\x37\x00\x06"
+    MSG_MARCH_STR "\x00"
+    "\x00\x00\x00\x38\x00\x06"
+    MSG_APRIL_STR "\x00"
+    "\x00\x00\x00\x39\x00\x04"
+    MSG_MAY_STR "\x00"
+    "\x00\x00\x00\x3A\x00\x06"
+    MSG_JUNE_STR "\x00\x00"
+    "\x00\x00\x00\x3B\x00\x06"
+    MSG_JULY_STR "\x00\x00"
+    "\x00\x00\x00\x3C\x00\x08"
+    MSG_AUGUST_STR "\x00\x00"
+    "\x00\x00\x00\x3D\x00\x0A"
+    MSG_SEPTEMBER_STR "\x00"
+    "\x00\x00\x00\x3E\x00\x08"
+    MSG_OCTOBER_STR "\x00"
+    "\x00\x00\x00\x3F\x00\x0A"
+    MSG_NOVEMBER_STR "\x00\x00"
+    "\x00\x00\x00\x40\x00\x0A"
+    MSG_DECEMBER_STR "\x00\x00"
+    "\x00\x00\x00\x41\x00\x06"
+    MSG__HOUR_STR "\x00"
+    "\x00\x00\x00\x42\x00\x06"
+    MSG__MINUTES_STR "\x00\x00"
+    "\x00\x00\x00\x43\x00\x08"
+    MSG__MONDAY_STR "\x00"
+    "\x00\x00\x00\x44\x00\x0A"
+    MSG__TUESDAY_STR "\x00\x00"
+    "\x00\x00\x00\x45\x00\x0C"
+    MSG__WEDNESDAY_STR "\x00\x00"
+    "\x00\x00\x00\x46\x00\x0A"
+    MSG__THURSDAY_STR "\x00"
+    "\x00\x00\x00\x47\x00\x08"
+    MSG__FRIDAY_STR "\x00"
+    "\x00\x00\x00\x48\x00\x0A"
+    MSG__SATURDAY_STR "\x00"
+    "\x00\x00\x00\x49\x00\x08"
+    MSG__SUNDAY_STR "\x00"
+    "\x00\x00\x00\x4A\x00\x08"
+    MSG__DATEPERIOD_STR "\x00"
+    "\x00\x00\x00\x4B\x00\x08"
+    MSG__DATEREPEAT_STR "\x00"
+    "\x00\x00\x00\x4C\x00\x08"
+    MSG__TIMEPERIOD_STR "\x00"
+    "\x00\x00\x00\x4D\x00\x08"
+    MSG__TIMEREPEAT_STR "\x00"
+    "\x00\x00\x00\x4E\x00\x08"
+    MSG_ALLDAY_STR "\x00"
+    "\x00\x00\x00\x4F\x00\x26"
+    MSG_DATEPOPUPGADGETS_STR "\x00\x00"
+    "\x00\x00\x00\x50\x00\x1A"
+    MSG_ABOUT_STR "\x00\x00"
+    "\x00\x00\x00\x51\x00\x0C"
+    MSG_VERSION_STR "\x00\x00"
+    "\x00\x00\x00\x52\x00\x0E"
+    MSG_UNREGISTERED_STR "\x00\x00"
+    "\x00\x00\x00\x53\x00\xD0"
+    MSG_ABOUTTEXT_STR "\x00\x00"
+    "\x00\x00\x00\x54\x00\x04"
+    MSG__OK_STR "\x00"
+    "\x00\x00\x00\x55\x00\x0E"
+    MSG_SEARCH_STR "\x00\x00"
+    "\x00\x00\x00\x56\x00\x0C"
+    MSG__FIND_STR "\x00\x00"
+    "\x00\x00\x00\x57\x00\x06"
+    MSG__FINDSTRING_STR "\x00"
+    "\x00\x00\x00\x58\x00\x0A"
+    MSG__REPLACESTRING_STR "\x00\x00"
+    "\x00\x00\x00\x59\x00\x0E"
+    MSG__IGNORECASE_STR "\x00\x00"
+    "\x00\x00\x00\x5A\x00\x12"
+    MSG__ONLYWHOLEWORDS_STR "\x00"
+    "\x00\x00\x00\x5B\x00\x0E"
+    MSG__REPLACEMODE_STR "\x00"
+    "\x00\x00\x00\x5C\x00\x08"
+    MSG_MACROS_STR "\x00\x00"
+    "\x00\x00\x00\x5D\x00\x08"
+    MSG_PROJECT_STR "\x00"
+    "\x00\x00\x00\x5E\x00\x06"
+    MSG_K_NEW_STR "\x00"
+    "\x00\x00\x00\x5F\x00\x0A"
+    MSG_K_OPEN_STR "\x00"
+    "\x00\x00\x00\x60\x00\x0E"
+    MSG_K_INCLUDE_STR "\x00\x00"
+    "\x00\x00\x00\x61\x00\x08"
+    MSG_IMPORT_STR "\x00\x00"
+    "\x00\x00\x00\x62\x00\x08"
+    MSG_K_SAVE_STR "\x00\x00"
+    "\x00\x00\x00\x63\x00\x0E"
+    MSG_K_SAVEAS_STR "\x00\x00"
+    "\x00\x00\x00\x64\x00\x08"
+    MSG_EXPORT_STR "\x00\x00"
+    "\x00\x00\x00\x65\x00\x0A"
+    MSG_K_ICONIFY_STR "\x00"
+    "\x00\x00\x00\x66\x00\x08"
+    MSG_K_TEST_STR "\x00\x00"
+    "\x00\x00\x00\x67\x00\x08"
+    MSG_K_QUIT_STR "\x00\x00"
+    "\x00\x00\x00\x68\x00\x06"
+    MSG_EDIT_STR "\x00\x00"
+    "\x00\x00\x00\x69\x00\x0E"
+    MSG_K_LASTSAVED_STR "\x00\x00"
+    "\x00\x00\x00\x6A\x00\x06"
+    MSG_DISPLAYERS_STR "\x00\x00"
+    "\x00\x00\x00\x6B\x00\x0A"
+    MSG_K_FIND_STR "\x00"
+    "\x00\x00\x00\x6C\x00\x0C"
+    MSG_K_FINDNEXT_STR "\x00"
+    "\x00\x00\x00\x6D\x00\x0E"
+    MSG_K_REPLACE_STR "\x00\x00"
+    "\x00\x00\x00\x6E\x00\x0E"
+    MSG_K_REPLACENEXT_STR "\x00\x00"
+    "\x00\x00\x00\x6F\x00\x0A"
+    MSG_SETTINGS_STR "\x00\x00"
+    "\x00\x00\x00\x70\x00\x0A"
+    MSG_K_EVENTS_STR "\x00\x00"
+    "\x00\x00\x00\x71\x00\x08"
+    MSG_K_TEXTS_STR "\x00"
+    "\x00\x00\x00\x72\x00\x08"
+    MSG_K_DATES_STR "\x00"
+    "\x00\x00\x00\x73\x00\x0E"
+    MSG_K_ATTRIBUTES_STR "\x00\x00"
+    "\x00\x00\x00\x74\x00\x0C"
+    MSG_K_ACKNOWLEDGE_STR "\x00"
+    "\x00\x00\x00\x75\x00\x10"
+    MSG_K_SAVEWHENEXIT_STR "\x00\x00"
+    "\x00\x00\x00\x76\x00\x08"
+    MSG_MODULES_STR "\x00"
+    "\x00\x00\x00\x77\x00\x12"
+    MSG_K_AFFECTALL_STR "\x00"
+    "\x00\x00\x00\x78\x00\x0C"
+    MSG_K_PARSEDIRS_STR "\x00\x00"
+    "\x00\x00\x00\x79\x00\x10"
+    MSG_K_SIMPLEREFRESH_STR "\x00\x00"
+    "\x00\x00\x00\x7A\x00\x10"
+    MSG_K_CLOSEWB_STR "\x00"
+    "\x00\x00\x00\x7B\x00\x0C"
+    MSG_K_OWNSCREEN_STR "\x00\x00"
+    "\x00\x00\x00\x7C\x00\x0A"
+    MSG_K_BACKDROP_STR "\x00\x00"
+    "\x00\x00\x00\x7D\x00\x0A"
+    MSG_K_SHANGHAI_STR "\x00\x00"
+    "\x00\x00\x00\x7E\x00\x10"
+    MSG_K_USESCREENFONT_STR "\x00"
+    "\x00\x00\x00\x7F\x00\x10"
+    MSG_K_SELECTFONT_STR "\x00\x00"
+    "\x00\x00\x00\x80\x00\x16"
+    MSG_K_SELECTSCREENMODE_STR "\x00\x00"
+    "\x00\x00\x00\x81\x00\x12"
+    MSG_K_ADJUSTPALETTE_STR "\x00"
+    "\x00\x00\x00\x82\x00\x08"
+    MSG_K_OPENSETTINGS_STR "\x00"
+    "\x00\x00\x00\x83\x00\x06"
+    MSG_K_SAVESETTINGS_STR "\x00\x00"
+    "\x00\x00\x00\x84\x00\x0C"
+    MSG_K_SAVESETTINGSAS_STR "\x00\x00"
+    "\x00\x00\x00\x85\x00\x06"
+    MSG_HELP_STR "\x00\x00"
+    "\x00\x00\x00\x86\x00\x0C"
+    MSG_K_HELPABOUT_STR "\x00\x00"
+    "\x00\x00\x00\x87\x00\x14"
+    MSG_K_HELPAUTHOR_STR "\x00"
+    "\x00\x00\x00\x88\x00\x0C"
+    MSG_K_HELPCONTENTS_STR "\x00"
+    "\x00\x00\x00\x89\x00\x0A"
+    MSG_K_HELPINDEX_STR "\x00\x00"
+    "\x00\x00\x00\x8A\x00\x08"
+    MSG_K_HELPHELP_STR "\x00"
+    "\x00\x00\x00\x8B\x00\x12"
+    MSG_K_HELPCHECKER_STR "\x00"
+    "\x00\x00\x00\x8C\x00\x16"
+    MSG_K_HELPPREFERENCES_STR "\x00"
+    "\x00\x00\x00\x8D\x00\x0A"
+    MSG_K_HELPEVENTS_STR "\x00"
+    "\x00\x00\x00\x8E\x00\x0A"
+    MSG_K_HELPTEXTS_STR "\x00\x00"
+    "\x00\x00\x00\x8F\x00\x0A"
+    MSG_K_HELPDATES_STR "\x00\x00"
+    "\x00\x00\x00\x90\x00\x0E"
+    MSG_K_HELPATTRIBUTES_STR "\x00"
+    "\x00\x00\x00\x91\x00\x36"
+    MSG_ACTIVEMODULES_STR "\x00"
+    "\x00\x00\x00\x92\x00\x1A"
+    MSG_LIBRARYNOTFOUND_STR "\x00"
+    "\x00\x00\x00\x93\x00\x1A"
+    MSG_COULDNOTOPENWB_STR "\x00\x00"
+    "\x00\x00\x00\x94\x00\x1A"
+    MSG_COULDNOTCLOSEWB_STR "\x00"
+    "\x00\x00\x00\x95\x00\x24"
+    MSG_IFFERROR1_STR "\x00\x00"
+    "\x00\x00\x00\x96\x00\x18"
+    MSG_IFFERROR2_STR "\x00\x00"
+    "\x00\x00\x00\x97\x00\x10"
+    MSG_NOTFOUND_STR "\x00"
+    "\x00\x00\x00\x98\x00\x20"
+    MSG_COULDNOTICONIFY_STR "\x00\x00"
+    "\x00\x00\x00\x99\x00\x32"
+    MSG_BUFFERTOOLARGE_STR "\x00"
+    "\x00\x00\x00\x9A\x00\x3A"
+    MSG_STILLVISITORS_STR "\x00"
+    "\x00\x00\x00\x9B\x00\x1A"
+    MSG_REPLACEWITH_STR "\x00\x00"
+    "\x00\x00\x00\x9C\x00\x20"
+    MSG_REPLACEEVENTGADGETS_STR "\x00"
+    "\x00\x00\x00\x9D\x00\x22"
+    MSG_NOTFOUNDASENTIREWORD_STR "\x00"
+    "\x00\x00\x00\x9E\x00\x30"
+    MSG_PROJECTCHANGED_STR "\x00\x00"
+    "\x00\x00\x00\x9F\x00\x18"
+    MSG_PROJECTCHANGEDBUTTONS_STR "\x00"
+    "\x00\x00\x00\xA0\x00\x14"
+    MSG_RECALLIOTROUBBLE_STR "\x00\x00"
+    "\x00\x00\x00\xA1\x00\x26"
+    MSG_OVERWRITE_STR "\x00\x00"
+    "\x00\x00\x00\xA2\x00\x06"
+    MSG_CLEAR_STR "\x00"
+    "\x00\x00\x00\xA3\x00\x08"
+    MSG_RESTORE_STR "\x00"
+    "\x00\x00\x00\xA4\x00\x10"
+    MSG_ENDOFPROJECT_STR "\x00\x00"
+    "\x00\x00\x00\xA5\x00\x34"
+    MSG_LISTLOCKED_STR "\x00\x00"
+    "\x00\x00\x00\xA6\x00\x10"
+    MSG_OUTOFMEMORY_STR "\x00\x00"
+    "\x00\x00\x00\xA7\x00\x2A"
+    MSG_REPLACEDNOCCURRENCESOF_STR "\x00"
+    "\x00\x00\x00\xA8\x00\x3A"
+    MSG_MAXEVENTSCANBESAVED_STR "\x00"
+    "\x00\x00\x00\xA9\x00\x08"
+    MSG_ICONIFY_STR "\x00"
+    "\x00\x00\x00\xAA\x00\x06"
+    MSG_QUIT_STR "\x00\x00"
+    "\x00\x00\x00\xAB\x00\x0A"
+    MSG_OKCANCEL_STR "\x00"
+    "\x00\x00\x00\xAC\x00\x0E"
+    MSG_RETRYCANCEL_STR "\x00\x00"
+    "\x00\x00\x00\xAD\x00\x08"
+    MSG_YESNO_STR "\x00\x00"
+    "\x00\x00\x00\xAE\x00\x04"
+    MSG_OK_STR "\x00\x00"
+    "\x00\x00\x00\xAF\x00\x06"
+    MSG_RESET_STR "\x00"
+    "\x00\x00\x00\xB0\x00\x0E"
+    MSG_OPENPROJECT_STR "\x00\x00"
+    "\x00\x00\x00\xB1\x00\x0E"
+    MSG_SAVEPROJECT_STR "\x00\x00"
+    "\x00\x00\x00\xB2\x00\x10"
+    MSG_INCLUDEPROJECT_STR "\x00"
+    "\x00\x00\x00\xB3\x00\x12"
+    MSG_OPENENVIRONMENT_STR "\x00\x00"
+    "\x00\x00\x00\xB4\x00\x12"
+    MSG_SAVEENVIRONMENT_STR "\x00\x00"
+    "\x00\x00\x00\xB5\x00\x10"
+    MSG_SELECTCOMMAND_STR "\x00\x00"
+    "\x00\x00\x00\xB6\x00\x0E"
+    MSG_SELECTDRAWER_STR "\x00"
+    "\x00\x00\x00\xB7\x00\x0C"
+    MSG_SELECTFONT_STR "\x00"
+    "\x00\x00\x00\xB8\x00\x12"
+    MSG_SELECTSCREENMODE_STR "\x00"
+    "\x00\x00\x00\xB9\x00\x10"
+    MSG_ADJUSTPALETTE_STR "\x00\x00"
+    "\x00\x00\x00\xBA\x00\x06"
+    MSG_OPEN_STR "\x00\x00"
+    "\x00\x00\x00\xBB\x00\x08"
+    MSG_INCLUDE_STR "\x00"
+    "\x00\x00\x00\xBC\x00\x06"
+    MSG_SAVE_STR "\x00\x00"
+};
+
+#endif /* CATCOMP_BLOCK */
+
+
+/****************************************************************************/
+
+
+struct LocaleInfo
+{
+    APTR li_LocaleBase;
+    APTR li_Catalog;
+};
+
+
+#include <dos.h>
+STRPTR __asm GetString(register __a0 struct LocaleInfo *li,register __d0 ULONG id);
+
+
+#ifdef CATCOMP_CODE
+
+STRPTR GetString(struct LocaleInfo *li, LONG stringNum)
+{
+LONG   *l;
+UWORD  *w;
+STRPTR  builtIn;
+
+    l = (LONG *)CatCompBlock;
+
+    while (*l != stringNum)
+    {
+        w = (UWORD *)((ULONG)l + 4);
+        l = (LONG *)((ULONG)l + (ULONG)*w + 6);
+    }
+    builtIn = (STRPTR)((ULONG)l + 6);
+
+#define XLocaleBase LocaleBase
+#define LocaleBase li->li_LocaleBase
+    
+    if (LocaleBase)
+        return(GetCatalogStr(li->li_Catalog,stringNum,builtIn));
+#define LocaleBase XLocaleBase
+#undef XLocaleBase
+
+    return(builtIn);
+}
+
+
+#endif /* CATCOMP_CODE */
+
+
+/****************************************************************************/
+
+
+#endif /* PREFS_LOCALE_H */

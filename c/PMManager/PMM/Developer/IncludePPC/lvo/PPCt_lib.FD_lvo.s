@@ -1,0 +1,16 @@
+	.set	LVOMakePPCT,-30
+	.global	LVOMakePPCT
+	.set	LVOFreePPCT,-36
+	.global	LVOFreePPCT
+	.set	LVOFallPPCT,-42
+	.global	LVOFallPPCT
+	.set	LVOImagePPCT,-48
+	.global	LVOImagePPCT
+	.set	LVOPaletteToRGB32,-54
+	.global	LVOPaletteToRGB32
+	.set	LVOFreeRGB32,-60
+	.global	LVOFreeRGB32
+	.set	LVORGB32ToPalette,-66
+	.global	LVORGB32ToPalette
+	.set	LVOFreePalette,-72
+	.global	LVOFreePalette

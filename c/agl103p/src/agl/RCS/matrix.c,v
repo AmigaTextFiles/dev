@@ -1,0 +1,1783 @@
+head	1.2;
+branch	1.2.1.99;
+access;
+symbols;
+locks; strict;
+comment	@ * @;
+
+
+1.2
+date	93.03.15.23.25.36;	author jason;	state Exp;
+branches
+	1.2.1.1;
+next	;
+
+1.2.1.1
+date	94.03.29.05.41.32;	author jason;	state Exp;
+branches;
+next	1.2.1.2;
+
+1.2.1.2
+date	94.04.02.03.33.11;	author jason;	state Exp;
+branches;
+next	1.2.1.3;
+
+1.2.1.3
+date	94.04.06.02.39.10;	author jason;	state Exp;
+branches;
+next	1.2.1.4;
+
+1.2.1.4
+date	94.09.13.03.48.33;	author jason;	state Exp;
+branches;
+next	1.2.1.5;
+
+1.2.1.5
+date	94.11.18.07.49.22;	author jason;	state Exp;
+branches;
+next	1.2.1.6;
+
+1.2.1.6
+date	94.12.09.05.29.56;	author jason;	state Exp;
+branches;
+next	;
+
+
+desc
+@transformations
+@
+
+
+1.2
+log
+@Initial RCS Version
+@
+text
+@#include"agl.h"
+
+/*
+ *  near and far cutting planes are included, but have no effect
+ */
+
+#define	FAST_PROJECTION	TRUE
+#define	FAST_PUSH		TRUE
+#define SINE_TABLE		TRUE
+
+
+/* ProjectionType enumeration */
+#define ORTHO		0
+#define PERSPECTIVE	1
+
+
+short MatrixLevel[MAX_WINDOWS],ProjectionType[MAX_WINDOWS];
+float Projection[MAX_WINDOWS][4][4];
+float Rotate[MAX_WINDOWS][MATRIXSTACKDEPTH][3][3];
+float Translation[MAX_WINDOWS][MATRIXSTACKDEPTH][3];
+float Sine[3600];
+
+
+/******************************************************************************
+void	init_matrices(void)
+
+******************************************************************************/
+/*PROTOTYPE*/
+void init_matrices(void)
+	{
+	long wid;
+	short x,y;
+
+	/* create sin table */
+	for(x=0;x<3600;x++)
+		Sine[x]=sin(x/10.0*DEG);
+
+	for(wid=0;wid<MAX_WINDOWS;wid++)
+		{
+		MatrixLevel[wid]=0;
+
+		for(x=0;x<3;x++)
+			{
+			Translation[wid][0][x]=0.0;
+
+			for(y=0;y<3;y++)
+				if(x==y)
+					Rotate[wid][0][y][x]=1.0;
+				else
+					Rotate[wid][0][y][x]=0.0;
+			}
+		}
+	}
+
+
+/******************************************************************************
+void pushmatrix(void)
+
+******************************************************************************/
+/*PROTOTYPE*/
+void pushmatrix(void)
+	{
+	short x,y,m;
+
+	if(MatrixLevel[CurrentWid]==MATRIXSTACKDEPTH-1)
+		GL_error("Too many matrices pushed");
+	else
+		{
+		m= ++MatrixLevel[CurrentWid];
+
+#if FAST_PUSH
+
+		memcpy(&Translation[CurrentWid][m][0],&Translation[CurrentWid][m-1][0],3*sizeof(float));
+		memcpy(&Rotate[CurrentWid][m][0][0],&Rotate[CurrentWid][m-1][0][0],9*sizeof(float));
+
+#else
+		for(y=0;y<3;y++)
+			{
+			Translation[CurrentWid][m][y]=Translation[CurrentWid][m-1][y];
+			for(x=0;x<3;x++)
+				Rotate[CurrentWid][m][y][x]=Rotate[CurrentWid][m-1][y][x];
+			}
+#endif
+
+		}
+	}
+
+
+/******************************************************************************
+void	popmatrix(void)
+
+******************************************************************************/
+/*PROTOTYPE*/
+void popmatrix(void)
+	{
+	if(MatrixLevel[CurrentWid]==0)
+		GL_error("Too many matrices popped");
+	else
+		MatrixLevel[CurrentWid]--;
+
+	if(MatrixLevel[CurrentWid]==0)	/* gotta have some way to go back */
+		Dimensions[CurrentWid]=2;
+	}
+
+
+/******************************************************************************
+void	project_vertex(float in[3],float out[3])
+
+	applies perspective on transformed vertex
+******************************************************************************/
+/*PROTOTYPE*/
+void project_vertex(float in[3],float out[3])
+	{
+#if !FAST_PROJECTION
+
+	short y,m;
+	float sum,before[4],mid[4];
+
+	/* complete: general purpose, any transform matrix */
+	for(y=0;y<3;y++)
+		before[y]=in[y];
+	before[3]=1.0;
+
+	for(y=0;y<4;y++)
+		{
+		sum=0.0;
+		for(m=0;m<4;m++)
+			sum+=Projection[CurrentWid][y][m]*before[m];
+		mid[y]=sum;
+		}
+
+	/* divide out range factor */
+	for(y=0;y<3;y++)
+		out[y]=Projection[CurrentWid][3][2]*mid[y]/mid[3];
+
+#else
+
+	/* fast: compute only x and y for specific transform */
+	if(ProjectionType[CurrentWid]==PERSPECTIVE)
+		{
+		out[0]=Projection[CurrentWid][0][0]*in[0]/in[2];
+		out[1]=Projection[CurrentWid][1][1]*in[1]/in[2];
+		}
+	else
+		{
+		out[0]=Projection[CurrentWid][0][0]*in[0]+Projection[CurrentWid][3][0];
+		out[1]=Projection[CurrentWid][1][1]*in[1]+Projection[CurrentWid][3][1];
+		}
+
+#endif
+	}
+
+
+/******************************************************************************
+void	perspective(long angle,float aspect,float near,float far)
+
+	angle in integer number of tenths of degrees
+
+	sets Projection[][]
+******************************************************************************/
+/*PROTOTYPE*/
+void perspective(long angle,float aspect,float near,float far)
+	{
+	float fovy,cot;
+
+	OneToOne[CurrentWid]=FALSE;
+	Dimensions[CurrentWid]=3;
+	ProjectionType[CurrentWid]=PERSPECTIVE;
+
+	fovy=angle*DEG/10.0;
+	cot=1.0/tan(fovy/2.0);
+
+#if !FAST_PROJECTION
+	memset(&Projection[CurrentWid][0][0],0,16*4);
+#endif
+
+	Projection[CurrentWid][0][0]=cot/aspect;
+	Projection[CurrentWid][1][1]=cot;
+	Projection[CurrentWid][2][2]=     -(far+near)/(far-near);
+	Projection[CurrentWid][2][3]= -1.0;
+	Projection[CurrentWid][3][2]= -(2.0*far*near)/(far-near);
+
+/*
+	printf("angle=%d fovy=%.2f cot=%.2f Proj=%.2f %.2f\n",angle,fovy,cot,
+													Projection[CurrentWid][0][0],Projection[CurrentWid][1][1]);
+*/
+	}
+
+
+/******************************************************************************
+void	ortho(float left,float right,float bottom,float top,
+														float near,float far)
+
+******************************************************************************/
+/*PROTOTYPE*/
+void ortho(float left,float right,float bottom,float top,float near,float far)
+	{
+	ortho2(left,right,bottom,top);
+
+	Projection[CurrentWid][2][2]= -2.0/(far-near);
+	Projection[CurrentWid][3][2]= -(far+near)/(far-near);
+	}
+
+
+/******************************************************************************
+void	ortho2(float left,float right,float bottom,float top)
+
+******************************************************************************/
+/*PROTOTYPE*/
+void ortho2(float left,float right,float bottom,float top)
+	{
+#if !FAST_PROJECTION
+	memset(&Projection[CurrentWid][0][0],0,16*4);
+#endif
+
+	Projection[CurrentWid][0][0]=2.0/(right-left);
+	Projection[CurrentWid][1][1]=2.0/(top-bottom);
+	Projection[CurrentWid][2][2]= -1.0;
+	Projection[CurrentWid][3][0]= -(right+left)/(right-left);
+	Projection[CurrentWid][3][1]= -(top+bottom)/(top-bottom);
+	Projection[CurrentWid][3][3]=1.0;
+
+	if( left==(-0.5) && right==(CurrentWidth-0.5) && bottom==(-0.5) && top==(CurrentHeight-0.5) )
+		OneToOne[CurrentWid]=TRUE;
+	else
+		OneToOne[CurrentWid]=FALSE;
+
+	ProjectionType[CurrentWid]=ORTHO;
+	}
+
+
+/******************************************************************************
+void	v2i(long lvert[2])
+
+******************************************************************************/
+/*PROTOTYPE*/
+void v2i(long lvert[2])
+	{
+	float fvert[3];
+	short svert[2];
+
+	if(OneToOne[CurrentWid])	/* bypass transforms if no effect */
+		{
+		svert[0]=lvert[0];
+		svert[1]=lvert[1];
+		render_vertex(svert);
+		}
+	else
+		{
+		fvert[0]=lvert[0];
+		fvert[1]=lvert[1];
+		fvert[2]=0.0;
+
+		v3f(fvert);
+		}
+	}
+
+
+/******************************************************************************
+void	v3i(long lvert[3])
+
+******************************************************************************/
+/*PROTOTYPE*/
+void v3i(long lvert[3])
+	{
+	float fvert[3];
+
+	fvert[0]=lvert[0];
+	fvert[1]=lvert[1];
+	fvert[2]=lvert[2];
+
+	v3f(fvert);
+	}
+
+
+/******************************************************************************
+void	v2s(short svert[2])
+
+******************************************************************************/
+/*PROTOTYPE*/
+void v2s(short svert[2])
+	{
+	float fvert[3];
+
+	if(OneToOne[CurrentWid])	/* bypass transforms if no effect */
+		render_vertex(svert);
+	else
+		{
+		fvert[0]=svert[0];
+		fvert[1]=svert[1];
+		fvert[2]=0.0;
+
+		v3f(fvert);
+		}
+	}
+
+
+/******************************************************************************
+void	v3s(short svert[3])
+
+******************************************************************************/
+/*PROTOTYPE*/
+void v3s(short svert[3])
+	{
+	float fvert[3];
+
+	fvert[0]=svert[0];
+	fvert[1]=svert[1];
+	fvert[2]=svert[2];
+
+	v3f(fvert);
+	}
+
+
+/******************************************************************************
+void	v2f(float fvert2[2])
+
+******************************************************************************/
+/*PROTOTYPE*/
+void v2f(float fvert2[2])
+	{
+	float fvert[3];
+	short svert[2];
+
+	if(OneToOne[CurrentWid])	/* bypass transforms if no effect */
+		{
+		svert[0]=fvert2[0];
+		svert[1]=fvert2[1];
+		render_vertex(svert);
+		}
+	else
+		{
+		fvert[0]=fvert2[0];
+		fvert[1]=fvert2[1];
+		fvert[2]=0.0;
+
+		v3f(fvert);
+		}
+	}
+
+
+/******************************************************************************
+void	v3f(float vert[3])
+
+******************************************************************************/
+/*PROTOTYPE*/
+void v3f(float vert[3])
+	{
+	float rvert[3],pvert[3];
+	short svert[2];
+
+	rotate_translate_position(vert,rvert);
+	project_vertex(rvert,pvert);
+
+	svert[0]=CurrentWidth*(pvert[0]+1.0)/2.0+0.5;
+	svert[1]=CurrentHeight*(pvert[1]+1.0)/2.0+0.5;
+	render_vertex(svert);
+
+/*
+if(CurrentWid==2)
+{
+printf("%5.3f %5.3f %5.3f -> %5.3f %5.3f %5.3f -> ",vert[0],vert[1],vert[2],rvert[0],rvert[1],rvert[2]);
+printf("%5.3f %5.3f -> %4d %4d\n",pvert[0],pvert[1],svert[0],svert[1]);
+}
+*/
+	}
+
+
+/******************************************************************************
+void	rotate_translate_position(float vert[3],float rvert[3])
+
+	calls rotate_position()
+	adds Translation[]
+******************************************************************************/
+/*PROTOTYPE*/
+void rotate_translate_position(float vert[3],float rvert[3])
+	{
+	short y,m;
+
+	m=MatrixLevel[CurrentWid];
+
+	rotate_position(vert,rvert);
+	for(y=0;y<3;y++)
+		rvert[y]+=Translation[CurrentWid][m][y];
+	}
+
+
+/******************************************************************************
+void	rotate_position(float vert[3],float rvert[3])
+
+	premultiplies vector to rotational matrix transform
+******************************************************************************/
+/*PROTOTYPE*/
+void rotate_position(float vert[3],float rvert[3])
+	{
+	short x,y,d,m;
+
+	d=Dimensions[CurrentWid];
+	m=MatrixLevel[CurrentWid];
+
+	for(x=0;x<d;x++)
+		{
+		rvert[x]=0.0;
+		for(y=0;y<d;y++)
+			rvert[x]+=vert[y]*Rotate[CurrentWid][m][y][x];
+		}
+	}
+
+
+/******************************************************************************
+void	translate(float fx,float fy,float fz)
+
+******************************************************************************/
+/*PROTOTYPE*/
+void translate(float fx,float fy,float fz)
+	{
+	float vert[3],rvert[3];
+	short y,m;
+
+	m=MatrixLevel[CurrentWid];
+
+	vert[0]=fx;
+	vert[1]=fy;
+	vert[2]=fz;
+
+	rotate_position(vert,rvert);
+
+	for(y=0;y<3;y++)
+		Translation[CurrentWid][m][y]+=rvert[y];
+	}
+
+
+/******************************************************************************
+void	rot(float angle,long axis)
+
+	angle in degrees
+
+	rotates current matrix transform about an axis
+******************************************************************************/
+/*PROTOTYPE*/
+void rot(float angle,long axis)
+	{
+	short x;
+	short m;
+	short i,j;
+	short angle1,angle2;
+
+	float b,c;
+	float sina,cosa;
+
+	m=MatrixLevel[CurrentWid];
+
+	switch(axis)
+		{
+		case 'x':
+			Dimensions[CurrentWid]=3;
+			i=1;
+			j=2;
+			break;
+		case 'y':
+			Dimensions[CurrentWid]=3;
+			i=2;
+			j=0;
+			break;
+		case 'z':
+			i=0;
+			j=1;
+			break;
+		default:
+			return;
+		}
+
+#if SINE_TABLE
+
+	if(angle<0.0)
+		{
+		angle1=(short)(-angle)*10%3600;
+		sina= -Sine[angle1];
+		}
+	else
+		{
+		angle1=(short)(angle)*10%3600;
+		sina=Sine[angle1];
+		}
+
+	angle2=(abs((short)angle)*10+900)%3600;
+	cosa=Sine[angle2];
+
+#else
+
+	angle*=DEG;
+
+	sina=sin(angle);
+	cosa=cos(angle);
+
+#endif
+
+	for(x=0;x<3;x++)
+		{
+		b=Rotate[CurrentWid][m][i][x];
+		c=Rotate[CurrentWid][m][j][x];
+		Rotate[CurrentWid][m][i][x]=  b*cosa+c*sina;
+		Rotate[CurrentWid][m][j][x]= -b*sina+c*cosa;
+		}
+	}
+
+
+/******************************************************************************
+void	scale(float sx,float sy,float sz)
+
+******************************************************************************/
+/*PROTOTYPE*/
+void scale(float sx,float sy,float sz)
+	{
+	short x,m;
+
+	m=MatrixLevel[CurrentWid];
+
+	for(x=0;x<3;x++)
+		{
+		Rotate[CurrentWid][m][0][x]*=sx;
+		Rotate[CurrentWid][m][1][x]*=sy;
+		Rotate[CurrentWid][m][2][x]*=sz;
+		}
+	}
+@
+
+
+1.2.1.1
+log
+@Added RCS Header
+@
+text
+@a0 16
+
+/******************************************************************************
+
+$Id: matrix.c,v 1.2.1.1 2002/03/26 22:04:15 jason Exp jason $
+
+$Log: matrix.c,v $
+ * Revision 1.2.1.1  2002/03/26  22:04:15  jason
+ * Added RCS Header
+ *
+ * Revision 1.2.1.1  2002/03/26  22:00:51  jason
+ * RCS/agl.h,v
+ *
+
+******************************************************************************/
+
+
+@
+
+
+1.2.1.2
+log
+@acceleration matrix operations: no more 4D arrays
+needs cleaning and further optimizations
+@
+text
+@d4 1
+a4 1
+$Id: matrix.c,v 1.2.1.1 1994/03/29 05:41:32 jason Exp jason $
+d7 1
+a7 1
+ * Revision 1.2.1.1  1994/03/29  05:41:32  jason
+d9 4
+a22 3
+#define	MATRIX_DEBUG	FALSE
+#define	VERTEX_DEBUG	FALSE
+
+a32 6
+/* MACRO'S */
+#define PROJECTION(Y,X) ProjectionPointer[Y*4+X]
+#define TRANSLATION(Y) TranslatePointer[Y*4]
+#define ROTATION(Y,X) RotatePointer[Y*4+X]
+
+
+a33 1
+
+d35 2
+a36 2
+float Transformation[MAX_WINDOWS][MATRIXSTACKDEPTH][4][4];
+
+a38 2
+float *RotatePointer,*TranslatePointer,*ProjectionPointer;
+
+a49 4
+#if MATRIX_DEBUG
+	printf("init_matrices()\n");
+#endif
+
+d58 5
+a62 2
+		for(x=0;x<4;x++)
+			for(y=0;y<4;y++)
+d64 1
+a64 1
+					Transformation[wid][0][y][x]=1.0;
+d66 2
+a67 1
+					Transformation[wid][0][y][x]=0.0;
+a72 19
+void	reset_matrix_pointers(void)
+
+	call from winset() to reset pointers to transform structures
+
+******************************************************************************/
+/*PROTOTYPE*/
+void reset_matrix_pointers(void)
+	{
+	short m;
+
+	m=MatrixLevel[CurrentWid];
+
+	RotatePointer= &(Transformation[CurrentWid][m][0][0]);
+	TranslatePointer= &(Transformation[CurrentWid][m][0][3]);
+	ProjectionPointer= &(Projection[CurrentWid][0][0]);
+	}
+
+
+/******************************************************************************
+d79 1
+a79 5
+	short x,y,m,n;
+
+#if MATRIX_DEBUG
+	printf("pushmatrix() -> %d\n",MatrixLevel[CurrentWid]+1);
+#endif
+d89 2
+a90 1
+		memcpy(RotatePointer+16,RotatePointer,48);
+a100 3
+		/* move up pointers */
+		RotatePointer+=16;
+		TranslatePointer+=16;
+a111 4
+#if MATRIX_DEBUG
+	printf("popmatrix() -> %d\n",MatrixLevel[CurrentWid]-1);
+#endif
+
+a114 1
+		{
+a116 5
+		/* move up pointers */
+		RotatePointer-=16;
+		TranslatePointer-=16;
+		}
+
+d144 1
+a144 1
+			sum+=PROJECTION(y,m)*before[m];
+d150 1
+a150 1
+		out[y]=PROJECTION(3,2)*mid[y]/mid[3];
+d157 2
+a158 2
+		out[0]=PROJECTION(0,0)*in[0]/in[2];
+		out[1]=PROJECTION(1,1)*in[1]/in[2];
+d162 2
+a163 2
+		out[0]=PROJECTION(0,0)*in[0]+PROJECTION(3,0);
+		out[1]=PROJECTION(1,1)*in[1]+PROJECTION(3,1);
+a181 4
+#if MATRIX_DEBUG
+	printf("perspective()\n");
+#endif
+
+d201 1
+a201 1
+											Projection[CurrentWid][0][0],Projection[CurrentWid][1][1]);
+a227 4
+#if MATRIX_DEBUG
+	printf("ortho2()\n");
+#endif
+
+a366 1
+	short x,y;
+d375 7
+a381 43
+#if VERTEX_DEBUG
+	if(CurrentWid==1)
+		{
+		for(y=0;y<4;y++)
+			{
+			for(x=0;x<4;x++)
+				printf("%5.2f ",Projection[CurrentWid][y][x]);
+
+			printf(" ");
+
+			for(x=0;x<4;x++)
+				printf("%5.2f ",PROJECTION(y,x));
+
+			printf(" ");
+
+			for(x=0;x<4;x++)
+				printf("%4.1f ",Transformation[CurrentWid][MatrixLevel[CurrentWid]][y][x]);
+
+			printf(" ");
+
+			if(y<3)
+				{
+				for(x=0;x<3;x++)
+					printf("%4.1f ",ROTATION(y,x));
+
+				printf("%4.1f\n",TRANSLATION(y));
+				}
+
+			printf("\n");
+			}
+
+		printf("%d %d  %d %d  %d\n",	&Projection[CurrentWid][0][0],
+									ProjectionPointer,
+									&Transformation[CurrentWid][MatrixLevel[CurrentWid]][0][0],
+									RotatePointer,
+									TranslatePointer);
+		printf("W%d M%d ",CurrentWid,MatrixLevel[CurrentWid]);
+		printf("%5.3f %5.3f %5.3f -> ",vert[0],vert[1],vert[2]);
+		printf("%5.3f %5.3f %5.3f -> ",rvert[0],rvert[1],rvert[2]);
+		printf("%5.3f %5.3f -> ",pvert[0],pvert[1]);
+		printf("%4d %4d\n",svert[0],svert[1]);
+		}
+#endif
+a395 3
+	rotate_position(vert,rvert);
+
+#if FALSE
+d398 1
+a398 1
+	/* the original (keep for reference) */
+a400 5
+#endif
+
+	rvert[0]+=TRANSLATION(0);
+	rvert[1]+=TRANSLATION(1);
+	rvert[2]+=TRANSLATION(2);
+a414 2
+
+#if FALSE
+a416 1
+	/* the original (keep for reference) */
+a422 25
+#endif
+
+	/* unrolled and optimised */
+	if(d==3)
+		{
+		rvert[0]=	vert[0]*ROTATION(0,0)
+				+	vert[1]*ROTATION(1,0)
+				+	vert[2]*ROTATION(2,0);
+
+		rvert[1]=	vert[0]*ROTATION(0,1)
+				+	vert[1]*ROTATION(1,1)
+				+	vert[2]*ROTATION(2,1);
+
+		rvert[2]=	vert[0]*ROTATION(0,2)
+				+	vert[1]*ROTATION(1,2)
+				+	vert[2]*ROTATION(2,2);
+		}
+	else
+		{
+		rvert[0]=	vert[0]*ROTATION(0,0)
+				+	vert[1]*ROTATION(1,0);
+
+		rvert[1]=	vert[0]*ROTATION(0,1)
+				+	vert[1]*ROTATION(1,1);
+		}
+d436 1
+a436 3
+#if MATRIX_DEBUG
+	printf("translate(%.2f %.2f %.2f)\n",fx,fy,fz);
+#endif
+a443 4
+#if FALSE
+	m=MatrixLevel[CurrentWid];
+
+	/* the original (keep for reference) */
+a445 6
+#endif
+
+	/* unrolled and optimised */
+	TRANSLATION(0)+=rvert[0];
+	TRANSLATION(1)+=rvert[1];
+	TRANSLATION(2)+=rvert[2];
+d467 1
+a467 3
+#if MATRIX_DEBUG
+	printf("rot(%.2f,%c)\n",angle,axis);
+#endif
+a513 4
+#if FALSE
+	m=MatrixLevel[CurrentWid];
+
+	/* the original (keep for reference) */
+a520 17
+#endif
+
+	/* unrolled and optimised */
+	b=ROTATION(i,0);
+	c=ROTATION(j,0);
+	ROTATION(i,0)=  b*cosa+c*sina;
+	ROTATION(j,0)= -b*sina+c*cosa;
+
+	b=ROTATION(i,1);
+	c=ROTATION(j,1);
+	ROTATION(i,1)=  b*cosa+c*sina;
+	ROTATION(j,1)= -b*sina+c*cosa;
+
+	b=ROTATION(i,2);
+	c=ROTATION(j,2);
+	ROTATION(i,2)=  b*cosa+c*sina;
+	ROTATION(j,2)= -b*sina+c*cosa;
+a532 5
+#if MATRIX_DEBUG
+	printf("scale(%.2f %.2f %.2f )\n",sx,sy,sz);
+#endif
+
+#if FALSE
+a534 1
+	/* the original (keep for reference) */
+a540 14
+#endif
+
+	/* unrolled and optimised */
+	ROTATION(0,0)*=sx;
+	ROTATION(1,0)*=sy;
+	ROTATION(2,0)*=sz;
+
+	ROTATION(0,1)*=sx;
+	ROTATION(1,1)*=sy;
+	ROTATION(2,1)*=sz;
+
+	ROTATION(0,2)*=sx;
+	ROTATION(1,2)*=sy;
+	ROTATION(2,2)*=sz;
+@
+
+
+1.2.1.3
+log
+@Separate rotation for X, Y, and Z axes
+@
+text
+@d4 1
+a4 1
+$Id: matrix.c,v 1.2.1.2 1994/04/02 03:33:11 jason Exp jason $
+a6 4
+ * Revision 1.2.1.2  1994/04/02  03:33:11  jason
+ * acceleration matrix operations: no more 4D arrays
+ * needs cleaning and further optimizations
+ *
+a23 1
+#define	FAST_ROT		TRUE
+d33 3
+a35 3
+#define PROJECTION(Y,X) ProjectionPointer[(Y<<2)+X]
+#define TRANSLATION(Y) TranslatePointer[(Y<<2)]
+#define ROTATION(Y,X) RotatePointer[(Y<<2)+X]
+d106 1
+a106 2
+/* 	short x,y; */
+	short m;
+d306 1
+a307 1
+	float fvert[3];
+d389 1
+a390 1
+	float fvert[3];
+d416 1
+d418 1
+a418 1
+	float rvert[3],pvert[3];
+a424 1
+
+d482 1
+a482 1
+/* 	short y,m; */
+d508 1
+a508 2
+	short d;
+/* 	short x,y,m; */
+d558 1
+a558 1
+/* 	short y,m; */
+d595 2
+d607 20
+d631 1
+a631 1
+		angle1=(short)(-angle*10.0)%3600;
+d636 1
+a636 1
+		angle1=(short)(angle*10.0)%3600;
+d640 1
+a640 1
+	angle2=(abs((short)(angle*10.0))+900)%3600;
+a651 74
+	switch(axis)
+		{
+		case 'x':
+			Dimensions[CurrentWid]=3;
+#if FAST_ROT
+			b=ROTATION(1,0);
+			c=ROTATION(2,0);
+			ROTATION(1,0)=  b*cosa+c*sina;
+			ROTATION(2,0)= -b*sina+c*cosa;
+
+			b=ROTATION(1,1);
+			c=ROTATION(2,1);
+			ROTATION(1,1)=  b*cosa+c*sina;
+			ROTATION(2,1)= -b*sina+c*cosa;
+
+			b=ROTATION(1,2);
+			c=ROTATION(2,2);
+			ROTATION(1,2)=  b*cosa+c*sina;
+			ROTATION(2,2)= -b*sina+c*cosa;
+#else
+			i=1;
+			j=2;
+#endif
+			break;
+
+		case 'y':
+			Dimensions[CurrentWid]=3;
+#if FAST_ROT
+			b=ROTATION(2,0);
+			c=ROTATION(0,0);
+			ROTATION(2,0)=  b*cosa+c*sina;
+			ROTATION(0,0)= -b*sina+c*cosa;
+
+			b=ROTATION(2,1);
+			c=ROTATION(0,1);
+			ROTATION(2,1)=  b*cosa+c*sina;
+			ROTATION(0,1)= -b*sina+c*cosa;
+
+			b=ROTATION(2,2);
+			c=ROTATION(0,2);
+			ROTATION(2,2)=  b*cosa+c*sina;
+			ROTATION(0,2)= -b*sina+c*cosa;
+#else
+			i=2;
+			j=0;
+#endif
+			break;
+
+		case 'z':
+#if FAST_ROT
+			b=ROTATION(0,0);
+			c=ROTATION(1,0);
+			ROTATION(0,0)=  b*cosa+c*sina;
+			ROTATION(1,0)= -b*sina+c*cosa;
+
+			b=ROTATION(0,1);
+			c=ROTATION(1,1);
+			ROTATION(0,1)=  b*cosa+c*sina;
+			ROTATION(1,1)= -b*sina+c*cosa;
+
+			b=ROTATION(0,2);
+			c=ROTATION(1,2);
+			ROTATION(0,2)=  b*cosa+c*sina;
+			ROTATION(1,2)= -b*sina+c*cosa;
+#else
+			i=0;
+			j=1;
+#endif
+			break;
+
+		default:
+			return;
+		}
+
+d665 1
+a665 3
+#if !FAST_ROT
+
+	/* unrolled and optimised (general case) */
+a679 2
+
+#endif
+d690 1
+a690 1
+/* 	short x,m; */
+@
+
+
+1.2.1.4
+log
+@added fixed-point test
+@
+text
+@d4 1
+a4 1
+$Id: matrix.c,v 1.2.1.3 1994/04/06 02:39:10 jason Exp jason $
+a6 3
+ * Revision 1.2.1.3  1994/04/06  02:39:10  jason
+ * Separate rotation for X, Y, and Z axes
+ *
+a16 1
+#ifndef NOT_EXTERN
+a17 1
+#endif
+a29 1
+#define FIXED_POINT		FALSE
+d38 3
+a40 31
+#define PROJECTION(Y,X)	ProjectionPointer[(Y<<2)+X]
+#define TRANSLATION(Y)	TranslatePointer[(Y<<2)]
+#define ROTATION(Y,X)	RotatePointer[(Y<<2)+X]
+
+#if FIXED_POINT
+
+	#define FIXING_POINT	10000
+
+	#define FIXVALUE(x)		(x*FIXING_POINT)
+	#define FIXBACK(x)		(x/(float)FIXING_POINT)
+	#define FIXMULT(x,y)	(x*y/FIXING_POINT)
+	#define FIXDIVIDE(x,y)	(FIXING_POINT*x/y)
+
+	#define FIXTYPE			long long
+
+#else
+
+	#define FIXVALUE(x)		x
+	#define FIXBACK(x)		x
+	#define FIXMULT(x,y)	(x*y)
+	#define FIXDIVIDE(x,y)	(x/y)
+
+	#define FIXTYPE			float
+
+#endif
+
+
+/* isolated prototypes */
+void rotate_translate_position(FIXTYPE vert[3],FIXTYPE rvert[3]);
+void rotate_position(FIXTYPE vert[3],FIXTYPE rvert[3]);
+void project_vertex(FIXTYPE in[3],FIXTYPE out[3]);
+d43 1
+a43 3
+short MatrixLevel[MAX_WINDOWS];
+short ProjectionType[MAX_WINDOWS];
+short OrthoAligned[MAX_WINDOWS];
+d45 2
+a46 2
+FIXTYPE Projection[MAX_WINDOWS][4][4];
+FIXTYPE Transformation[MAX_WINDOWS][MATRIXSTACKDEPTH][4][4];
+d48 1
+a48 1
+FIXTYPE Sine[3600];
+d50 1
+a50 1
+FIXTYPE *RotatePointer,*TranslatePointer,*ProjectionPointer;
+d69 1
+a69 1
+		Sine[x]=FIXVALUE(sin(x/10.0*DEG));
+d78 1
+a78 1
+					Transformation[wid][0][y][x]=FIXVALUE(1.0);
+d80 1
+a80 1
+					Transformation[wid][0][y][x]=FIXVALUE(0.0);
+d126 1
+a126 1
+		memcpy(RotatePointer+16,RotatePointer,12*sizeof(FIXTYPE));
+d172 1
+a172 1
+void	project_vertex(FIXTYPE in[3],FIXTYPE out[3])
+d176 2
+a177 2
+/*NO PROTOTYPE*/
+void project_vertex(FIXTYPE in[3],FIXTYPE out[3])
+a180 2
+	ERROR: NOT_CURRENT
+
+a205 2
+		/* mult and divide cancel fixed point effect */
+
+d211 2
+a212 2
+		out[0]=FIXMULT(PROJECTION(0,0),in[0])+PROJECTION(3,0);
+		out[1]=FIXMULT(PROJECTION(1,1),in[1])+PROJECTION(3,1);
+a235 1
+	OrthoAligned[CurrentWid]=FALSE;
+d246 5
+a250 5
+	Projection[CurrentWid][0][0]=FIXVALUE(cot/aspect);
+	Projection[CurrentWid][1][1]=FIXVALUE(cot);
+	Projection[CurrentWid][2][2]=FIXVALUE(     -(far+near)/(far-near));
+	Projection[CurrentWid][2][3]=FIXVALUE( -1.0);
+	Projection[CurrentWid][3][2]=FIXVALUE( -(2.0*far*near)/(far-near));
+d269 2
+a270 2
+	Projection[CurrentWid][2][2]=FIXVALUE( -2.0/(far-near));
+	Projection[CurrentWid][3][2]=FIXVALUE( -(far+near)/(far-near));
+d289 6
+a294 6
+	Projection[CurrentWid][0][0]=FIXVALUE(2.0/(right-left));
+	Projection[CurrentWid][1][1]=FIXVALUE(2.0/(top-bottom));
+	Projection[CurrentWid][2][2]=FIXVALUE( -1.0);
+	Projection[CurrentWid][3][0]=FIXVALUE( -(right+left)/(right-left));
+	Projection[CurrentWid][3][1]=FIXVALUE( -(top+bottom)/(top-bottom));
+	Projection[CurrentWid][3][3]=FIXVALUE(1.0);
+d296 1
+a296 6
+	ProjectionType[CurrentWid]=ORTHO;
+
+	OrthoAligned[CurrentWid]= ( left==(-0.5) && right==(CurrentWidth-0.5) &&
+														 bottom==(-0.5) && top==(CurrentHeight-0.5) );
+
+	if(OrthoAligned[CurrentWid] && viewport_aligned())
+a299 1
+	}
+d301 1
+a301 31
+
+/******************************************************************************
+void	viewport(Screencoord left,Screencoord right,
+										Screencoord bottom,Screencoord top)
+******************************************************************************/
+/*PROTOTYPE*/
+void viewport(Screencoord left,Screencoord right,Screencoord bottom,Screencoord top)
+	{
+	ViewPort[CurrentWid][0]=left;
+	ViewPort[CurrentWid][1]=right-left+1;
+	ViewPort[CurrentWid][2]=bottom;
+	ViewPort[CurrentWid][3]=top-bottom+1;
+
+	scrmask(left,right,bottom,top);
+
+	if(OrthoAligned[CurrentWid] && viewport_aligned())
+		OneToOne[CurrentWid]=TRUE;
+	else
+		OneToOne[CurrentWid]=FALSE;
+	}
+
+
+/******************************************************************************
+long	viewport_aligned(void)
+
+******************************************************************************/
+/*PROTOTYPE*/
+long viewport_aligned(void)
+	{
+	return (ViewPort[CurrentWid][0]==0 && ViewPort[CurrentWid][1]==CurrentWidth &&
+									ViewPort[CurrentWid][2]==0 && ViewPort[CurrentWid][3]==CurrentHeight );
+d423 1
+a423 10
+	FIXTYPE fvert[3],rvert[3],pvert[3];
+
+#if FIXED_POINT
+
+	fvert[0]=FIXVALUE(vert[0]);
+	fvert[1]=FIXVALUE(vert[1]);
+	fvert[2]=FIXVALUE(vert[2]);
+	rotate_translate_position(fvert,rvert);
+
+#else
+a425 3
+
+#endif
+
+d428 2
+a429 7
+/*
+	svert[0]=CurrentWidth  * FIXBACK(FIXDIVIDE((pvert[0]+1.0),2.0)) + 0.5;
+	svert[1]=CurrentHeight * FIXBACK(FIXDIVIDE((pvert[1]+1.0),2.0)) + 0.5;
+*/
+
+	svert[0]=ViewPort[CurrentWid][0]+ ViewPort[CurrentWid][1] * FIXBACK(FIXDIVIDE((pvert[0]+1.0),2.0));
+	svert[1]=ViewPort[CurrentWid][2]+ ViewPort[CurrentWid][3] * FIXBACK(FIXDIVIDE((pvert[1]+1.0),2.0));
+d480 1
+a480 1
+void	rotate_translate_position(FIXTYPE vert[3],FIXTYPE rvert[3])
+d485 2
+a486 2
+/*NO PROTOTYPE*/
+void rotate_translate_position(FIXTYPE vert[3],FIXTYPE rvert[3])
+d507 1
+a507 1
+void	rotate_position(FIXTYPE vert[3],FIXTYPE rvert[3])
+d511 2
+a512 2
+/*NO PROTOTYPE*/
+void rotate_position(FIXTYPE vert[3],FIXTYPE rvert[3])
+d534 11
+a544 11
+		rvert[0]=	FIXMULT(vert[0],ROTATION(0,0))
+				+	FIXMULT(vert[1],ROTATION(1,0))
+				+	FIXMULT(vert[2],ROTATION(2,0));
+
+		rvert[1]=	FIXMULT(vert[0],ROTATION(0,1))
+				+	FIXMULT(vert[1],ROTATION(1,1))
+				+	FIXMULT(vert[2],ROTATION(2,1));
+
+		rvert[2]=	FIXMULT(vert[0],ROTATION(0,2))
+				+	FIXMULT(vert[1],ROTATION(1,2))
+				+	FIXMULT(vert[2],ROTATION(2,2));
+d548 2
+a549 2
+		rvert[0]=	FIXMULT(vert[0],ROTATION(0,0))
+				+	FIXMULT(vert[1],ROTATION(1,0));
+d551 2
+a552 2
+		rvert[1]=	FIXMULT(vert[0],ROTATION(0,1))
+				+	FIXMULT(vert[1],ROTATION(1,1));
+d564 1
+a564 1
+	FIXTYPE vert[3],rvert[3];
+a566 2
+	OneToOne[CurrentWid]=FALSE;
+
+d571 3
+a573 3
+	vert[0]=FIXVALUE(fx);
+	vert[1]=FIXVALUE(fy);
+	vert[2]=FIXVALUE(fz);
+d605 2
+a606 4
+	FIXTYPE b,c;
+	FIXTYPE sina,cosa;
+
+	OneToOne[CurrentWid]=FALSE;
+d616 1
+a616 1
+		angle1=(long)(-angle*10.0)%3600;
+d621 1
+a621 1
+		angle1=(long)(angle*10.0)%3600;
+d625 1
+a625 1
+	angle2=(abs((long)(angle*10.0))+900)%3600;
+d644 2
+a645 2
+			ROTATION(1,0)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+			ROTATION(2,0)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d649 2
+a650 2
+			ROTATION(1,1)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+			ROTATION(2,1)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d654 2
+a655 2
+			ROTATION(1,2)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+			ROTATION(2,2)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d667 2
+a668 2
+			ROTATION(2,0)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+			ROTATION(0,0)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d672 2
+a673 2
+			ROTATION(2,1)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+			ROTATION(0,1)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d677 2
+a678 2
+			ROTATION(2,2)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+			ROTATION(0,2)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d689 2
+a690 2
+			ROTATION(0,0)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+			ROTATION(1,0)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d694 2
+a695 2
+			ROTATION(0,1)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+			ROTATION(1,1)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d699 2
+a700 2
+			ROTATION(0,2)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+			ROTATION(1,2)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d729 2
+a730 2
+	ROTATION(i,0)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+	ROTATION(j,0)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d734 2
+a735 2
+	ROTATION(i,1)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+	ROTATION(j,1)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+d739 2
+a740 2
+	ROTATION(i,2)= FIXMULT( b,cosa) + FIXMULT(c,sina);
+	ROTATION(j,2)= FIXMULT(-b,sina) + FIXMULT(c,cosa);
+a754 36
+#if FIXED_POINT
+	FIXTYPE sx2,sy2,sz2;
+
+	sx2=FIXVALUE(sx);
+	sy2=FIXVALUE(sy);
+	sz2=FIXVALUE(sz);
+
+	/* unrolled and optimised */
+	ROTATION(0,0)*=sx2/FIXING_POINT;
+	ROTATION(1,0)*=sy2/FIXING_POINT;
+	ROTATION(2,0)*=sz2/FIXING_POINT;
+
+	ROTATION(0,1)*=sx2/FIXING_POINT;
+	ROTATION(1,1)*=sy2/FIXING_POINT;
+	ROTATION(2,1)*=sz2/FIXING_POINT;
+
+	ROTATION(0,2)*=sx2/FIXING_POINT;
+	ROTATION(1,2)*=sy2/FIXING_POINT;
+	ROTATION(2,2)*=sz2/FIXING_POINT;
+#else
+	/* unrolled and optimised */
+	ROTATION(0,0)*=sx;
+	ROTATION(1,0)*=sy;
+	ROTATION(2,0)*=sz;
+
+	ROTATION(0,1)*=sx;
+	ROTATION(1,1)*=sy;
+	ROTATION(2,1)*=sz;
+
+	ROTATION(0,2)*=sx;
+	ROTATION(1,2)*=sy;
+	ROTATION(2,2)*=sz;
+#endif
+
+	OneToOne[CurrentWid]=FALSE;
+
+d771 12
+@
+
+
+1.2.1.5
+log
+@added matrix load and get
+@
+text
+@d4 1
+a4 1
+$Id: matrix.c,v 1.2.1.4 1994/09/13 03:48:33 jason Exp jason $
+a6 3
+ * Revision 1.2.1.4  1994/09/13  03:48:33  jason
+ * added fixed-point test
+ *
+d28 2
+a29 2
+#define	MATRIX_DEBUG		FALSE
+#define	VERTEX_DEBUG		FALSE
+d31 5
+a35 5
+#define	CLEAR_PROJECTION	TRUE
+#define	FAST_PUSH			TRUE
+#define	FAST_ROT			TRUE
+#define SINE_TABLE			TRUE
+#define FIXED_POINT			FALSE
+d39 2
+a40 3
+#define PROJ_ORTHO			0
+#define PROJ_PERSPECTIVE	1
+#define PROJ_CUSTOM			2
+d45 1
+a45 1
+#define TRANSLATION(X)	TranslatePointer[X]
+a76 8
+static Matrix IdentityMatrix=
+	{
+	1.0, 0.0, 0.0, 0.0,
+	0.0, 1.0, 0.0, 0.0,
+	0.0, 0.0, 1.0, 0.0,
+	0.0, 0.0, 0.0, 1.0,
+	};
+
+a79 1
+short MatrixMode=MSINGLE;
+d135 1
+a135 1
+	TranslatePointer= &(Transformation[CurrentWid][m][3][0]);
+d162 1
+a162 1
+		memcpy(RotatePointer+16,RotatePointer,16*sizeof(FIXTYPE));
+d208 1
+a208 7
+void	mmode(short mode)
+
+	set matrix mode:
+		MSINGLE
+		MVIEWING
+		MPROJECTION
+		MTEXTURE
+d210 1
+d212 2
+a213 2
+/*PROTOTYPE*/
+void mmode(short mode)
+d215 1
+a215 15
+	if(mode!=MSINGLE && mode!=MVIEWING && mode!=MPROJECTION && mode!=MTEXTURE )
+		{
+		GL_error("(INTERNAL) getmatrix: illegal MatrixMode");
+		}
+	else
+		{
+		MatrixMode=mode;
+
+		if(mode==MSINGLE)
+			GL_error("MSINGLE obsolete: using MVIEWING");
+		
+		if(mode==MTEXTURE)
+			GL_error("MTEXTURE not supported");
+		}
+	}
+d217 1
+d219 2
+a220 2
+/******************************************************************************
+long	getmmode(void)
+d222 4
+a225 6
+******************************************************************************/
+/*PROTOTYPE*/
+long getmmode(void)
+	{
+	return MatrixMode;
+	}
+d227 1
+a227 11
+
+/******************************************************************************
+void	getmatrix(Matrix  m)
+
+	give user the current transform
+
+******************************************************************************/
+/*PROTOTYPE*/
+void getmatrix(Matrix  m)
+	{
+	switch(MatrixMode)
+d229 4
+a232 16
+		case MSINGLE:
+		case MVIEWING:
+			memcpy(m,RotatePointer,sizeof(Matrix));
+			break;
+
+		case MPROJECTION:
+			memcpy(m,ProjectionPointer,sizeof(Matrix));
+			break;
+
+		case MTEXTURE:
+			memset(m,0,sizeof(Matrix));
+			break;
+
+		default:
+			GL_error("(INTERNAL) getmatrix: illegal MatrixMode");
+			break;
+a233 1
+	}
+d235 3
+d239 1
+a239 4
+/******************************************************************************
+void	loadmatrix(Matrix  m)
+
+	use the users custom matrix
+d241 2
+a242 5
+******************************************************************************/
+/*PROTOTYPE*/
+void loadmatrix(Matrix  m)
+	{
+	switch(MatrixMode)
+d244 1
+a244 9
+		case MSINGLE:
+		case MVIEWING:
+			memcpy(RotatePointer,m,sizeof(Matrix));
+			break;
+
+		case MPROJECTION:
+			memcpy(ProjectionPointer,m,sizeof(Matrix));
+			ProjectionType[CurrentWid]=PROJ_CUSTOM;
+			break;
+d246 2
+a247 7
+		case MTEXTURE:
+			GL_error("loadmatrix: MTEXTURE matrix mode not supported -> can't load matrix");
+			break;
+
+		default:
+			GL_error("(INTERNAL) loadmatrix: illegal MatrixMode");
+			break;
+d249 1
+a249 62
+
+	OneToOne[CurrentWid]=is_one_to_one(RotatePointer);
+	}
+
+
+/******************************************************************************
+void	multmatrix(Matrix  m)
+
+	pre-multiply current matrix by user's custom transform
+
+******************************************************************************/
+/*PROTOTYPE*/
+void multmatrix(Matrix  m)
+	{
+	Matrix temp;
+
+	short x,y;
+	short n;
+
+	memcpy(temp,RotatePointer,sizeof(Matrix));
+
+	for(y=0;y<4;y++)
+		for(x=0;x<4;x++)
+			{
+			ROTATION(y,x)=0;
+
+			for(n=0;n<4;n++)
+				ROTATION(y,x)+=m[y][n]*temp[n][x];
+			}
+
+	OneToOne[CurrentWid]=is_one_to_one(RotatePointer);
+	}
+
+
+/******************************************************************************
+long	is_one_to_one(Matrix m)
+
+	returns TRUE if given 4x4 matrix is an identity
+
+******************************************************************************/
+/*PROTOTYPE*/
+long is_one_to_one(Matrix m)
+	{
+	return OrthoAligned[CurrentWid] && viewport_aligned() &&
+												memcmp(RotatePointer,IdentityMatrix,sizeof(Matrix))==0;
+	}
+
+
+/******************************************************************************
+void	project_vertex(FIXTYPE in[3],FIXTYPE out[3])
+
+	applies perspective on transformed vertex
+******************************************************************************/
+/*NO PROTOTYPE*/
+void project_vertex(FIXTYPE in[3],FIXTYPE out[3])
+	{
+#if !FAST_PROJECTION
+
+	short x,m;
+	float sum,before[4],mid[4];
+
+	switch(ProjectionType[CurrentWid])
+d251 3
+a253 2
+		case PROJ_ORTHO:
+			/* fast: compute only x and y for ortho projection */
+d255 1
+a255 58
+			out[0]=FIXMULT(PROJECTION(0,0),in[0])+PROJECTION(3,0);
+			out[1]=FIXMULT(PROJECTION(1,1),in[1])+PROJECTION(3,1);
+			break;
+
+		case PROJ_PERSPECTIVE:
+			/* fast: compute only x and y for perspective projection */
+
+			/* mult and divide cancel fixed point effect */
+
+			out[0]= -PROJECTION(0,0)*in[0]/in[2];
+			out[1]= -PROJECTION(1,1)*in[1]/in[2];
+			break;
+
+		case PROJ_CUSTOM:
+			/* complete: general purpose, any transform matrix */
+
+			for(x=0;x<3;x++)
+				before[x]=in[x];
+			before[3]=1.0;
+
+			for(x=0;x<4;x++)
+				{
+				sum=0.0;
+				for(m=0;m<4;m++)
+					sum+=PROJECTION(m,x)*before[m];
+
+				mid[x]=sum;
+				}
+
+			/* divide out range factor */
+			for(x=0;x<3;x++)
+				out[x]= -mid[x]/mid[3];
+
+/* 				out[y]=PROJECTION(3,2)*mid[y]/mid[3]; */
+
+/*
+			for(m=0;m<4;m++)
+				{
+				for(x=0;x<4;x++)
+					printf("%8.2f ",PROJECTION(m,x));
+
+				printf("\n");
+				}
+
+			printf("\nbefore\n");
+			for(x=0;x<4;x++)
+				printf("%8.2f ",before[x]);
+
+			printf("\nmid\n");
+			for(x=0;x<4;x++)
+				printf("%8.2f ",mid[x]);
+
+			printf("\nout\n");
+			for(x=0;x<4;x++)
+				printf("%8.2f ",out[x]);
+*/
+			break;
+		}
+d278 1
+a278 1
+	ProjectionType[CurrentWid]=PROJ_PERSPECTIVE;
+d283 2
+a284 2
+#if CLEAR_PROJECTION
+	memset(&Projection[CurrentWid][0][0],0,sizeof(Matrix));
+d326 1
+a326 1
+#if CLEAR_PROJECTION
+d337 1
+a337 1
+	ProjectionType[CurrentWid]=PROJ_ORTHO;
+d342 4
+a345 1
+	OneToOne[CurrentWid]=is_one_to_one(RotatePointer);
+d363 4
+a366 1
+	OneToOne[CurrentWid]=is_one_to_one(RotatePointer);
+a646 2
+
+		rvert[2]=	vert[2];
+@
+
+
+1.2.1.6
+log
+@added copyright
+@
+text
+@d1 1
+d4 1
+a4 4
+Copyright © 1994 Jason Weber
+All Rights Reserved
+
+$Id: matrix.c,v 1.2.1.5 1994/11/18 07:49:22 jason Exp jason $
+a6 3
+ * Revision 1.2.1.5  1994/11/18  07:49:22  jason
+ * added matrix load and get
+ *
+@
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,551 @@
+#
+# FastBasic - Fast basic interpreter for the Atari 8-bit computers
+# Copyright (C) 2017-2022 Daniel Serpell
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program.  If not, see <http://www.gnu.org/licenses/>
+#
+
+# Syntax in simplified PEG format
+# -------------------------------
+
+TOKENS {
+ # First token must be "END"
+ TOK_END
+ # Constant and variable loading
+ TOK_NUM, TOK_BYTE, TOK_CSTRING, TOK_VAR_ADDR, TOK_VAR_SADDR, TOK_VAR_LOAD
+ TOK_SHL8, TOK_0, TOK_1
+ # PUSH plus composed PUSH ops
+ TOK_PUSH, TOK_PUSH_VAR_LOAD
+ TOK_PUSH_NUM, TOK_PUSH_BYTE, TOK_PUSH_0, TOK_PUSH_1, TOK_POP
+ # Numeric operators
+ TOK_NEG, TOK_ABS, TOK_SGN, TOK_ADD, TOK_SUB, TOK_MUL, TOK_DIV, TOK_MOD
+ # Operators on VAR
+ TOK_ADD_VAR,
+ # Bitwise operators
+ TOK_BIT_AND, TOK_BIT_OR, TOK_BIT_EXOR
+ # Functions
+ TOK_PEEK, TOK_DPEEK, TOK_BYTE_PEEK
+ TOK_TIME, TOK_RAND
+ # Boolean operators
+ TOK_L_NOT, TOK_L_OR, TOK_L_AND
+ # Comparisons
+ TOK_LT, TOK_GT, TOK_NEQ, TOK_EQ
+ # Convert from int to bool
+ TOK_COMP_0
+ # Low level statements
+ TOK_POKE, TOK_DPOKE, TOK_MOVE, TOK_NMOVE, TOK_MSET, TOK_INC, TOK_DEC
+ TOK_VAR_STORE, TOK_SADDR, TOK_INCVAR, TOK_DECVAR, TOK_BYTE_POKE
+ TOK_NUM_POKE, TOK_VAR_STORE_0
+ # Position (used also in graphics)
+ TOK_POSITION
+ # Print statements
+ TOK_PRINT_STR, TOK_PRINT_TAB, TOK_PRINT_RTAB, TOK_PRINT_COLOR_STR
+ # Simple console input and output
+ TOK_GETKEY, TOK_INPUT_STR, TOK_PUT, TOK_BYTE_PUT
+ # Jumps
+ TOK_JUMP, TOK_CJUMP, TOK_CNJUMP, TOK_CALL, TOK_RET, TOK_CRET, TOK_CNRET
+ # FOR loop support
+ TOK_FOR, TOK_FOR_NEXT, TOK_FOR_EXIT
+ # Arrays
+ TOK_DIM, TOK_USHL
+ # Strings
+ TOK_COPY_STR, TOK_VAL, TOK_CMP_STR, TOK_INT_STR, TOK_STR_IDX, TOK_CAT_STR, TOK_CHR
+ TOK_PAUSE
+ # USR, calls ML routine
+ TOK_USR_ADDR, TOK_USR_PARAM, TOK_USR_CALL
+
+}
+
+EXTERN {
+ E_REM, E_NUMBER_WORD, E_NUMBER_BYTE, E_EOL
+ E_PUSH_LT, E_POP_LOOP, E_POP_REPEAT
+ E_POP_IF, E_ELSEIF, E_EXIT_LOOP
+ E_POP_WHILE, E_POP_FOR, E_POP_PROC_DATA, E_POP_PROC_2
+ E_CONST_STRING
+ E_VAR_CREATE, E_VAR_SET_TYPE, E_LABEL_SET_TYPE
+ E_VAR_WORD, E_VAR_SEARCH
+ E_LABEL, E_LABEL_DEF, E_LABEL_CREATE, E_DO_EXEC
+ E_PUSH_VAR, E_POP_VAR
+}
+
+SYMBOLS {
+ LT_DO_LOOP      = importzp
+ LT_ELIF         = importzp
+ LT_ELSE         = importzp
+ LT_FOR_1        = importzp
+ LT_FOR_2        = importzp
+ LT_IF           = importzp
+ LT_PROC_2       = importzp
+ LT_REPEAT       = importzp
+ LT_WHILE_1      = importzp
+ LT_WHILE_2      = importzp
+ VT_ARRAY_BYTE   = importzp
+ VT_ARRAY_STRING = importzp
+ VT_ARRAY_WORD   = importzp
+ VT_STRING       = importzp
+ VT_WORD         = importzp
+
+ BASIC_TOP = importzp
+ IOERROR = importzp
+ PRINT_ARG = importzp
+ MEMTOP = import
+ CLEAR_DATA = import
+ ATEOL = 155
+ ATCLS = $7D
+}
+
+# Normal expressions
+INT_EXPR: integer expression
+        T_EXPR BIT_EXPR_MORE M_EXPR_MORE INT_EXPR_MORE
+
+PUSH_T_EXPR: integer expression
+        # Those produce about 1% faster code in the IDE for 12 extra bytes.
+#        emit TOK_PUSH_BYTE E_NUMBER_BYTE
+#        emit TOK_PUSH_NUM E_NUMBER_WORD
+#        emit TOK_PUSH_VAR_LOAD E_VAR_WORD
+        emit TOK_PUSH T_EXPR
+
+INT_EXPR_MORE:
+        "+" PUSH_T_EXPR BIT_EXPR_MORE M_EXPR_MORE emit TOK_ADD INT_EXPR_MORE
+        "-" PUSH_T_EXPR BIT_EXPR_MORE M_EXPR_MORE emit TOK_SUB INT_EXPR_MORE
+        pass
+
+M_EXPR_MORE:
+        "*"   PUSH_T_EXPR BIT_EXPR_MORE emit TOK_MUL M_EXPR_MORE
+        "/"   PUSH_T_EXPR BIT_EXPR_MORE emit TOK_DIV M_EXPR_MORE
+        "Mod" PUSH_T_EXPR BIT_EXPR_MORE emit TOK_MOD M_EXPR_MORE
+        pass
+
+BIT_EXPR_MORE:
+        "&"    PUSH_T_EXPR emit TOK_BIT_AND  BIT_EXPR_MORE
+        "!"    PUSH_T_EXPR emit TOK_BIT_OR   BIT_EXPR_MORE
+        "Exor" PUSH_T_EXPR emit TOK_BIT_EXOR BIT_EXPR_MORE
+        pass
+
+ADR_EXPR: string or variable
+        STR_EXPR
+        emit { TOK_VAR_LOAD, VT_ARRAY_WORD   } E_VAR_SEARCH
+        emit { TOK_VAR_LOAD, VT_ARRAY_BYTE   } E_VAR_SEARCH
+        emit { TOK_NUM, VT_ARRAY_WORD   } E_LABEL
+        emit { TOK_NUM, VT_ARRAY_BYTE   } E_LABEL
+        emit { TOK_VAR_LOAD, VT_ARRAY_STRING } E_VAR_SEARCH
+        emit { TOK_VAR_ADDR } E_VAR_WORD
+
+USR_EXPR_MORE:
+        "," EXPR emit TOK_USR_PARAM USR_EXPR_MORE
+        pass
+
+T_EXPR: integer constant, variable or function
+        emit TOK_BYTE E_NUMBER_BYTE
+        emit TOK_NUM E_NUMBER_WORD
+        "-" T_EXPR emit TOK_NEG
+        "+" T_EXPR
+        PAR_EXPR
+        INT_FUNCTIONS
+
+# This is an integer terminal that can't be parsed as a floating point:
+INT_FUNCTIONS: integer variable or function
+        "Not" NOT_EXPR emit TOK_L_NOT
+        # Special (predefined) variables
+        "Time"   emit TOK_TIME
+        # Variables as R-Values, push value into stack
+        ARRAY_WORD_ADDR emit TOK_DPEEK
+        ARRAY_BYTE_ADDR emit TOK_PEEK
+        # Functions without parameters
+        "Fre()"  emit { TOK_NUM, &MEMTOP, TOK_DPEEK, TOK_PUSH_BYTE, BASIC_TOP, TOK_DPEEK, TOK_SUB }
+        "Err()"  emit { TOK_BYTE_PEEK, IOERROR }
+        "Key()"  emit { TOK_NUM, &CH, TOK_PEEK, TOK_PUSH_BYTE, 255, TOK_BIT_EXOR }
+        # Variables
+        emit TOK_VAR_LOAD E_VAR_WORD
+        # Functions with parameters
+        "Abs"    T_EXPR emit TOK_ABS
+        "SGn"    T_EXPR emit TOK_SGN
+        "Peek"   T_EXPR emit TOK_PEEK
+        "PAddle" emit { TOK_NUM, &PADDL0, TOK_PUSH_BYTE, 7 } RD_PORT
+        "PTrig"  emit { TOK_NUM, &PTRIG0, TOK_PUSH_BYTE, 7 } RD_PORT
+        "Stick"  emit { TOK_NUM, &STICK0, TOK_PUSH_BYTE, 3 } RD_PORT
+        "STRig"  emit { TOK_NUM, &STRIG0, TOK_PUSH_BYTE, 3 } RD_PORT
+        "Rand"   T_EXPR emit TOK_RAND
+        "Dpeek"  T_EXPR emit TOK_DPEEK
+        "USR("   EXPR emit TOK_USR_ADDR USR_EXPR_MORE ")" emit TOK_USR_CALL
+        "ADR("   ADR_EXPR ")"
+        "&"      ADR_EXPR
+        "Len"    STR_PAR_EXPR emit TOK_PEEK # First byte of string is the length
+        "Val"    STR_PAR_EXPR emit TOK_VAL
+        "ASc"    STR_PAR_EXPR emit { TOK_PUSH_1, TOK_ADD, TOK_PEEK } # TODO: does not check for empty strings.
+
+# Used to handle PADDLE/STICK/PTRIG/STRIG
+RD_PORT:
+        emit TOK_PUSH T_EXPR emit { TOK_BIT_AND, TOK_ADD, TOK_PEEK }
+
+PAR_EXPR: left parenthesis
+        "(" EXPR ")"
+
+STR_PAR_EXPR: left parenthesis
+        "(" STR_EXPR ")"
+
+# Parses a continuation of an INT to BOOLean expression
+OR_AND_BOOL:
+        OR_EXPR_RIGHT
+        AND_EXPR_RIGHT
+
+# Test if an INT needs to be converted to BOOL
+TEST_BOOL_EXPR:
+        emit TOK_COMP_0 OR_AND_BOOL
+        emit TOK_PUSH COMP_EXPR_RIGHT OR_EXPR_MORE AND_EXPR_MORE COMP_EXPR_MORE
+        pass
+
+# General Expression - Can be INT or BOOL
+EXPR:
+        INT_EXPR TEST_BOOL_EXPR
+        STR_EXPR COMP_STR_RIGHT
+
+# Forced BOOL expressions, convert to BOOL always
+FORCE_BOOL_EXPR:
+        NOT_EXPR AND_EXPR_MORE OR_EXPR_MORE
+
+OR_EXPR_RIGHT: 'OR'
+        "Or" emit TOK_PUSH NOT_EXPR AND_EXPR_MORE emit TOK_L_OR OR_EXPR_MORE
+
+OR_EXPR_MORE:
+        OR_EXPR_RIGHT
+        pass
+
+AND_EXPR_RIGHT: 'AND'
+        "And" emit TOK_PUSH NOT_EXPR emit TOK_L_AND AND_EXPR_MORE
+
+AND_EXPR_MORE:
+        AND_EXPR_RIGHT
+        pass
+
+NOT_EXPR:
+        "Not" NOT_EXPR emit TOK_L_NOT
+        INT_EXPR COMP_OR_BOOL
+        STR_EXPR COMP_STR_RIGHT
+
+COMP_OR_BOOL:
+        emit TOK_PUSH COMP_EXPR_RIGHT COMP_EXPR_MORE
+        emit TOK_COMP_0
+
+COMP_EXPR_RIGHT: integer comparison operator
+        "<=" INT_EXPR emit { TOK_GT, TOK_L_NOT }
+        ">=" INT_EXPR emit { TOK_LT, TOK_L_NOT }
+        "<>" INT_EXPR emit TOK_NEQ
+        "<"  INT_EXPR emit TOK_LT
+        ">"  INT_EXPR emit TOK_GT
+        "="  INT_EXPR emit TOK_EQ
+
+# Push and string expression
+PCMP_STR_EXPR:
+        emit TOK_PUSH STR_EXPR emit TOK_CMP_STR
+
+COMP_STR_RIGHT: comparison operator
+        "="  PCMP_STR_EXPR emit TOK_EQ
+        ">"  PCMP_STR_EXPR emit TOK_GT
+        ">=" PCMP_STR_EXPR emit { TOK_LT, TOK_L_NOT }
+        "<>" PCMP_STR_EXPR emit TOK_NEQ
+        "<=" PCMP_STR_EXPR emit { TOK_GT, TOK_L_NOT }
+        "<"  PCMP_STR_EXPR emit TOK_LT
+
+COMP_EXPR_MORE:
+        emit TOK_PUSH COMP_EXPR_RIGHT COMP_EXPR_MORE
+        pass
+
+# String expressions: base plus optional index
+STR_EXPR: string expression
+        STRING_FUNCTIONS OPT_STR_INDEX
+
+OPT_STR_INDEX:
+        "[" emit TOK_PUSH EXPR C_EXPR "]" emit TOK_STR_IDX OPT_STR_INDEX
+        "[" emit TOK_PUSH EXPR "]" emit { TOK_PUSH_BYTE, 255, TOK_STR_IDX } OPT_STR_INDEX
+        pass
+
+STRING_FUNCTIONS:
+        # Either, a constant string
+        "\"" emit TOK_CSTRING E_CONST_STRING
+        # Or a string function
+        "CHR$" T_EXPR emit TOK_CHR
+        "STR$" T_EXPR emit TOK_INT_STR
+        # Convert pointer to string!
+        "$" PAR_EXPR
+        # Or a string variable
+        emit { TOK_VAR_LOAD, VT_STRING } E_VAR_SEARCH "$"
+        # Or a string array
+        ARRAY_STRING_ADDR emit TOK_DPEEK
+
+# PRINT statement:
+# - PRINT separator or an end-of-line if not given:
+PRINT_SEP_EOL:
+        "Tab" T_EXPR emit TOK_PRINT_TAB
+        # Right-TAB and COLOR are complicated because we need to apply it to the *next*
+        # parameter, so we read that parameter and the next optional separator:
+        "RTab" T_EXPR emit { TOK_BYTE_POKE, PRINT_ARG } PRINT_ONE emit { TOK_PRINT_RTAB } PRINT_SEP_EOL
+        "Color" T_EXPR emit { TOK_BYTE_POKE, PRINT_ARG } PRINT_ONE emit { TOK_PRINT_COLOR_STR } PRINT_SEP_EOL
+        "," emit { TOK_BYTE, 10, TOK_PRINT_TAB }
+        ";"
+        E_EOL emit { TOK_BYTE_PUT, ATEOL }
+
+# - One item to print, converted to string:
+PRINT_ONE_STR:
+        PRINT_ONE emit TOK_PRINT_STR
+        pass
+
+# - One item to print, followed by a separator:
+PRINT_ONE:
+        EXPR emit { TOK_INT_STR }
+        STR_EXPR
+
+# - PRINT expression, including the optional I/O channel
+PRINT_EXPR:
+        IO_CHAN_OPT PRINT_SEP_EOL PRINT_MORE
+        IO_CHAN_OPT PRINT_MORE
+
+PRINT_MORE:
+        E_EOL IO_CHAN0
+        PRINT_ONE_STR PRINT_SEP_EOL PRINT_MORE
+
+# Parse multi-line IF
+THEN_OR_MULTILINE: 'THEN'
+        "Then" PARSE_START E_POP_IF
+        pass
+
+VAR_CREATE_TYPE:
+        "$" emit VT_STRING
+        emit VT_WORD
+
+# Parse variable as L-VALUE, stores the *address* in the stack, this creates the
+# variable if not exist.
+# NOTE: the creation rule (E_VAR_SET_TYPE) always fails, so the parser uses the next
+#       rules using the created variable.
+VAR_WORD_LVALUE_SADDR: variable name
+        ARRAY_WORD_ADDR emit TOK_SADDR
+        E_VAR_CREATE VAR_CREATE_TYPE E_VAR_SET_TYPE
+        emit TOK_VAR_SADDR E_VAR_WORD
+
+VAR_STR_LVALUE_SADDR: variable name
+        emit { TOK_VAR_SADDR, VT_STRING } E_VAR_SEARCH "$"
+        ARRAY_STRING_ADDR emit TOK_SADDR
+
+VAR_WORD_SAVE: variable name
+        E_VAR_CREATE VAR_CREATE_TYPE E_VAR_SET_TYPE
+        E_VAR_WORD E_PUSH_VAR
+
+# This is a standalone rule to skip spaces before the equal
+EQUAL: '='
+        "="
+
+# Parse optional "STEP" in for
+STEP_OPTIONAL: 'STEP'
+        "Step" emit TOK_PUSH EXPR
+        emit TOK_PUSH_1
+
+# Parse (optional) variable name in "NEXT"
+NEXT_VARNAME:
+        E_VAR_WORD
+        emit 0
+
+# POSITION arguments, used also in PLOT, DRAWTO, LOCATE and FILLTO
+POSITION:
+        EXPR C_EXPR emit TOK_POSITION
+
+# Word Arrays
+ARRAY_WORD_ADDR:
+        emit { TOK_VAR_LOAD, VT_ARRAY_WORD } E_VAR_SEARCH emit TOK_PUSH PAR_EXPR emit { TOK_USHL, TOK_ADD }
+        emit { TOK_NUM, VT_ARRAY_WORD } E_LABEL emit TOK_PUSH PAR_EXPR emit { TOK_USHL, TOK_ADD }
+
+# String Arrays
+ARRAY_STRING_ADDR:
+        emit { TOK_VAR_LOAD, VT_ARRAY_STRING } E_VAR_SEARCH "$" emit TOK_PUSH PAR_EXPR emit { TOK_USHL, TOK_ADD }
+
+# Byte Arrays
+ARRAY_BYTE_ADDR: variable name
+        emit { TOK_VAR_LOAD, VT_ARRAY_BYTE } E_VAR_SEARCH emit TOK_PUSH PAR_EXPR emit TOK_ADD
+        emit { TOK_NUM, VT_ARRAY_BYTE } E_LABEL emit TOK_PUSH PAR_EXPR emit TOK_ADD
+
+# DIM
+DIM_MORE: comma
+        "," DIM_VAR DIM_MORE
+        pass
+
+# INPUT
+INPUT_STR:
+        "\"" emit TOK_CSTRING E_CONST_STRING emit TOK_PRINT_STR PRINT_SEP_EOL # Prints a given string
+        ";"                                         # If starts with ';' don't print anyting
+        emit { TOK_BYTE_PUT, 63 }                   # Prints a '?' by default
+
+INPUT_VAR_LIST:
+        INPUT_VAR INPUT_VAR_MORE
+
+INPUT_VAR_MORE:
+        "," INPUT_VAR_LIST
+        pass
+
+INPUT_VAR:
+        VAR_WORD_LVALUE_SADDR  emit { TOK_INPUT_STR, TOK_VAL, TOK_DPOKE }
+        ARRAY_BYTE_ADDR        emit { TOK_SADDR, TOK_INPUT_STR, TOK_VAL, TOK_POKE }
+        VAR_STR_LVALUE_SADDR   emit { TOK_INPUT_STR, TOK_COPY_STR }
+
+# Optional WORD array type
+TYPE_WORD:
+        "Word" emit VT_ARRAY_WORD
+        emit VT_ARRAY_WORD
+
+# BYTE array type
+TYPE_BYTE:
+        "Byte" emit VT_ARRAY_BYTE
+
+DIM_VAR_TYPE:
+        "$" PAR_EXPR emit { TOK_PUSH_1, TOK_ADD, TOK_USHL, VT_ARRAY_STRING }
+        PAR_EXPR     emit { TOK_PUSH_1, TOK_ADD } TYPE_BYTE
+        PAR_EXPR     emit { TOK_PUSH_1, TOK_ADD, TOK_USHL } TYPE_WORD
+        # Also allow creating non-array variables
+        VAR_CREATE_TYPE
+
+DIM_VAR: new variable name
+        E_VAR_CREATE E_PUSH_VAR DIM_VAR_TYPE E_VAR_SET_TYPE emit TOK_DIM E_POP_VAR
+        E_VAR_WORD E_PUSH_VAR
+        emit { VT_STRING } E_VAR_SEARCH "$" E_PUSH_VAR
+
+# No I/O channel support
+IO_CHAN_OPT:
+        pass
+
+IO_CHAN_OPT_NOCOMMA:
+        pass
+
+IO_CHAN0:
+
+# Get from keyboard expression
+GETK_EXPR:
+        ARRAY_BYTE_ADDR        emit { TOK_SADDR, TOK_GETKEY, TOK_POKE }
+        VAR_WORD_LVALUE_SADDR  emit { TOK_GETKEY, TOK_DPOKE }
+
+# A comma followed by an expression
+C_EXPR: comma followed by an expression
+        "," emit TOK_PUSH EXPR
+
+# Get two comma separated expressions ",A,B" and returns "A*16+B"
+EXPR_AB:
+        "," EXPR emit { TOK_USHL, TOK_USHL, TOK_USHL, TOK_USHL } C_EXPR emit TOK_ADD
+
+# Parses a "DATA" expression, get's binary data in memory
+DATA_WORDS: data word
+        "," E_NUMBER_WORD DATA_WORDS
+        pass
+
+DATA_BYTE:
+        "\"" E_CONST_STRING
+        E_NUMBER_BYTE
+        emit { VT_ARRAY_BYTE } E_LABEL
+
+DATA_BYTES: data byte
+        # To store bytes, simply remove upper part
+        DATA_BYTE "," DATA_BYTES
+        DATA_BYTE
+
+# Used in the extended compiler, set's the segment of the label
+DATA_EXT_TYPE: extended data type
+        pass
+
+DATA_TYPE: data type
+        TYPE_BYTE DATA_EXT_TYPE EQUAL E_LABEL_SET_TYPE DATA_BYTES
+        TYPE_WORD DATA_EXT_TYPE EQUAL E_LABEL_SET_TYPE E_NUMBER_WORD DATA_WORDS
+
+DATA_END:
+        ","
+        E_POP_PROC_DATA
+
+DATA_VAR: new data array name
+        DATA_TYPE
+        E_LABEL_CREATE "()" emit { TOK_JUMP } E_LABEL_DEF DATA_TYPE
+
+# Optional number after PAUSE
+PAUSE_OPT:
+        EXPR
+        E_EOL emit { TOK_0 }
+
+# Optional expression for EXEC
+OPT_EXEC_PARAM:
+        EXPR EXEC_PARAM_MORE emit { TOK_PUSH }
+        pass
+
+EXEC_PARAM_MORE:
+        C_EXPR EXEC_PARAM_MORE
+        pass
+
+# EXEC call
+EXEC_CALL:
+        "EXEc"
+        "@"
+
+# Optional variable in PROC
+OPT_PROC_VAR:
+        VAR_WORD_SAVE OPT_PROC_VAR emit { TOK_POP, TOK_VAR_STORE } E_POP_VAR
+        pass
+
+# Parse a line
+STATEMENT: statement
+        "." E_REM
+        "?" PRINT_EXPR
+        "PRInt" PRINT_EXPR
+        "INput" INPUT_STR INPUT_VAR_LIST IO_CHAN0
+        "GEt" GETK_EXPR
+        "PUt" IO_CHAN_OPT EXPR emit TOK_PUT IO_CHAN0
+        "CLS" IO_CHAN_OPT_NOCOMMA emit { TOK_BYTE_PUT, ATCLS } IO_CHAN0
+        "Poke"  EXPR emit TOK_SADDR "," EXPR emit TOK_POKE
+        "Dpoke" EXPR emit TOK_SADDR "," EXPR emit TOK_DPOKE
+        "MSet"  EXPR C_EXPR C_EXPR emit TOK_MSET
+        "Move"  EXPR C_EXPR C_EXPR emit TOK_MOVE
+        "-move" EXPR C_EXPR C_EXPR emit TOK_NMOVE
+        "DO" E_EOL emit LT_DO_LOOP E_PUSH_LT
+        "Loop" E_EOL emit TOK_JUMP E_POP_LOOP
+        "Repeat" E_EOL emit LT_REPEAT E_PUSH_LT
+        "Until" FORCE_BOOL_EXPR emit TOK_CJUMP E_POP_REPEAT
+        "While" emit LT_WHILE_1 E_PUSH_LT FORCE_BOOL_EXPR emit { TOK_CJUMP, LT_WHILE_2 } E_PUSH_LT
+        "WEnd" E_EOL emit TOK_JUMP E_POP_WHILE
+        "If" FORCE_BOOL_EXPR emit { TOK_CJUMP, LT_IF } E_PUSH_LT THEN_OR_MULTILINE
+        "For" VAR_WORD_LVALUE_SADDR EQUAL emit TOK_PUSH EXPR emit TOK_DPOKE \
+              "To" EXPR STEP_OPTIONAL \
+              emit { TOK_FOR, TOK_CNJUMP, LT_FOR_2 } E_PUSH_LT emit LT_FOR_1 E_PUSH_LT
+        "Next" emit TOK_FOR_NEXT emit TOK_CJUMP NEXT_VARNAME E_EOL E_POP_FOR emit TOK_FOR_EXIT
+        "ELse" E_EOL emit TOK_JUMP emit LT_ELSE E_ELSEIF
+        "ELIf" emit { TOK_JUMP, LT_ELIF } E_ELSEIF FORCE_BOOL_EXPR emit { TOK_CJUMP, LT_IF } E_PUSH_LT
+        "Endif" E_EOL E_POP_IF
+        "EXit" emit TOK_JUMP E_EXIT_LOOP
+        "POSition" POSITION
+        "DIm" DIM_VAR DIM_MORE
+        "PAuse" PAUSE_OPT emit TOK_PAUSE
+        "INC" VAR_WORD_LVALUE_SADDR emit TOK_INC
+        "DEc" VAR_WORD_LVALUE_SADDR emit TOK_DEC
+        "PRoc" E_LABEL_CREATE emit { TOK_JUMP } E_LABEL_DEF emit LT_PROC_2 E_PUSH_LT OPT_PROC_VAR
+        "ENDProc" E_POP_PROC_2 emit TOK_RET E_POP_PROC_DATA
+        EXEC_CALL E_LABEL_CREATE OPT_EXEC_PARAM emit { TOK_CALL } E_DO_EXEC
+        "DAta" DATA_VAR DATA_END
+        "END" emit TOK_END
+        "Timer" emit { TOK_0, TOK_BYTE_POKE, RTCLOK1, TOK_0, TOK_BYTE_POKE, RTCLOK2 }
+        "CLR" emit { TOK_NUM, &CLEAR_DATA, TOK_USR_ADDR, TOK_USR_CALL }
+
+LINE_ASSIGNMENT:
+        VAR_WORD_SAVE                  EQUAL EXPR emit TOK_VAR_STORE E_POP_VAR
+        VAR_WORD_LVALUE_SADDR          EQUAL EXPR emit TOK_DPOKE
+        ARRAY_BYTE_ADDR emit TOK_SADDR EQUAL EXPR emit TOK_POKE
+        VAR_STR_LVALUE_SADDR           EQUAL STR_EXPR emit TOK_COPY_STR
+        VAR_STR_LVALUE_SADDR           EQUAL "+" STR_EXPR emit TOK_CAT_STR
+
+PARSE_START:
+        E_EOL
+        STATEMENT E_EOL
+        LINE_ASSIGNMENT E_EOL
+
+# vi:syntax=perl

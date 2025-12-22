@@ -1,0 +1,137 @@
+MODULE	'exec/nodes',
+			'exec/lists',
+			'exec/ports',
+			'exec/libraries'
+
+OBJECT NexxStr
+	Ivalue:LONG,
+	Length:UWORD,
+	Flags:UBYTE,
+	Hash:UBYTE,
+	Buff[8]:BYTE
+
+CONST	NXADDLEN=9
+
+#define IVALUE(nsPtr) (nsPtr.Ivalue)
+
+FLAG	NS_KEEP,
+		NS_STRING,
+		NS_NOTNUM,
+		NS_NUMBER,
+		NS_BINARY,
+		NS_FLOAT,
+		NS_EXT,
+		NS_SOURCE
+
+CONST	NSF_INTNUM=NSF_NUMBER|NSF_BINARY|NSF_STRING,
+		NSF_DPNUM =NSF_NUMBER|NSF_FLOAT,
+		NSF_ALPHA =NSF_NOTNUM|NSF_STRING,
+		NSF_OWNED =NSF_SOURCE|NSF_EXT|NSF_KEEP,
+		KEEPSTR   =NSF_STRING|NSF_SOURCE|NSF_NOTNUM,
+		KEEPNUM   =NSF_STRING|NSF_SOURCE|NSF_NUMBER|NSF_BINARY
+
+OBJECT RexxArg
+	Size:LONG,
+	Length:UWORD,
+	Flags:UBYTE,
+	Hash:UBYTE,
+	Buff[8]:BYTE
+
+OBJECT RexxMsg
+	Node:MN,
+	TaskBlock:APTR,
+	LibBase:APTR,
+	Action:LONG,
+	Result1:LONG,
+	Result2:LONG,
+	Args[16]:PTR TO UBYTE,
+
+	PassPort:PTR TO MP,
+	CommAddr:PTR TO UBYTE,
+	FileExt:PTR TO UBYTE,
+	Stdin:LONG,
+	Stdout:LONG,
+	avail:LONG
+
+#define ARG0(rmp) (rmp.Args[0])    /* start of argblock		*/
+#define ARG1(rmp) (rmp.Args[1])    /* first argument		*/
+#define ARG2(rmp) (rmp.Args[2])    /* second argument		*/
+
+CONST	MAXRMARG=15
+
+CONST	RXCOMM=$01000000,
+		RXFUNC=$02000000,
+		RXCLOSE=$03000000,
+		RXQUERY=$04000000,
+		RXADDFH=$07000000,
+		RXADDLIB=$08000000,
+		RXREMLIB=$09000000,
+		RXADDCON=$0A000000,
+		RXREMCON=$0B000000,
+		RXTCOPN=$0C000000,
+		RXTCCLS=$0D000000
+
+FLAG	RXF_NOIO=16,
+		RXF_RESULT,
+		RXF_STRING,
+		RXF_TOKEN,
+		RXF_NONRET
+
+CONST	RXCODEMASK=$FF000000,
+		RXARGMASK =$0000000F
+
+OBJECT RexxRsrc
+	Node:LN,
+	Func:WORD,
+	Base:APTR,
+	Size:LONG,
+	Arg1:LONG,
+	Arg2:LONG
+
+ENUM	RRT_ANY,
+		RRT_LIB,
+		RRT_PORT,
+		RRT_FILE,
+		RRT_HOST,
+		RRT_CLIP
+
+CONST	GLOBALSZ=200
+
+OBJECT RexxTask
+	Global[GLOBALSZ]:BYTE,
+	MsgPort:MP,
+	Flags:UBYTE,
+	SigBit:BYTE,
+
+	ClientID:APTR,
+	MsgPkt:APTR,
+	TaskID:APTR,
+	RexxPort:APTR,
+
+	ErrTrap:APTR,
+	StackPtr:APTR,
+
+	Header1:LH,
+	Header2:LH,
+	Header3:LH,
+	Header4:LH,
+	Header5:LH
+
+FLAG	RTF_TRACE,
+		RTF_HALT,
+		RTF_SUSP,
+		RTF_TCUSE,
+		RTF_WAIT=6,
+		RTF_CLOSE
+
+CONST	MEMQUANT=16,
+		MEMMASK=$FFFFFFF0
+
+CONST	MEMQUICK=1<<0,
+		MEMCLEAR=1<<16
+
+OBJECT SrcNode
+	Succ:PTR TO SrcNode,
+	Pred:PTR TO SrcNode,
+	Ptr:APTR,
+	Size:LONG

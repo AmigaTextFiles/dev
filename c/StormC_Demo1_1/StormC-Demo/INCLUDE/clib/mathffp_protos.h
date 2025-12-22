@@ -1,0 +1,46 @@
+#ifndef  CLIB_MATHFFP_PROTOS_H
+#define  CLIB_MATHFFP_PROTOS_H
+
+/*
+**	$VER: mathffp_protos.h 1.4 (3.5.90)
+**	Includes Release 40.15
+**
+**	C prototypes. For use with 32 bit integers only.
+**
+**	(C) Copyright 1990-1993 Commodore-Amiga, Inc.
+**	    All Rights Reserved
+*/
+
+#ifndef  EXEC_TYPES_H
+#include <exec/types.h>
+#endif
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+LONG SPFix( FLOAT parm );
+FLOAT SPFlt( long integer );
+LONG SPCmp( FLOAT leftParm, FLOAT rightParm );
+LONG SPTst( FLOAT parm );
+FLOAT SPAbs( FLOAT parm );
+FLOAT SPNeg( FLOAT parm );
+FLOAT SPAdd( FLOAT leftParm, FLOAT rightParm );
+FLOAT SPSub( FLOAT leftParm, FLOAT rightParm );
+FLOAT SPMul( FLOAT leftParm, FLOAT rightParm );
+FLOAT SPDiv( FLOAT leftParm, FLOAT rightParm );
+/*--- functions in V33 or higher (Release 1.2) ---*/
+FLOAT SPFloor( FLOAT parm );
+FLOAT SPCeil( FLOAT parm );
+
+#ifdef __cplusplus
+}
+#endif
+
+#ifdef STORMPRAGMAS
+#ifndef _INCLUDE_PRAGMA_MATHFFP_LIB_H
+#include <pragma/mathffp_lib.h>
+#endif
+#endif
+
+#endif	 /* CLIB_MATHFFP_PROTOS_H */

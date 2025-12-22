@@ -1,0 +1,9 @@
+OPT MODULE
+OPT EXPORT
+
+CONST	SHKVIDEO_PAL = 32,
+	SHKVIDEO_NTSC = 0
+
+PROC mGetVideo(video:PTR TO LONG)
+PutInt($dff1dc,video)
+ENDPROC

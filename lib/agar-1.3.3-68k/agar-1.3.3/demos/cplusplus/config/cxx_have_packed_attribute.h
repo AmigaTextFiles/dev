@@ -1,0 +1,3 @@
+#ifndef CXX_HAVE_PACKED_ATTRIBUTE
+#define CXX_HAVE_PACKED_ATTRIBUTE "yes"
+#endif

@@ -1,0 +1,719 @@
+; /--- MAIN ---/
+
+
+;#########################
+;#      BLITZ-GP         #
+;#                       #
+;# Copyright (C) 1998 by #
+;# Christos Dimitrakakis #
+;#                       #
+;#########################
+
+;  This program is Free software; you can redistribute it and/or modify
+;  it under the terms of version 2 of the GNU General Public License as
+;  published by the Free Software Foundation.
+;
+;  This program is distributed in the hope that it will be useful,
+;  but WITHOUT ANY WARRANTY; without even the implied warranty of
+;  MERCHANTABILITY OR FITNESS for A PARTICULAR PURPOSE.  See the
+;  GNU General Public License for more details.
+;
+;  You should have received a copy of the GNU General Public License
+;  along with this program; if not, write to the Free Software
+;  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+;
+
+
+
+#NOF_TREES=4
+#STACK_SIZE=32
+nof_trees.w=#NOF_TREES
+stack_size.w=#STACK_SIZE
+roulette.w=False
+elitism.w=False
+tour_size=5
+marked_crossover.w=False
+pop_size.w=500
+demes.b=True
+neighbourhood.w=50
+mem_size.l=256
+max_generations.w=500
+JSR_on_main.b=False
+min_init_tree_size.w=5
+max_init_tree_size.w=12
+mutation_rate.f=.02
+sim_delay=2
+max_trials.w=10
+max_time.w=128
+n.w=0
+
+NPrint "Blitz-GP"
+
+NPrint " Copyright ",Chr$(169),"1998 by Christos Dimitrakakis"
+NPrint "------------------------------------------"
+NPrint ""
+NPrint "Blitz-GP Starting with the following parameters:"
+NPrint "------------------------------------------------"
+
+NPrint "nof_trees: ",nof_trees
+Print  "init_tree_size: ",min_init_tree_size
+NPrint "-",max_init_tree_size
+
+NPrint "roulette: ",roulette
+NPrint "elitism: ",elitism
+NPrint "tour_size: ",tour_size
+
+NPrint "pop_size: ",pop_size
+NPrint "demes: ",demes
+NPrint "neighbourhood: ",neighbourhood
+NPrint "max_generations: ",max_generations
+
+NPrint "mutation_rate: ",mutation_rate
+
+NPrint "max_trials: ",max_trials
+NPrint "max_time: ",max_time
+
+NPrint "stack_size: ",stack_size
+NPrint "mem_size: ",mem_size
+
+NPrint ""
+NPrint "################################################"
+
+
+Macro mydefaultInput
+DefaultInput
+End Macro
+
+Macro mydefaultOutput
+DefaultOutput
+End Macro
+
+INCDIR "zip:stuff/bgp/includes/"
+XINCLUDE "defines.bb2"
+XINCLUDE "funcdef.bb2"
+
+
+; --- list of individuals ---
+
+Dim ind.individual(pop_size)
+Dim brd.individual(pop_size)
+Dim mem.l(mem_size)
+
+Dim fit_his.fit_stat(max_generations)
+
+DEFTYPE .individual best
+DEFTYPE .individual *curr_ind
+
+
+tm_raw_fitness.f=0          ;trial maximum raw fitness
+ta_raw_fitness.f=0          ;trial average raw fitness
+
+raw_fitness.f=0             ;scratch raw fitness
+adj_fitness.f=0             ;scratch adjusted fitness
+aver_fitness.f=0            ;current average fitness
+avw_adj.f=0                 ;scratch average fitness
+bst_fitness.f=0             ;best fitness
+cur_bst_fitness.f=0         ;best fitness of generation
+
+new_max_result2.f=0
+max_result2.f=0
+
+cross_marks_succ.l=0
+
+tree.w=0                    ;program tree used [VM page]
+
+
+time.l=0
+time1.l=Ticks
+time2.l=0
+muta_time.l=0
+cros_time.l=0
+eval_time.l=0
+
+
+
+Gosub main
+
+time=Ticks-time1
+If dbreak=False AND break=False Then Gosub show_bst_ind
+NPrint "Run Complete"
+
+If time<>0
+  muta_trat.f=100*muta_time/time
+  cros_trat.f=100*cros_time/time
+  eval_trat.f=100*eval_time/time
+  ;Format "-#######0.0"
+
+  NPrint "Time:      ",time/50,"s"
+  NPrint "Mutation:  ",muta_time/50,"s (",muta_trat," % )"
+  NPrint "Crossover: ",cros_time/50,"s (",cros_trat," % )"
+  NPrint "Evaluation:",eval_time/50,"s (",eval_trat," % )"
+  Print  "System:    ",(time-muta_time-cros_time-eval_time)/50
+  NPrint "s (",100-muta_trat-cros_trat-eval_trat," % )"
+
+EndIf
+;Format "-##0.0##"
+!mydefaultOutput
+NPrint ""
+NPrint "Done"
+NPrint "Press mouse button to exit"
+
+MouseWait
+If dbrake=False Then ShowScreen1:Gosub show_bst_ind
+Gosub show_statistics
+!mydefaultOutput
+NPrint "------------------------------"
+NPrint "Cleaning up.."
+
+End
+
+
+
+Statement showind{x.w}
+  SHARED ind()
+  NPrint ind(x)\tr[0]
+End Statement
+
+Function.l rand{x.l}
+  Function Return (Int(Rnd(x+1)))
+End Function
+
+
+.main
+  break=False
+  show_repeat=4             ; number of show_bst_ind repeats
+
+  Dim map$(8)
+  Dim map2$(64)
+
+
+  Gosub app_init            ; initialize application
+
+
+
+; /- Open Screen -/
+
+  WbToScreen 0
+  WbVP.l=ViewPort(0)        ; get WB Viewport
+
+  scrx.w=640                ; open 640x480x2,BestModeIDA screen
+  scry.w=480
+  Dim mytags.TagItem(16)
+  mytags(0)\ti_Tag=#BIDTAG_NominalWidth,640
+  mytags(1)\ti_Tag=#BIDTAG_NominalHeight,480
+  mytags(2)\ti_Tag=#BIDTAG_DesiredWidth,640
+  mytags(3)\ti_Tag=#BIDTAG_DesiredHeight,480
+  mytags(4)\ti_Tag=#BIDTAG_MonitorID, (GetVPModeID_(WbVP)AND #MONITOR_ID_MASK)
+  mytags(5)\ti_Tag=#BIDTAG_Depth,2
+  mytags(6)\ti_Tag=#TAG_END
+
+  modeid.l=BestModeIDA_(&mytags(0))
+  If ScreenTags(1,"BlitzGP",#SA_DisplayID,modeid,#SA_Width,scrx,#SA_Height,scry,#SA_Depth,2,#SA_DetailPen,2)
+    Delay_(5)
+  Else
+    Goto flushquit
+  EndIf
+
+  Window 0,10,10,200,200,6,"Simulation",2,1
+  Window 1,220,10,400,400,6,"VM Monitor",2,1
+  Window 2,10,220,600,180,6,"Fitness History",2,1
+  Window 3,10,400,600,80,6,"Fitness Distribution",2,1
+
+  !mydefaultInput
+  !mydefaultOutput
+
+  Gosub init_inds
+
+  run.w=1
+
+  Repeat
+    NPrint ""
+    NPrint "-------------------------------"
+    NPrint Centre$("Generation "+Str$(run),31)
+    NPrint "-------------------------------"
+    NPrint ""
+    Print "--- Evaluation"
+
+    new_max_result2.f=256
+    time2.l=Ticks
+    Gosub run_inds
+    time2=Ticks-time2
+    eval_time+time2
+    NPrint " (",time2/50,"s) ---"
+    max_result2.f=new_max_result2
+
+    If new_bst.b=True
+      Gosub show_bst_ind
+    EndIf
+    Gosub show_statistics
+
+    !mydefaultOutput
+    !mydefaultInput
+    cross_marks_succ.l=0
+    If dbreak=False
+      Print "--- Crossover"
+      time2.l=Ticks
+      Gosub cross_inds
+      time2=Ticks-time2
+      NPrint " (",time2/50,"s) ---"
+      cros_time+time2
+    EndIf
+    NPrint "SCs:",special_crossovers.l
+    NPrint "MCs:",cross_marks_succ.l
+    If dbreak=False
+      Print "--- Mutation"
+      time2.l=Ticks
+      Gosub mutate_inds
+      time2=Ticks-time2
+      NPrint " (",time2/50,"s) ---"
+      muta_time+time2
+    EndIf
+
+    NPrint "   == Fitness =="
+    Print "RAW: ",best\raw_fitness
+    Print " ADJ: ",best\adj_fitness
+    Print " AVER: ",aver_fitness
+    NPrint" SEL: ",avw_adj
+    NPrint " CUR_BST: ",cur_bst_fitness
+
+    If dbreak=True Then break=True
+    If break=False
+      Gosub break_test
+    EndIf
+
+    run+1
+  Until run>=max_generations OR break=True
+  show_repeat=10
+flushquit:
+  Return
+
+
+
+
+
+
+; /--- INITIALIZE INDIVIDUALS ---/
+
+;      Initialize individuals
+;      by creating a string of
+;      length x (min<=x<=max)
+;      that contains valid VM
+;      instruction characters
+
+
+.init_inds
+
+  For m.w=0 To pop_size
+    For tree.w=0 To nof_trees-1
+      x$=""
+      For n.w=-min_init_tree_size To Int(Rnd(max_init_tree_size))+1
+        If tree=0 AND JSR_on_main=True
+          x$+Chr$(64+#JSR_START+Int(Rnd(#JSR_RANGE)))
+        Else
+          x$+Chr$(64+Int(Rnd(num_functions)))
+        EndIf
+      Next n
+      ind(m)\tr[tree]=x$
+    Next tree
+  Next m
+  Return
+
+
+; /--- MUTATE INDIVIDUALS ---/
+
+XINCLUDE "mutate.bb2"
+
+; /--- CROSSOVER INDIVIDUALS ---/
+
+XINCLUDE "crossover.bb2"
+
+
+
+; /--- EXECUTE INDIVIDUAL CODE ---/
+
+ .run_inds
+
+  new_bst.b=False
+  aver_fitness.f=0
+  cur_bst_fitness.f=0
+  m.w=0
+
+
+
+  While (m<=pop_size)AND(dbreak=False)
+
+    raw_fitness.f=0
+    tm_raw_fitnesss.f=0
+    ta_raw_fitness.f=0
+    success=0
+
+    For n.w=1 To max_trials
+
+;        pass initial data to individual
+;       ================================
+
+;   you have to reset the Virtual Machine in each trial
+;   before you begin. Remember to also do this correctly
+;   in the part where the best individual is shown..
+;   (show_bst_ind).
+
+
+    value1.l=0
+    value2.l=n-3
+    resultl.l=give_result{value2} ;this is the desired result
+    result2.f=0
+    vm\NZ=0
+    vm\pc=1
+    vm\a=value2                   ;put input in A
+    vm\b=0
+    vm\x=0
+    vm\sp=0
+    vm\exc=0
+    tree.w=0
+    map_index=n
+
+
+;             Run Individual
+;           ==================
+
+
+    *curr_ind=ind(m)
+    x$=ind(m)\tr[tree]
+    x=Len(x$)
+    xx=&x$
+    t.l=128
+    tt.l=0
+
+    While vm\pc>=0 AND vm\pc<x AND t>0 AND vm\exc=0
+      inst.b=Asc(Mid$(x$,vm\pc,1))-64
+;      If inst<0 OR inst>num_functions Then NPrint "*****ERROR!******":End
+      GetReg d0,f_set(inst)\func
+      MOVE.l d0,a0
+      JSR (a0)
+      If vm\pc<0 OR vm\pc>=x Then vm\exc=16
+      vm\pc+1
+      Gosub app_code
+      t-1
+      tt+1
+    Wend
+
+
+        ; Access Fitness of Trial ;
+        ;=========================;
+
+    ; Average trial fitness is being calculated
+    ; The raw fitness measure consists of two terms in this case
+    ; 1) The Squared Error between desired result and returned
+    ; value (which is assumed to be returned in register B)
+    ; 2) A small penalty added for programs that take too long
+    ; to execute.
+
+    ta_raw_fitness+(resultl-vm\b)^2+tt/256
+
+    ; Feel free to remove the time penalty term and see how that
+    ; affects evolution of programs.
+    ; You could also try adding an extra penalty for programs
+    ; that do not terminate correctly.
+
+
+
+    Next n
+
+
+        ; Calculate raw fitness of individual ;
+        ;=====================================;
+
+    ; in this case, raw_fitness is just the sum of
+    ; the raw fitness of all trials.
+    ; One may wish to divide that by the number of
+    ; trials to get an average, but this is unnecessary.
+    ; Usually good individuals have a low raw fitness
+    ; and bad ones have a high raw fitness (as is the case
+    ; in this particular problem), but there maybe problems
+    ; where raw fitness is expressed differently.
+
+    raw_fitness.f=ta_raw_fitness      ;user-defined
+
+
+        ; Fitness Calculation ;
+        ;=====================;
+
+    ; it is VERY IMPORTANT that you calculate the
+    ; value of adj_fitness for each individual, as
+    ; this is what the program uses internally for
+    ; accessing fitnesses. Bad Individuals ALWAYS have
+    ; fitness close to 0 and good individuals ALWAYS
+    ; have an adjusted fitness close to 1.
+
+
+    adj_fitness.f=1/(1+raw_fitness)   ;user-defined
+
+
+
+    aver_fitness.f+adj_fitness        ;don't change
+    ind(m)\raw_fitness=raw_fitness    ;these three
+    ind(m)\adj_fitness=adj_fitness    ;lines, OK?
+
+
+
+        ; Find Best Individual ;
+        ;======================;
+
+    If (adj_fitness>cur_bst_fitness)
+      cur_bst_fitness=adj_fitness
+      If (adj_fitness>bst_fitness)
+        new_bst=True
+        bst_fitness=adj_fitness
+        best\raw_fitness=raw_fitness
+        best\adj_fitness=adj_fitness
+        For tree.w=0 To nof_trees-1
+          best\tr[tree]=ind(m)\tr[tree]
+        Next tree
+      EndIf
+    EndIf
+    m+1
+    Gosub break_test2
+  Wend
+  aver_fitness/pop_size
+
+  Return
+
+
+
+
+
+.show_bst_ind
+
+
+NPrint "--- New Best Individual ---"
+
+
+    ; pass initial Data To individual;
+    ;================================;
+
+Use Window 0
+InnerCls
+WLocate 1,1
+Use Window 1
+InnerCls
+WLocate 1,1
+
+For disp_iter.w=1 To show_repeat
+For i.w=1 To 1
+  value1.l=2
+  value2.l=2
+
+
+  resultl.l=give_result{disp_iter}  ;get result
+  vm\NZ=0
+  vm\pc=1
+  vm\a=disp_iter                    ;put value
+  desired_resultl.l=resultl         ;put result in here too
+  vm\b=0
+  vm\x=0
+  vm\sp=0
+  vm\exc=0
+  tree.w=0
+
+
+;            Run Individual
+;          ==================
+
+
+  Use Window 1
+  cury.l=0:InnerCls:WLocate 1,1
+  For tree.w=0 To nof_trees-1
+    x$=best\tr[tree]
+    x=Len(x$)
+    For n.w=1 To x-1
+      inst.b=Asc(Mid$(x$,n,1))-64
+      WLocate 8+(tree*100),n*8
+      Print f_set(inst)\name
+    Next n
+  Next tree
+
+  tree.w=0
+  *curr_ind=best
+  x$=best\tr[tree]
+  x=Len(x$)
+  xx=&x$
+  t=128
+  ogx=0:ogy=0
+  ogxx=0:ogyy=0
+
+  opc=1
+  g\enemy=rand{2}
+  While vm\pc>=0 AND vm\pc<x AND t>0 AND vm\exc=0
+    inst.b=Asc(Mid$(x$,vm\pc,1))-64
+    Use Window 1
+
+    WLocate 1+100*otree,8*opc
+    Print " "
+    WLocate 1+100*tree,8*vm\pc
+    Print ">"
+
+    opc=vm\pc
+    otree=tree
+    If inst<0 OR inst>num_functions
+      NPrint "*****ERROR!******"
+    Else
+      tmpl.l=f_set(inst)\func
+      GetReg d0,tmpl
+      MOVE.l d0,a0
+      JSR (a0)
+    EndIf
+    vm\pc+1
+    Gosub app_code
+    t-1
+;    DefaultOutput
+;    NPrint "PC: ",vm\pc," TREE",tree
+
+;    DefaultInput
+;    NPrint t
+    Use Window 1
+    WLocate 0,240
+    NPrint "PC:",vm\pc," NZ: ",vm\NZ," A:",vm\a," B:",vm\b," X:",vm\x,"  "
+    NPrint desired_resultl
+
+
+    If Joyb(0)=0
+      VWait sim_delay
+    EndIf
+
+  Wend
+;  !mydefaultInput
+;  !mydefaultOutput
+
+
+        ; VM EXCEPTIONS ;
+        ;===============;
+
+  If vm\pc<0 OR vm\pc>=x
+    Use Window 1
+    WLocate 10,250+disp_iter*8
+    Select vm\exc
+      Case 0:NPrint " -OK-"
+      Case 1:NPrint "-ERR- SP Overflow        "
+      Case 2:NPrint "-ERR- SP Underflow       "
+      Case 4:NPrint "-ERR- Illegal Instruction"
+      Case 8:NPrint "-ERR- Bus Error          "
+      Case 16:NPrint"-ERR- Segmentation Fault "
+      Default:NPrint"-ERR- Unkown Error       "
+    End Select
+  EndIf
+
+
+        ; Access Fitness ;
+        ;================;
+
+
+Next i
+Use Window 0
+NPrint "f(",disp_iter,")=",desired_resultl,"..",vm\b
+Next disp_iter
+  !mydefaultInput
+  !mydefaultOutput
+  Return
+
+.show_statistics
+  x=0
+  ;ShowScreen 1
+
+
+    ;show distributed fitness measures;
+    ;---------------------------------;
+
+  WindowOutput 3
+  Use Window 3
+  InnerCls
+  yff.f=15
+  For m.w=0 To pop_size
+    xf.f=m/pop_size
+    WPlot 20+400*xf,ind(m)\adj_fitness*40+14,1
+    yf.f=40*(ind(m)\adj_fitness/best\adj_fitness)+15
+    yff.f=(yff*7+yf)/8
+    WPlot 20+400*xf,yf,2
+    WPlot 20+400*xf,yff,3
+  Next m
+
+
+    ;show history of fitness measures;
+    ;--------------------------------;
+
+  WindowOutput 2
+  Use Window 2
+  InnerCls
+  xf.f=20+run
+  fit_his(run)\best=best\adj_fitness
+  fit_his(run)\curr=cur_bst_fitness
+  fit_his(run)\aver=aver_fitness
+  If best\adj_fitness=0
+    yff.f=140/.001
+  Else
+    yff.f=140/best\adj_fitness
+  EndIf
+  plota=10
+  plotb=10
+  plotc=10
+  xff.f=500/run
+  For m.w=1 To run
+    xf2.f=20+(m-1)*xff
+    xf.f=20+(m)*xff
+    plota1=10+yff*fit_his(m)\best
+    plotb1=10+yff*fit_his(m)\aver
+    plotc1=10+yff*fit_his(m)\curr
+    Wline xf2-1,plota,xf-1,plota1,1
+    Wline xf2,plotb,xf,plotb1,2
+    Wline xf2,plotc,xf,plotc1,3
+    plota=plota1
+    plotb=plotb1
+    plotc=plotc1
+  Next m
+
+  Return
+
+;--------------
+
+
+
+XINCLUDE "app.bb2"
+
+
+break_test:
+    If (SetSignal_(0,#SIGBREAKF_CTRL_C)AND #SIGBREAKF_CTRL_C)
+      break=True
+      NPrint ""
+      NPrint "interrupted"
+      NPrint "==========="
+    EndIf
+
+break_test2:
+    If (SetSignal_(0,#SIGBREAKF_CTRL_D)AND #SIGBREAKF_CTRL_D)
+      dbreak=True
+      NPrint ""
+      NPrint "***BREAK***"
+      NPrint ""
+    EndIf
+
+    Return
+
+
+clearmem:
+  Return
+  For k.w=0 To mem_size-1
+    mem(k)=0
+  Next k
+  GetReg d0,&mem(0)
+  GetReg d1,mem_size
+  SUBQ.l #2,d1
+  MOVE.l d0,a0
+clearmem1:
+  MOVE.b #0,(a0)+
+  DBRA d1,clearmem1
+  Return
+
+XINCLUDE "functions.bb2"
+;XINCLUDE "app.bb2"
+
+
+

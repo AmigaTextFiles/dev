@@ -1,0 +1,1495 @@
+@database "exec.library.guide"
+@remark $Id: exec.library.guide,v 3.0 1997/02/07 06:35:11 wjm Rel $
+
+@font courier.font 13
+
+@remark-----------------------------------------------------------------------
+
+@node Main "Programmer's Guide To Exec.library"
+@font courier.font 18
+
+
+
+        @{b}----------------------------------
+        PROGRAMMER'S GUIDE TO EXEC.LIBRARY
+        ----------------------------------@{ub}
+
+
+
+
+
+
+
+
+
+
+     Copyright � 1995-1997 by W. John Malone,
+               DYNACHROME Software.
+               All rights reserved.
+@endnode
+
+
+@remark------------------------------------------------------------------------
+
+@node Contents "Programmer's Guide To Exec.library"
+
+
+   @{b}1. INTRODUCTION@{ub}
+
+      1.0 @{" Introduction " link Introduction}........................................module purpose
+
+
+   @{b}2. COMPONENTS@{ub}
+
+      2.0 @{" Nodes and Lists " link Lists}................................mundane but crucial 
+      2.1 @{" Libraries " link Libraries}.......................................@{b}the@{ub} building block
+      2.2 @{" Multitasking " link Multitasking}..................................tasks and scheduling
+      2.3 @{" Interprocess Communications " link IPC}...................signals and messages
+      2.4 @{" Memory " link Memory}.......................................how memory is managed
+      2.5 @{" Interrupts " link Interrupts}..............................how interrupts are managed
+      2.5 @{" Devices " link Devices}............................................I/O abstraction
+      2.6 @{" Semaphores " link Semaphores}..................................task level arbitration
+      2.7 @{" Resources " link Resources}.....................................hardware abstraction
+
+
+   @{b}3. BOOT TIME@{ub}
+
+      3.0 @{" Bootstrap " link Bootstrap}....................the first moments after the Big Reset
+      3.1 @{" BootTable " link BootTable}...............................exec.library configuration
+      3.2 @{" ROMTags " link ROMTags}..........................module ID and initialization info
+      
+
+   
+   @{b}4. REFERENCE@{ub}
+
+      4.1 @{" Library Procedures " link exec.library.ag/Main}......................exec.library AutoDocs
+
+
+   @{b}5. SEE ALSO@{ub}
+
+      @{" AmiExec.guide " link AmiExec.guide/Contents}
+      @{" cpu.resource.guide " link cpu.resource.guide/Contents}
+      @{" timer.device.guide " link timer.device.guide/Contents}
+      @{" serial.device.guide " link serial.device.guide/Contents}
+      @{" debug.library.guide " link debug.library.guide/Contents}
+      
+@endnode   
+
+
+@remark--------------------------------------------------------------------------
+
+@node Introduction "Programmer's Guide To Exec.library | Introduction"
+@toc  Contents
+@{u}@{b}Introduction@{ub}@{uu}
+
+@{b}exec.library@{ub} (Exec) is the core software module, the microkernel, of AmiExec.
+The classification of Exec in a typical taxonomy of kernels is:  a real-time,
+32 bit, object-oriented, multi-tasking microkernel.  Translation:  Exec is
+@{b}useful@{ub}.
+
+Exec has two interrelated basic responsibilities.  From a hardware viewpoint
+it is responsible for the management of the microprocessor and memory.  From
+a software viewpoint it lays the foundation for the system by defining the
+fundamental system objects.  In OOP terms it is the metaclass or class factory
+for Tasks, Libraries, Interrupts and so on - the building blocks out of which
+the rest of the system will be built.
+
+This document discusses the system objects which Exec manipulates, and talks
+about what happens at boot time.  Knowledge of the former is necessary to
+write software to run on Exec.  Knowledge of the latter is necessary to to
+configure Exec for a specific hardware setup.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Lists "Programmer's Guide To Exec.library | Lists"
+@toc  Contents
+@{u}@{b}Nodes and Lists@{ub}@{uu}
+
+Exec is an extensible system.  To avoid the limitations of fixed table sizes,
+the doubly linked list is used extensively throughout the system.  Members of
+list are nodes.  Nodes can be named, and can be prioritized.  If the nodes
+are maintained in order of priority on the list, the list is referred to as
+an ordered list, or a queue.
+
+
+The C language structure declarations are:
+
+struct Node 
+   {
+   struct  Node *ln_Succ;           /* ptr to successor */
+   struct  Node *ln_Pred;           /* ptr to predecessor */
+   UBYTE   ln_Type;                 /* the type of this node */
+   BYTE    ln_Pri;                  /* priority for sorting */
+   char    *ln_Name;                /* a NULL terminated ID string */
+   };
+
+struct List 
+   {
+   struct  Node *lh_Head;           /* ptr to first list member */
+   struct  Node *lh_Tail;           /* ALWAYS zero */
+   struct  Node *lh_TailPred;       /* ptr to last list member */
+   UBYTE   lh_Type;                 /* the type of node on the list */
+   UBYTE   l_pad;                   /* explicit word alignment */
+   };
+
+
+
+The following list and node manipulation procedures are provided by Exec:
+
+        AddHead   - insert node at the head of a list                       
+        AddTail   - append node to tail of list                             
+        Enqueue   - insert or append node to a system queue                 
+        FindName  - find a system list node with a given name               
+        Insert    - insert a node into a list                                 
+        RemHead   - remove the head node from a list                        
+        Remove    - remove a node from a list                                
+        RemTail   - remove the tail node from a list                        
+
+
+Most system structures, and very likely many application structures, are
+extended nodes - node descendants if we succumb to OOP terminology.
+
+Example: struct Task
+            {
+            struct Node tc_Node;
+            UBYTE  tc_flags;                  
+            UBYTE  tc_state;
+               etc.
+               etc.
+            };
+   
+The above structure is a node, and can be manipulated as such.  For example
+it can be sorted into a list with the Enqeue procedure.  It has "inherited"
+the ability to be manipulated by the node procedures, because it is based on
+a node.
+
+The "extend and inherit" philosophy can be seen throughout Exec.  More is
+accomplished with fewer procedures and mechanisms, making it both simple and
+efficient.
+
+The use of lists as opposed to tables does not introduce a performance
+penalty.  The usual procedure is to obtain a pointer via the FindName
+procedure (or FindName as extended by the node type in question), and
+thereafter use the pointer.
+
+The doubly linked list system is efficient, but a little different than that
+typically encountered.  The list header is constructed such that the
+addition, insertion, and removal procedures do not need to continually be
+checking for the empty list special case.  You'll also notice that the Remove
+procedure does not need a pointer to the list, only the node.  The following
+facts and code fragments illustrate the basics of working with lists.
+
+When a list is empty, lh_Head points to lh_Tail, and lh_TailPred points to
+lh_Head.  The following macro is used to test for an empty list:
+
+#define IsListEmpty(x)  ((((x)->lh_TailPred) == (struct Node *)(x))
+
+The end of a list is reached when the successor is NULL, not when node is
+NULL.  A typical list traversal consists of:
+
+   for (node = list->lh_Head; node->ln_Succ != NULL; node = node->ln_Succ)
+      {
+      Do stuff to node;
+      }
+
+   or
+
+   for (node = list->lh_TailPred; node->ln_Pred != NULL; node = node->ln_Pred)
+      {
+      Do stuff to node;
+      }
+   
+Finally, there is also defined a MinNode and MinList structure.  These are
+stripped down Nodes and Lists without type, priority and name fields.
+FindName and Enqueue can't be used with MinNodes obviously, but other than
+that they function identically to Nodes.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Libraries "Programmer's Guide To Exec.library | Libraries"
+@toc  Contents
+@{u}@{b}Libraries@{ub}@{uu}
+
+Libraries are sets of procedures and associated data, linked separately from
+their clients, which clients can gain access to and use at run time.  They
+are the building block of an Exec system with Exec itself being a library
+called "exec.library".  The purpose of libraries is to allow an Exec system
+to be extended or modified without breaking existing code, and to reduce the
+size of software by allowing procedures to be shared by modules.
+
+A library has a control structure which is an extended Node.  This standard
+Library structure extends a Node with extra information such as a version and
+revision number.  Individual libraries will extend the Library structure in
+turn based on their own unique data requirements.  The important part of a
+library however is the jump table which immediately precedes the Library
+structure in memory:
+
+
+   jmp myfuncN
+   jmp myfuncN-1
+   .
+   .
+   .
+   jmp myfunc
+   jmp reserved
+   jmp Expunge
+   jmp Close
+   jmp Open
+   struct MyLibrary
+      {
+      struct Library library;
+      Stuff unique to MyLibrary;
+      };
+   
+To use a library it is neccessary to obtain a library base pointer.  That is,
+a pointer to the actual struct Library.  That's because the library
+procedures are accessed by negative offsets from the struct Library into the
+jump table.  The Library Vector Offsets (LVO's) are known at compile time.
+The location of the library in memory is not.
+
+Library base pointers are obtained via the exec.library procedure
+OpenLibrary:
+
+   struct Library *OpenLibrary(char *libname, ULONG libversion);
+
+   where libname is the NULL terminated name of the library - eg. "my.library",
+   and libversion is the minimum acceptal version of the library.
+
+It's easy to understand what this function does.  Exec.library's extended
+library structure, called ExecBase, contains among other things a list of the
+library's in the system.  Essentially what this function does is a FindName
+for the requested library, and returns the result to the caller.
+
+Note that the use of library procedures from high level languages doesn't
+look like jump table usage, it looks like a regular procedure call.  Either
+the compiler supports library calls via a pragma, or the procedure call
+invokes an assembly language "stub" to use the jump table.
+
+Note also, that all modules automatically have access to exec.library - in
+case the reader was wondering how to gain access to Exec to do OpenLibrary's.
+
+So let's look at what this library mechanism does for us:
+
+   � Library procedures can be used by multiple modules thus reducing system
+     size.
+
+   � Libraries can be modified independently of their clients.  If a library
+     is updated, existing modules which use that library automatically
+     benefit from that update.  They don't have to be modified, or recompiled
+     or relinked.
+
+   � Libraries are fast.  The jump table mechanism is simple and almost as
+     fast as "raw" procedure calling.  No software exceptions or Supervisor
+     mode, or Ring Level mucking about is required.
+
+   � Libraries keep Exec simple and fast.  Exec is not heavy magic.  It's a
+     library just like everybody else.  Related to the above point, calling
+     Exec doesn't mean your executing an exception or disabling interrupts.  
+     Critical sections such as system list manipulation are protected, but for 
+     the most part, Exec executes in run-of-the mill unprotected User mode.
+
+   � Libraries are an excellent organizational tool for modular software
+     development.
+
+   � Libraries are, if you insist, Object Oriented.  They encapsulate code
+     (the procedures) and data (the body of the Library structure itself,
+     as well as structures allocated by the library procedures.  By providing 
+     library procedures for manipulation of the library's data types, 
+     clients can be protected from changes to data as well as code.
+
+   � Library procedures can be replaced or extended via SetFunction.  The
+     procedure returns the existing vector table entry and replaces it.  
+     The procedure you insert can invoke the procedure it replaced.  It
+     probably should be used infrequently and with care, but it does allow
+     a great deal of flexibility.  It is the equivalent, with both the
+     benefits and dangers, of being able to override a method in an OOP
+     language.
+
+@endnode
+     
+     
+@remark--------------------------------------------------------------------------
+@node Multitasking "Programmer's Guide To Exec.library | Multitasking"
+@toc  Contents
+@{u}@{b}Multitasking@{ub}@{uu}
+     
+@{b}Scheduling@{ub}
+
+Exec is a fully preemptive system.  The highest priority ready Task always
+has the processor.  If a lower priority task is running when a higher
+priority task becomes ready, the higher priority task is switched in.  In the
+case of equal priority tasks a round-robin scheme is used based on a
+time-slice selected at System Generation time.
+
+The scheduling algorithm is thus useful, simple and fast.
+
+
+@{b}Task Weights@{ub}
+
+A Task is the simplest non-interrupt related unit of execution.  There are no
+heavier weights supported by Exec.  Exec executes in a single 32 bit flat
+memory space.  No MMU is used to "protect" tasks from one another, so no
+"Thread" concept is required to circumvent the protection for multi-threading
+- Tasks are already light-weight.
+
+
+@{b}Creation and Deletion@{ub}
+
+Tasks can be created at boot time by including the appropriate @{"ROMTag" link ROMTags} in the
+system, or they can be created at any time using the linker library function
+CreateTask:
+
+   struct Task *CreateTask(char *name, long pri, APTR initPC,  LONG stackSize );
+
+Basically, the entry point (e.g. a procedure) is specified by initPC and off
+goes an independent task with the specified name, priority and stack size.
+
+Anyone can delete a task from the system, but usually it is a good idea to
+arrange for the task to delete itself:
+   
+   void DeleteTask(struct Task *task);
+
+   where DeleteTask(NULL) means delete self.
+   
+Note the above are linker library wrappers who eventually call exec.library
+procedures AddTask and RemTask repectively.
+
+
+@{b}Single Threading of Tasks@{ub}
+
+Single threading is the term used to describe taking over sole control of the
+machine.  This is usually done to manipulate shared data where all the
+changes must be done at once for the data to be valid.  Since a task switch
+can occur at any time, task switching must be turned off while the critical
+region of code is executed.  Under AmiExec, the exec.library Forbid and
+Permit procedures are used:
+
+   Forbid();         /* forbid task switching */
+   Critical Code     /* whatever needed protecting */
+   Permit();         /* permit task switching */
+
+Forbid and Permit nest, so multiple Forbids are possible, provided that each
+Forbid is ultimately paired with exactly one Permit.
+
+Note that this arbitrates Tasks only, and is system wide.  See the sections
+on @{"Interrupts" link Interrupts} and @{"Semaphores" link Semaphores} for other arbitration mechanisms.
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node IPC "Programmer's Guide To Exec.library | Interprocess Communications"
+@toc  Contents
+@{u}@{b}Interprocess Communctions@{ub}@{uu}
+
+Exec provides IPC through Signals and Messages.  The Extend and Inherit
+philosphy applies to IPC - Messages are built on Signals so we discuss
+Signals first.
+
+
+@{b}Signals@{ub}
+
+Each task can have up to 16 signals (there are actually 32 but 16 are
+reserved for system use).  It is a very simple, effective system.  Exec
+provides the following functions dealing with Signals:
+
+   AllocSignal - allocate a signal bit                                
+   FreeSignal  - free a signal bit                                  
+   SetSignal   - define the state of this task's signals             
+   Signal      - signal a task                                          
+   Wait        - wait for one or more signals                             
+
+A task can Wait on one or more signals.  A call to Wait returns when one or
+more of the specified signals arrives.  If the signal(s) have arrived prior
+to the call to Wait, Wait will return immediately.  Signals do not queue,
+that's what messages are for.
+
+The following code fragment demonstrates allocating and waiting on signals -
+though it doesn't check for errors or make any sense.
+
+#define FOREVER for (;;)
+#define SB_EXIT 16
+#define SF_EXIT (1 << SB_EXIT)
+
+   ULONG waitsigs;                           /* signals to Wait on */
+   ULONG signals;                            /* signals received */
+   BYTE  sig1;                               /* signal bit number */
+   BYTE  sig2;                               /* signal bit number */
+   
+   sig1 = AllocSignal(-1);                   /* ask for any free signal bit */
+   sig2 = AllocSignal(SB_EXIT);              /* ask specifically for a signal bit */
+   
+   waitsigs = (1 << sig1) | (1 << sig2);     /* we'll wait on both signals */
+   
+   FOREVER                                   /* for (;;) */
+      {
+      signals = Wait(waitsigs);              /* wait on them */    
+      
+      if ((signals & (1 << sig1)) != NULL)   /* check for, act on sig1 */
+         We Got Sig1 So Do WhatEver;            
+
+      if ((signals & SF_EXIT) != NULL)       /* check for, act on exit sig */
+         We Got SF_EXIT So Do Exit Stuff;
+      }
+
+
+@{b}Messages@{ub}
+
+Signals are useful but do not carry any information other than their
+occurence, and do not queue.  Messages and MsgPorts provide a fast
+non-copying communication mechanism capable of carrying data and queuing.
+
+Exec.library provides the following procedures dealing with ports and
+messages:
+
+        AddPort       - add a public message port to the system               
+        CreateMsgPort - allocate and initialize a new message port.       
+        DeleteMsgPort - free a message port created by CreateMsgPort      
+        GetMsg        - get next message from a message port                   
+        PutMsg        - put a message to a message port                        
+        ReplyMsg      - put a message to its reply port                      
+        WaitPort      - wait for a given port to be non-empty                  
+
+
+The C language definitions of the structures are:
+
+struct MsgPort 
+    {
+    struct  Node mp_Node;
+    UBYTE   mp_Flags;         /* action to take on message arrival */
+    UBYTE   mp_SigBit;        /* signal bit associated with this port */
+    void   *mp_SigTask;       /* object to be signalled with mp_SigBit */
+    struct  List mp_MsgList;  /* list of messages */
+   };
+
+struct Message 
+    {
+    struct  Node mn_Node;
+    struct  MsgPort *mn_ReplyPort;  /* message reply port */
+    UWORD   mn_Length;              /* total message length, in bytes */
+    }  
+
+A message in turn, is usually an extended Message:
+
+   struct MyMessage
+      {
+      struct Message message;
+      My stuff;
+      };
+
+(Note that mn_Length in the above example is sizeof(struct MyMessage).)
+
+As you can see, ports and messages are both extended nodes.  Messages are
+nodes so that they can be added to the message list of ports.  Ports are
+nodes so that they can be made public.  Ports can be either public or
+private.  A port is public if its node is assigned a name and then added to
+the public port list via AddPort.  Other modules can then find the port via a
+FindPort call, thus allowing rendezvous by name.  i.e.  The by now familiar
+find by name, use by pointer method.
+
+Depending on the value of the flags field in a message port, message arrival
+can cause one of a number of actions.  By far the most common though is the
+indicated task, the owner of the port, is signaled with the indicated signal.
+Thus Messaging is building on the signal mechanism, not creating an unrelated
+new one.
+
+Message passing is non-copying, so after sending a message, the sender needs
+to know when he can reuse the message.  This is done by the receiver replying
+the message to the senders reply port.
+
+From the senders view:
+
+   PutMsg(targetport, mymessage);                  /* send a message */
+   WaitPort(mymessage->mn_ReplyPort);              /* wait for the reply */
+   GetMsg(mymessage->mn_ReplyPort);                /* remove the reply */
+   
+
+From the receivers view:
+
+   WaitPort(targetport);                           /* wait on the port's signal */
+   while ((message = GetMsg(targetport)) != NULL)  /* get each arrived message */
+      {
+      Do something with message;                   /* whatever is appropriate */
+      ReplyMsg(msg);                               /* send message back */
+      }
+
+This is a flexible system, and the above illustrates the common case.
+Multiple ports, or ports and signals, can be waited on simultaneously by
+extracting the signals from the port structures, ORing them together and
+using the lower level Wait procedure.  The straight forward ReplyMsg does not
+have to be used - it is possible to bounce a message through multiple tasks
+for instance before it arrives back at the sender.  Or, it can be agreed that
+the message never comes back - allocate, send, the receiver deallocates.
+Whatever protocol suits your application is fine.
+
+I'll just point out that a common mistake is to think of WaitPort as removing
+messages from the port.  It does not.  It waits for a signal at the port.
+Call GetMsg to get the messages.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Memory "Programmer's Guide To Exec.library | Memory"
+@toc  Contents
+@{u}@{b}Memory@{ub}@{uu}
+
+Exec provides a single 32 bit address space which is shared by all tasks.
+There is no hardware memory management, but there is a simple, useful,
+software system for the management of memory.  Exec provides the following
+functions dealing with memory:
+
+        AddMemList   - add memory to the system free pool                   
+        AllocAbs     - allocate at a given location                           
+        Allocate     - allocate a block of memory                             
+        AllocEntry   - allocate many regions of memory                      
+        AllocMem     - allocate memory given certain requirements             
+        AllocVec     - allocate memory and keep track of the size             
+        AvailMem     - memory available given certain requirements             
+        CopyMem      - general purpose memory copy routine                      
+        CopyMemQuick - optimized memory copy routine                       
+        Deallocate   - deallocate a block of memory                         
+        FreeEntry    - free many regions of memory                           
+        FreeMem      - deallocate with knowledge of block size                   
+        FreeVec      - return AllocVec() memory to the system                  
+        TypeOfMem    - determine attributes of a given memory address        
+
+Most of the above procedures are used in pairs:  Allocate/Deallocate,
+AllocMem/FreeMem, AllocVec/FreeVec.  Which pair is appropriate in what
+circumstances will become clear as the procedures are discussed and the
+concepts of memory attributes and public vs.  private memory are explained.
+
+The memory available to the system is not necessarily one contiguous chunk.
+It may be divided into a number of regions.  For instance, the RAM on the CPU
+card could be one region, a separate RAM card could provide another.  Exec
+uses the first few bytes of a memory region to build a structure for managing
+that region.  This is the MemHeader structure.  Its C language definition is:
+
+   struct   MemHeader 
+      {
+      struct  Node mh_Node;
+      UWORD   mh_Attributes;        /* characteristics of this region */
+      struct  MemChunk *mh_First;   /* first free region */
+      APTR    mh_Lower;             /* lower memory bound */
+      APTR    mh_Upper;             /* upper memory bound+1 */
+      ULONG   mh_Free;              /* total number of free bytes */
+      };
+
+Note that the MemHeader structure is an extended Node.  The memory regions
+available to the system are kept on a list in ExecBase.  Note also the
+mh_Attritbutes field.  Not all memory has the same characteristics.  This
+field allows the characteristics of the field to be specified.  For instance
+if the memory region is battery backed, the MEMF_BAT bit in the attributes
+field would be set.
+
+The MemHeader defines the extent of the region and maintains a list of the
+free memory chunks.  Allocated chunks are not tracked.  If memory is not
+freed it is lost to the system so be sure to clean up.
+
+The three pairs of Alloc/Free memory procedures are, of course, built on one
+another.  The C language prototypes for Allocate and Deallocate are:
+
+   APTR Allocate(struct MemHeader *memheader, ULONG bytesize)
+   void Deallocate(struct MemHeader *memheader, APTR memoryblock, ULONG bytesize)
+
+These are the low level procedures.  As you can see, you require a pointer to
+the MemHeader structure to make use of these procedures.  These procedures
+are used to manage private memory pools - memory that has otherwise been
+obtained from the system and that you've built a MemHeader structure to
+control.
+
+To manipulate system memory the AllocMem/FreeMem procedures are used.  The C
+language prototypes are:
+
+   APTR AllocMem(ULONG bytesize, ULONG attributes)
+   APTR FreeMem(APTR memblock, ULONG bytesize)
+
+These procedures do not require a MemHeader pointer and are the "normal" way
+for an application to manipulate memory.  Note that memory attributes are a
+parameter to AllocMem, and the block size is a parameter to FreeMem.  What
+AllocMem does is search the list of memory regions for a region with the
+required attributes, and perform an Allocate from that region.  The special
+attribute flag MEMF_CLEAR tells AllocMem that the returned memory is to be
+set to all zero.
+
+Whether or not to build and manage a private pool depends on the pattern of
+memory use.  Allocate/Deallocate is obviously faster than AllocMem/FreeMem in
+that the latter is a superset of the former - the search for the MemHeader is
+skipped.  On the other hand, AllocMem/FreeMem are more efficient in terms of
+memory used.  Only actual in use memory has been taken from the system.  Free
+memory in private pools is unavailable to others in the system.  If speed is
+critical and the total memory requirements are predictable than a private
+pool with direct calls to Allocate/Deallocate is a good idea.  In the
+majority of the cases, stick with AllocMem/FreeMem.  Of course, depending on
+the development language, you may want to go through the language's interface
+to memory instead of Exec calls.
+
+A third pair of memory procedures is AllocVec/FreeVec.  The C language
+prototypes are:
+
+   APTR AllocVec(ULONG bytesize, ULONG attributes)
+   void FreeVec(APTR)
+
+These procedures are layered on top of AllocMem/FreeMem.  Their purpose is to
+avoid the need to know the size of what you're freeing.  AllocVec allocates
+an extra 4 bytes to store the block size which FreeVec uses when it is
+called.
+
+
+@{b}Important@{ub}
+
+�  You must free only what you've allocated.  Also, don't get a block and then
+   try to free a portion of it.  Doing so can result in a corrupt free memory
+   list.
+
+�  Interrupts may not allocate or free memory.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Interrupts "Programmer's Guide To Exec.library | Interrupts"
+@toc  Contents
+@{u}@{b}Interrupts@{ub}@{uu}
+
+Interrupts are quite straightforward under Exec.  They are not magic bi-modal
+monsters.  Interrupt handling code is installed into the system via
+exec.library calls and the Interrupt structure.  The CPU vector table is not
+accessed directly.  Interrupts are "done right" under Exec.  They are
+prioritized and can nest - a higher priority interrupt can interrupt a lower
+priority interrupt.
+
+The C language definition of an Interrupt is:
+
+   struct Interrupt 
+      {
+      struct  Node is_Node;
+      APTR    is_Data;           /* server data */
+      VOID    (*is_Code)();      /* server code entry */
+      };
+
+
+The exec.library functions dealing with interrupts are:
+
+   AddIntServer - add an interrupt server to the system              
+   Disable      - disable interrupt processing.
+   Enable       - permit system interrupts to resume.
+   RemIntServer - remove an interrupt server from a server chain     
+   SetIntVector - set a system interrupt vector                      
+
+
+AddIntServer and RemIntServer are the usual way to install and remove
+interrupts processing code.  Basically there are two types of interrupt
+processing code.  A "Server" is invoked via an Interrupt structure which is
+maintained on an ordered list of Interrupts for processing that level of
+interrupt.  When an interrupt of that level occurs, each procedure is invoked
+via its Interrupt structure until one of them returns TRUE.  It's a chain.
+You install your server on the chain with AddIntServer.  The server code
+should not assume that its hardware is the source of the interrupt.  It may
+be someone elses who has been installed at a lower priority.  If it's your
+interrupt, service it and return TRUE.  This will terminate the traversal of
+the server list.  If it isn't your interrupt, return FALSE.  Traversal of the
+server list will continue, and the next server will be invoked.
+
+SetInVector is for installing "Handlers".  Unlike Servers there can be only
+one handler per interrupt level.  A handler is lower level than a server and
+monopolizes the interrupt level.  Unless you are currently the only user of
+that interrupt, and are confident you will remain the only user, stick to
+AddIntServer.
+
+To make things clear, realize that AddIntServer is enqueuing your Interrupt
+structure on a list that gets traversed by a Handler that Exec has itself
+installed with SetIntVector.  Again, Exec makes extensive use of itself.
+
+Software Interrupts (not to be confused with 68000 traps) function
+identically to hardware interrupts.  There is no need to learn (and no need
+for exec.library to support) a second mechanism.  SoftInt servers are added
+to the system via AddIntServer.  Simply specify zero as the interrupt level
+in the call.
+
+Software interrupts are run by Cause'ing them with the Cause function.  What
+they provide is a unit of execution that is of higher priority than any task,
+yet lower than any hardware interrupt.  They are a useful tool in the
+software designers arsenal.  For instance, a hardware interrupt can do the
+minimal hardware interaction required to service the interrupt source, and
+then Cause a software interrupt to defer less time critical processing to a
+lower priority.
+
+Think back to the earlier discussion of messages and message ports.  Recall
+that there are various actions which can be taken on message arrival at a
+port.  While, as was stated, the common port action is PA_SIGTASK, there is
+also PA_SOFTINT.  In this case the ports mp_SigTask member points to an
+Interrupt, not a Task.  The Interrupt is Cause'd.
+
+
+@{b}Single Threading Everything@{ub}
+
+At times there are critical code sections which need stronger arbitration
+than that provided by Forbid/Permit.  You recall Forbid disables task
+switching thus guaranteeing no other task will run until a matching Permit is
+executed.  Disable/Enable are a similar pair, only they guarantee NOTHING
+else will run, not even an Interrupt, regardless of how high its priority
+(well except NMI).  Obviously it is unwise to have interrupts disabled for
+long periods.  Only very short code sections should be protected this way,
+and only when absolutely necessary.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Devices "Programmer's Guide To Exec.library | Devices"
+@toc  Contents
+@{u}@{b}Devices@{ub}@{uu}
+
+A Device is an extension of the Library the purpose of which is to
+encapsulate hardware.  The idea of course is that client modules are
+protected from changes in the underlying hardware because the hardware
+dependencies are isolated in the device.  Building on the library mechanism
+facilitates this goal.
+
+In addition to the standard Open, Close, Expunge and Reserved library
+vectors, a device has two additional standard vectors:  @{b}BeginIO@{ub} and @{b}AbortIO@{ub}.
+Interaction with the device is done by passing commands to the device's
+BeginIO vector in extended messages called I/O requests.  The AbortIO vector
+is used when it is necessary to halt the execution of an in-progress I/O
+request.  The standard vectors usually aren't invoked directly by the client,
+but rather via the appropriate Exec procedure.  The Exec procedures dealing
+with devices are:
+
+
+        AddDevice       - add a device to the system                            
+        CheckIO         - get the status of an IORequest                           
+        CloseDevice     - conclude access to a device                          
+        CreateIORequest - create an IORequest structure.                  
+        DoIO            - perform an I/O command and wait for completion              
+        OpenDevice      - gain access to a device                                
+        RemDevice       - remove a device from the system                       
+        SendIO          - initiate an I/O command                                   
+
+
+@{b}More:@{ub}
+
+   @{" Opening a Device " link Devices.Opening}
+   @{" Using a Device " link Devices.Using}
+   @{" Synchronous vs. Asynchronous Commands " link Devices.Sync}
+   @{" I/O Completion " link Devices.IOCompletion}
+   @{" QUICKly Completed Commands " link Devices.QUICK}
+
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Devices.Opening "Programmer's Guide To Exec.library | Devices | Opening"
+@toc  Devices
+@{b}Opening a Device@{ub}
+
+Before using a device, you must first gain acess to it.  Accessing a device,
+because interraction is based on Exec messages, requires the creation of a
+reply port to receive returning I/O requests, and creation of the I/O
+requests themselves.  Reply ports have been discussed elsewhere.  The C
+language declaration of a minimum I/O request is:
+
+struct IORequest 
+   {
+   struct  Message io_Message;      /* an IORequest is an extended Message */
+   struct  Device  *io_Device;      /* device node pointer  */
+   struct  Unit    *io_Unit;        /* unit (driver private)*/
+   UWORD   io_Command;              /* device command */
+   UBYTE   io_Flags;
+   BYTE    io_Error;                /* error or warning num */
+   };
+
+
+Devices may define that an extension of the IORequest be used to access them.
+One extension of the IORequest, an I/O request suitable for bytewise I/O, is
+so common that it is also defined by Exec:
+
+struct IOStdReq 
+   {
+   struct  Message io_Message;      /* an IORequestis an extended Message */
+   struct  Device  *io_Device;      /* device node pointer  */
+   struct  Unit    *io_Unit;        /* unit (driver private)*/
+   UWORD   io_Command;              /* device command */
+   UBYTE   io_Flags;
+   BYTE    io_Error;                /* error or warning num */
+   ULONG   io_Actual;               /* actual number of bytes transferred */
+   ULONG   io_Length;               /* requested number bytes transferred*/
+   APTR    io_Data;                 /* points to data area */
+   ULONG   io_Offset;               /* offset for block structured devices */
+   };
+
+
+The typical sequence of activities is:
+
+   1. Create a reply port for returning I/O requests.  The Exec CreateMsgPort 
+      procedure is a good way to do this:
+
+      rp_device = CreateMsgPort();
+
+
+   2. Create an IORequest, or whatever extended IORequest is appropriate for
+      the device in question.  The Exec CreateIORequest procedure is a good
+      way to do this:
+
+      io_device = CreateIORequest(rp_device, sizeof(io_device));
+
+
+   3. Open the device:
+
+      error = OpenDevice("somekinda.device", 0, io_device, 0);
+
+         � "somekinda.device" is the name of the device to open
+         � the first 0 is the unit number on the device to open.  Depending
+           on the device, the device may control multiple units.  For example a  
+           device for a multi-port serial card will probably have one unit for
+           each port. 
+         � io_device is a pointer to an IORequest which is going to be used 
+           to issue commands to the device.   
+         � the last 0 is a flags field whose use is device dependent.
+
+
+What OpenDevice does is very similar to what OpenLibray does.  It finds the
+device on Exec's device list, stuffs the io_Device field of the provided I/O
+request, and invokes the device's Open procedure.  Again the rule is find by
+name use by pointer.  The I/O request now contains a pointer to the Device
+structure.  Future calls to Exec procedures which dispatch the I/O request to
+the device can do so efficiently.
+
+If your are going to be using multiple I/O requests to the same unit of the
+same device, open the unit once, and then copy the contents of the now
+initialized I/O request to the other requests.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Devices.Using "Programmer's Guide To Exec.library | Devices | Using"
+@toc  Devices
+@{b}Using a Device@{ub}
+
+Using a device @{"basically" link Clarinet} consists of stuffing an I/O request with the command
+and appropriate data, sending the I/O request to the device, waiting for
+the request to complete, and then extracting any data which the device may
+have placed in the I/O request or client buffers in response to the command.
+
+While the command sets of devices differ, there is a common core set of
+commands which most devices support.  New devices should also support these
+commands if they are appropriate to the function of that device.  These
+commands, and brief, generalized definitions of their purpose are:
+
+   CMD_RESET   - abort all queued and active I/O requests and reinitialize,
+                 returning the device and hardware configuration to the default
+                 state.
+   CMD_READ    - read data from the hardware
+   CMD_WRITE   - write data to the hardware
+   CMD_UPDATE  - synchronize data - e.g. flush caches
+   CMD_CLEAR   - zero internal buffers
+   CMD_STOP    - pause all I/O activity
+   CMD_START   - restart I/O activity
+   CMD_FLUSH   - abort all pending I/O requests
+
+Devices will of course support commands as appropriate over and above this
+core set.  When writing a device it is recommended that the standard commands
+perform the above functions and not be "overloaded" to perform something
+completely unrelated.  A device specific command should be used for a device
+specific command.  That said, the basic command set achieves good coverage
+and is useful over a broad range of I/O possibilities.  Similar
+recommendations hold regarding design of I/O request structures for new
+devices.  If IORequest or IOStdReq are not suitable, extend one of them as
+necessary rather than using non-intuitive member overloading.
+
+Once an I/O request has been stuffed with the command and data, it must be
+passed to the device.  Which Exec procedure is used to do this depends on
+whether the caller wants synchronous or asynchronous command processing.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Devices.Sync "Programmer's Guide To Exec.library | Devices | Sync vs. ASync"
+@toc  Devices
+@{b}Synchronous vs. Asynchronous Commands@{ub}
+
+Synchronous I/O is sending the command and waiting for it's completion.
+Asynchronous I/O is sending the command and continuing execution, not waiting
+for the completion of the command until a later time.
+
+Synchronous I/O is performed using the DoIO procedure:
+
+   BYTE DoIO(struct IORequest *io)
+
+DoIO will not return until the I/O request is complete.  The BYTE returned is
+a copy of the io_error field of the I/O request, with zero being no error.
+See <exec/errors.h> for standard error codes.
+
+Asynchronous I/O is performed using the SendIO and WaitIO procedures:
+
+   void SendIO(struct IORequest *io)
+   BYTE WaitIO(struct IORequest *io)
+
+SendIO returns immediately, without waiting for the request to complete.  The
+caller can continue execution and at some point call WaitIO.  WaitIO will
+wait for the I/O to complete and remove the request from the caller's reply
+port.  The return value from WaitIO is a copy of the I/O request's io_error
+field.
+
+Waiting on I/O completion can be done at the same time as waiting on signals
+and "normal" messages.  Simply extract the signal from the reply port and use
+the lower level Wait procedure.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Devices.IOCompletion "Programmer's Guide To Exec.library | Devices | I/O Completion"
+@toc  Devices
+@{b}I/O Completion@{ub}
+
+Whether or not an I/O request has been completed can be checked with the
+procedure:
+
+   struct IORequest *CheckIO(struct IORequest *io)
+
+If the IORequest is complete, the I/O request pointer as passed will be
+returned otherwise NULL.
+
+Device writers take note:  What CheckIO does is examine the node type field
+of the I/O request.  If the type is NT_MESSAGE, the request has not
+completed.  If the type is NT_REPLYMSG the request has completed.  If not all
+I/O to your device goes through PutMsg/ReplyMsg you @{b}must@{ub} set the node types 
+yourself.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Devices.QUICK "Programmer's Guide To Exec.library | Devices | QUICK Commands"
+@toc  Devices
+@{b}QUICKly Completed Commands@{ub}
+
+While the interaction between clients and devices is message based, it does
+not necessarily involve the sending of a message in the Exec, inter-task
+communication sense.  Device I/O is always message based in the OOP sense of
+sending a parameter block to a method dispatcher, but it does not always
+result in inter-task Exec messaging.  While Exec messaging is fast, always
+sending a message from caller to a device task and then from device task to
+caller would be @{"unnecessary and inefficient" link NTJab1}.  Thus the distinction between
+QUICK and non-QUICK commands.
+
+If the IOF_QUICK bit in the io_flags field of an I/O request is set, the
+device will attempt to service the command immediately, within the context of
+the calling task.  The DoIO procedure sets IOF_QUICK before calling the
+device's BeginIO procedure, and checks it upon return.  If the device can
+service the request immediately, it does so and returns leaving the QUICK
+flag set.  DoIO then also simply returns.  The I/O has been performed as a
+simple procedure call to a shared library - no message sending or waiting has
+been performed.  If the device cannot service the request immediately, the
+BeginIO procedure removes the IOF_QUICK bit, does whatever it takes to
+initiate the service or store the request for later servicing, and returns.
+DoIO seeing that IOF_QUICK bit has been removed, does a WaitIO.  "Whatever it
+takes" is usually PutMsg'ing the I/O request to a task owned by the device or
+adding it to a list which is feeding the device's interrupt service routine.
+See the @{"Typical Device Diagram" system "SYS:Utilities/MultiView ExecDevice.iff"}.
+
+SendIO on the other hand clears the QUICK flag before calling BeginIO.  If
+the request can be serviced immediately it will be, but the device will
+always reply the request to the reply port.
+
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Semaphores "Programmer's Guide To Exec.library | Semaphores"
+@toc  Contents
+@{u}@{b}Semaphores@{ub}@{uu}
+
+Semaphores are the means by which two or more tasks can coordinate their
+access or use of a "resource" such as a shared data structure.  They are a
+third arbitration mechanism avaible to software designers under Exec, the
+other two being the Disable/Enable and Forbid/Permit procedure pairs.
+
+Semaphores are built on the Signal mechanism and as such coordinate Tasks.
+Arbitration among Interrupts cannot be performed with semaphores,
+Disable/Enable must be used for that.  The advantage of semaphores over the
+Forbid/Permit procedures are that they provide a finer grain means of
+coordination.  Only those tasks who are contending for the specific semaphore
+protected resource are blocked.  Forbid on the other hand essentially
+arbitrates for the CPU, and hence is global in nature.
+
+The exec.library procedures dealing with semaphores are:
+
+   AddSemaphore     - add a signal semaphore to the system               
+   AttemptSemaphore - try to obtain without blocking                 
+   FindSemaphore    - find a given system signal semaphore              
+   InitSemaphore    - initializes a signal semaphore                    
+   ObtainSemaphore  - gain exclusive access to a semaphore             
+   Procure          - bid for a message lock (semaphore)                      
+   ReleaseSemaphore - make signal semaphore available to others      
+   Vacate           - release a message lock (semaphore)                       
+
+
+There are two types of semaphores supported by Exec:  @{"Signal Semaphores" link Semaphores.Signal} and
+@{"Semaphores" link Semaphores.Message}.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Semaphores.Signal "Programmer's Guide To Exec.library | Semaphores | Signal Semaphores"
+@toc  Semaphores
+@node
+@{b}Signal Semaphores@{ub}
+
+Signal Semaphores provide the classic textbook semaphore.   Assuming the
+semaphore exists the most straightforward use is:
+
+   struct SignalSemaphore *ss_sharedsomething;     /* assume exists */
+
+   ObtainSemaphore(ss_sharedsomething);
+   Do whatever with sharedsomething;
+   ReleaseSemaphore(ss_sharedsomething);
+
+ObtainSemaphore will not return until the semaphore has been acquired.  The
+caller will block until the sempahore is available.  When the semaphore
+becomes available the caller will be made the owner, ObtainSemaphore will
+return, and any other task who tries to obtain the semaphore will block.
+
+ReleaseSemaphore relinquishes ownership of a semaphore, making it available
+for other tasks.
+
+ObtainSemaphore and ReleaseSemaphore nest.  There must be exactly one Release
+for every Obtain.
+
+The AttemptSemaphore procedure allows the caller to try to acquire a
+semaphore without blocking:
+
+   BOOL AttemptSemaphore(struct SignalSemaphore *)
+
+   where the BOOL returned is TRUE if ownership of the semaphore has been
+   acquired.
+
+Signal Semaphores are created by allocating the memory for them and
+initializing them via either the InitSemaphore or AddSemaphore procedures.
+InitSemaphore is used where the semaphore is to be private.  AddSemaphore is
+a superset of InitSemaphore which places the semaphore on Exec's list of
+public semaphores where it can be found by other tasks using the
+FindSemaphore procedure.  If a semaphore is to be public, it should be
+assigned a name and priority prior to the AddSemaphore call.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Semaphores.Message "Programmer's Guide To Exec.library | Semaphores | Semaphores"
+@toc  Semaphores
+@node
+@{b}Semaphores@{ub}
+
+With Signal Semaphores a caller can only attempt to obtain one semaphore at
+a time.  Straight Semaphores are message based and allow the caller to
+attempt to obtain multiple semaphores at once.
+
+A straight Semaphore is an extended message port with a PA_IGNORE message
+arrival action.  It must be created and initialized "manually" and can be
+made public by adding it to the public port list via AddPort.  Thus public
+Semaphores are found using FindPort.
+
+Semaphores are used by sending "bid messages" to them which return when
+ownership of the semaphore has been obtained.  Thus it is possible to attempt
+to acquire ownership of multiple semaphores by sending bid messages to more
+than one semaphore before waiting on the reply port or ports of the bid
+messages.
+
+Assuming the existence of necessary ports and messages, semaphore usage is
+generally as follows:
+
+   struct Semaphore *semaphore;     /* assume pts to a Semaphore */
+   struct Message   *msg_bid;       /* assume pts to a Message */
+
+   free = Procure(semaphore, msg_bid)
+   if (free == FALSE)   
+      {
+      WaitPort(msg_bid->mn_ReplyPort)
+      GetMsg(msg_bid->mn_ReplyPort);
+      }
+
+   Do semaphore protected stuff;
+
+   Vacate(semaphore);
+      
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Resources "Programmer's Guide To Exec.library | Resources"
+@toc  Contents
+@{u}@{b}Resources@{ub}@{uu}
+
+For the most part Exec defines neither the form nor function of Resources.
+They are simply "something" other than a Library or Device which can be
+Opened.  In practice however, resources tend to be implemented as libraries
+for providing either low-level hardware arbitration and/or low-level hardware
+abstraction.  A device, for example, will usually claim ownership of the
+necessary underlying hardware via the appropriate resource.
+
+Access to a Resource is gained via the OpenResource procedure:
+
+   APTR OpenResource(char *resname)
+
+   where resname is the resource name and APTR is a pointer to the resource
+   if successful, or NULL on failure.
+
+Use of a resource is completely resource specific.  But again, usually there
+are Alloc and Free procedures of some sort for whatever it is the resource is
+controlling access to - which is frequently hardware, but not necessarily.
+
+There is no CloseResource procedure.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Bootstrap "Programmer's Guide To Exec.library | Bootstrap"
+@toc  Contents
+@{u}@{b}Bootstrap@{ub}@{uu}
+
+The bootstrap code is the code run when the system is booted - first powered
+on or reset.  Immediately after a system boot nothing exists, there are no
+libraries or devices or tasks, etc.  Their code and data are "out there"
+somewhere in memory, but nothing is initialized and running.  The bootstrap
+code is the software responsible for taking the system from this nothing
+exists state and turning it into a running system.
+
+Exec's bootstrap code performs the following activities:
+
+   � Initializes the supervisor stack pointer and zeros the supervisor stack
+     space.  The location of the supervisor stack is defined in the BootTable.
+
+   � Scans through memory looking for ROMTags, saving pointers to the tags as it
+     finds them.  The scan start address is defined in BootTable, the scan end
+     address is the end of 32 bit memory, 0xFFFFFFFE.
+
+   � All ROMTags of class COLDSTART are initialized in order of descending
+     ROMTag priority.
+
+This bootstrap code is contained within the exec.library module and is right
+at the beginning of that module.  At boot time control must be passed to it
+with A0 containing a pointer to the BootTable.  That means some pre-Exec
+bootstrap bootstrap code must be supplied.  The trivial case will be
+something like:
+
+MySystemEntry:
+   lea   BootTable,a0   ;BootTable statically initialized in code section
+   jmp   MYEXECENTRY    ;MYEXECENTRY is where you've located exec.library's
+                        ;code section.
+
+
+Some notes about ROMTags and the scanning process:
+
+There is a limitation of 128 ROMTags per system.
+
+Currently, memory "holes" are not allowed.  Bus errors aren't being handled
+during scanning.  If it is necessary to locate modules in non-contiguous
+memory, then use NT_UNKNOWN ROMTags with appropriate endskip values to skip
+over any address space which doesn't exist.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node BootTable "Programmer's Guide To Exec.library | BootTable"
+@toc  Contents
+@{u}@{b}BootTable@{ub}@{uu}
+
+The BootTable contains the minimum information Exec needs to run the
+bootstrap code.  It is the means by which Exec is configured or customized
+for a specific target system.  Exec's bootstrap code assumes A0 contains a
+pointer to an initialized BootTable.
+
+The C language definition of BootTable is:
+
+struct BootTable
+   {
+   APTR   AbsSysBase;               /* pointer to pointer to base of exec lib */
+   APTR   SysStackLower;            /* lower limit of supervisor stack */
+   APTR   SysStackUpper;            /* upper limit of supervisor stack */
+   APTR   ScanStart;                /* start for ROMTag scan */
+   ULONG  ScanSkip;                 /* memory quantum to advance scan on bus error */
+   APTR   DumpArea;                 /* where to dump if debug.library not present */
+   UWORD  AttnFlags;                /* processors and co-processors */
+   UWORD  SoftIntTrap;              /* trap used for software interrupts */
+   struct Vector   *MonitorVectors; /* exception vectors when monitor present */
+   struct LibEntry *ExecISRs;       /* ptr to jump table of ExecISRs */
+   ULONG  Baud;                     /* default baud rate for console */
+   BOOL   TagStep;                  /* pause at each ROMTag during boot */
+   UWORD  BreakpointTrap;           /* trap used to insert breakpoints */
+   void   (*BootEvent)(UWORD event, 
+                       APTR  data); /* low level boot debugging callback */
+   };
+
+
+The function of the BootTable members is as follows:
+
+@{b}AbsSysBase@{ub} is the Absolute System Base.  A location where a pointer to
+exec.library is to be placed.  This is a historical artifact since no code 
+should obtain ExecBase via AbsSysBase.  However, it may be handy during
+debugging to know where you can find a pointer to exec.library.
+
+@{b}SysStackLower@{ub} is the lower bound of the memory to be used for the supervisor
+stack.
+
+@{b}SysStackUpper@{ub} is the upper bound of the the memory to be used for the 
+supervisor stack.  Note that any Reset Initial Supervisor Stack Pointer at
+location 0x0 will immediately be overridden by this value.
+
+@{b}ScanStart@{ub} is the address where the bootstrap code is to begin its scan through
+memory in search of ROMTags.
+
+@{b}ScanSkip@{ub} specifies the granularity of the memory in the system and is used to
+speed up the ROMTag scanning process.  Frequently memory regions always begin
+on some even boundary such as 1K, 64K, 1M or whatever.  A ScanSkip value of
+0x400 for instance results in the scan process advancing the address to the
+next multiple of 0x400 should a bus error occur.  This member is not
+currently useful since bus errors aren't being handled during scanning.
+
+@{b}DumpArea@{ub} specifies a memory location where a copy of the processor registers
+should be written if an NMI occurs and debug.library is not present.  Most
+CPUs have an abort switch which generates an non-maskable interrupt.  If
+debug.library is present, Exec will invoke it when abort is hit.  Otherwise
+if DumpArea is a valid value (not -1) Exec will write the USP, SSP, SR, PC,
+D0-D7/A0-A7, and a pointer to ExecBase, beginning at DumpArea.
+
+@{b}AttnFlags@{ub} are flags specifing the processor and co-processor types in the
+system.  See <exec/execbase.h>, the AFF_ definitions.
+
+@{b}SoftIntTrap@{ub} is the trap number to use for generating software interrupts.  0
+or 15 are usually good choices.  If using a ROM monitor determine the
+mechanism it uses for inserting breakpoints.  Some use traps so it will be
+necessary to avoid a conflict and use a different trap number.
+
+@{b}MonitorVectors@{ub} is a pointer to a table of Vectors (See <ext/exec.h>) which,
+if non-NULL, Exec will use to initialize the vector table.  Sometimes to
+co-exist with ROM monitors it is necessary to "wrap" Exec's ISRs.  A typical
+instance is if the ROM monitor uses interrupt driven serial I/O.  In that
+case to co-exist peacefully a wrapper will have to be used that determines
+who should get the interrupt, Exec or the ROM monitor.
+
+@{b}ExecISRs@{ub} is a pointer to storage for an Exec style library vector table.
+This is the other half of the MonitorVectors scheme.  To wrap an ISR the
+original ISR has to be able to be invoked.  If non-NULL, Exec will build a
+jump table to the original Exec ISRs at this location.  The table is Exec
+library style meaning the entries include the jmp instruction (are six bytes
+in size), and descend in memory from the provided address from ISR level 0,
+to ISR level 6.
+
+@{b}Baud@{ub} is the default baud rate to be used by the console - presumably a serial
+port on the target SBC.  Exec.library itself doesn't actually need this
+value, but makes it available to cpu.resource who does.
+
+@{b}TagStep@{ub} is a value for debug.library.  If TRUE the system is paused at 
+each BootMsg as the resident modules initialize.  Hitting CTRL-C enters debug
+for system inspection, hitting RETURN contines booting with no more pausing,
+any other key steps to the next BootMsg.
+
+@{b}BreakpointTrap@{ub} is a value for debug.library.  It specifies the trap
+number debug.library should use when inserting breakpoints.
+
+@{b}BootEvent@{ub} is a callback procedure useful for low level debugging. It 
+is invoked at the beginning of ROMTag scanning, as ROMTags are found, and as
+ROMTags are processed.  This callback is useful for debugging a system
+encountering difficulties very early in the boot process, before
+debug.library becomes available.  It can be used to blink LEDs, dump info to
+battery backed RAM somewhere, or whatever.  For the currently defined boot
+events the data parameter is either NULL or a pointer to the relevant
+ROMTag.
+
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node ROMTags "Programmer's Guide To Exec.library | ROMTags"
+@toc  Contents
+@{u}@{b}ROMTags@{ub}@{uu}
+
+A ROMTag is a small data structure which must be linked into the code section
+of each ROM resident module.  A ROMTag allows the bootstrap code to find the
+module and provides the information necessary to initialize that module.  The
+terms ROMTag and Resident structure both refer to the same thing and will be
+used interchangeably.  The former is the name of the assembly language
+structure declaration, the latter the C language structure declaration.
+
+The assembly language definition of ROMTag (see <exec/resident.i>) is:
+
+   STRUCTURE RT,0
+      UWORD RT_MATCHWORD         ; word to match on (ILLEGAL)
+      APTR  RT_MATCHTAG          ; pointer to the above (RT_MATCHWORD)
+      APTR  RT_ENDSKIP           ; address to continue scan
+      UBYTE RT_FLAGS             ; various tag flags
+      UBYTE RT_VERSION           ; release version number
+      UBYTE RT_TYPE              ; type of module (NT_XXXXXX)
+      BYTE  RT_PRI               ; initialization priority
+      APTR  RT_NAME              ; pointer to node name
+      APTR  RT_IDSTRING          ; pointer to identification string
+      APTR  RT_INIT              ; pointer to init code
+      LABEL RT_SIZE
+
+@{b}RT_MATCHWORD, RT_MATCHTAG, RT_ENDSKIP@{ub} have to do with the process of modules
+being found at boot time.  RT_MATCHWORD is always $4AFC, the 68000 illegal
+instruction.  RT_MATCHTAG points back to the immediately preceding
+RT_MATCHWORD.  By searching for illegal instructions immediately followed by
+a pointer back to the illegal instruction, the bootstrap code locates ROMTags
+in memory.  RT_ENDSKIP contains the address where the bootstrap code should
+continue its scan for tags.  At a minimum this is the end of the current
+ROMTag.
+
+@{b}RT_FLAGS@{ub} are a set of flags which affect the processing of this ROMTag.  If
+the COLDSTART flag is set, the ROMTag is to be processed at boot time,
+otherwise it sits on the resident list, available but uninitialized.  The
+AUTOINIT flag affects the interpretation of the RT_INIT member.
+
+@{b}RT_VERSION@{ub} is the version number of the module.
+
+@{b}RT_TYPE@{ub} is the type of module specified using the node type definitions such
+as NT_LIBRARY, NT_DEVICE and so on.  This affects the interpretation of the
+RT_INIT member.
+
+@{b}RT_PRI@{ub} specifies the priority of this module for COLDSTART initialization
+purposes.  High priority modules are initialized first.
+
+@{b}RT_NAME@{ub} is the name of the resident module.
+
+@{b}RT_IDSTRING@{ub} is a string usually containing the name, version, and creation date
+of the resident module.
+
+@{b}RT_INIT@{ub} is either a pointer to initialization code for the module, or if 
+the RTF_AUTOINIT flag in RT_FLAGS is set, is a pointer to one of several
+types of AutoInit structures.  The RT_TYPE member determines the type of
+AutoInit structure.  AutoInit, while not required, is the usual way to
+initialize modules whose type is supported by an AutoInit mechanism.
+
+   See: @{" AutoInit Libraries " link AutoInitLibraries}
+        @{" AutoInit Devices " link AutoInitDevices}
+        @{" AutoInit Tasks " link AutoInitTasks}
+        @{" AutoInit Memory " link AutoInitMemory}
+        @{" Non-AutoInit " link Non-AutoInit}
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node AutoInitLibraries "Programmer's Guide To Exec.library | ROMTags | AutoInit Libraries"
+@toc  ROMTags
+@{b}AutoInit Libraries@{ub}
+
+The RT_INIT member of an AUTOINIT, NT_LIBRARY ROMTag must point to an
+RtInitLib structure whose assembly language definition is:
+
+   STRUCTURE RtInitLib,0
+      ULONG rtl_space                  ; size of the Library structure
+      APTR  rtl_funcTable              ; ptr to table of library procedures
+      APTR  rtl_dataTable              ; always NULL
+      APTR  rtl_initRoutine            ; ptr to initialization procedure
+      LABEL RTL_SIZE
+
+Basically this structure provides the information Exec requires to
+construct the library using the exec.library MakeLibrary procedure. Refer to
+the @{"MakeLibrary AutoDoc" link exec.library.ag/MakeLibrary} for more (and essential) detail, but briefly:
+
+@{b}rtl_space@{ub} specifies the size of the Library or extended Library structure
+employed by this Library.  This is the size of the data structure alone, it
+does not include the size of the library vector table.
+
+@{b}rtl_funcTable@{ub} is a pointer to an array of pointers to procedures which are to
+be placed in the library vector table.  The array is terminated by a -1.
+
+@{b}rtl_dataTable@{ub} exists for compatibility reasons and is always NULL.
+
+@{b}rtl_initRoutine@{ub} is a pointer to an initialization procedure invoked
+after the library has been constructed to do initialization specific to this
+library.
+
+@endnode
+
+      
+@remark--------------------------------------------------------------------------
+@node AutoInitDevices "Programmer's Guide To Exec.library | ROMTags | AutoInit Devices"
+@toc  ROMTags
+@{b}AutoInit Devices@{ub}
+
+See @{"AutoInit Libraries" link AutoInitLibraries}.  A Device is simply an extended Library so the two
+are created in the same fashion.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node AutoInitTasks "Programmer's Guide To Exec.library | ROMTags | AutoInit Tasks"
+@toc  ROMTags
+@{b}AutoInit Tasks@{ub}
+
+The RT_INIT member of an AUTOINIT, NT_TASK ROMTag must point to an RtInitTask
+structure whose definition is:
+
+   STRUCTURE RtInitTask,0
+      BYTE  rtt_priority                  ; priority of the task
+      BYTE  rtt_pad
+      APTR  rtt_entrypt                   ; entry point (usually StdEntry)
+      ULONG rtt_stacksz                   ; task stack size in bytes
+      LABEL RTT_SIZE
+
+Basically this structure provides the parameters for a @{"CreateTask" link ext.lib.ag/CreateTask} call.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node AutoInitMemory "Programmer's Guide To Exec.library | ROMTags | AutoInit Memory"
+@toc  ROMTags
+@{b}AutoInit Memory@{ub}
+
+The RT_INIT member of an AUTOINIT, NT_MEMORY ROMTag must point to an RtInitMem
+structure whose definition is:
+
+   STRUCT RtInitMem,0
+      ULONG rtm_size                ; size of memory region in bytes
+      ULONG rtm_attributes          ; attributes of memory region
+      LONG  rtm_pri                 ; priority
+      APTR  rtm_base                ; address of start of region
+      APTR  rtm_name                ; name to give region
+      APTR  rtm_dest                ; destination (for data sections)
+      LABEL RTM_SIZE
+
+In general, two types of memory regions can be described by an RtInitMem
+structure:  allocatable memory - memory to go on the system free list, and
+data section memory - memory containing the data section(s) of one or more
+modules.  If allocatable memory is being desribed it is added to the system
+free list with an @{"AddMemList" link exec.library.ag/AddMemList} call using the information provided by the
+RtInitMem structure.  If a data section is being described a block copy is
+performed from rt_base to rtm_dest for rtm_size bytes.  Which type of memory
+region is being described is determined by the value of rtm_dest, with -1
+indicating an allocatable memory region.
+
+@endnode
+
+
+@remark--------------------------------------------------------------------------
+@node Non-AutoInit "Programmer's Guide To Exec.library | ROMTags | Non-AutoInit"
+@toc  ROMTags
+@{b}Non-AutoInit@{ub}
+
+The RT_INIT member of non-AUTOINIT ROMTags, regardless of type, points to an
+initialization procedure.  The C language prototype of this procedure is:
+
+   void __asm init(register __a6 struct ExecBase *sysbase,
+                   register __a0 long seglist);
+
+This procedure is responsible for doing whatever consitutes initialization
+for the module.  Note that seglist will be NULL for ROM resident modules.
+
+@endnode

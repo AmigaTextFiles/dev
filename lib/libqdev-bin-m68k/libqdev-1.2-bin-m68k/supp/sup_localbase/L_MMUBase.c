@@ -1,0 +1,18 @@
+/*
+ * Generated automatically with 'lbasegen'.
+*/
+
+#define ___QLBS_NOALIASES
+#include "qlbs.h"
+#include <exec/nodes.h>
+
+extern void *MMUBase;
+
+struct Node QBASELOCAL(MMUBase) = 
+{
+  (struct Node *)&MMUBase,
+  (struct Node *)&MMUBase,
+  ___QLBS_NT_LOCALBASE,
+  0,
+  ___QLBS_MAKESTR(QBASELOCAL(MMUBase))
+};

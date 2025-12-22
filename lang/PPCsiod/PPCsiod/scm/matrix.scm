@@ -1,0 +1,20 @@
+(define (matrix  . args)
+        (if (null? (cdr args))
+            (car args)
+            (do ((res (make-vector (car args)))
+                 (ind (-1+ (car args)) (-1+ ind)))
+                ((< ind 0) res)
+                (vector-set! res ind (apply matrix (cdr args))))))
+
+
+(define (matrix-ref m . args)
+        (do ((res m))
+            ((null? args) res)
+            (set! res  (vector-ref res (car args)))
+            (set! args (cdr args))))
+
+(define (matrix-set! m . args)
+        (do ((res m))
+            ((null? (cddr args)) (vector-set! res (car args) (cadr args)))
+            (set! res  (vector-ref res (car args)))
+            (set! args (cdr args))))

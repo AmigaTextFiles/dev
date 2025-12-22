@@ -1,0 +1,593 @@
+Here's a list of changes I had to make to non-machine-dependent source
+files of dmake:
+
+
+The first "real" change was made to function.c. This was necessary
+because SAS/C didn't provide UNIX-style functions with which stdout is
+redirected to file in function.c. As the UNIX implementation with
+dup() and close() is more or less a hack (in my opinion), I didn't see
+any point in writing my own dup(). In the Amiga port the redirection
+is done by changing the AmigaDOS filehandle of stdout. This is more or
+less a hack, too. :-)
+
+The second bigger change was done to runargv.c and sysintf.c as far as
+the starting of programs are concerned: here the Unix'ish forkv() was
+replaced by the AmigaOS calls System() and RunCommand().
+The proper handling of Amiga return codes was implemented through the
+introduction of a new standard macro variable "FAILAT", whose integer
+value is held in a new global variable 'FailatLevel' (it is not
+mentioned in vextern.h).
+
+The rest of the non-machine-dependent files in amiga-directory contain
+only cosmetic changes to stop the compiler from complaining. Here's a
+list of diffs, which I hope is self-explanatory:
+
+*** dmake.c     Tue Apr 07 07:45:06 1992
+--- amiga/dmake.c       Mon Aug 29 21:45:10 1994
+***************
+*** 90,95 ****
+--- 90,96 ----
+  #define _DEFINE_GLOBALS_ 1
+
+  #include "extern.h"
++ EXTERN int FailatLevel; /* Referenced in main() and Handle_result() */
+  #include "patchlvl.h"
+  #include "version.h"
+
+***************
+*** 113,125 ****
+  static char *sccid = "Copyright (c) 1990,1991 by Dennis Vadura";
+  static char _warn  = TRUE;            /* warnings on by default */
+
+! static        void    _do_VPATH();
+! static        void    _do_ReadEnvironment();
+  #if !defined(__GNUC__)
+  static  void    _do_f_flag ANSI((char, char *, char **));
+  #else
+  static  void    _do_f_flag ANSI((int, char *, char **));
+  #endif
+
+  PUBLIC void
+  main(argc, argv)
+--- 114,131 ----
+  static char *sccid = "Copyright (c) 1990,1991 by Dennis Vadura";
+  static char _warn  = TRUE;              /* warnings on by default */
+
+! static  void    _do_VPATH ANSI((void));
+! static  void    _do_ReadEnvironment ANSI((void));
+! static  void    _set_inc_depth ANSI((void));
+! static  void    errargs ANSI((char *, va_list));
+  #if !defined(__GNUC__)
+  static  void    _do_f_flag ANSI((char, char *, char **));
+  #else
+  static  void    _do_f_flag ANSI((int, char *, char **));
+  #endif
++ static  void    _set_string_var ANSI((char *, char *, int, char **));
++ static  void    _set_int_var ANSI((char *, char *, int, int *));
++ #define M_FLAG   M_DEFAULT | M_EXPANDED
+
+  PUBLIC void
+  main(argc, argv)
+***************
+*** 145,150 ****
+--- 151,165 ----
+     Create_macro_vars();
+     Catch_signals(Quit);
+
++    /* Amigas have a builtin shell */
++    _set_string_var("SHELL",        "AmigaOS",      M_DEFAULT, &Shell       );
++    _set_string_var("SHELLFLAGS",   "",             M_DEFAULT, &Shell_flags );
++    _set_string_var("GROUPSHELL",   "AmigaOS",      M_DEFAULT, &GShell      );
++    _set_string_var("GROUPFLAGS",   "",             M_DEFAULT, &GShell_flags);
++    _set_string_var("SHELLMETAS",   "|(),&<>][$\\", M_DEFAULT, &Shell_metas );
++    _set_string_var("GROUPSUFFIX",  "",             M_DEFAULT, &Grp_suff    );
++    _set_int_var   ("FAILAT",       "10",           M_DEFAULT, &FailatLevel );
++
+     Def_macro( "MAKECMD", Pname, M_PRECIOUS|M_NOEXPORT );
+     Pname = basename(Pname);
+
+***************
+*** 228,234 ****
+            case 'e': Get_env    = 'e';   break;
+            case 'E': Get_env    = 'E';   break;
+
+!           case 'V': Version();  Quit(NIL(CELL));  break;
+            case 'A': Def_macro("AUGMAKE", "y", M_EXPANDED); break;
+            case 'B': Def_macro(".NOTABS", "y", M_EXPANDED); break;
+            case 'i': Def_macro(".IGNORE", "y", M_EXPANDED); break;
+--- 243,249 ----
+              case 'e': Get_env    = 'e';   break;
+              case 'E': Get_env    = 'E';   break;
+
+!             case 'V': Version();  Quit();  break;
+              case 'A': Def_macro("AUGMAKE", "y", M_EXPANDED); break;
+              case 'B': Def_macro(".NOTABS", "y", M_EXPANDED); break;
+              case 'i': Def_macro(".IGNORE", "y", M_EXPANDED); break;
+***************
+*** 651,657 ****
+
+        vfprintf( stderr, fmt, args );
+        putc( '\n', stderr );
+!       if( errflg && !Continue ) Quit( NIL(CELL) );
+     }
+  }
+
+--- 666,672 ----
+
+        vfprintf( stderr, fmt, args );
+        putc( '\n', stderr );
+!       if( errflg && !Continue ) Quit();
+     }
+  }
+
+***************
+*** 712,721 ****
+  */
+  #if __STDC__ == 1 && !defined(__GNUC__)
+  void
+! Error(char *fmt, ...)
+  #else
+  #if defined(_MPW)
+! Error(char *fmt, va_alist)
+  va_dcl
+  #else
+  int
+--- 727,736 ----
+  */
+  #if __STDC__ == 1 && !defined(__GNUC__)
+  void
+! Warning(char *fmt, ...)
+  #else
+  #if defined(_MPW)
+! Warning(char *fmt, va_alist)
+  va_dcl
+  #else
+  int
+***************
+*** 799,805 ****
+     puts("    -X   - ignore #! lines at start of makefile");
+     }
+
+!    Quit(NIL(CELL));
+  }
+
+
+--- 814,820 ----
+     puts("    -X   - ignore #! lines at start of makefile");
+     }
+
+!    Quit();
+  }
+
+
+***************
+*** 816,818 ****
+--- 831,873 ----
+     for (p=Rule_tab;  *p != NIL(char);  p++)
+        printf("\t%s\n", *p);
+  }
++
++ /*
++ ** Define a string variables value, and set up the macro.
++ ** Copied from imacs.c
++ */
++ static void
++ _set_string_var(name, val, flag, var)
++ char *name;
++ char *val;
++ int  flag;
++ char **var;
++ {
++    HASHPTR hp;
++
++    hp = Def_macro(name, val, M_FLAG | flag);
++    hp->ht_flag |= M_VAR_STRING | M_MULTI;
++    hp->MV_SVAR  = var;
++    *var         = hp->ht_value;
++ }
++
++
++ /*
++ ** Define an integer variable value, and set up the macro.
++ ** Copied from imacs.c
++ */
++ static void
++ _set_int_var(name, val, flag, var)
++ char *name;
++ char *val;
++ int  flag;
++ int  *var;
++ {
++    HASHPTR hp;
++
++    hp = Def_macro(name, val, M_FLAG | flag);
++    hp->ht_flag |= M_VAR_INT | M_MULTI;
++    hp->MV_IVAR  = var;
++    *var         = atoi(val);
++ }
++
+*** function.c  Fri Jan 24 05:27:00 1992
+--- amiga/function.c    Fri Dec 31 19:47:38 1999
+***************
+*** 255,273 ****
+
+     return(res);
+  }
+
+-
+  static char *
+  _exec_shell( data )
+  char *data;
+  {
+     extern char *tempnam();
+     static int  nestlevel = 0;
+-    static int  org_out;
+     static int  bsize;
+     static char *buffer;
+     static char *tmpnm;
+     static FILE *tmp;
+
+     int wait     = Wait_for_completion;
+     uint16 vflag = Verbose;
+--- 255,280 ----
+
+     return(res);
+  }
++ #ifndef _DCC
++ #include <ios1.h>               /* For stdout and stdin redirection */
++ #else
++ #include <stdio.h>
++ #include <fcntl.h>
++ #endif
+
+  static char *
+  _exec_shell( data )
+  char *data;
+  {
++ #ifndef _DCC
+     extern char *tempnam();
++ #endif
+     static int  nestlevel = 0;
+     static int  bsize;
+     static char *buffer;
+     static char *tmpnm;
+     static FILE *tmp;
++    long stdout_hnd;     /* Temporary file handle */
+
+     int wait     = Wait_for_completion;
+     uint16 vflag = Verbose;
+***************
+*** 299,311 ****
+
+     if( nestlevel == 0 ) {
+        tmpnm   = tempnam(NIL(char),"mk");
+!       org_out = dup(1);
+
+        if( (tmp = fopen(tmpnm, "w+")) == NIL(FILE) )
+         Open_temp_error( tmpnm, cname.ht_name );
+
+!       close(1);
+!       dup( fileno(tmp) );
+
+        bsize  = (Buffer_size < BUFSIZ)?BUFSIZ:Buffer_size;
+        buffer = MALLOC(bsize,char);
+--- 306,327 ----
+
+     if( nestlevel == 0 ) {
+        tmpnm   = tempnam(NIL(char),"mk");
+! #ifndef _DCC
+!       stdout_hnd = chkufb(fileno(stdout))->ufbfh; /* AmigaOS handle of stdout */
+! #else
+!       stdout_hnd = __getfh(fileno(stdout))->fd_Fh;
+! #endif
+
+        if( (tmp = fopen(tmpnm, "w+")) == NIL(FILE) )
+           Open_temp_error( tmpnm, cname.ht_name );
+
+!       /* Assign stdout to tmp */
+!       fflush(stdout);
+! #ifndef _DCC
+!       chkufb(fileno(stdout))->ufbfh = chkufb(fileno(tmp))->ufbfh;
+! #else
+!       __getfh(fileno(stdout))->fd_Fh = __getfh(fileno(tmp))->fd_Fh;
+! #endif
+
+        bsize  = (Buffer_size < BUFSIZ)?BUFSIZ:Buffer_size;
+        buffer = MALLOC(bsize,char);
+***************
+*** 337,349 ****
+
+     fclose(tmp);
+     if( nestlevel == 0 ) {
+        Remove_file(tmpnm);
+-       close(1);
+-       dup(org_out);
+-       close(org_out);
+        FREE(tmpnm);
+        FREE(buffer);
+     }
+     else {
+        if( (tmp = fopen(tmpnm, "w+")) == NIL(FILE) )
+         Open_temp_error( tmpnm, cname.ht_name );
+--- 353,369 ----
+
+     fclose(tmp);
+     if( nestlevel == 0 ) {
++       fflush(stdout);
++ #ifndef _DCC
++       chkufb(fileno(stdout))->ufbfh = stdout_hnd; /* Revert stdout */
++ #else
++       __getfh(fileno(stdout))->fd_Fh = stdout_hnd;
++ #endif
+        Remove_file(tmpnm);
+        FREE(tmpnm);
+        FREE(buffer);
+     }
++ #if 0
+     else {
+        if( (tmp = fopen(tmpnm, "w+")) == NIL(FILE) )
+           Open_temp_error( tmpnm, cname.ht_name );
+***************
+*** 351,356 ****
+--- 371,377 ----
+        close(1);
+        dup( fileno(tmp) );
+     }
++ #endif
+
+     return(res);
+  }
+*** getinp.c    Tue Apr 07 07:47:46 1992
+--- amiga/getinp.c      Thu Feb 10 20:39:26 1994
+***************
+*** 311,317 ****
+        strcat( space, brk   );
+     }
+     else {
+!       space[0] = 0xff;            /* a char we know will not show up      */
+        space[1] = 0;
+     }
+
+--- 311,317 ----
+        strcat( space, brk   );
+     }
+     else {
+!       space[0] = (char)0xff;  /* a char we know will not show up      */
+        space[1] = 0;
+     }
+
+*** infer.c     Fri Jan 24 05:27:20 1992
+--- amiga/infer.c       Thu Feb 10 20:31:14 1994
+***************
+*** 52,58 ****
+  static void     _free_dfas   ANSI((DFALINKPTR));
+  static int      _count_dots  ANSI((char *));
+  static char *   _build_name  ANSI((char *, char *, char *));
+! static void     _free_icells ANSI(());
+  static ICELLPTR   _union_iset  ANSI((ICELLPTR, ICELLPTR));
+  static ICELLPTR   _add_iset    ANSI((ICELLPTR,ICELLPTR,CELLPTR,DFALINKPTR,
+                                     CELLPTR,int,int,char *,char *, int));
+--- 52,58 ----
+  static void     _free_dfas   ANSI((DFALINKPTR));
+  static int      _count_dots  ANSI((char *));
+  static char *   _build_name  ANSI((char *, char *, char *));
+! static void     _free_icells ANSI((void));
+  static ICELLPTR   _union_iset  ANSI((ICELLPTR, ICELLPTR));
+  static ICELLPTR   _add_iset    ANSI((ICELLPTR,ICELLPTR,CELLPTR,DFALINKPTR,
+                                     CELLPTR,int,int,char *,char *, int));
+*** make.c      Tue May 10 04:33:56 1994
+--- amiga/make.c        Fri May 27 04:34:16 1994
+***************
+*** 54,64 ****
+
+  static  void    _drop_mac ANSI((HASHPTR));
+  static  void    _set_recipe ANSI((char*, int));
+! static  void    _set_tmd ANSI(());
+  static  void    _append_file ANSI((STRINGPTR, FILE*, char*, int));
+  static  LINKPTR _dup_prq ANSI((LINKPTR));
+  static  char*   _prefix ANSI((char *, char *));
+  static  char*   _pool_lookup ANSI((char *));
+
+  #define RP_GPPROLOG     0
+  #define RP_RECIPE       1
+--- 54,65 ----
+
+  static  void    _drop_mac ANSI((HASHPTR));
+  static  void    _set_recipe ANSI((char*, int));
+! static  void    _set_tmd ANSI((void));
+  static  void    _append_file ANSI((STRINGPTR, FILE*, char*, int));
+  static  LINKPTR _dup_prq ANSI((LINKPTR));
+  static  char*   _prefix ANSI((char *, char *));
+  static  char*   _pool_lookup ANSI((char *));
++ static  int     _explode_graph ANSI((CELLPTR, LINKPTR, CELLPTR));
+
+  #define RP_GPPROLOG     0
+  #define RP_RECIPE       1
+***************
+*** 355,360 ****
+--- 356,362 ----
+      *   2. It is a target and Force is set
+      *   3. It's set of recipe lines has changed.
+      */
++
+     if(    Check_state(cp, _recipes, NUM_RECIPES )
+        || (cp->ce_time < otime)
+        || ((cp->ce_flag & F_TARGET) && Force)
+***************
+*** 524,530 ****
+
+
+
+! int
+  _explode_graph( cp, parent, setdirroot )/*
+  ==========================================
+     Check to see if we have made the node already.  If so then don't do
+--- 526,532 ----
+
+
+
+! static int
+  _explode_graph( cp, parent, setdirroot )/*
+  ==========================================
+     Check to see if we have made the node already.  If so then don't do
+*** sysintf.c   Tue Apr 07 07:46:18 1992
+--- amiga/sysintf.c     Mon Aug 29 21:53:49 1994
+***************
+*** 73,78 ****
+--- 73,79 ----
+  */
+
+  #include "extern.h"
++ EXTERN int FailatLevel; /* Referenced in main() and Handle_result() */
+  #include "sysintf.h"
+
+  /*
+***************
+*** 91,97 ****
+--- 92,100 ----
+  char **member;
+  {
+     struct stat buf;
++ #ifndef _DCC
+     time_t seek_arch();
++ #endif
+
+     if( member != NIL(char *) )
+        Fatal("Library symbol names not supported");
+***************
+*** 147,153 ****
+--- 150,158 ----
+  PUBLIC time_t
+  Do_time()
+  {
++ #ifndef _DCC
+     extern time_t time();
++ #endif
+     return (time((time_t*)0));
+  }
+
+***************
+*** 255,261 ****
+  Read_env_string(ename)
+  char *ename;
+  {
+! #if !defined(_MSC_VER) || _MSC_VER < 600
+     extern char *getenv();
+  #endif
+     return( getenv(ename) );
+--- 260,266 ----
+  Read_env_string(ename)
+  char *ename;
+  {
+! #if !defined(_DCC) && (!defined(_MSC_VER) || _MSC_VER < 600)
+     extern char *getenv();
+  #endif
+     return( getenv(ename) );
+***************
+*** 298,305 ****
+  # define make_env()
+  # define free_env()
+  #else
+!    void make_env();
+!    void free_env();
+  #endif
+
+     make_env();
+--- 303,310 ----
+  # define make_env()
+  # define free_env()
+  #else
+!    void make_env ANSI((void));
+!    void free_env ANSI((void));
+  #endif
+
+     make_env();
+***************
+*** 325,334 ****
+  Catch_signals(fn)
+  void (*fn)();
+  {
+     if( signal(SIGINT, SIG_IGN) != SIG_IGN )
+!       signal( SIGINT, fn );
+     if( signal(SIGQUIT, SIG_IGN) != SIG_IGN )
+!       signal( SIGQUIT, fn );
+  }
+
+
+--- 330,343 ----
+  Catch_signals(fn)
+  void (*fn)();
+  {
++ #ifdef SIGINT
+     if( signal(SIGINT, SIG_IGN) != SIG_IGN )
+!       signal( SIGINT, (void(*)(int))fn );
+! #endif
+! #ifdef SIGQUIT
+     if( signal(SIGQUIT, SIG_IGN) != SIG_IGN )
+!       signal( SIGQUIT, (void(*)(int))fn );
+! #endif
+  }
+
+
+***************
+*** 339,348 ****
+--- 348,361 ----
+  PUBLIC void
+  Clear_signals()
+  {
++ #ifdef SIGINT
+     if( signal(SIGINT, SIG_IGN) != SIG_IGN )
+        signal( SIGINT, SIG_DFL );
++ #endif
++ #if SIGQUIT
+     if( signal(SIGQUIT, SIG_IGN) != SIG_IGN )
+        signal( SIGQUIT, SIG_DFL );
++ #endif
+  }
+
+
+***************
+*** 360,366 ****
+--- 373,381 ----
+     Pname = (argc == 0) ? DEF_MAKE_PNAME : argv[0];
+     sprintf( buf, "dmake-%d-root", GETPID );
+     Root = Def_cell( buf );
++ #ifndef _DCC
+     tzset();
++ #endif
+  }
+
+
+***************
+*** 429,435 ****
+--- 444,452 ----
+  char *suff;
+  int  op;
+  {
++ #ifndef _DCC
+     extern char *tempnam();
++ #endif
+
+     *path = _strjoin( tempnam(NIL(char), "mk"), suff, -1, TRUE );
+     Def_macro( "TMPFILE", *path, M_MULTI|M_EXPANDED );
+***************
+*** 558,566 ****
+  {
+     status = ((status&0xff)==0 ? status>>8
+            : (status & 0xff)==SIGTERM ? -1
+!           : (status & 0x7f)+128);
+
+!    if( status )
+        if( !abort_flg ) {
+         fprintf( stderr, "%s:  Error code %d, while making '%s'",
+                  Pname, status, target->ce_fname );
+--- 575,583 ----
+  {
+     status = ((status&0xff)==0 ? status>>8
+              : (status & 0xff)==SIGTERM ? -1
+!             : (status & 0x7f));
+
+!    if( status < 0 || status >= FailatLevel )
+        if( !abort_flg ) {
+           fprintf( stderr, "%s:  Error code %d, while making '%s'",
+                    Pname, status, target->ce_fname );

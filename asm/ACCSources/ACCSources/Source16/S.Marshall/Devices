@@ -1,0 +1,364 @@
+***************************************************************************
+*                                                                         *
+*            Devices and Desires (with apologies to P. D. James)          *
+*                                                                         *
+*                    A brief look at Amiga Exec Devices                   *
+*                                                                         *
+*                           By Steve Marshall                             *
+*                                                                         *
+***************************************************************************
+
+  The purpose of this article is to  give  the assembly programmer a little
+insight into the use of Exec  devices.  If  you have ever tried to read the
+device chapters in the RKM Lib  and  Devices  you  will  no doubt have been
+frustrated to find all the examples  written  in 'C'. I hope, over the next
+few months to give the assembler programmer  enough information to at least
+get the devices up and running. What  I  shall not be doing is delving deep
+into the devices themselves  and  showing  how  to write your own device (a
+future article maybe). This is the  first  part  and is intended to give an
+overall look at devices, what they are  and some ground rules in their use.
+Over the next few months  I  shall  look  at  each  device in turn and give
+examples, useful subroutines etc.  The  first device specific article (next
+month) is on the audio device.  Why  the  audio  device  ? Well two reasons
+really. Firstly it's alphabetically  correct  to  start here. Secondly it's
+probably the most non standard, bug ridden,  awkward son of a - well that's
+enough of that. Suffice it to say  that  Commodore  themselves fell foul of
+some of this devices problems. The  early  RKM Libs and Devices manual (the
+white one) audio  device  examples  were  incorrect.  Even  today the 'Say'
+command seems to cause problems for  correctly  written  programs. Also the
+audio device cannot be called with the  more usual DoIO, SendIO routines in
+the exec library.
+
+What is a Device
+~~~~~~~~~~~~~~~~
+  Good question. In Amiga terms a  device  is  one of three things. We have
+exec, DOS, and logical devices. For the sake of clarity I will give a brief
+description of each.
+
+DOS - these are the ones which act  as  interface between exec devices  and
+AmigaDOS . These include PRT:, SER:, RAW:, CON: etc.
+
+Logical - these devices are the ones that  you allocate with the CLI assign
+command. They also include the default ones such as C:, LIBS:, L:, S: etc.
+
+
+Exec - this is the type of  device  which  we  will be looking at. The exec
+device is a software  interface  between  the  various  types of IO and the
+machine. This software is designed to give us 'device independent IO'. This
+is rather a fanciful notion, after  all,  it  is not realistic to expect to
+address the audio hardware the same  as  you  would the printer. This being
+said these  devices  come  about  as  close  as  it  is  possible  to  get.
+Unfortunately for us it's not that close.
+  An exec device (hereby referred  to  as  device)  is  not dissimilar to a
+library. That is it  contains  a  jump  table  and  a  number of associated
+routines.  Indeed some devices, most notably  the console, may be used like
+libraries to obtain some of their functions. With a device there are only a  
+few entries in the jump table, and all  devices start the jump table with a
+number of standard routines. These are :
+ 
+            OffSet
+  AbortIO    (-36)
+  BeginIO    (-30)
+  
+  ExtFunc    (-24)
+  Expunge    (-18)
+  Close      (-12)
+  Open       (-6)
+
+  The first two are the  standard  device  functions  and the last four are
+standard for both libraries and  devices.  The  standard library and device
+routines are  opening,  closing  and  removing  the  device.  We  would not
+normally call these  ourselves.  These  would  be called for us by the exec
+calls OpenDevice() and  CloseDevice().  But  wait I hear you say, that only
+leaves two standard device routines.  Yep!  that's right, most devices only
+have the two calls. So how do  we  get  the  device to do all the different
+things that we want to do. To answer this  we must first look at IO blocks,
+what they are and how to use them.
+
+The IO Request Block.
+~~~~~~~~~~~~~~~~~~~~~
+  All devices require an  IO  request  block,  indeed  we  cant even open a
+device without one. The IO block is simply  a block of memory which is used
+to communicate with the device.  It  is  in  fact  just a message structure
+extended to suit our needs. When the device has completed the IO request it 
+replies this message back to us  (unless  we  have set the IOF_QUICK flag -
+more on this later). First things  first,  not  all devices use the same IO
+Request structure. To help you  use  the  devices  I  have gathered all the
+information on IO request structure sizes together and listed them below :
+
+
+IORequest =                              OFFSET
+io_Message  = a message structure        ( 0 )
+io_Device   = pointer to the device      ( 20 ) initialized by OpenDevice()
+io_Unit     = pointer to a unit struct   ( 24 ) initialized by OpenDevice()
+io_Command  = the command to be executed ( 28 )
+io_Flags    = mainly used for quick IO   ( 30 )
+io_Error    = error returned by device   ( 31 )
+Total Size  = (32 bytes)
+
+IOStdReq
+io_Message  = a message structure        ( 0 )
+io_Device   = pointer to the device      ( 20 ) initialized by OpenDevice()
+io_Unit     = pointer to a unit struct   ( 24 ) initialized by OpenDevice()
+io_Command  = the command to be executed ( 28 )
+io_Flags    = mainly used for quick IO   ( 30 )
+io_Error    = error returned by device   ( 31 )
+io_Actual   = Bytes transferred          ( 32 ) returned by device
+io_Length   = Bytes to be transferred    ( 36 ) set by us
+io_Data     = pointer to buffer          ( 40 )
+io_Offset   = device specific offset     ( 44 )
+Total Size  = (48 bytes)
+
+  As you can see  the  IOStdReq  is  just  an  extension  of  the IORequest
+structure. Similary  all  the  devices  use  either  od these structures or
+extensions of either. Listed  below  are  the  structures  required by each
+device, the size and size symbol for each structure.
+ 
+Device Specific Requirements
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+***************************************************************************
+|      Device       |    IOB Type    |    IOB Size    |  IOB Size Symbol  |  
+***************************************************************************
+|  audio.device     |     IOAudio    |    68 Bytes    |     ioa_SIZEOF    |
+---------------------------------------------------------------------------
+| clipboard.device  |    IOClipReq   |    52 Bytes    |    iocr_SIZEOF    |
+---------------------------------------------------------------------------
+|  console.device   |    IOStdReq    |    48 Bytes    |     IOSTD_SIZE    |
+---------------------------------------------------------------------------
+|  gameport.device  |    IOStdReq    |    48 Bytes    |     IOSTD_SIZE    |
+---------------------------------------------------------------------------
+|   input.device    |    IOStdReq    |    48 Bytes    |     IOSTD_SIZE    |
+---------------------------------------------------------------------------
+|  keyboard.device  |    IOStdReq    |    48 Bytes    |     IOSTD_SIZE    |
+---------------------------------------------------------------------------
+|  narrator.device  |       NDI      |    44 Bytes    |      NDI_SIZE     |
+---------------------------------------------------------------------------
+|  parallel.device  |    IOExtPar    |    62 Bytes    |   IOEXTPar_SIZE   |
+---------------------------------------------------------------------------
+|  printer.device   |    IOStdReq    |    48 Bytes    |     IOSTD_SIZE    |
+|                   |    IODRPReq    |    62 Bytes    |    iodrpr_SIZEOF  |
+|                   |   IOPRTCmdReq  |    38 Bytes    |    iocpr_SIZEOF   | 
+---------------------------------------------------------------------------
+|   serial.device   |    IOEXTSER    |    82 Bytes    |    IOEXTSER_SIZE  |
+---------------------------------------------------------------------------
+|   timer.device    |   TIMEREQUEST  |    40 Bytes    |      IOTV_SIZE    |
+---------------------------------------------------------------------------
+| trackdisk.device  |    IOStdReq    |    48 Bytes    |     IOSTD_SIZE    |
+|                   |    IOEXTTD     |    56 Bytes    |     IOTD_SIZE     |
+---------------------------------------------------------------------------
+
+How do we initialize the IO Block ?
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+  For most devices  we  need  only  initialize  the  message  part  of  the
+structure. To do this we first  need  to  create  a message port for the IO
+Block. Note that the same port could  be  used for a number of different IO
+Blocks or even devices. To simplify the  source code of the examples I have
+decided to use the ARP libraries CreatePort()  routine. If you wish to find
+out about how to create  message  ports  then  refer  to previous ACC disks
+where at least two CreatePort routines  have been published. Once we have a
+reply port we can  allocate  the  memory  required  for  the IO Block. This
+memory can be in either Chip or Fast  memory  but you should specify Public
+memory. No that we have both the replyport and the IOBlock we can link them
+together.  We  do  this  by  putting  a  pointer  (the  value  returned  by
+CreatePort) into the  IOBlock's  message  structure.  This goes in the long
+word 14 bytes from the start of the structure. The proper message offset is
+MN_REPLYPORT. To recap we would use code something like :
+
+       move.l    d0,MN_REPLYPORT(a5)
+
+  Where do contains the  pointer  to  the  replyport  and  a5  contains the
+address of the IO Block.  Next  we  should  set  the  messages node type to
+NT_MESSAGE. This would be done with something like :
+
+       move.b    #NT_MESSAGE,LN_TYPE(a5)
+
+  With some devices (i.e. audio device) we may also wish to set up the node
+priority. Finally we should set  up  the  message  length by placing the IO
+Block size (the value used to allocate the memory) in the message MN_LENGTH
+field. This would look something like :
+
+       move.w    #IOSTD_SIZE,MN_LENGTH(a5)
+
+Note:
+  Some devices require extra fields  initializing  (i.e.  Console and Audio
+devices). I will cover these in more detail later.
+
+Opening the Device
+~~~~~~~~~~~~~~~~~~
+  Now we have an IOBlock fully initialized and ready to use we can open the
+device. This is done with the exec call OpenDevice() (suprizingly). This is
+called as shown below :
+
+   Error = OpenDevice(Name,Unit,IOBlock,Flags)
+    d0                 a0   d0    a1     d1
+ 
+  Where name is a pointer to a  'C'  type  string  (null  terminated) which
+contains the name of the device to be opened.
+  Unit is the unit number. For example  the  trackdisk  device uses this to
+select the drive number, i.e. 0 = df0: 1 = df1: etc.
+  IOBlock is a pointer to our IOBlock.
+  Flags give additional information to  the  device and is device specific.
+For most devices this should be zero.
+
+  After we call OpenDevice() we should check the error in d0. If d0 returns  
+null then all is O.K. Otherwise the device failed to open.
+
+Creating Extra IOBlocks
+~~~~~~~~~~~~~~~~~~~~~~~
+  Now that the  device  is  open  we  can  create  additional  IOBlocks  if
+required. To do this we simply  allocate  enough memory for another IOBlock
+and then copy the data across from  the  IOBlock which was used to open the
+device. The reason for this is that  OpenDevice()  initializes  some of the
+fields in the IOBlock  when  it  opens  the  device.  At the very least you
+should copy across the IO_DEVICE and IO_UNIT fields.
+
+Calling the Device
+~~~~~~~~~~~~~~~~~~
+  To actually get the device to do  something  we must send commands to it.
+We do this by setting the io_Command field to the command required i.e.
+
+      move.w     #CMD_WRITE,IO_COMMAND(a5)
+
+  To get the device to carry this out we  must send the command. We usually
+do this with the exec calls :
+
+    Error = DoIO(IOBlock)
+      d0           a1
+
+  which does not return until the request has been satisfied or
+
+   SendIO(IOBlock)
+            a1
+
+  Which returns immediately. To  wait  for  a  command  to finish (which we
+called with SendIO) we could call 
+
+  Error = WaitIO(IOBlock)
+    d0             a1
+
+  Note: Calling SendIO() immediately  followed  by  WaitIO() is the same as
+calling DoIO().
+
+  To stop an IO request we can call AbortIO()  (the exec function). This is
+called as shown below :
+
+  Error = AbortIO(IOBlock)
+   d0               a1 
+
+  Some devices, most notable the audio device  require that we directly use
+the devices  BeginIO  and  AbortIO  routines.  You  may  remember  from the
+amiga.lib article that there is  a  routine  to  call BeginIO in amiga.lib.
+There is a couple of macros in the exec/io.i  file. They are called by name
+and take no arguments. You must  however  enter with the IOBlock address in
+register a1. The macro names are all upper case ie.
+
+    BEGINIO
+
+    ABORTIO
+
+  Basically all these macros do is  save  a6  on the stack, move the device
+pointer (from the  IOBlock)  into  a6,  jump  to  the correct routine, then
+restore a6.
+  Note that when you send commands to  a  device faster than it can process
+them the requests will be queued. A device can only handle one request at a 
+time. This is what is termed  a  single  threaded task. A good example of a
+single threaded task is the 1.2 - 1.3 workbench.  It can only deal with one
+thing at a time. That is the reason for all those sleepy pointers.
+  Note also that you must not change  anything  in the IOBlock or try to re
+use it until the device  has  finished  with  it. This is a common cause of
+program crashes.
+
+Standard Commands
+~~~~~~~~~~~~~~~~~
+  For all devices there are a set  of  standard  commands.  These provide a
+very basic set of IO commands. These commands are :
+
+CMD_CLEAR - ($0005)
+~~~~~~~~~~~~~~~~~~~
+  This command simply clears all the devices internal buffers.
+
+CMD_FLUSH - ($0008)
+~~~~~~~~~~~~~~~~~~~
+  Aborts all pending IO requests. All pending  requests will return with an
+error. Requests currently active are not effected.
+
+CMD_INVALID ($0000)
+~~~~~~~~~~~~~~~~~~~
+  Tells the device that we are sending an invalid command ?????. The device 
+will reply with the error  IOERR_NOCMD  indicating that this command is not
+supported. Is this confusing or what!
+
+CMD_NONSTD ($0009)
+~~~~~~~~~~~~~~~~~~
+  This is where the device specific commands start.
+
+CMD_READ ($0002)
+~~~~~~~~~~~~~~~~
+  Reads a specified number of bytes from  the devices internal buffers into
+the calling programs  buffer.  The  number  of  bytes  to be transferred is
+specified in the  IO_LENGTH  field  of  the  IOBlock.  The  number of bytes
+actually transferred is returned in the IO_ACTUAL field of the IOBlock.
+
+CMD_RESET ($0001)
+~~~~~~~~~~~~~~~~~
+  Aborts all pending IO requests  and  resets  the  device  to it's default
+configuration. Any related hardware is also reset.
+
+CMD_START ($0007)
+~~~~~~~~~~~~~~~~~
+  Restarts a device IO Request that was stopped using CMD_STOP.
+
+CMD_STOP ($0006)
+~~~~~~~~~~~~~~~~
+  This command stops the device from handling  any further IO Requests. The
+request current being executed will  be  stopped  at the first opportunity.
+Further requests will queue until the device  is restarted with the command
+CMD_START.
+
+CMD_UPDATE ($0004)
+~~~~~~~~~~~~~~~~~~
+  Forces the device to write out all  it's  internal  buffers to the actual
+device hardware (i.e. to disk)  making  sure  that all media is up to date.
+Not using this command is  a  common  reason  for  trackdisk  programs  not
+working properly.
+ 
+CMD_WRITE ($0003)
+~~~~~~~~~~~~~~~~~
+  Writes a specified number of bytes to the  device. The number of bytes to
+transfer is specified in the IO_LENGTH  field of the IOBlock. The number of
+bytes actually transferred is returned in the IO_ACTUAL field.
+
+Shortcuts - QuickIO
+~~~~~~~~~~~~~~~~~~~
+  There are occasions when it would be an  unacceptable overhead to have to
+mess around receiving messages from the  device. Because of this the system
+programmers gave us  an  alternative  method.  This  is  QuickIO,  which is
+specified by setting  the  IOF_QUICK  flag  in  the  IO_FLAGS  field of the
+IOBlock. When this  bit  is  set  the  device  will  perform  this  request
+immediately (if possible). If after  calling  BeginIO the IOF_QUICK flag is
+still set then the request has  already  been completed and no message will
+be sent to the  replyport.  Looking  for  a  message  could  result in your
+program entering an endless loop (and disappearing  up your own replyport),
+or causing your program to Wait() forever. If the IOF_QUICK flag is cleared
+after calling BeginIO the request has not been completed. A message will be
+sent to the IOBlocks replyport when  the  request has been completed. It is
+up to you to check for this and to  get  the  message fron the replyport if
+necessary. Note that the message is  the  IOBlock  itself (It starts with a
+message structure - remember ?). This makes  it relatively easy to find out
+which request has been completed.
+  To use QuickIO you really need to use the devices BeginIO routine. If you
+use the exec functions DoIO and  SendIO  then you will have no control over
+this flag. DoIO always sets this  flag  and  SendIO always clears it. It is
+because these commands write an  absolute  value  into IO_FLAGS that causes
+problems for devices like the audio device.
+
+  This has been a relatively brief look at  devices. Next time we will look
+at specific devices and get down to  writing  some code. At the end of this
+series I intend to write  a  run  time  device  support  library (if enough
+people are  interested).  This  will  contain  all  the  usual  CreatePort,
+DeletePort, CreateExtIO etc. It will also contain some more device specific
+stuff, perhaps even simple library  calls  to open each device. DOS library
+routines for reading and writing may also  be included. I would be grateful
+for any comments on this. See you next month ?
+
+             Steve Marshall

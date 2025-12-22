@@ -1,0 +1,771 @@
+DEFINITION MODULE Graphics;
+
+FROM SYSTEM IMPORT
+ ADDRESS,BITSET,BYTE,LONGSET,WORD;
+FROM Hardware IMPORT
+ bltnodePtr;
+FROM Exec IMPORT
+ Interrupt,Library,List,Message,MinList,Node,SignalSemaphore,
+ SignalSemaphorePtr,TaskPtr,UByte;
+
+TYPE
+ AnimCompPtr=POINTER TO AnimComp;
+ AnimObPtr=POINTER TO AnimOb;
+ AreaInfoPtr=POINTER TO AreaInfo;
+ BitMapPtr=POINTER TO BitMap;
+ BobPtr=POINTER TO Bob;
+ ClipRectPtr=POINTER TO ClipRect;
+ CollTablePtr=POINTER TO CollTable;
+ ColorMapPtr=POINTER TO ColorMap;
+ CopinitPtr=POINTER TO Copinit;
+ CopInsPtr=POINTER TO CopIns;
+ CopListPtr=POINTER TO CopList;
+ CprlistPtr=POINTER TO Cprlist;
+ DBufPacketPtr=POINTER TO DBufPacket;
+ GelsInfoPtr=POINTER TO GelsInfo;
+ IsrvstrPtr=POINTER TO IsrvstrPtr;
+ LayerPtr=POINTER TO Layer;
+ LayerInfoPtr=POINTER TO LayerInfo;
+ RasInfoPtr=POINTER TO RasInfo;
+ RastPortPtr=POINTER TO RastPort;
+ RectanglePtr=POINTER TO Rectangle;
+ RegionPtr=POINTER TO Region;
+ RegionRectanglePtr=POINTER TO RegionRectangle;
+ SimpleSpritePtr=POINTER TO SimpleSprite;
+ TextAttrPtr=POINTER TO TextAttr;
+ TextFontPtr=POINTER TO TextFont;
+ TmpRasPtr=POINTER TO TmpRas;
+ UCopListPtr=POINTER TO UCopList;
+ ViewPtr=POINTER TO View;
+ ViewPortPtr=POINTER TO ViewPort;
+ VSpritePtr=POINTER TO VSprite;
+
+ Rectangle=RECORD
+  minX: INTEGER;
+  minY: INTEGER;
+  maxX: INTEGER;
+  maxY: INTEGER;
+ END;
+ Layer=RECORD
+  front: LayerPtr;
+  back: LayerPtr;
+  clipRect: ClipRectPtr;
+  rp: RastPortPtr;
+  bounds: Rectangle;
+  reserved: ARRAY [0..3] OF BYTE;
+  priority: CARDINAL;
+  flags: CARDINAL;
+  superBitMap: BitMapPtr;
+  superClipRect: ClipRectPtr;
+  window: ADDRESS;
+  scrollX: INTEGER;
+  scrollY: INTEGER;
+  cr: ClipRectPtr;
+  cr2: ClipRectPtr;
+  crnew: ClipRectPtr;
+  superSaveClipRects: ClipRectPtr;
+  cliprects: ClipRectPtr;
+  layerInfo: LayerInfoPtr;
+  lock: SignalSemaphore;
+  reserved3: ARRAY [0..7] OF BYTE;
+  clipRegion: RegionPtr;
+  saveClipRects: RegionPtr;
+  reserved2: ARRAY [0..21] OF BYTE;
+  damageList: RegionPtr;
+ END;
+ ClipRect=RECORD
+  next: ClipRectPtr;
+  prev: ClipRectPtr;
+  lobs: LayerPtr;
+  bitMap: BitMapPtr;
+  bounds: Rectangle;
+  p1: ClipRectPtr;
+  p2: ClipRectPtr;
+  reserved: LONGINT;
+  flags: LONGINT;
+ END;
+
+CONST
+ needsNoConcealedRasters=01H; 
+ isLessX=1;
+ isLessY=2;
+ isGrtrX=4;
+ isGrtrY=8;
+(* collision procedures are called as proc(gelptr,collMask); *)
+ borderHit=0;
+ topHit=1;
+ bottomHit=2;
+ leftHit=4;
+ rightHit=8;
+
+CONST
+(* CopIns.opCode *)
+ move=0;
+ wait=1;
+ next=2;
+(* flags for CopIns.opCode *)
+ sht=14;
+ lof=15;
+
+TYPE
+ CopIns=RECORD
+  CASE opCode: CARDINAL OF
+  | move:
+   destAddr: INTEGER;
+   destData: INTEGER;
+  | wait:
+   vWaitPos: INTEGER;
+   hWaitPos: INTEGER;
+  | next:
+   nxtlist: CopListPtr;
+  END;
+ END;
+ Cprlist=RECORD
+  next: CprlistPtr;
+  start: ADDRESS;
+  maxCount: INTEGER;
+ END;
+ CopList=RECORD
+  next: CopListPtr;
+  copList: CopListPtr;
+  viewPort: ViewPortPtr;
+  copIns: CopInsPtr;
+  copPtr: CopInsPtr;
+  copLStart: ADDRESS;
+  copSStart: ADDRESS;
+  count: INTEGER;
+  maxCount: INTEGER;
+  dyOffset: INTEGER;
+ END;
+ UCopList=RECORD
+  next: UCopListPtr;
+  firstCopList: CopListPtr;
+  copList: CopListPtr;
+ END;
+ Copinit=RECORD
+  diagstrt: ARRAY [0..3] OF CARDINAL;
+  sprstrtup: ARRAY [0..(2*8*2)+2+(2*2)+2-1] OF CARDINAL;
+  sprstop: ARRAY [0..1] OF CARDINAL;
+ END;
+
+CONST
+(* display control register bplcon0,see <display.h> *)
+ interlace=04H;
+ pf2pri=40H;
+ colorOn=200H;
+ dblpf=400H;
+ holdnmodify=800H;
+ m640=08000H;
+ plnCntMsk=07H;
+ plnCntShft=12;
+
+ fineScroll=0FH;
+ fineScrollShift=04H;
+ fineScrollMask=0FH;
+ vrtclPos=01FFH;
+ vrtclPosShift=07H;
+ horizPos=07FH;
+ dftchMask=0FFH;
+ vposrlof=08000H;
+
+ ringtrigger=01H;
+ anfracsize=06H;
+ animhalf=020H;
+
+ b2Norm=0;
+ b2Swap=1;
+ b2Bobber=2;
+
+TYPE
+ VSpriteFlags=(vsprite,saveBack,overlay,mustDraw,vf4,vf5,vf6,vf7,backSaved,
+  bobUpdate,gelGone,vsOverflow);
+ VSpriteFlagSet=SET OF VSpriteFlags;
+ VSprite=RECORD
+  nextVSprite: VSpritePtr;
+  prevVSprite: VSpritePtr;
+  drawPath: VSpritePtr;
+  clearPath: VSpritePtr;
+  oldY: INTEGER;
+  oldX: INTEGER;
+  flags: VSpriteFlagSet;
+  y: INTEGER;
+  x: INTEGER;
+  height: INTEGER;
+  width: INTEGER;
+  depth: INTEGER;
+  meMask: BITSET;
+  hitMask: BITSET;
+  imageData: ADDRESS;
+  borderLine: ADDRESS;
+  collMask: ADDRESS;
+  sprColors: ADDRESS;
+  vsBob: BobPtr;
+  planePick: UByte;
+  planeOnOff: UByte;
+ END;
+ BobFlags=(saveBob,bobIsComp,bf2,bf3,bf4,bf5,bf6,bf7,bWaiting,bDrawn,bobsAway,
+  bobNix,savePreserve,outStep);
+ BobFlagSet=SET OF BobFlags;
+ Bob=RECORD
+  flags: BobFlagSet;
+  saveBuffer: ADDRESS;
+  imageShadow: ADDRESS;
+  before: BobPtr;
+  after: BobPtr;
+  bobVSprite: VSpritePtr;
+  bobComp: AnimCompPtr;
+  dBuffer: DBufPacketPtr;
+ END;
+ AnimComp=RECORD
+  flags: INTEGER;
+  timer: INTEGER;
+  timeSet: INTEGER;
+  nextComp: AnimCompPtr;
+  prevComp: AnimCompPtr;
+  nextSeq: AnimCompPtr;
+  prevSeq: AnimCompPtr;
+  animCRoutine: ADDRESS;
+  yTrans: INTEGER;
+  xTrans: INTEGER;
+  headOb: AnimObPtr;
+  animBob: BobPtr;
+ END;
+ AnimOb=RECORD
+  nextOb: AnimObPtr;
+  prevOb: AnimObPtr;
+  clock: LONGINT;
+  anOldY: INTEGER;
+  anOldX: INTEGER;
+  anY: INTEGER;
+  anX: INTEGER;
+  yVel: INTEGER;
+  xVel: INTEGER;
+  yAccel: INTEGER;
+  xAccel: INTEGER;
+  ringYTrans: INTEGER;
+  ringXTrans: INTEGER;
+  animORoutine: ADDRESS;
+  headComp: AnimCompPtr;
+ END;
+ DBufPacket=RECORD
+  bufY: INTEGER;
+  bufX: INTEGER;
+  bufPath: VSpritePtr;
+  bufBuffer: ADDRESS;
+ END;
+ CollTable=RECORD
+  collPtrs: ARRAY [0..15] OF ADDRESS
+ END;
+ BitMap=RECORD
+  bytesPerRow: CARDINAL;
+  rows: CARDINAL;
+  flags: UByte;
+  depth: UByte;
+  pad: CARDINAL;
+  planes: ARRAY [0..7] OF ADDRESS;
+ END;
+ GfxBase=RECORD
+  libNode: Library;
+  actiView: ViewPtr;
+  copinit: CopinitPtr;
+  cia: ADDRESS;
+  blitter: ADDRESS;
+  loFlist: ADDRESS;
+  shFlist: ADDRESS;
+  blthd: bltnodePtr;
+  blttl: bltnodePtr;
+  bsblthd: bltnodePtr;
+  bsblttl: bltnodePtr;
+  vbsrv: Interrupt;
+  timsrv: Interrupt;
+  bltsrv: Interrupt;
+  textFonts: List;
+  defaultFont: TextFontPtr;
+  modes: BITSET;
+  vBlank: UByte;
+  debug: BYTE;
+  beamSync: INTEGER;
+  bplcon0: BITSET;
+  spriteReserved: UByte;
+  bytereserved: BYTE;
+  flags: BITSET;
+  blitLock: INTEGER;
+  blitNest: INTEGER;
+  blitWaitQ: List;
+  blitOwner: TaskPtr;
+  waitQ: List;
+  displayFlags: BITSET;
+  simpleSprites: ADDRESS;
+  maxDisplayRow: CARDINAL;
+  maxDisplayColumn: CARDINAL;
+  normalDisplayRows: CARDINAL;
+  normalDisplayColumns: CARDINAL;
+  normalDPMX: CARDINAL;
+  normalDPMY: CARDINAL;
+  lastChanceMemory: SignalSemaphorePtr;
+  lcMptr: ADDRESS;
+  microsPerLine: CARDINAL;
+  reserved: ARRAY [0..1] OF LONGCARD;
+ END;
+ GfxBasePtr=POINTER TO GfxBase;
+
+CONST
+(* GfxBase.displayFlags *)
+ ntsc=1;
+ genloc=2;
+ pal=4;
+
+ blitMsgFault=4;
+
+TYPE
+ Isrvstr=RECORD
+  node: Node;
+  iptr: IsrvstrPtr;
+  code: ADDRESS;
+  ccode: ADDRESS;
+  carg: INTEGER;
+ END;
+ LayerFlags=(layerSimple,layerSmart,layerSuper,lf3,layerUpdating,lf5,
+  layerBackdrop,layerRefresh,layerClipRectsLost);
+ LayerFlagSet=SET OF LayerFlags;
+ LayerInfo=RECORD
+  layer: LayerPtr;
+  lp: LayerPtr;
+  obs: LayerPtr;
+  freeClipRects: MinList;
+  lock: SignalSemaphore;
+  head: List;
+  longreserved: LONGINT;
+  flags: LayerFlagSet;
+  count: UByte;
+  lockLayersCount: UByte;
+  layerInfoExtraSize: CARDINAL;
+  blitbuff: ADDRESS;
+  layerInfoExtra: ADDRESS;
+ END;
+
+CONST
+ lmnRegion=-1;
+ newLayerInfoCalled=01H;
+ alertLayersNoMem=083010000H;
+
+TYPE
+ AreaInfo=RECORD
+  vctrTbl: ADDRESS;
+  vctrPtr: ADDRESS;
+  flagTbl: ADDRESS;
+  flagPtr: ADDRESS;
+  count: INTEGER;
+  maxCount: INTEGER;
+  firstX: INTEGER;
+  firstY: INTEGER;
+ END;
+ TmpRas=RECORD
+  rasPtr: ADDRESS;
+  size: LONGINT;
+ END;
+ GelsInfo=RECORD
+  sprRsrvd: BYTE;
+  flags: BYTE;
+  gelHead: VSpritePtr;
+  gelTail: VSpritePtr;
+  nextLine: ADDRESS;
+  lastColor: ADDRESS;
+  collHandler: CollTablePtr;
+  leftmost: INTEGER;
+  rightmost: INTEGER;
+  topmost: INTEGER;
+  bottommost: INTEGER;
+  firstBlissObj: ADDRESS;
+  lastBlissObj: ADDRESS;
+ END;
+ DrawModes=(dm0,complement,inversvid);
+ DrawModeSet=SET OF DrawModes;
+ FontStyles=(underlined,bold,italic,extended);
+ FontStyleSet=SET OF FontStyles;
+ FontFlags=(romFont,diskFont,revPath,tallDot,wideDot,proportional,
+  designed,removed);
+ FontFlagSet=SET OF FontFlags;
+ RastPortFlags=(firstDot,oneDot,dBuffer,areaOutline,rpf4,noCrossFill,
+  rpf6,rpf7,rpf8);
+ RastPortFlagSet=SET OF RastPortFlags;
+ RastPort=RECORD
+  layer: LayerPtr;
+  bitMap: BitMapPtr;
+  areaPtrn: ADDRESS;
+  tmpRas: TmpRasPtr;
+  areaInfo: AreaInfoPtr;
+  gelsInfo: GelsInfoPtr;
+  mask: UByte;
+  fgPen: UByte;
+  bgPen: UByte;
+  aOlPen: UByte;
+  drawMode: DrawModeSet;
+  areaPtSz: UByte;
+  linPatCnt: UByte;
+  dummy: BYTE;
+  flags: RastPortFlagSet;
+  linePtrn: CARDINAL;
+  x: INTEGER;
+  y: INTEGER;
+  minterms: ARRAY [0..7] OF BYTE;
+  penWidth: INTEGER;
+  penHeight: INTEGER;
+  font: TextFontPtr;
+  algoStyle: FontStyleSet;
+  txFlags: FontFlagSet;
+  txHeight: CARDINAL;
+  txWidth: CARDINAL;
+  txBaseline: CARDINAL;
+  txSpacing: INTEGER;
+  user: ADDRESS;
+  longreserved: ARRAY [0..1] OF LONGINT;
+  wordreserved: ARRAY [0..6] OF WORD;
+  reserved: ARRAY [0..7] OF BYTE;
+ END;
+
+CONST
+ jam1=DrawModeSet{};
+ jam2=DrawModeSet{dm0};
+ spriteAttached=080H;
+ normalFont=FontStyleSet{};
+
+TYPE
+ RegionRectangle=RECORD
+  next: RegionRectanglePtr;
+  prev: RegionRectanglePtr;
+  bounds: Rectangle;
+ END;
+ Region=RECORD
+  bounds: Rectangle;
+  regionRectangle: RegionRectanglePtr;
+ END;
+ SimpleSprite=RECORD
+  posctldata: ADDRESS;
+  height: CARDINAL;
+  x: CARDINAL;
+  y: CARDINAL;
+  num: CARDINAL;
+ END;
+ TextAttr=RECORD
+  name: ADDRESS;
+  ySize: CARDINAL;
+  style: FontStyleSet;
+  flags: FontFlagSet;
+ END;
+ TextFont=RECORD
+  message: Message;
+  ySize: CARDINAL;
+  style: FontStyleSet;
+  flags: FontFlagSet;
+  xSize: CARDINAL;
+  baseline: CARDINAL;
+  boldSmear: CARDINAL;
+  accessors: CARDINAL;
+  loChar: CHAR;
+  hiChar: CHAR;
+  charData: ADDRESS;
+  modulo: CARDINAL;
+  charLoc: ADDRESS;
+  charSpace: ADDRESS;
+  charKern: ADDRESS;
+ END;
+ ColorMap=RECORD
+  flags: UByte;
+  type: UByte ;
+  count: CARDINAL;
+  colorTable: ADDRESS;
+ END;
+ ViewModes=(vm0,genlocVideo,lace,vm3,vm4,vm5,pfba,extraHalfbrite,genlocAudio,
+  vm9,dualpf,ham,vm12,vpHide,sprites,hires);
+ ViewModeSet=SET OF ViewModes;
+ ViewPort=RECORD
+  next: ViewPortPtr;
+  colorMap: ColorMapPtr;
+  dspIns: CopListPtr;
+  sprIns: CopListPtr;
+  clrIns: CopListPtr;
+  uCopIns: UCopListPtr;
+  dWidth: INTEGER;
+  dHeight: INTEGER;
+  dxOffset: INTEGER;
+  dyOffset: INTEGER;
+  modes: ViewModeSet;
+  reserved: CARDINAL;
+  rasInfo: RasInfoPtr;
+ END;
+ View=RECORD
+  viewPort: ViewPortPtr;
+  lofCprList: CprlistPtr;
+  shfCprList: CprlistPtr;
+  dyOffset: INTEGER;
+  dxOffset: INTEGER;
+  modes: ViewModeSet;
+ END;
+ RasInfo=RECORD
+  next: RasInfoPtr;
+  bitMap: BitMapPtr;
+  rxOffset: INTEGER;
+  ryOffset: INTEGER;
+ END;
+
+PROCEDURE AddAnimOb(anOb: AnimObPtr;
+                    anKey: ADDRESS;
+                    rp: RastPortPtr);
+PROCEDURE AddBob(Bob: BobPtr;
+                 rp: RastPortPtr);
+PROCEDURE AddFont(textFont: TextFontPtr);
+PROCEDURE AddVSprite(vs: VSpritePtr;
+                     rp: RastPortPtr);
+PROCEDURE AllocRaster(width: CARDINAL;
+                      height: CARDINAL): ADDRESS;
+PROCEDURE AndRectRegion(region: RegionPtr;
+                        rectangle: RectanglePtr);
+PROCEDURE AndRegionRegion(region1: RegionPtr;
+                          region2: RegionPtr): BOOLEAN;
+PROCEDURE Animate(anKey: ADDRESS; rp: RastPortPtr);
+PROCEDURE AreaDraw(rp: RastPortPtr;
+                   x: INTEGER;
+                   y: INTEGER): LONGINT;
+PROCEDURE AreaEllipse(rp: RastPortPtr;
+                      cX: INTEGER;
+                      cY: INTEGER;
+                      a: INTEGER;
+                      b: INTEGER): LONGINT;
+PROCEDURE AreaEnd(rp: RastPortPtr): LONGINT;
+PROCEDURE AreaMove(rp: RastPortPtr;
+                   x: INTEGER;
+                   y: INTEGER): LONGINT;
+PROCEDURE AskFont(rp: RastPortPtr;
+                  textAttr: TextAttrPtr);
+PROCEDURE AskSoftStyle(rp: RastPortPtr): FontStyleSet;
+PROCEDURE AttemptLockLayerRom(layer: LayerPtr): BOOLEAN;
+PROCEDURE BltBitMap(srcBitMap: BitMapPtr;
+                    srcX: INTEGER;
+                    srcY: INTEGER;
+                    dstBitMap: BitMapPtr;
+                    dstX: INTEGER;
+                    dstY: INTEGER;
+                    sizeX: INTEGER;
+                    sizeY: INTEGER;
+                    minterm: BYTE;
+                    mask: BYTE;
+                    tempA: ADDRESS): LONGCARD;
+PROCEDURE BltBitMapRastPort(srcbm: BitMapPtr;
+                            srcX: INTEGER;
+                            srcY: INTEGER;
+                            destRp: RastPortPtr;
+                            destX: INTEGER;
+                            destY: INTEGER;
+                            sizeX: INTEGER;
+                            sizeY: INTEGER;
+                            minterm: BYTE);
+PROCEDURE BltClear(memBlock: ADDRESS;
+                   bytecount: LONGCARD;
+                   flags: LONGCARD);
+PROCEDURE BltMaskBitMapRastPort(srcbm: BitMapPtr;
+                                srcX: INTEGER;
+                                srcY: INTEGER;
+                                destRp: RastPortPtr;
+                                destX: INTEGER;
+                                destY: INTEGER;
+                                sizeX: INTEGER;
+                                sizeY: INTEGER;
+                                minterm: BYTE;
+                                bltmask: ADDRESS);
+PROCEDURE BltPattern(rp: RastPortPtr;
+                     mask: ADDRESS;
+                     xl: INTEGER;
+                     yl: INTEGER;
+                     maxX: INTEGER;
+                     maxY: INTEGER;
+                     bytecnt: INTEGER);
+PROCEDURE BltTemplate(srcTemplate: ADDRESS;
+                      srcX: INTEGER;
+                      srcMod: INTEGER;
+                      rp: RastPortPtr;
+                      dstX: INTEGER;
+                      dstY: INTEGER;
+                      sizeX: INTEGER;
+                      sizeY: INTEGER);
+PROCEDURE CBump(c: UCopListPtr);
+PROCEDURE ChangeSprite(vp: ViewPortPtr;
+                       s: SimpleSpritePtr;
+                       newdata: ADDRESS);
+PROCEDURE ClearEOL(rp: RastPortPtr);
+PROCEDURE ClearRectRegion(region: RegionPtr;
+                          rectangle: RectanglePtr): LONGINT;
+PROCEDURE ClearRegion(region: RegionPtr);
+PROCEDURE ClearScreen(rp: RastPortPtr);
+PROCEDURE ClipBlit(src: RastPortPtr;
+                   srcX: INTEGER;
+                   srcY: INTEGER;
+                   dest: RastPortPtr;
+                   destX: INTEGER;
+                   destY: INTEGER;
+                   xSize: INTEGER;
+                   ySize: INTEGER;
+                   minterm: BYTE);
+PROCEDURE CloseFont(font: TextFontPtr);
+PROCEDURE CMove(c: UCopListPtr;
+                a: ADDRESS;
+                v: INTEGER);
+PROCEDURE CopySBitMap(layer: LayerPtr);
+PROCEDURE CWait(c: UCopListPtr;
+                v: INTEGER;
+                h: INTEGER);
+PROCEDURE DisownBlitter();
+PROCEDURE DisposeRegion(region: RegionPtr);
+PROCEDURE DoCollision(rp: RastPortPtr);
+PROCEDURE Draw(rp: RastPortPtr;
+               x: INTEGER;
+               y: INTEGER);
+PROCEDURE DrawEllipse(rp: RastPortPtr;
+                      cX: INTEGER;
+                      cY: INTEGER;
+                      a: INTEGER;
+                      b: INTEGER);
+PROCEDURE DrawGList(rp: RastPortPtr;
+                    vp: ViewPortPtr);
+PROCEDURE Flood(rp: RastPortPtr;
+                mode: LONGCARD;
+                x: INTEGER;
+                y: INTEGER): LONGINT;
+PROCEDURE FreeColorMap(colorMap: ColorMapPtr);
+PROCEDURE FreeCopList(coplist: CopListPtr);
+PROCEDURE FreeCprList(cprlist: CprlistPtr);
+PROCEDURE FreeGBuffers(anOb: AnimObPtr;
+                       rp: RastPortPtr;
+                       db: BOOLEAN);
+PROCEDURE FreeRaster(p: ADDRESS;
+                     width: CARDINAL;
+                     height: CARDINAL);
+PROCEDURE FreeSprite(pick: INTEGER);
+PROCEDURE FreeVPortCopLists(vp: ViewPortPtr);
+PROCEDURE GetColorMap(entries: LONGINT): ColorMapPtr;
+PROCEDURE GetGBuffers(anOb: AnimObPtr;
+                      rp: RastPortPtr;
+                      db: BOOLEAN): BOOLEAN;
+PROCEDURE GetRGB4(colorMap: ColorMapPtr;
+                  entry: LONGINT): LONGCARD;
+PROCEDURE GetSprite(sprite: SimpleSpritePtr;
+                    pick: INTEGER): INTEGER;
+(*PRIVATE*) PROCEDURE GraphicsReserved1(): LONGINT;
+(*PRIVATE*) PROCEDURE GraphicsReserved2(): LONGINT;
+PROCEDURE InitArea(VAR areainfo: AreaInfo;
+                   buffer: ADDRESS;
+                   maxvectors: INTEGER);
+PROCEDURE InitBitMap(VAR bm: BitMap;
+                     depth: INTEGER;
+		     width: INTEGER;
+                     height: INTEGER);
+PROCEDURE InitGels(head: VSpritePtr;
+                   tail: VSpritePtr;
+                   gInfo: GelsInfoPtr);
+PROCEDURE InitGMasks(anOb: AnimObPtr);
+PROCEDURE InitMasks(vs: VSpritePtr);
+PROCEDURE InitRastPort(VAR rp: RastPort);
+PROCEDURE InitTmpRas(VAR tmpras: TmpRas;
+                     buffer: ADDRESS;
+                     size: LONGINT);
+PROCEDURE InitView(VAR view: View);
+PROCEDURE InitVPort(VAR vp: ViewPort);
+PROCEDURE LoadRGB4(vp: ViewPortPtr;
+                   colors: ADDRESS;
+                   count: INTEGER);
+PROCEDURE LoadView(view: ViewPtr);
+PROCEDURE LockLayerRom(layer: LayerPtr);
+PROCEDURE MakeVPort(view: ViewPtr;
+                    viewport: ViewPortPtr);
+PROCEDURE Move(rp: RastPortPtr;
+               x: INTEGER;
+               y: INTEGER);
+PROCEDURE MoveSprite(vp: ViewPortPtr;
+                     sprite: SimpleSpritePtr;
+                     x: INTEGER;
+                     y: INTEGER);
+PROCEDURE MrgCop(view: ViewPtr);
+PROCEDURE NewRegion(): RegionPtr;
+PROCEDURE OpenFont(textAttr: TextAttrPtr): TextFontPtr;
+PROCEDURE OrRectRegion(region: RegionPtr;
+                       rectangle: RectanglePtr): LONGINT;
+PROCEDURE OrRegionRegion(region1: RegionPtr;
+                         region2: RegionPtr): LONGINT;
+PROCEDURE OwnBlitter();
+PROCEDURE PolyDraw(rp: RastPortPtr;
+                   count: INTEGER;
+                   array: ADDRESS);
+PROCEDURE QBlit(bp: bltnodePtr);
+PROCEDURE QBSBlit(bsp: bltnodePtr);
+PROCEDURE ReadPixel(rp: RastPortPtr;
+                    x: INTEGER;
+                    y: INTEGER): LONGINT;
+PROCEDURE RectFill(rp: RastPortPtr;
+                   xMin: INTEGER;
+                   yMin: INTEGER;
+                   xMax: INTEGER;
+                   yMax: INTEGER);
+PROCEDURE RemFont(textFont: TextFontPtr);
+PROCEDURE RemIBob(bob: BobPtr;
+                  rp: RastPortPtr;
+                  vp: ViewPortPtr);
+PROCEDURE RemVSprite(vs: VSpritePtr);
+PROCEDURE ScrollRaster(rp: RastPortPtr;
+                       dx: INTEGER;
+                       dy: INTEGER;
+                       xMin: INTEGER;
+                       yMin: INTEGER;
+                       xMax: INTEGER;
+                       yMax: INTEGER);
+PROCEDURE ScrollVPort(vp: ViewPortPtr);
+PROCEDURE SetAPen(rp: RastPortPtr;
+                  pen: CARDINAL);
+PROCEDURE SetBPen(rp: RastPortPtr;
+                  pen: CARDINAL);
+PROCEDURE SetCollision(num: LONGCARD;
+                       routine: PROC;
+                       gInfo: GelsInfoPtr);
+PROCEDURE SetDrMd(rp: RastPortPtr;
+                  mode: DrawModeSet);
+PROCEDURE SetFont(rp: RastPortPtr;
+                  font: TextFontPtr);
+PROCEDURE SetRast(rp: RastPortPtr;
+                  pen: CARDINAL);
+PROCEDURE SetRGB4(vp: ViewPortPtr;
+                  n: CARDINAL;
+                  r: CARDINAL;
+                  g: CARDINAL;
+                  b: CARDINAL);
+PROCEDURE SetRGB4CM(cm: ColorMapPtr;
+                    n: CARDINAL;
+                    r: CARDINAL;
+                    g: CARDINAL;
+                    b: CARDINAL);
+PROCEDURE SetSoftStyle(rp: RastPortPtr;
+                       style: FontStyleSet;
+                       enable: FontStyleSet): FontStyleSet;
+PROCEDURE SortGList(rp: RastPortPtr);
+PROCEDURE SyncSBitMap(layer: LayerPtr);
+PROCEDURE Text(rp: RastPortPtr;
+               string: ADDRESS;
+               count: INTEGER);
+PROCEDURE TextLength(rp: RastPortPtr;
+                     string: ADDRESS;
+                     count: INTEGER): INTEGER;
+PROCEDURE UCopperListInit(copperList: UCopListPtr;
+                          num: LONGINT);
+
+PROCEDURE UnlockLayerRom(layer: LayerPtr);
+PROCEDURE VBeamPos(): LONGINT;
+PROCEDURE WaitBlit();
+PROCEDURE WaitBOVP(vp: ViewPortPtr);
+PROCEDURE WaitTOF();
+PROCEDURE WritePixel(rp: RastPortPtr;
+                     x: INTEGER;
+                     y: INTEGER): LONGINT;
+PROCEDURE XorRectRegion(region: RegionPtr;
+                        rectangle: RectanglePtr): LONGINT;
+PROCEDURE XorRegionRegion(region1: RegionPtr;
+                          region2: RegionPtr): LONGINT;
+
+END Graphics.

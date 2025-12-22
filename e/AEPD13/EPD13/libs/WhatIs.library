@@ -1,0 +1,263 @@
+einitialise les menus internes                       */
+    /**********************************************************************/
+    IF (test_main:=readfile())=FALSE THEN remakelist()
+    IF (test_main:=openinterface())<>ER_NONE THEN Raise(test_main)
+    REPEAT
+    IF (test_main:=wait4message())<>ER_NONE THEN Raise(test_main)
+    UNTIL type=IDCMP_CLOSEWINDOW
+    Raise(ER_NONE)
+EXCEPT
+    closeinterface()
+    IF new_screen.firstwindow<>0
+    Wait(Shl(1,sig))            /* wait until all windows closed */
+    ENDIF
+    IF sig THEN FreeSignal(sig)
+    IF save_list_chip THEN FreeMem(save_list_chip,total_chip)
+    IF com_list THEN Dispose(com_list)
+    IF stack_list THEN Dispose(stack_list)
+    IF tattr THEN Dispose(tattr)
+    IF new_screen THEN CloseS(new_screen)
+    SetDefaultPubScreen(NIL)    /* workbench is default again */
+    SELECT exception
+    CASE ER_NONE;   NOP
+    CASE ER_OPENLIB; WriteF('Impossible d\aouvir les libraries gadtools.library et/ou asl.libraries\n')
+    CASE ER_SCREEN;  WriteF('Ouverture de l\aécran impossible.\n')
+    CASE ER_VISUAL;  WriteF('Impossible de "locker" l\aécran.\n')
+    CASE ER_MENUS;   WriteF('Impossible de créer les menus.\n')
+    CASE ER_WINDOW;  WriteF('Impossible d\aouvrir la fenêtre.\n')
+    CASE ER_MEM;     WriteF('Mémoire insuufisante.\n')
+    CASE ER_BA;  WriteF('Bad Args !.\n')
+    DEFAULT;     NOP
+    ENDSELECT
+ENDPROC
+PROC openinterface() /*"openinterface()"*/
+/********************************************************************************
+ * Para     : NONE
+ * Return   : ER_NONE si tout c'est bien passé,sinon l'erreur produite.
+ * Description  : Ouvre les libraries,Initialise l'écran et la fenêtre.
+ *******************************************************************************/
+  IF (gadtoolsbase:=OpenLibrary('gadtools.library',37))=NIL THEN RETURN ER_OPENLIB
+  IF (aslbase:=OpenLibrary('asl.library',37))=NIL THEN RETURN ER_OPENLIB
+  IF (new_screen:=OpenScreenTagList(NIL,          /* get ourselves a public screen */
+     [SA_TOP,0,
+      /*SA_WIDTH,1820,*/              /* la taille de l'écran ne se fait qu'avec */
+      /*SA_HEIGHT,512,*/              /*                         */
+      SA_DEPTH,scr_depth,             /*                         */
+      SA_FONT,tattr,              /*                         */
+      SA_DISPLAYID,scr_type,          /* le champ SA_DISPLAYID           */
+      SA_PUBNAME,'NGLSCREEN',
+      SA_TITLE,'NasGûl Screen © 1994 NasGûl',
+      SA_PUBSIG,IF (sig:=AllocSignal(-1))=NIL THEN Raise(ER_SIG) ELSE sig,
+      SA_AUTOSCROLL,TRUE,
+      SA_TYPE,CUSTOMSCREEN+PUBLICSCREEN,
+      SA_OVERSCAN,OSCAN_TEXT,
+      /*SA_PENS,[0,1,1,2,1,3,1,0,2,1,2,1]:INT,    /* Répartition de couleurs WB 2.0 */*/
+      SA_PENS,all_pens,
+      SA_DETAILPEN,dp,            /* Detailpen */
+      SA_BLOCKPEN,bp,             /* BlockPen  */
+      0,0]))=NIL THEN RETURN ER_SCREEN
+  PubScreenStatus(new_screen,0)                 /* make it available */
+  SetDefaultPubScreen('NGLSCREEN')
+  SetPubScreenModes(SHANGHAI)
+  IF (visual:=GetVisualInfoA(new_screen,NIL))=NIL THEN RETURN ER_VISUAL
+  IF (menu:=CreateMenusA(save_list_chip,NIL))=NIL THEN RETURN ER_MENUS
+  IF LayoutMenusA(menu,visual,NIL)=FALSE THEN RETURN ER_MENUS
+  IF (wnd:=OpenW(0,0,new_screen.width,new_screen.height,$700,$900,'NGLWINDOW',new_screen,15,NIL))=NIL THEN RETURN ER_WINDOW
+  LoadRGB4(ViewPortAddress(wnd),palette,4)
+  IF SetMenuStrip(wnd,menu)=FALSE THEN RETURN ER_MENUS
+  Gt_RefreshWindow(wnd,NIL)
+  RETURN ER_NONE
+ENDPROC
+PROC closeinterface() /*"closeinterface()"*/
+/********************************************************************************
+ * Para     : NONE
+ * Return   : NONE
+ * Descritption : Ferme l'écran la fenêtre et les libraries.
+ *******************************************************************************/
+  IF wnd THEN ClearMenuStrip(wnd)
+  IF menu THEN FreeMenus(menu)
+  IF visual THEN FreeVisualInfo(visual)
+  IF wnd THEN CloseWindow(wnd)
+  IF gadtoolsbase THEN CloseLibrary(gadtoolsbase)
+  IF aslbase THEN CloseLibrary(aslbase)
+ENDPROC
+PROC wait4message() HANDLE /*"wait4message()"*/
+/********************************************************************************
+ * Para     : NONE
+ * Return   : ER_NONE ou l'erreur apparue lors d'un Rebuild (menus).
+ * Descritption : Surveille la fenêtre.
+ *******************************************************************************/
+  DEF mes:PTR TO intuimessage,ms
+  DEF ret=NIL,adr_menu:PTR TO menu,number
+  DEF fwin:PTR TO window
+  ms:=wnd.menustrip
+  REPEAT
+    type:=0
+    IF mes:=Gt_GetIMsg(wnd.userport)
+      type:=mes.class
+      IF type=IDCMP_MENUPICK
+      ret:=mes.code
+      IF ret<>$FFFF
+          adr_menu:=ItemAddress(ms,ret)
+          SELECT ret
+          CASE $F800 /*Infos*/
+              EasyRequestArgs(0,[20,0,0,'NasGûl Screen v0.0a','Ok'],0,NIL)
+          CASE $F820 /*newshell*/
+              Execute('Newshell',0,stdout)
+             all_pens:=[1,2,1,2,0,1,3,1,2,1,1,0]:INT
+          CASE $F840 /*rebuild*/
+              /*Raise(rebuildmenu(fichier_source))*/
+              Raise(rebuildmenu())
+          CASE $F860 /*quitter*/
+              fwin:=new_screen.firstwindow
+              IF fwin.nextwindow=0
+              IF EasyRequestArgs(0,[20,0,0,'Voulez-vous quitter ?','Oui|Non'],0,NIL) THEN type:=IDCMP_CLOSEWINDOW
+              ELSE
+              IF EasyRequestArgs(0,[20,0,0,'Attention plusieurs fenêtres sur l\aécran.\n Voulez-vous quitter ?','Oui|Non'],0,NIL) THEN type:=IDCMP_CLOSEWINDOW
+              ENDIF
+          DEFAULT
+              number:=executemenu(ms,adr_menu)
+          ENDSELECT
+      ENDIF
+      ELSEIF type=IDCMP_REFRESHWINDOW
+    Gt_BeginRefresh(wnd)
+    Gt_EndRefresh(wnd,TRUE)
+    type:=0
+      ELSEIF type<>IDCMP_CLOSEWINDOW
+    type:=0
+      ENDIF
+      Gt_ReplyIMsg(mes)
+    ELSE
+      Wait(-1)
+    ENDIF
+  UNTIL type
+  Raise(ER_NONE)
+EXCEPT
+    RETURN exception
+ENDPROC
+PROC readfile() /*"readfile()"*/
+/********************************************************************************
+ * Para     : NONE
+ * Return   : TRUE si tout c'est bien passé,sion FALSE
+ * Descritption : Ouvre le fichier de config et le traite ligne par ligne.
+ *******************************************************************************/
+  DEF len,a,adr,buf,handle,flen=TRUE,long,pas
+  DEF my_string[256]:STRING,p=0,ff[256]:STRING
+  DEF my_menu:PTR TO newmenu,test_parsing=NIL
+  /*****************************************/
+  /* Stockage du fichier source dans buf   */
+  /*****************************************/
+  IF (flen:=FileLength(fichier_source))=-1 THEN RETURN FALSE
+  IF (buf:=New(flen+1))=NIL THEN RETURN FALSE
+  IF (handle:=Open(fichier_source,1005))=NIL THEN RETURN FALSE
+  len:=Read(handle,buf,flen)
+  Close(handle)
+  IF len<1 THEN RETURN FALSE
+  adr:=buf
+  /***********/
+  /* Lecture */
+  /***********/
+  FOR a:=0 TO len-1
+    test_parsing:=NIL
+    IF buf[a]=10                /* Retour chariot (on traite le fichier par ligne) */
+    IF a-p<>0               /* si la ligne n'est pas vide ..*/
+        StringF(my_string,'\s',adr)     /* stockage de la ligne dans ff */
+        ff:=String(EstrLen(my_string))
+        StrCopy(ff,my_string,a-p)
+        IF (test_parsing:=parse(ff))=FALSE  /* parsing de ff */
+        Dispose(buf)
+        RETURN FALSE
+        ENDIF
+    ENDIF
+    p:=a+1
+    adr:=buf+a+1
+    ENDIF
+  ENDFOR
+  Dispose(buf)                            /* libére la mémoire buffer du fichier_source */
+  ListAdd(save_list,[0,0,0,0,0,0,0],7)    /* ajoute le END_MENU (0)  a la liste des menus */
+  long:=ListLen(save_list)                /* longueur de la  liste qui sert a calculer */
+  total_chip:=(long/7)*20                 /* la place que prennent les structures newmenu */
+  save_list_chip:=AllocMem(total_chip,2)  /* on alloue la place néssessaire */
+  pas:=save_list_chip
+  FOR buf:=0 TO long-1 STEP 7
+    my_menu:=New(SIZEOF newmenu)             /* création */
+    my_menu.type:=save_list[buf]         /* stockage */
+    my_menu.pad:=save_list[buf+1]        /*    "     */
+    my_menu.label:=save_list[buf+2]      /*    "     */
+    my_menu.commkey:=save_list[buf+3]    /*    "     */
+    my_menu.flags:=save_list[buf+4]      /*    "     */
+    my_menu.mutualexclude:=save_list[buf+5]  /*    "     */
+    my_menu.userdata:=save_list[buf+6]   /*    "     */
+    CopyMem(my_menu,pas,20)                  /* Copie en mémoire */
+    pas:=pas+20              /* incrémentation par pas de 20 */
+    Dispose(my_menu)                         /* libération du buffer my_menu */
+  ENDFOR
+  /*******************/
+  /* FIN DE LA COPIE */
+  /*******************/
+  Dispose(save_list)   /* libération de buffer */
+  RETURN TRUE
+ENDPROC
+PROC parse(ff) /*"parse(ff)"*/
+/********************************************************************************
+ * Para     : Chaine de caractères.
+ * Return   : TRUE si tout c'set bien passé,sion FALSE
+ * Description  : Stock la ligne dans save_list.
+ *******************************************************************************/
+    DEF ret_str[256]:STRING
+    DEF trim_str[256]:STRING
+    DEF parse_str[256]:STRING
+    DEF str_para[256]:STRING
+    trim_str:=TrimStr(ff)
+    IF StrCmp('#',ff,1)<>TRUE                                        /* si ce n'est pas un commentaire.. */
+    StrCopy(parse_str,trim_str,ALL)
+    IF StrCmp('SCREENMODE',parse_str,10)
+        initscreen(parse_str)
+        RETURN TRUE
+    ENDIF
+    IF StrCmp('PALETTE',parse_str,7)
+        initpalette(parse_str)
+        RETURN TRUE
+    ENDIF
+    IF StrCmp('MENU',parse_str,4)=TRUE                           /* Entrée Menu */
+        IF (ret_str:=found_para('MENU',parse_str))<>FALSE        /* Trouve le titre */
+        str_para:=String(EstrLen(ret_str))
+        StrCopy(str_para,ret_str,ALL)
+        ListAdd(save_list,[1,0,str_para,0,0,0,0],7)          /* stockage dans la liste */
+        ListAdd(com_list,[''],1)                             /* mise a jour des autres listes */
+        ListAdd(stack_list,[''],1)
+        Dispose(str_para)                                    /* libère mem */
+        ENDIF
+        RETURN TRUE                          /* LIGNE OK */
+    ELSEIF StrCmp('ITEM',parse_str,4)=TRUE                       /* Entrée Item */
+        IF (ret_str:=found_para('ITEM',parse_str))<>FALSE        /* Trouve le nom */
+        str_para:=String(EstrLen(ret_str))
+        StrCopy(str_para,ret_str,ALL)
+        ListAdd(save_list,[2,0,str_para],3)                  /* stockage dans la liste */
+        Dispose(str_para)
+        IF (ret_str:=found_para('KEY',parse_str))<>FALSE     /* Trouve le raccourci clavier */
+            str_para:=String(EstrLen(ret_str))
+            StrCopy(str_para,ret_str,ALL)
+            ListAdd(save_list,[str_para,0,0,0],4)            /* stockage dans la liste */
+            Dispose(str_para)                                /* libère la mémoire */
+        ELSE
+            ListAdd(save_list,[0,0,0,0],4)                   /* pas de raccourci clavier */
+        ENDIF
+        IF (ret_str:=found_para('COMM',parse_str))<>FALSE    /* trouve la commande associée */
+            str_para:=String(EstrLen(ret_str))
+            StrCopy(str_para,ret_str,ALL)
+            ListAdd(com_list,[str_para],1)                   /* stockage dans la liste */
+            Dispose(str_para)
+        ELSE
+            ListAdd(com_list,[''],1)                         /* item sans commande,donc c'est un item */
+        ENDIF                            /* avec subitem                  */
+        IF (ret_str:=found_para('STACK',parse_str))<>FALSE   /* trouve la stack */
+            str_para:=String(EstrLen(ret_str))
+            StrCopy(str_para,ret_str,ALL)
+            ListAdd(stack_list,[str_para],1)                 /* stockage dans la liste */
+            Dispose(str_para)
+        ELSE
+            ListAdd(stack_list,['4000'],1)                   /* stack par défault a 4000 */
+        ENDIF
+        ENDIF
+        RETURN TRUE                        

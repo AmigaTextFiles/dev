@@ -1,0 +1,167 @@
+@page
+
+#include <pac.h>
+
+@deftp {Data type} {struct pac_module *}
+A pointer to an incomplete type that represents an open PAC module returned
+from a successful call to @code{pac_open}.
+@end deftp
+
+@deftypefun int pac_init (long @var{rate}, int @var{bits}, int @var{channels});
+Initialize libpac.  Call this function before calling anything other than
+@code{pac_test} or @code{pac_exit}.
+
+The arguments specify the format of the audio data that libpac will generate.
+@var{rate} must be between @code{PAC_RATE_MIN} (currently 4000) and
+@code{PAC_RATE_MAX} (currently 48000), @var{bits} must be 8, 16, or 32 and
+@var{channels} must be 1 or 2.
+
+Return 0 on success or -1 on failure.  On failure, @code{errno} is set to
+@code{PAC_EALREADY} if the library is already initialized or @code{PAC_EINVAL}
+if an invalid argument was passed.
+@end deftypefun
+
+@deftypefun void pac_exit (void);
+Free all resources used by libpac.  This includes all modules opened by
+@code{pac_open} that has not been closed by @code{pac_close}.  You do not have
+to call @code{pac_init} before calling this function.
+@end deftypefun
+
+@deftypefun int pac_test (const char *@var{filename});
+Return true if @var{filename} seems to be a PAC module.  Note that even if
+this function returns true there's no guarantee that @code{pac_open} will
+succeed.  However, if this function fails so will @code{pac_open}.
+
+On failure, @code{errno} is set to @code{PAC_EFORMAT} if the file is not a PAC
+module.  Otherwise it is set to some system specific error code.  See
+@code{pac_perror} and @code{pac_strerror}.
+@end deftypefun
+
+@deftypefun {struct pac_module *} pac_open (const char *@var{filename});
+Open the PAC module pointed to by @var{filename}.  Return pointer to the open
+module on success or @code{NULL} on failure.  On failure, @code{errno} is set
+to @code{PAC_EFORMAT} if @var{filename} is not a valid PAC module.  Otherwise
+it is set to some system specific error code.
+
+If @code{pac_test} succeeded on @var{filename} but @code{pac_open} fails,
+try disabling @code{PAC_STRICT_FORMAT}.  See @code{pac_disable}.
+@end deftypefun
+
+@deftypefun void pac_close (struct pac_module *@var{module});
+Close @var{module} and free all resources allocated to it.  @var{module} may
+be @code{NULL}.
+@end deftypefun
+
+@deftypefun long pac_read (struct pac_module *@var{module}, void *@var{buffer}, long @var{size});
+Read at most @var{size} bytes from @var{module} into @var{buffer}.  @var{size}
+is rounded down to the nearest multiple of the frame size.  The frame size is
+the number of bytes required to represent one sample on all channels (one
+sample frame).  8-bit samples are stored as @code{signed char} and range from
+-127 to 127 while 16-bit samples are stored as @code{short} and range from
+-32767 to 32767.  32-bit samples are stored as @code{long} and are read
+directly (no volume reduction or clipping performed) from the internal mixing
+buffer.
+
+To read N seconds worth of audio you need to read @code{N * rate * frame_size}
+bytes.  E.g., if you called @code{pac_init (44100, 16, 2);} the frame size
+is @code{sizeof (short) * 2} bytes.  N seconds worth of audio data is then
+@code{N * 44100 * sizeof (short) * 2} bytes.
+
+On success, the function returns the number of bytes read into @var{buffer}.
+This may be 0 if @var{module} has reached the end or if @var{size} was less
+than the frame size.  It may be less than @var{size} if @var{size} was not a
+multiple of the frame size or @var{module} reached the end.  The function
+returns -1 on failure.
+@end deftypefun
+
+@deftypefun long pac_seek (struct pac_module *@var{module}, long @var{offset}, int @var{whence});
+Seek @var{offset} frames into @var{module}.  The @var{whence} argument can be
+one of @code{SEEK_SET}, @code{SEEK_CUR}, or @code{SEEK_END}.  They have the
+same meaning as in the ISO C @code{fseek} function.
+
+Return the new position on success.  Return -1 on failure and set @code{errno}
+to @code{PAC_ENOTSUP} if @var{module} is not seekable or @code{PAC_EINVAL} if
+@var{offset} is out of range or @var{whence} is invalid.  On failure the
+current position is left unchanged.
+@end deftypefun
+
+@deftypefun long pac_tell (const struct pac_module *@var{module});
+Return the current read position, in frames, for @var{module}.
+@end deftypefun
+
+@deftypefun int pac_eof (const struct pac_module *@var{module});
+Return true if @var{module} has reached the end.  This occur after reading
+the last sample frame.
+@end deftypefun
+
+@deftypefun long pac_length (const struct pac_module *@var{module});
+Return the total length, in frames, of @var{module}.  If the length cannot be
+determined or is too long, the function returns 0.  This also means that
+seeking is not available.
+@end deftypefun
+
+@deftypefun {const char *} pac_title (const struct pac_module *@var{module});
+Return a pointer to the @var{module} song title.  The length is at most
+@code{PAC_NAME_MAX} (currently 40), not including the null character.
+@end deftypefun
+
+@deftypefun void pac_enable (int @var{flags});
+Enable libpac options.  These options affect how modules are loaded by
+@code{pac_open} and read by @code{pac_read}.  @var{flags} can be any
+combination of the following:
+
+@table @samp
+@item PAC_GUS_EMULATION
+Emulate Gravis UltraSound hardware volume ramping.  It only affects version
+1.4 PAC modules using the note-off effect (Cxy).
+@item PAC_ENDLESS_SONGS
+Songs that do not explicitly stop will play forever.  @code{pac_length} always
+returns the length of the song as if this option was disabled.  This also
+means that @code{pac_tell} and @code{pac_seek} operate within this length.
+When the song ``wraps'', @code{pac_tell} will begin at 0 again.
+@item PAC_INTERPOLATION
+Linear interpolation for slightly better sample-rate conversion.
+@item PAC_VOLUME_REDUCTION
+Reduce the mixing volume to avoid excessive clipping.  This option is disabled
+when reading 32-bit data (see @code{pac_init} and @code{pac_read}).
+@item PAC_STRICT_FORMAT
+Fail @code{pac_open} if non-critical errors are encountered such as missing
+sounds, channel settings, invalid loop points, etc.  Disable this option to
+allow reading these files.  They may or may not play correctly.
+@item PAC_NOSOUNDS
+Enable this option to prevent @code{pac_open} from loading and allocating
+storage for the sounds.  You can still play the module but it will, ofcourse,
+be inaudible.
+@item PAC_MODE_DEFAULT
+The default mode, set by @code{pac_init}, is
+(PAC_GUS_EMULATION|PAC_INTERPOLATION|PAC_STRICT_FORMAT|PAC_VOLUME_REDUCTION).
+@end table
+
+You can call @code{pac_enable (0xff)} to enable all options.
+@end deftypefun
+
+@deftypefun int pac_isenabled (int @var{flags});
+Query libpac options.  Return true if one or more of the bits in @var{flags}
+is set.  See @code{pac_enable} for a description of the available options.
+@end deftypefun
+
+@deftypefun void pac_disable (int @var{flags});
+Disable libpac options.  See @code{pac_enable} for a description of the
+available options.
+
+You can call @code{pac_disable (0xff)} to disable all options.
+@end deftypefun
+
+@deftypefun void pac_perror (const char *@var{string});
+Print @var{string} to @code{stderr} followed by a colon and a blank, then a
+string describing the last error encountered.  If @var{string} is @code{NULL}
+or @var{*string} is @code{'\0'} then only the error string is printed.  If
+@code{errno} is not a libpac error code, the function calls @code{perror}.
+@end deftypefun
+
+@deftypefun {const char *} pac_strerror (int @var{errnum});
+Return pointer to string describing the error code passed in @var{errnum}.  If
+@var{errnum} is not a libpac error code, the function calls @code{strerror}.
+@end deftypefun
+
+@bye

@@ -1,0 +1,140 @@
+Short: Profiler for PowerUp ppc.library progs
+Author: Peter McGavin  (p.mcgavin@irl.cri.nz)
+Type: dev/misc
+Uploader: Peter McGavin  (p.mcgavin@irl.cri.nz)
+Version: 0.0
+
+
+
+                            ProfilePPC 0.0                   9 Jan 2000
+                            --------------
+
+
+This archive contains a simple profiler I wrote for PowerUp ELF object
+programs.  Both source code and binary of ProfilePPC are included.
+
+WARNING: IN ITS CURRENT STATE, PROFILEPPC WILL LIKELY HANG OR CRASH
+YOUR AMIGA EVENTUALLY.  If anyone knows how to fix the problems,
+described in the technical notes below, please let me know.
+
+A profiler gathers statistics for how long the program spends in each
+subroutine.  You can find out which subroutines need speeding up the
+most.
+
+This profiler works by sampling the PPC PC (program counter) at
+regular intervals while the program runs, like SAS/C's lprof/lstat.
+That is different to some other profilers which insert code in the
+prologue and epilogue of every subroutine.
+
+
+
+REQUIREMENTS:
+-------------
+
+You need an Amiga with a PPC, a recent version of ppc.library from
+Phase5 (I use version 46.28) and an ELF object program linked with
+ppc-amigaos-ld to profile.  Sorry, ProfilePPC doesn't seem to work
+under WarpOS with Frank Wille's emulation library.
+
+
+
+USAGE:
+------
+
+    ProfilePPC <program> <program-arguments...>
+
+ProfilePPC runs the ELF program with the given arguments.  While the
+program is running, it samples the PPC PC every 400ms.  After the
+program exits, ProfilePPC writes a table of statistics to stdout,
+including the name of each subroutine and the number of counts in that
+subroutine.  Only subroutines with at least 1 count are displayed.
+
+
+
+SOME MINOR GLITCHES:
+--------------------
+
+Only global symbols known by PowerUp are used.  Subroutines declared
+static may not show up.  Extra debugging information in the object
+file isn't used.  ProfilePPC invents names for the spaces between
+subroutines it knows about, so you might be able to work out where the
+PC is from the output, if you know the order your subroutines are
+linked.
+
+The sampling interval is large, 400ms, because otherwise the
+probability of a crash or hang is too great.  That means counts
+are low unless your program runs for a long time.
+
+The PPC program under test runs slower and less smoothly than usual
+because it is being stopped and restarted frequently.
+
+Only plain ELF object programs linked with ppc-amigaos-ld work.  And
+then only if they run as a single task.
+
+
+
+TECHNICAL NOTES:
+----------------
+
+When I started, I thought this would be a straightforward project.
+After all, PowerUp provides ppc.library calls to load an ELF object,
+read the symbol table, start the program asynchronously and sample the
+task's PC while it runs.
+
+However, sampling the task's PC turns out to be a major headache.  The
+obvious approach of:
+
+        PPCGetTaskAttrsTags (ppctask, PPCTASKINFOTAG_PC, &pc, TAG_END)
+
+doesn't work.  It always returns the same PC for a given task,
+something like 0xfff02058.
+
+My next approach was to try sampling the link register, LR, instead,
+with:
+
+        PPCGetTaskAttrsTags (ppctask, PPCTASKINFOTAG_LR, &pc, TAG_END)
+
+Since the PPC always stores the return address in the LR, I thought
+this might just work.  At first it seemed to.  But then I noticed it
+never returned an address in a CPU-intensive routine.  It seemed to
+return the address where the PPC task was last in a WAIT state.  The
+results aren't very useful.
+
+OK, ppc.library provides PPCStopTask() and PPCStartTask() to
+temporarily pause and restart a PPC task.  Furthermore, PPCStopTask()
+causes an exception.  The PC can be extracted from the exception
+message passed to a custom exception handler.
+
+So, that was my next attempt.  The 68k task calls PPCStopTask(), my
+exception handler extracts the PC and Signal()s the 68K task.  The
+68k task Wait()s for the signal, then calls PPCStartTask() with
+PPCTASKSTARTTAG_RUN.
+
+Oops, this crashed or hung immediately.  On the other hand, stepping
+through slowly in the CPR debugger, it seemed to work.  Run it fast
+and it hung again.
+
+After lots of experimentation, I found it seems to depend on the PPC
+task's state whether it works or not.  If the PPC task is doing
+something CPU-intensive, i.e, in RUN state, it seems to work just
+fine.  If it's doing I/O, i.e, in WAIT state, PPCStopTask() stops the
+task all right, but no exception occurs and the task can't be
+restarted.
+
+So, the way it works now is: 
+1) Get the PPC task's state;
+2) If it's in RUN state, get the PC with PPCStopTask()/PPCStartTask()
+   and exception handler;
+3) If it's in WAIT state, get the LR with PPCGetTaskAttrsTags()
+
+Although this seems to work most of the time, there is still a major
+problem.  If the PPC task's state changes from RUN to WAIT between
+getting the state and calling PPCStopTask(), the program hangs.
+
+Similarly, if the PPC task finishes between testing for whether it's
+finished and getting the state, PPCGetTaskAttrsTags() crashes.
+
+If you know how to get around these problems, please let me know.
+
+
+Peter McGavin.   (p.mcgavin@irl.cri.nz)

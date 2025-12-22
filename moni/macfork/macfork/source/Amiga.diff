@@ -1,0 +1,294 @@
+diff -Nur ../macforkorig/MacFork.cc ./MacFork.cc
+--- ../macforkorig/MacFork.cc	Wed Sep  1 00:36:12 1999
++++ ./MacFork.cc	Thu Sep 20 21:05:15 2001
+@@ -13,16 +13,21 @@
+ #include "arg.h"
+ 
+ #include "Resource.h"
+-#include <netinet/in.h>
++#ifdef AMIGA
++  #define ntohs(x) (x)
++#else
++  #include <netinet/in.h>
++#endif
+ 
+ const Int NO_ID = 65536;
+ 
+ static const Char *gDataTypeID = 0;
++static const Char *version = "$VER: macfork 1.0 (20.09.2001) Andrew Willmott";
+ 
+ Void SaveAsData(ResourceFile &resFile, ResShort id)
+ {
+ 	ResLong     dataLen;
+-	Char        *data;
++	Char        *data, *tmp;
+ 	FILE        *dataOut;
+ 	Char        filename[1024];
+ 	const Char  *name;	
+@@ -31,13 +36,19 @@
+ 
+ 	if (data)
+ 	{
+-		printf("saving %s %d as data\n", gDataTypeID, id);
+-
+ 		name = resFile.GetResourceName(gDataTypeID, id);
+ 		if (name)
+-			sprintf(filename, "%s.data", name);
++			sprintf(filename, "%s.%s", name, gDataTypeID);
+ 		else
+-			sprintf(filename, "id_%d.data", id);
++			sprintf(filename, "id_%d.%s", id, gDataTypeID);
++
++		for(tmp = filename; *tmp; ++tmp)	/* prevent illegal names */
++		{
++			if(*tmp == '/' || *tmp == ':')
++				*tmp = '_';
++		}
++
++		printf("saving %s %d as data file '%s'\n", gDataTypeID, id, filename);
+ 
+ 		dataOut = fopen(filename, "wb");
+ 
+@@ -198,7 +209,24 @@
+ 
+ Void IterateResFunc(ResourceFile &resFile, ResFunc resFunc, ResIDParam typeID, Int resID)
+ {
+-	if (resID == NO_ID)
++	if(!typeID)
++	{
++		Int	i, j, k;
++
++		k = resFile.GetNumTypes();
++		for(i = 0; i < k; ++i)
++		{
++			gDataTypeID = resFile.GetTypeName(i);
++			if(resID == NO_ID)
++			{
++				for (j = 0; j < resFile.GetNumResources(i); j++)
++					resFunc(resFile, resFile.resLists[i][j].id);
++			}
++			else
++				resFunc(resFile, resID);
++		}
++	}
++	else if (resID == NO_ID)
+ 	{
+ 		Int		i, j;
+ 
+@@ -216,7 +244,7 @@
+ {
+ 	ResourceFile    resFile;
+ 	Int				i;
+-	Int				pict, iconFam, pltt, resID = NO_ID;
++	Int				pict, iconFam, dumpall, pltt, resID = NO_ID;
+ 	const Char		*filename = 0, *listTypeID = 0;
+ 	Arg_form		*arg_format;
+ 
+@@ -233,6 +261,7 @@
+ 		"-pltt",	ARG_FLAG(&pltt),			"save pltt (as text)",
+ 		"-icon",	ARG_FLAG(&iconFam), 		"save icon (as .ppm files)",
+ 		"-dump %S", &gDataTypeID,				"save resource of specified type as data file",
++		"-dumpall",	ARG_FLAG(&dumpall),			"save all resources as data file",
+ 		"[%d]",		&resID,						"resource ID (if not given, all resources are selected)",
+ 
+ 		"", 	"",
+@@ -255,7 +284,11 @@
+ 	if (arg_parse_argv(argc, argv, arg_format) < 0)
+ 		exit(1);
+ 
+-	resFile.Open(filename);
++	if(!resFile.Open(filename))
++	{
++		printf("Could not open requested file!\n");
++		exit(1);
++	}
+ 
+ 	if (argc == 2)
+ 	{
+@@ -278,6 +311,8 @@
+ 		IterateResFunc(resFile, SavePalette, "pltt", resID);
+ 	else if (iconFam)
+ 		IterateResFunc(resFile, SaveIconFamily, "ICN#", resID);
++	else if (dumpall)
++		IterateResFunc(resFile, SaveAsData, 0, resID);
+ 	else if (gDataTypeID)
+ 		IterateResFunc(resFile, SaveAsData, gDataTypeID, resID);
+ 	else
+diff -Nur ../macforkorig/Resource.cc ./Resource.cc
+--- ../macforkorig/Resource.cc	Tue Aug 31 17:10:19 1999
++++ ./Resource.cc	Thu Sep 20 21:00:48 2001
+@@ -9,7 +9,13 @@
+ */
+ 
+ #include "Resource.h"
+-#include <netinet/in.h>
++#include <string.h>
++#ifdef AMIGA
++  #define ntohl(x) (x)
++  #define ntohs(x) (x)
++#else
++  #include <netinet/in.h>
++#endif
+ 
+ #define dprintf if (0) printf
+ 
+@@ -77,6 +83,11 @@
+ 	return(-1);
+ }
+ 
++Char *ResourceFile::GetTypeName(Int num)
++{
++	return resTypes[num].id;
++}
++
+ Int ResourceFile::GetResourceNumber(Int i, ResShort resID)
+ {
+ 	Int		j;
+@@ -162,7 +173,7 @@
+ 			ReadLong();
+ 			resPtr->name = 0;
+ 			
+-			resPtr->attr = resPtr->dataOffset >> 24;
++			resPtr->attr = (Char) (resPtr->dataOffset >> 24);
+ 			resPtr->dataOffset &= 0xFFFFFF;
+ 
+ 			dprintf("resource '%c%c%c%c' %d: name %d, data %d, attr %d\n", 
+@@ -190,24 +201,27 @@
+ 	}
+ }
+ 
+-Void ResourceFile::Open(const Char *filename)
++Int ResourceFile::Open(const Char *filename)
+ {
+ 	
+-	resFork = fopen(filename, "rb");
+-
+-	resHeader.dataOffset = ReadLong();
+-	resHeader.mapOffset = ReadLong();
+-	resHeader.dataLength = ReadLong();
+-	resHeader.mapLength = ReadLong();
+-
+-	dprintf("got header: data %d [%d] map %d [%d]\n", 
+-		resHeader.dataOffset,
+-		resHeader.dataLength,
+-		resHeader.mapOffset,
+-		resHeader.mapLength
+-	);
++	if((resFork = fopen(filename, "rb")))
++	{
++		resHeader.dataOffset = ReadLong();
++		resHeader.mapOffset = ReadLong();
++		resHeader.dataLength = ReadLong();
++		resHeader.mapLength = ReadLong();
++
++		dprintf("got header: data %d [%d] map %d [%d]\n", 
++			resHeader.dataOffset,
++			resHeader.dataLength,
++			resHeader.mapOffset,
++			resHeader.mapLength
++		);
+ 
+-	ReadMap();
++		ReadMap();
++		return 1;
++	}
++	return 0;
+ }
+ 
+ Void ResourceFile::PrintAllResources()
+@@ -226,7 +240,8 @@
+ 
+ Void ResourceFile::PrintResources(Int i)
+ {
+-	Int		j, len;
++	ResLong		len;
++	Int		j;
+ 	
+ 	for (j = 0; j < resTypes[i].items; j++)
+ 	{
+diff -Nur ../macforkorig/Resource.h ./Resource.h
+--- ../macforkorig/Resource.h	Tue Aug 31 06:28:10 1999
++++ ./Resource.h	Thu Sep 20 21:01:17 2001
+@@ -57,7 +57,7 @@
+ {
+ public:
+ 
+-	Void        Open(const Char *filename);
++	Int         Open(const Char *filename);
+ 	Void        Close();
+ 	            
+ 	Void		PrintAllResources();
+@@ -71,6 +71,7 @@
+ 
+ 	Int 		GetResourceNumber(Int i, ResShort resID);
+ 	Int 		GetTypeNumber(ResIDParam typeID);
++	Char * 		GetTypeName(Int num);
+ 
+ // internal
+ 	Void        ReadMap();
+diff -Nur ../macforkorig/SMakeFile ./SMakeFile
+--- ../macforkorig/SMakeFile	Thu Jan  1 01:00:00 1970
++++ ./SMakeFile	Thu Sep 20 20:33:33 2001
+@@ -0,0 +1,14 @@
++SCOPTS = RESOPT PARM=R NOSTKCHK STRMER SMALLCODE SMALLDATA NOICONS MEMSIZE=HUGE\
++OPTIMIZE OPTINLOCAL OPTSCHED OPTGO STRIPDEBUG LIB LIB:scm.lib
++
++macfork: MacFork.cc Resource.h arg.h Types.h mac-std-palette.txt resource.o arg.o
++  sc $(SCOPTS) LINK MacFork.cc Resource.o arg.o TO $@
++
++Resource.o: Resource.cc Resource.h Types.h
++  sc $(SCOPTS) Resource.cc
++
++arg.o: arg.c arg.h simple.h
++  sc $(SCOPTS) arg.c
++
++clean:
++  delete \#?.(o|lnk)
+diff -Nur ../macforkorig/arg.c ./arg.c
+--- ../macforkorig/arg.c	Tue Aug 31 16:49:19 1999
++++ ./arg.c	Thu Sep 20 20:33:34 2001
+@@ -24,7 +24,7 @@
+  * and Alvy Ray Smith's AARG at Pixar.
+  */
+ 
+-static char rcsid[] = "$Header: /usr/people/ajw/cvsroot/arg/arg.c,v 1.1 1998/01/21 04:57:18 ajw Exp $";
++/*static char rcsid[] = "$Header: /usr/people/ajw/cvsroot/arg/arg.c,v 1.1 1998/01/21 04:57:18 ajw Exp $";*/
+ 
+ #include <stdarg.h>
+ #include <ctype.h>
+@@ -65,10 +65,10 @@
+ 
+ static Arg_form *regf;		/* advancing form ptr used by arg_find_reg */
+ 
+-va_list arg_doc_parse();
++va_list arg_doc_parse(Arg_form *f, va_list ap);
+ int arg_format(Arg_form *f);
+ void arg_init(Arg_form *form);
+-int arg_done();
++int arg_done(void);
+ int arg_parse_form1(int ac, char **av, Arg_form *form);
+ int arg_do(int ac, char **av, Arg_form *f);
+ void av_print(char *str, int ac, char **av);
+diff -Nur ../macforkorig/arg.h ./arg.h
+--- ../macforkorig/arg.h	Tue Aug 31 16:49:39 1999
++++ ./arg.h	Thu Sep 20 20:33:34 2001
+@@ -22,7 +22,7 @@
+ 	short nparam; 		/* number of parameters to flag */
+ 	int parammask; 		/* bit i says ok to stop before param i, i=0..*/
+ 	int **param;  		/* parameter pointer list */
+-	int (*subr)(); 		/* subroutine to call for action (if any) */
++	int (*subr)(int, char **);	/* subroutine to call for action (if any) */
+ 	struct arg_form *sublist; 	/* subordinate list (if any) */
+ 	short rep; 			/* # times this flag repeated in arglist */
+ } Arg_form;
+@@ -56,7 +56,9 @@
+ 
+ extern int arg_debug, arg_doccol;
+ extern int arg_warning; 		/* print warnings about repeated flags? */
+-Arg_form *arg_to_form1(), *arg_find_flag(), *arg_find_reg();
++Arg_form *arg_to_form1(va_list ap);
++Arg_form *arg_find_flag(char *arg, Arg_form *form);
++Arg_form *arg_find_reg(void);
+ 
+ #ifdef __cplusplus
+ extern "C"

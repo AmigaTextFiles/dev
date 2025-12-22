@@ -1,0 +1,225 @@
+DEFINITION MODULE Threads;
+(*f*)
+(* Copyright (c) Robert Ennals
+** This provides tools for easy management of threads within Cyclone
+*)
+
+FROM DosD       IMPORT ProcessPtr, NpTags;
+FROM DosL       IMPORT CreateNewProc, Delay;
+FROM SYSTEM     IMPORT TAG, CAST, ADR, ADDRESS, REG, LONGSET;
+FROM ExecL      IMPORT Wait;
+FROM ExecD      IMPORT ExecBase,execBase, TaskPtr;
+FROM UtilityD   IMPORT tagUser;
+FROM Objects    IMPORT TObject;
+(*e*)
+
+TYPE
+(*f*)
+
+    StrPtr          = ADDRESS;
+    ThreadProc      = PROCEDURE;
+    ThreadProcPtr   = POINTER TO ThreadProc;
+    ThreadPtr       = POINTER TO Thread;
+    ThreadStreamPtr = POINTER TO ThreadStream;
+    ThreadNodePtr   = POINTER TO ThreadNode;
+    ThreadListPtr   = POINTER TO ThreadList;
+
+    ThreadNode      = RECORD
+	tn_Prev     : ThreadNodePtr;
+	tn_Next     : ThreadNodePtr;
+	tn_Thread   : ThreadPtr;
+    END;
+
+    ThreadList      = RECORD
+	head        : ThreadNodePtr;
+	tail        : ThreadNodePtr;
+    END;
+
+(*e*)
+
+(* ThreadStreams *)
+(*f*)
+
+    (* ThreadStreams can be used for passing data between threads
+    ** Eg in a spellchecker, one finds the errors and puts them in the stream
+    ** and another reads these errors and asks the user what to do
+    *)
+
+    ts_NodePtr  = POINTER TO ts_Node;
+    ts_Node     = RECORD
+	prev    : ts_NodePtr;
+	next    : ts_NodePtr;
+	data    : ADDRESS;
+    END;
+
+    ThreadStream = CLASS(TObject)
+	head            : ts_NodePtr;
+	tail            : ts_NodePtr;
+	ReadThread      : ThreadPtr;
+	    (* The thread responsible FOR reading the stream
+	    ** IF more than one wants TO Read THEN the information
+	    ** must be broadcast WITH a Common Object, NOT a threadstream.
+	    *)
+	WriteThreads    : ThreadList;
+	    (* Any threads that are waiting TO Write TO the stream *)
+	CurrentItems    : LONGINT;
+	Limit           : LONGINT;
+	    (* How many items can be in the stream before Send fails
+	    ** If no limit is set then the thread's linked list
+	    ** can grow indefinitely.
+	    **
+	    ** Normally you will set a limit on the data in a stream.
+	    **
+	    ** If limit is 1 then a new item cannot be added until the
+	    ** old one has been read.
+	    *)
+	ReadTrigger     : BOOLEAN;
+	WriteTriggers   : SHORTINT;
+	    (* Is either the client or server waiting for the stream
+	    ** If they are then sending or reading an item will wake them
+	    ** up by calling ClientThread^.Wake or ServerThread^.Wake
+	    *)
+
+	Dead            : BOOLEAN;
+	    (* Set to true when we need to stop Stream IO *)
+
+	CONSTRUCTOR Init;
+	PROCEDURE Finish;
+	PROCEDURE Get()     : ADDRESS;
+	PROCEDURE GetWait() : ADDRESS;
+	PROCEDURE Send(item : ADDRESS) : BOOLEAN;
+	PROCEDURE SendWait(item : ADDRESS);
+	PROCEDURE StreamSync;
+    END;
+
+    (* Get, gets an item to the stream and send puts one onto it.
+    ** Client is the procedure that reads the items and Server the procedure
+    ** that creates them. One or other of these can be null to make the current
+    ** thread fill that job. Any specified threads are started and given the
+    ** threadstream in task.userdata.OutStream.
+    **
+    ** GetWait and SendWait wait until the stream is ready, wheras get and
+    ** send do not. Normally GetWait and SendWait will be used.
+    **
+    ** Note that if a thread is waiting for a thread it is sleeping and so
+    ** can be removed if another thread attempts to dispose of it.
+    ** Threads will be disposed of when their ThreadStream is disposed of.
+    *)
+
+    (* You may want to create descendents for storing streams of specific
+    ** object types
+    *)
+(*e*)
+
+
+(* Threads *)
+(*f*)
+    th_bits=(
+	th_Sleep,            (* Thread is asleep *)
+	th_Terminate,        (* Thread has been asked TO terminate *)
+	th_Dead              (* Thread has died *)
+    );
+
+    th_flags = SET OF th_bits;
+
+    Thread = CLASS(TObject)
+
+	(* The size OF this structure cannot be relied on *)
+
+	Userdata        : ADDRESS; (* Place FOR the user TO put their data *)
+	Version         : LONGINT; (* Version OF the Thread Structure *)
+
+	th_Name         : ARRAY[1..40] OF CHAR;
+	th_Pri          : LONGINT;
+	th_Proc         : ThreadProc;
+  
+	th_Task         : TaskPtr; (* Read Only *)
+
+	InStream        : ThreadStream;
+	OutStream       : ThreadStream;
+	    (* A thread can be created on it's own without any
+	    ** attatched streams.
+	    ** You will not normally start up threads manually.
+	    ** Normally they will be started from streams,
+	    ** objects which contain threads such as
+	    ** ModelessWindow OR bags.
+	    *)
+
+	Attributes      : ADDRESS;
+	    (* use this to pass parameters to threads *)
+	Parent          : Thread;
+	ChildThreads    : ThreadNodePtr;
+	    (* ChildThreads are ordered TO terminate when Thread
+	    ** terminates
+	    *)
+	Flags           : th_flags;
+	    (* Various flags including Sleep and Terminate
+	    *)
+	Dead            : BOOLEAN; (* Is the Thread Dead? *)
+
+	BackPtr         : ThreadPtr;
+
+	(* The user should not play around with the functions and values
+	** IN thread objects other than through ThreadStreams AND lists
+	*)
+
+	PROCEDURE Start;
+	    (* Starts the thread *)
+
+	PROCEDURE Terminate; (* can only be called BY Thread parent *)
+	    (* Stops the Thread *)
+
+	PROCEDURE Wake; (* Wake up a sleeping Thread *)
+	    (* Wakes it up if it is sleeping (used FOR sync) *)
+
+END;
+(*e*)
+  
+
+PROCEDURE CheckTerminate() : BOOLEAN;
+(*f*)
+(* This resyncs a thread in with everything else.
+** If a terminate request has been made then a thread can be terminated
+** at a resync point.
+**
+** IN this version the user has TO check CheckTerminate themselves
+** Future versions will use exception handling.
+*)
+(*e*)
+
+PROCEDURE ReSync;
+(*f*)
+(* This will Raise an exception IF the thread should terminate
+** You may also use Checkterminate TO find out IF you must stop
+*)
+(*e*)
+
+PROCEDURE ThisThread() : Thread;
+
+PROCEDURE Sleep;
+(*f*)
+(* Waits for something to happen. During a sleep a thread can be stopped
+** Sleep is usually only called within things like threadstreams.
+** Do not use in normal circumstances
+*)
+(*e*)
+
+PROCEDURE SetupThread(VAR th : Thread; Proc : ThreadProc; Name : ARRAY OF CHAR ; Pri : LONGINT ; InStream, OutStream : ThreadStream);
+
+PROCEDURE StreamRead () : ADDRESS;    
+
+PROCEDURE StreamWrite (item : ADDRESS);
+
+PROCEDURE FinishOutStream;
+
+PROCEDURE FinishInStream;  
+
+PROCEDURE ThreadWait(siga : LONGSET) : LONGSET;
+    (* You must use this instead of the exec Wait function in
+    ** multithreaded programs in order to be able to terminate
+    ** threads while the are waiting
+    *)
+
+END Threads.
+
+

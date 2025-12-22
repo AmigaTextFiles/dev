@@ -1,0 +1,929 @@
+#NO_APP
+gcc2_compiled.:
+___gnu_compiled_ada:
+.text
+LC0:
+	.ascii "Just an example !!"
+LC1:
+	.ascii "Characters"
+LC2:
+	.ascii "Name"
+LC3:
+	.ascii "Sex"
+LC4:
+	.ascii "female"
+LC5:
+	.ascii "male"
+LC6:
+	.ascii "Race"
+LC7:
+	.ascii "Class"
+LC8:
+	.ascii "Armor"
+LC9:
+	.ascii "Level"
+LC10:
+	.ascii "Human"
+LC11:
+	.ascii "Elf"
+LC12:
+	.ascii "Dwarf"
+LC13:
+	.ascii "Hobbit"
+LC14:
+	.ascii "Gnome"
+LC15:
+	.ascii "Warrior"
+LC16:
+	.ascii "Rogue"
+LC17:
+	.ascii "Bard"
+LC18:
+	.ascii "Monk"
+LC19:
+	.ascii "Magician"
+LC20:
+	.ascii "Archmage"
+LC21:
+	.ascii "Cloak"
+LC22:
+	.ascii "Shield"
+LC23:
+	.ascii "Gloves"
+LC24:
+	.ascii "Helmet"
+LC25:
+	.ascii "Experience"
+LC26:
+	.ascii "Strength"
+LC27:
+	.ascii "Dexterity"
+LC28:
+	.ascii "Condition"
+LC29:
+	.ascii "Intelligence"
+	.even
+.globl _characters_locale___elabs
+_characters_locale___elabs:
+	link a5,#-8
+	moveml #0x3c00,sp@-
+	clrl sp@-
+	jbsr _OpenLocaleLibrary
+	addqw #4,sp
+	moveb d0,_characters_locale__locale_opened
+	moveq #0,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC0,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #18,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_appdescription
+	movel d3,_characters_locale__msg_appdescription+4
+	moveq #1,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC1,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #10,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_wi_characters
+	movel d3,_characters_locale__msg_wi_characters+4
+	moveq #2,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC2,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #4,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_label_0
+	movel d3,_characters_locale__msg_la_label_0+4
+	moveq #3,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC3,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #3,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_label_1
+	movel d3,_characters_locale__msg_la_label_1+4
+	moveq #4,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC4,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #6,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_cy_sex0
+	movel d3,_characters_locale__msg_cy_sex0+4
+	moveq #5,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC5,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #4,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_cy_sex1
+	movel d3,_characters_locale__msg_cy_sex1+4
+	moveq #6,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC6,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #4,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_gr_register0
+	movel d3,_characters_locale__msg_gr_register0+4
+	moveq #7,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC7,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_gr_register1
+	movel d3,_characters_locale__msg_gr_register1+4
+	moveq #8,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC8,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_gr_register2
+	movel d3,_characters_locale__msg_gr_register2+4
+	moveq #9,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC9,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_gr_register3
+	movel d3,_characters_locale__msg_gr_register3+4
+	moveq #10,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC6,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #4,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_race
+	movel d3,_characters_locale__msg_ra_race+4
+	moveq #11,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC10,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_race0
+	movel d3,_characters_locale__msg_ra_race0+4
+	moveq #12,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC11,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #3,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_race1
+	movel d3,_characters_locale__msg_ra_race1+4
+	moveq #13,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC12,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_race2
+	movel d3,_characters_locale__msg_ra_race2+4
+	moveq #14,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC13,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #6,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_race3
+	movel d3,_characters_locale__msg_ra_race3+4
+	moveq #15,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC14,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_race4
+	movel d3,_characters_locale__msg_ra_race4+4
+	moveq #16,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC7,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_class
+	movel d3,_characters_locale__msg_ra_class+4
+	moveq #17,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC15,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #7,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_class0
+	movel d3,_characters_locale__msg_ra_class0+4
+	moveq #18,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC16,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_class1
+	movel d3,_characters_locale__msg_ra_class1+4
+	moveq #19,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC17,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #4,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_class2
+	movel d3,_characters_locale__msg_ra_class2+4
+	moveq #20,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC18,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #4,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_class3
+	movel d3,_characters_locale__msg_ra_class3+4
+	moveq #21,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC19,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #8,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_class4
+	movel d3,_characters_locale__msg_ra_class4+4
+	moveq #22,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC20,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #8,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_ra_class5
+	movel d3,_characters_locale__msg_ra_class5+4
+	moveq #23,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC8,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_gr_armor
+	movel d3,_characters_locale__msg_gr_armor+4
+	moveq #24,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC21,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_cloak
+	movel d3,_characters_locale__msg_la_cloak+4
+	moveq #25,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC22,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #6,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_shield
+	movel d3,_characters_locale__msg_la_shield+4
+	moveq #26,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC23,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #6,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_gloves
+	movel d3,_characters_locale__msg_la_gloves+4
+	moveq #27,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC24,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #6,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_helmet
+	movel d3,_characters_locale__msg_la_helmet+4
+	moveq #28,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC9,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #5,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_gr_level
+	movel d3,_characters_locale__msg_gr_level+4
+	moveq #29,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC25,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #10,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_experience
+	movel d3,_characters_locale__msg_la_experience+4
+	moveq #30,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC26,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #8,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_strength
+	movel d3,_characters_locale__msg_la_strength+4
+	moveq #31,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC27,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #9,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_dexterity
+	movel d3,_characters_locale__msg_la_dexterity+4
+	moveq #32,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC28,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #9,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_condition
+	movel d3,_characters_locale__msg_la_condition+4
+	moveq #33,d2
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC29,d0
+	moveq #0,d4
+	moveq #0,d5
+	moveq #1,d4
+	moveq #12,d5
+	movel d4,a5@(-8)
+	movel d5,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,d3
+	movel d2,_characters_locale__msg_la_intelligence
+	movel d3,_characters_locale__msg_la_intelligence+4
+L1:
+	moveml a5@(-24),#0x3c
+	unlk a5
+	rts
+.globl _characters_locale__characters_version
+.data
+	.even
+_characters_locale__characters_version:
+	.long 0
+.text
+LC30:
+	.ascii "Characters.catalog"
+	.even
+.globl _characters_locale__opencharacterscatalog
+_characters_locale__opencharacterscatalog:
+	link a5,#-24
+	moveml #0x3800,sp@-
+	jbsr _utility_tagitem__newtaglist
+	movel d0,a0
+	lea a5@(-16),a1
+	movel a0@,a1@
+	addqw #4,a1
+	addqw #4,a0
+	movel a0@,a1@
+	addqw #4,a1
+	addqw #4,a0
+	movel a0@,a1@
+	addqw #4,a1
+	addqw #4,a0
+	movel a0@,a1@
+	addqw #4,a1
+	addqw #4,a0
+	tstb _characters_locale__locale_opened
+	jeq L3
+	jbsr _characters_locale__closecharacterscatalog
+	movel _characters_locale__characters_builtinlanguage,sp@-
+	pea 1:w
+	lea a5@(-16),a0
+	movel a0,sp@-
+	jbsr _utility_tagitem__addtag__5
+	addw #12,sp
+	movel _characters_locale__characters_catalog,d4
+	cmpl _locale__null_catalog:l,d4
+	jne L4
+	movel a5@(16),a0
+	movel a0@,d1
+	subql #1,d1
+	movel a5@(16),a0
+	movel a0@(4),d0
+	cmpl d0,d1
+	jle L6
+	movel d1,d0
+L6:
+	movel a5@(16),a0
+	movel d0,a1
+	subl a0@,a1
+	lea a1@(1),a0
+	cmpw #0,a0
+	jeq L5
+	movel a5@(16),sp@-
+	movel a5@(12),sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,sp@-
+	pea 2:w
+	lea a5@(-16),a0
+	movel a0,sp@-
+	jbsr _utility_tagitem__addtag__5
+	addw #12,sp
+L5:
+	movel _characters_locale__characters_version,sp@-
+	pea 4:w
+	lea a5@(-16),a0
+	movel a0,sp@-
+	jbsr _utility_tagitem__addtag__4
+	addw #12,sp
+	lea a5@(-16),a0
+	movel a0,sp@-
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC30,d0
+	moveq #0,d2
+	moveq #0,d3
+	moveq #1,d2
+	moveq #18,d3
+	movel d2,a5@(-24)
+	movel d3,a5@(-20)
+	lea a5@(-24),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,sp@-
+	movel a5@(8),sp@-
+	jbsr _locale__opencataloga
+	addw #12,sp
+	movel d0,_characters_locale__characters_catalog
+L4:
+L3:
+	jra L2
+L2:
+	moveml a5@(-36),#0x1c
+	unlk a5
+	rts
+	.even
+.globl _characters_locale__closecharacterscatalog
+_characters_locale__closecharacterscatalog:
+	link a5,#0
+	tstb _characters_locale__locale_opened
+	jeq L8
+	movel _characters_locale__characters_catalog,sp@-
+	jbsr _CloseCatalog
+	addqw #4,sp
+	movel _locale__null_catalog,_characters_locale__characters_catalog
+L8:
+	jra L7
+L7:
+	unlk a5
+	rts
+	.even
+.globl _characters_locale__getcharactersstring
+_characters_locale__getcharactersstring:
+	link a5,#-4
+	tstb _characters_locale__locale_opened
+	jeq L10
+	movel a5@(12),sp@-
+	movel a5@(8),sp@-
+	movel _characters_locale__characters_catalog,sp@-
+	jbsr _GetCatalogStr
+	addw #12,sp
+	movel d0,a5@(-4)
+	tstl a5@(-4)
+	jeq L11
+	movel a5@(-4),d0
+	jra L9
+L11:
+L10:
+	movel a5@(12),d0
+	jra L9
+L9:
+	unlk a5
+	rts
+LC31:
+	.ascii "english"
+	.even
+.globl _characters_locale___elabb
+_characters_locale___elabb:
+	link a5,#-8
+	movel d3,sp@-
+	movel d2,sp@-
+	moveq #0,d0
+	moveq #0,d1
+	movel #LC31,d0
+	moveq #0,d2
+	moveq #0,d3
+	moveq #1,d2
+	moveq #7,d3
+	movel d2,a5@(-8)
+	movel d3,a5@(-4)
+	lea a5@(-8),a0
+	movel a0,d1
+	movel d1,sp@-
+	movel d0,sp@-
+	jbsr _interfaces__c__strings__allocate_string
+	addqw #8,sp
+	movel d0,_characters_locale__characters_builtinlanguage
+	movel _locale__null_catalog,_characters_locale__characters_catalog
+L12:
+	movel a5@(-16),d2
+	movel a5@(-12),d3
+	unlk a5
+	rts
+.comm _characters_locale__locale_opened,2
+.comm _characters_locale__msg_appdescription,8
+.comm _characters_locale__msg_wi_characters,8
+.comm _characters_locale__msg_la_label_0,8
+.comm _characters_locale__msg_la_label_1,8
+.comm _characters_locale__msg_cy_sex0,8
+.comm _characters_locale__msg_cy_sex1,8
+.comm _characters_locale__msg_gr_register0,8
+.comm _characters_locale__msg_gr_register1,8
+.comm _characters_locale__msg_gr_register2,8
+.comm _characters_locale__msg_gr_register3,8
+.comm _characters_locale__msg_ra_race,8
+.comm _characters_locale__msg_ra_race0,8
+.comm _characters_locale__msg_ra_race1,8
+.comm _characters_locale__msg_ra_race2,8
+.comm _characters_locale__msg_ra_race3,8
+.comm _characters_locale__msg_ra_race4,8
+.comm _characters_locale__msg_ra_class,8
+.comm _characters_locale__msg_ra_class0,8
+.comm _characters_locale__msg_ra_class1,8
+.comm _characters_locale__msg_ra_class2,8
+.comm _characters_locale__msg_ra_class3,8
+.comm _characters_locale__msg_ra_class4,8
+.comm _characters_locale__msg_ra_class5,8
+.comm _characters_locale__msg_gr_armor,8
+.comm _characters_locale__msg_la_cloak,8
+.comm _characters_locale__msg_la_shield,8
+.comm _characters_locale__msg_la_gloves,8
+.comm _characters_locale__msg_la_helmet,8
+.comm _characters_locale__msg_gr_level,8
+.comm _characters_locale__msg_la_experience,8
+.comm _characters_locale__msg_la_strength,8
+.comm _characters_locale__msg_la_dexterity,8
+.comm _characters_locale__msg_la_condition,8
+.comm _characters_locale__msg_la_intelligence,8
+.comm _characters_locale__characters_builtinlanguage,4
+.comm _characters_locale__characters_catalog,4

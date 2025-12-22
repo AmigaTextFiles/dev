@@ -1,0 +1,382 @@
+
+INTRODUCTION
+------------
+
+c2p.library is designed to ease integration of chunky pixel routines with the
+Amiga classic bitplane hardware.
+
+The library operates in a very low-level environment, don't expect to find
+any hardware abstraction layer.
+
+The library operate using the black-box concept, like in a object-oriented
+programming framework. All iterations are performed using system calls,
+avoiding the use of public data structures.
+
+The core object is the Context, wich is used to perform all chunky2planar
+operations.
+
+
+
+
+
+
+
+
+
+
+THE CONTEXT LIFETIME
+--------------------
+
+Normal operations consists in the following steps:
+
+1) Create a Context using C2P_CreateContext function:
+   (pseudo language C-like)
+
+	APTR context = C2P_CreateContext();
+
+
+2) Define Context's parameters.
+   You MUST at least specify the Context Type, Width and Height:
+   (pseudo language C-like)
+
+	C2P_SetContextParameter(
+		ctx,
+		C2P_CONTEXT_PARAMETER_TYPE,
+		C2P_CONTEXT_TYPE_BITMAP
+		);
+
+	C2P_SetContextParameter(
+		ctx,
+		C2P_CONTEXT_PARAMETER_WIDTH,
+		320
+		);
+
+	C2P_SetContextParameter(
+		ctx,
+		C2P_CONTEXT_PARAMETER_HEIGHT,
+		200
+		);
+
+
+3) Initialize the Context:
+   (pseudo language C-like)
+
+	ULONG error = C2P_InitializeContext(context);
+	if (error == NULL)
+	{
+		// The Context is ready :-)
+	}
+
+
+4) Gets the Context Chunky buffer and BitMap:
+   (pseudo language C-like)
+
+	APTR bitmap = C2P_GetContextParameter(
+		ctx,
+		C2P_CONTEXT_PARAMETER_BITMAP
+		);
+
+	BYTE *chunky = C2P_GetContextParameter(
+		ctx,
+		C2P_CONTEXT_PARAMETER_CHUNKY
+		);
+
+
+5) Use the BitMap to create a custom screen or whatever you need.
+   The planar data is located at BitPlane #0.
+
+
+6) Here starts the game loop.
+   If you need previous chunky data to generate new chunky content, you may
+   change the Context's Chunky Buffer with a new buffer:
+
+	C2P_SetContextParameter(
+		ctx,
+		C2P_CONTEXT_PARAMETER_CHUNKY,
+		new_chunky_buffer
+		);
+
+   By doing so, you are handling a sort of 'double buffered' chunky mode.
+
+
+7) Write some data to the Chunky buffer:
+   (pseudo language C-like)
+
+	for (int i = 0; i < 100 ; i++)
+	{
+		chunky[i] = i;
+	}
+
+
+8) Perform the chunky2planar conversion of the Context:
+   (pseudo language C-like)
+
+	C2P_Chunky2Planar(ctx);
+
+
+9) Repeat step 6 until game ends.
+
+
+10) Before exit, destroy the Context:
+    (pseudo language C-like)
+
+	C2P_DestroyContext(ctx);
+
+
+11) Here you cannot use the Context anymore.
+    If you need it again, you must create a new Context.
+
+
+PLEASE NOTE:
+You are allowed to change only few parameter values if the Context has
+already been initialized.
+
+
+
+
+
+
+
+
+
+
+SPEED UP TO THE LIMITS
+----------------------
+
+If you can change the programming approach from horizontal to vertical
+rasterization, you can got a big speed improvement using the Scrambled buffer
+instead the classic Chunky buffer.
+
+This mode can be used easily in a FPS games (Doom like).
+
+The scrambled buffer is a chunky buffer with a different column order.
+Substantially, when you draw a pixel in the scrambled buffer, you are
+directly making the firsts passes of the chunky2planar conversion algorythm.
+So, the c2p conversion can be reduced in complexity, gaining speed.
+
+In a classic chunky buffer, the order of pixels is:
+
+	0, 1, 2, 3, 4, 5, 6, 7, ... and so on
+
+A scrambled buffer appears as:
+
+	0, 8, 16, 24, 1, 9, 17, 25, ...
+
+The way to know the offsets to convert the classic pixel coordinates consists
+in calling the C2P_GetContextParameter() and C2P_GetContextIndexedParameter()
+functions.
+
+You need to force the scrambled chunky mode for a Context:
+(pseudo language C-like)
+
+	APTR context = C2P_CreateContext();
+	... some context parameters sets ...
+	C2P_SetContextParameter(
+		context,
+		C2P_CONTEXT_PARAMETER_FORCE_SCRAMBLED,
+		TRUE
+		);
+	... some other context parameters sets ...
+	C2P_InitializeContext(context);
+
+Firsts, call the C2P_GetContextParameter() function to read the number of
+scrambled offsets, querying for the appropriate parameter:
+(pseudo language C-like)
+
+	int N = C2P_GetContextParameter(
+		context,
+		C2P_CONTEXT_PARAMETER_SCRAMBLED_OFFSETS_COUNT
+		);
+
+The result is the number N of scrambled offsets, each to add to X coords
+modulo N.
+
+
+Then, declare an array of N elements:
+(pseudo language C-like)
+
+	int[] offsets = new int(N);
+
+
+Next, call the C2P_GetContextIndexedParameter() function to fetch the n-th
+scrambled offset:
+(pseudo language C-like)
+
+	for (int i = 1; i < N ; i++)
+	{
+		offsets[i] = C2P_GetContextIndexedParameter(
+			context,
+			C2P_CONTEXT_PARAMETER_SCRAMBLED_OFFSETS_COUNT
+			);
+	}
+
+
+Eventually, add the offset to the X-coord of the pixel:
+(pseudo language C-like)
+
+	int x_scrambled = x_pixel + offsets[x_pixel % N];
+
+Note: the number N of scrambled offsets is guaranteed to be a power of 2.
+You can calculate the modulo simply using a bitwise AND operation with N-1.
+As example, the last sample instruction become:
+(pseudo language C-like)
+
+	int x_scrambled = x_pixel + offsets[x_pixel & (N - 1)];
+
+
+
+
+
+
+
+
+
+
+CONVERT ONLY SOME PIXELS
+------------------------
+
+If you need, you can convert only a limited number of pixels and place it in
+a specified position of target bitmap.
+The following context parameters are available:
+
+C2P_CONTEXT_PARAMETER_SOURCE_OFFSET
+	Number of pixels skipped in the source (chunky) before the c2p conversion
+	is applied.
+
+C2P_CONTEXT_PARAMETER_TARGET_OFFSET
+	Number of pixels skipped in the target (planar) before the c2p conversion
+	is applied.
+
+C2P_CONTEXT_PARAMETER_CONVERT_COUNT
+	Number of pixels to convert.
+
+You can modify these parameters before and after the context has been
+initialized.
+
+Example of use: you can convert some chunky data into a bigger bitmap, to
+generate a perspective floor.
+Assuming a width x height source chunky buffer and a bigger destination
+bitmap (same width), you can specify:
+
+- C2P_CONTEXT_PARAMETER_SOURCE_OFFSET = 0
+- C2P_CONTEXT_PARAMETER_TARGET_OFFSET = width * num lines of sky
+- C2P_CONTEXT_PARAMETER_CONVERT_COUNT = width x height (original chunky size)
+
+	+-------------------------+       -  +-------------------------+
+	| Chunky floor            |       |  | Sky                     |
+	|                         |       |  |                         |
+	|                         |       |  |                         |
+	+-------------------------+       |  |                         |
+	                                  |  |                         |
+	                    target offset +->|-------------------------|
+	                                     | Planar floor            |
+	                                     |                         |
+	                                     |                         |
+	                                     +-------------------------+
+
+and next draw some Blitter Objects over the bitmap.
+
+BE WARN: Pay attention of the source and destination size, no controls are
+performed and if you exceed the bounds the system may crash.
+
+
+
+
+
+
+
+
+
+
+BLITTER FRIENDLY
+----------------
+
+If you use c2p.library to draw a planar floor, on which you will later draw
+BOBs (Blitter OBjects), you may find useful to use an interleaved BitMap.
+
+To do this, simply set the INTERLEAVED_BITMAP Context parameter to TRUE,
+before initializing it:
+(pseudo language C-like)
+
+	APTR context = C2P_CreateContext();
+	... some context parameters sets ...
+	C2P_SetContextParameter(
+		context,
+		C2P_CONTEXT_PARAMETER_INTERLEAVED_BITMAP,
+		TRUE
+		);
+	... some other context parameters sets ...
+	C2P_InitializeContext(context);
+
+
+BEWARE: If you plan to use interleaved BitMaps, be sure to specify an
+interleaved target BitMap, in order to display it correctly.
+Eg:
+(pseudo language C-like)
+
+	screen = OpenScreenTags(
+        NULL,
+        SA_Depth,       DEPTH,
+        SA_Width,       WIDTH,
+        SA_Height,      HEIGHT,
+		...
+        SA_ShowTitle,   FALSE,
+        SA_Type,        CUSTOMSCREEN,
+        ...
+        SA_Exclusive,   TRUE,
+        SA_Interleaved, TRUE,	<-- NOTE THIS
+        SA_Quiet,       TRUE,
+        TAG_END
+        );
+
+    bitmap = screen->RastPort.BitMap;
+
+
+NOTE: You may also create an interleaved BitMap using the C2P_CreateBitMap()
+function, but only if the Context has previously been set as Interleaved.
+
+
+
+
+
+
+
+
+
+
+DELTA CONVERSION
+----------------
+
+In some cases, only few pixels will change between two different frames.
+The best approach may be convert only the modified pixels presents in new
+frame, keeping all the others.
+In order to achieve this, you must provide the old frame into a reference
+buffer, so that the new frame can use it to compare and find the modified
+pixels.
+The following context parameters are available:
+
+C2P_CONTEXT_PARAMETER_REFERENCE
+	Address of the Reference buffer to use for delta conversion.
+	Passing NULL will disable delta conversion.
+
+C2P_CONTEXT_PARAMETER_REFERENCE_WRITEBACK
+	TRUE if the reference buffer must be updated with the content of the
+	chunky buffer when delta conversion is activated (default behavior).
+	FALSE to disable the automatic update of reference buffer. In that case,
+	you must update manually the reference buffer after the chunky2planar
+	conversion.
+
+You can modify these parameters before and after the context has been
+initialized.
+
+Some thoughts about it: if you rewrite from scratch the new frame every time,
+you should enable writeback.
+If you use a static background, you should disable writeback.
+Delta conversion is obviously slower than the classic one, because it has to
+perform a comparison for each group of pixels. It is faster if a maximum of
+60-70% of the pixels are modified. Otherwise it is better to use the classic
+conversion.
+
+BE WARN: Pay attention of the reference buffer size, it must be equal to the
+chunky buffer size.
+

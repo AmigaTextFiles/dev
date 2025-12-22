@@ -1,0 +1,239 @@
+(********************************************************************************
+
+Name         : Exec.DEF
+Version      : 1.0
+Purpose      : Interface to Exec
+Author       : ms
+Modified     : 3.4.86  22:50 ms
+
+********************************************************************************)
+
+DEFINITION MODULE Exec;
+
+FROM SYSTEM IMPORT ADDRESS, BYTE;
+
+TYPE (* ===== exec/nodes.h ===== *)
+     NodeType   = (ntUnknown, ntTask,    ntInterrupt, ntDevice,   ntMsgPort,
+                   ntMessage, ntFreeMsg, ntReplyMsg,  ntResource, ntLibrary,
+                   ntMemory,  ntSoftInt, ntFont,      ntProcess,  ntSemaphore);
+     NodePtr    = POINTER TO Node;
+     Node       = RECORD
+                    lnSucc, lnPred: NodePtr;
+                    lnType: NodeType;
+                    lnPri: BYTE;            (* [-127..128] *)
+                    lnName: ADDRESS         (* POINTER TO ARRAY OF CHAR *)
+                  END;
+     (* ===== exec/lists.h ===== *)
+     ListPtr    = POINTER TO List;
+     List       = RECORD
+                    lhHead, lhTail, lhTailPred: NodePtr;
+                    lhType: NodeType;
+                    lhPad: BYTE
+                  END;
+     (* ===== exec/tasks.h =====*)
+     TaskPtr    = POINTER TO Task;
+     Task       = RECORD
+                    tcNode: Node;
+                    tcFlags,
+                    tcState: BYTE;
+                    tcIDNestCnt,
+                    tcTDNestCnt: BYTE;
+                    tcSigAlloc,
+                    tcSigWait,
+                    tcSigRecvd,
+                    tcSigExpect: LONGINT;
+                    tcTrapAlloc,
+                    tcTrabAble: CARDINAL;
+                    tcExceptData,
+                    tcExecptCode,
+                    tcTrapData,
+                    tcTrapCode,
+                    tcSPReg,
+                    tcSPLower,
+                    tcSPUpper,
+                    tcSwitch,
+                    tcLaunch: ADDRESS;
+                    tcMemEntry: List;
+                    tcUserData: ADDRESS
+                  END;
+     (* ===== exec/ports.h ===== *)
+     MsgPortPtr = POINTER TO MsgPort;
+     MsgPort    = RECORD
+                    mpNode: Node;
+                    mpFlags, mpSigBit: BYTE;
+                    mpSigTask: TaskPtr;
+                    mpMsgList: List
+                  END;
+     MessagePtr = POINTER TO Message;
+     Message    = RECORD
+                    mnNode: Node;
+                    mnReplyPort: MsgPortPtr;
+                    mnLength: CARDINAL
+                  END;
+     Semaphore  = RECORD
+                    smMsgPort: MsgPort;
+                    smBids: INTEGER
+                  END;
+     (* ===== exec/interrupts.h ===== *)
+     Interrupt  = RECORD
+                    isNode: Node;
+                    isData: ADDRESS;
+                    isCode: PROC
+                  END;
+     IntVector  = RECORD
+                    ivData: ADDRESS;
+                    ivCode: PROC;
+                    ivNode: NodePtr
+                  END;
+     SoftIntList= RECORD
+                    shList: List;
+                    shPad: CARDINAL
+                  END;
+     (* ===== exec/memory.h ===== *)
+     MemChunk   = RECORD
+                    mcNext: POINTER TO MemChunk;
+                    mcBytes: LONGCARD
+                  END;
+     MemHeader  = RECORD
+                    mhNode: Node;
+                    mhAttributes: CARDINAL;
+                    mhFirst: POINTER TO MemChunk;
+                    mhLower, mhUpper: ADDRESS;
+                    mhFree: LONGCARD
+                  END;
+     MemEntry   = RECORD
+                    CASE :CARDINAL OF
+                    | 0: meReqs: LONGCARD
+                    | 1: meAddr: ADDRESS
+                    END;
+                    meLength: LONGCARD
+                  END;
+     MemList    = RECORD
+                    mlNode: Node;
+                    mlNumEntries: CARDINAL;
+                    mlME: ARRAY [0..0] OF MemEntry (* ?!? *)
+                  END;
+CONST
+     memfPublic = 0D;
+     memfChip   = 1D;
+     memfFast   = 2D;
+     memfClear  = 65536D;
+     memfLargest= 131072D;
+     (* ===== exec/libraries.h ===== *)
+     libVectSize= 6;
+     libReserved= 4;
+     libBase    = -libReserved; 
+     libUserDef = libBase-libReserved*libVectSize;
+     libNonStd  = libUserDef;
+     libOpen    = -6;
+     libClose   = -12;
+     libExpunge = -18;
+     libExtFunc = -24;
+TYPE Library    = RECORD
+                    libNode: Node;
+                    libFlags, libPad: BYTE;
+                    libNegSize,
+                    libPosSize,
+                    libVersion,
+                    libRevision: CARDINAL;
+                    libIdString: ADDRESS;
+                    libSum: LONGCARD;
+                    libOpenCnt: CARDINAL
+                  END;
+     LibraryPtr = POINTER TO Library;
+     (* ===== exec/devices.h ===== *)
+     Device     = RECORD
+                    ddLibrary: Library
+                  END;
+     Unit       = RECORD
+                    unitMsgPort: MsgPortPtr;
+                    unitFlags, unitPad: BYTE;
+                    unitOpenCnt: CARDINAL
+                  END;
+     (* ===== exec/io.h ===== *)
+     IORequest = RECORD
+                   ioMessage: Message;
+                   ioDevice: POINTER TO Device;
+                   ioUnit: POINTER TO Unit;
+                   ioCommand: CARDINAL;
+                   ioFlags,
+                   ioError: BYTE
+                 END;
+     IOStdReq  = RECORD
+                   ioMessage: Message;
+                   ioDevice: POINTER TO Device;
+                   ioUnit: POINTER TO Unit;
+                   ioCommand: CARDINAL; (* ORD(ioCmds) *)
+                   ioFlags,
+                   ioError: BYTE;
+                   ioActual,
+                   ioLength: LONGCARD;
+                   ioData: ADDRESS;
+                   ioOffset: LONGCARD
+                 END;
+     IOCmds    = (cmdInvalid, cmdReset, cmdRead, cmdWrite, cmdUpdate,
+                  cmdClear, cmdStop, cmdStart, cmdFlush, cmdNonStd);
+
+(* ===== special functions ===== *)
+PROCEDURE InitCode(startClass, version: LONGINT);
+PROCEDURE InitStruct(initTable, memory: ADDRESS; size: LONGINT);
+PROCEDURE MakeLibrary(funcInit, structInit, libInit: ADDRESS; dataSize, codeSize: LONGINT);
+PROCEDURE MakeFunctions(target, functionArray, funcDispBase: ADDRESS);
+PROCEDURE FindResident(name: ARRAY OF CHAR); (* terminated by 0C! *)
+PROCEDURE InitResident(resident, segList: ADDRESS);
+PROCEDURE Alert(alertNum: LONGINT; parameters: ADDRESS);
+PROCEDURE Debug;
+(* ===== interrupts ===== *)
+PROCEDURE Disable;
+PROCEDURE Enable;
+PROCEDURE Forbid;
+PROCEDURE Permit;
+PROCEDURE SetSR(newSR, mask: LONGINT);
+PROCEDURE SuperState;
+PROCEDURE UserState;
+PROCEDURE SetIntVector(intNumber: LONGINT; VAR interrupt: Interrupt);
+PROCEDURE AddIntServer(intNumber: LONGINT; VAR interrupt: Interrupt);
+PROCEDURE RemIntServer(intNumber: LONGINT; VAR interrupt: Interrupt);
+PROCEDURE Cause(VAR interrupt: Interrupt);
+(* ===== memory allocation ===== *)
+PROCEDURE Allocate(VAR freeList: MemList; byteSize: LONGINT);
+PROCEDURE Deallocate(VAR freeList: MemList; memoryBlock: ADDRESS; byteSize: LONGINT);
+PROCEDURE AllocMem(byteSize, requirements: LONGINT);
+PROCEDURE FreeMem(memoryBlock: ADDRESS; byteSize: LONGINT);
+PROCEDURE AvailMem(requirements: LONGINT): BOOLEAN;
+PROCEDURE AllocEntry(VAR entry: MemEntry);
+PROCEDURE FreeEntry(VAR entry: MemEntry);
+(* ===== lists ===== *)
+
+(* ===== messages ===== *)
+PROCEDURE AddPort(VAR port: MsgPort);
+PROCEDURE RemPort(VAR port: MsgPort);
+PROCEDURE PutMsg(VAR port: MsgPort; VAR message: Message);
+PROCEDURE GetMsg(VAR port: MsgPort): Message;
+PROCEDURE ReplyMsg(VAR message: Message);
+PROCEDURE WaitPort(VAR port: MsgPort);
+PROCEDURE FindPort(name: ARRAY OF CHAR); (* terminated by 0C! *)
+(* ===== libraries ===== *)
+PROCEDURE AddLibrary(VAR library: Library);
+PROCEDURE RemLibrary(VAR library: Library);
+PROCEDURE OldOpenLibrary(libName: ARRAY OF CHAR): LibraryPtr; (* 0C! *)
+PROCEDURE CloseLibrary(library: LibraryPtr); 
+PROCEDURE SetFunction(library: LibraryPtr; funcOffset, funcEntry: LONGINT);
+PROCEDURE SubLibrary(library: LibraryPtr);
+(* ===== devices ===== *)
+PROCEDURE AddDevice(VAR device: Device);
+PROCEDURE RemDevice(VAR device: Device);
+PROCEDURE OpenDevice(devName: ARRAY OF CHAR; unit: LONGINT;
+                     ioRequest: ADDRESS; flags: LONGINT): LONGINT;
+PROCEDURE CloseDevice(ioRequest: ADDRESS);
+PROCEDURE DoIO(ioRequest: ADDRESS);
+PROCEDURE SendIO(ioRequest: ADDRESS);
+PROCEDURE CheckIO(ioRequest: ADDRESS);
+PROCEDURE WaitIO(ioRequest: ADDRESS);
+PROCEDURE AbortIO(ioRequest: ADDRESS);
+
+(* ===== resources ===== *)
+
+PROCEDURE OpenLibrary(libName: ARRAY OF CHAR; version: LONGINT): LibraryPtr;
+
+END Exec.

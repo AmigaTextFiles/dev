@@ -1,0 +1,11 @@
+/* $Id: sana2specialstats.h 23386 2005-06-23 08:17:21Z neil $ */
+OPT NATIVE
+MODULE 'target/devices/sana2'
+{#include <devices/sana2specialstats.h>}
+NATIVE {DEVICES_SANA2SPECIALSTATS_H} CONST
+
+/* Ethernet */
+
+NATIVE {S2SS_ETHERNET_BADMULTICAST}   CONST ->#S2SS_ETHERNET_BADMULTICAST   = (S2WireType_Ethernet << 16 | 0)
+NATIVE {S2SS_ETHERNET_RETRIES}        CONST ->#S2SS_ETHERNET_RETRIES        = (S2WireType_Ethernet << 16 | 1)
+NATIVE {S2SS_ETHERNET_FIFO_UNDERRUNS} CONST ->#S2SS_ETHERNET_FIFO_UNDERRUNS = (S2WireType_Ethernet << 16 | 2)

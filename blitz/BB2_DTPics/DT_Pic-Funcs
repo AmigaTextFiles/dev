@@ -1,0 +1,416 @@
+; DTLoad - functions v1.25
+; By Leigh Parry
+;
+; Requires :
+;    amigalibs.res in compiler options
+;    installed datatypes for pictures (JPEG for example pics)
+;
+; Seperate file for INCBIN'ing - DTPic-Funcs.asc
+;
+; **** Important ****
+; ALTERED NEWTYPE - now stores a mapped variable
+;
+; Took NBitmaps out of DT_2_BM
+; Also by default Function is commented out.
+; if you want to use it just un-comment it.
+
+
+DEFTYPE .l
+
+._SETUP_VARS
+#DTM_FrameBox  =$601
+#OBP_Precision =$84000000
+
+#DTP_IFF=#DTWM_IFF
+#DTP_RAW=#DTWM_RAW
+#DTPObjects=10
+
+NEWTYPE .DTPInfo                         ; a newtype to store our DT's info
+  *obj.b
+  *bm.BitMap
+  bmw.l
+  bmh.l
+  bmd.l
+  ModeID.l
+  mapped.b
+End NEWTYPE
+
+Dim DTPictures.DTPInfo(#DTPObjects)                    ; an array to store several objects
+
+; ----------------------------------------------------------
+
+._ReleaseDT
+Statement ReleaseDT {OBJ}
+; OBJ = number of the object we want to free
+; if it is still displayed then any colours which change
+; make the pic look terrible.
+
+  SHARED DTPictures()
+  If DTPictures(OBJ)\obj
+    DisposeDTObject_ DTPictures(OBJ)\obj
+    DTPictures(OBJ)\obj=0
+  End If
+End Statement
+
+; ----------------------------------------------------------
+
+._ReleaseAllDT
+Statement ReleaseALLDT {}
+; Free all the objects
+  For n=0 To #DTPObjects
+    ReleaseDT{n}
+  Next n
+End Statement
+
+; ----------------------------------------------------------
+
+._DTLoad
+Function DTLoad {OBJ.l,Fyle.s,RMap.b,Prec} ; ,Palet}
+; OBJ   = number to use - must be in limit of DTPictures() array
+; RMap  = Remap the image to used screen 0=NO , anything_else=YES
+; Prec  = Precision of the remap  -1=Exact(Best) 0=Image(Good) 16=Icon(Poor) 32=GUI(Poor)
+; Palet = Palette object to store changed colour values in. -1=No Palet
+
+  SHARED DTPictures()
+
+  If DTPictures(OBJ)\obj Then ReleaseDT {OBJ}
+
+  DEFTYPE.BitMapHeader   *bmhd
+  DEFTYPE.l              *cregs,ModeID
+  DEFTYPE.dtFrameBox     dtf
+  DEFTYPE.FrameInfo      fri
+  DEFTYPE.gpLayout       gpl
+  DEFTYPE.BitMap         *bm,*dsbm,*clbm
+  DEFTYPE.l
+
+  *scr.Screen     = Peek.l(Addr Screen(Used Screen))
+
+;  disdep          = *scr\BitMap\Depth
+;  numcols         = 2^disdep-1
+  Dim attrs.TagItem (5)
+  attrs(0)\ti_Tag = #DTA_SourceType,#DTST_FILE
+  attrs(1)\ti_Tag = #DTA_GroupID,#GID_PICTURE
+
+  If RMap=0
+    attrs(2)\ti_Tag = #PDTA_Remap,0
+    attrs(3)\ti_Tag = #TAG_DONE,0
+  Else
+    attrs(2)\ti_Tag = #PDTA_Remap,-1
+    attrs(3)\ti_Tag = #PDTA_Screen,*scr
+    attrs(4)\ti_Tag = #OBP_Precision,Prec
+    attrs(5)\ti_Tag = #TAG_DONE,0
+  End If
+
+  name$=Fyle.s : rmap=RMap
+  success=0
+
+  *obj.b=NewDTObjectA_(&name$,attrs(0))
+  If *obj
+    dtf\MethodID=#DTM_FrameBox
+    dtf\dtf_ContentsInfo=&fri,&fri,SizeOf.FrameInfo
+    DoDTMethodA_ *obj,0,0,&dtf
+    gpl\MethodID=#DTM_PROCLAYOUT
+    gpl\gpl_GInfo=0
+    gpl\gpl_Initial=1
+    DoDTMethodA_ *obj,0,0,&gpl
+
+    GetAttr_ #PDTA_ModeID,*obj,&ModeID
+    GetAttr_ #PDTA_BitMapHeader,*obj,&*bmhd
+    GetAttr_ #PDTA_BitMap,*obj,&*bm
+
+    bmw.l=*bmhd\bmh_Width
+    bmh.l=*bmhd\bmh_Height
+    bmd.l=*bmhd\bmh_Depth
+
+    success=1
+
+  End If
+
+  If success=0
+    DisposeDTObject_ *obj
+    DTPictures(OBJ)\obj=0
+  Else
+    DTPictures(OBJ)\obj=*obj,*bm,bmw,bmh,bmd,ModeID,rmap
+  End If
+  Function Return success
+End Function
+
+; ----------------------------------------------------------
+
+._BM_2_BM
+Function BM_2_BM {*SrcB,SrcW,SrcH,*DestB,DestW,DestH}
+; copy one BitMap into another,
+; with scaling if different sizes
+
+; Used by DT_2_BM and when copying into a created System BitMap
+; So if you're using the DT_2_BM function you still need this one.
+
+  success=0
+  If *SrcB
+    BSA.BitScaleArgs\bsa_SrcX=0
+    BSA\bsa_SrcY=0
+    BSA\bsa_SrcWidth=SrcW
+    BSA\bsa_SrcHeight=SrcH
+    BSA\bsa_XSrcFactor=SrcW
+    BSA\bsa_YSrcFactor=SrcH
+    BSA\bsa_DestX=0
+    BSA\bsa_DestY=0
+    BSA\bsa_DestWidth=DestW
+    BSA\bsa_DestHeight=DestH
+    BSA\bsa_XDestFactor=DestW
+    BSA\bsa_YDestFactor=DestH
+    BSA\bsa_SrcBitMap=*SrcB
+    BSA\bsa_DestBitMap=*DestB
+    BitMapScale_ &BSA
+    success=1
+  End If
+  Function Return success
+End Function
+
+; ----------------------------------------------------------
+
+._Save_IFF
+Function.l Save_IFF {Fyle.s,*BM.BitMap,Palet,bwid,valu,DTPal}
+; Fyle.s      = Filename to save to
+; BM          = Pointer to the BitMap
+;               (If using Blitz BitMap use  Addr BitMap(#))
+; Palet       = Palette to save to the file
+; bwid        = REAL Width (To be stored in Header)
+; valu        = ModeID to save in file  0=No Id
+; DTPal       = Use DTPictures(DTPal) palette.
+
+  SHARED DTPictures()
+
+  NEWTYPE .rgbcomp      :_red.l:_green.l:_blue.l: End NEWTYPE
+  NEWTYPE .palettedata  :_numcols.w:_zero.w:_rgbs.rgbcomp[256]:_zero2.l: End NEWTYPE
+  NEWTYPE .palette      :*_dat.palettedata:_numcols.w:_lowcol.w:_hicol.w:_speed.w:_var.w:_pad.b[114]: End NEWTYPE
+
+  DEFTYPE .BitMapHeader  *bmhd,*dtdm
+  DEFTYPE .BitMap        *dbm
+  DEFTYPE .l             *cregs
+  DEFTYPE .l
+
+  name$=Fyle.s
+  modeid.l=valu
+
+  *dbm=*BM
+  bmwid=*dbm\BytesPerRow
+  bmhit=*dbm\Rows
+  bmflg=*dbm\Flags
+  bmdep=*dbm\Depth
+  leaved=0
+
+  If bmwid*8=>bwid
+    If bmwid*8>bwid+8 Then bmwid=(bwid+8)/8+1
+
+; findout if were using a DT bitmap and if Interleaved
+    If DTPal>-1 AND DTPal<#DTPObjects+1
+      *dtbm=DTPictures(DTPal)\bm
+      GetAttr_ #PDTA_CRegs,DTPictures(DTPal)\obj,&*cregs
+      If bmdep>1 AND *dbm=*dtbm
+;        If *dbm\Planes[1]=*dbm\Planes[0]+bmwid Then leaved=1
+        If *dbm\BytesPerRow=((bwid+8)/8+1)*bmdep Then leaved=1
+      End If
+    End If
+
+    bitmapsize=bmwid*bmhit*bmdep
+    *bmhd\bmh_Width=bwid
+    *bmhd\bmh_Height=bmhit
+    *bmhd\bmh_Depth=bmdep
+    *bmhd\bmh_Compression=0
+    *bmhd\bmh_PageWidth=bwid
+    *bmhd\bmh_PageHeight=bmhit
+
+; Thanks to Sami Naatanen <sami.naatanen@dlc.fi> (For correct spelling of Naatanen see readme file)
+; for pointing out to use Cvl
+
+    ID_ILBM=Cvl("ILBM") : ID_BMHD=Cvl("BMHD")
+    ID_CMAP=Cvl("CMAP") : ID_CAMG=Cvl("CAMG")
+
+    OK=0
+    *iff.IFFHandle=AllocIFF_()
+    If *iff
+      lock.l=Open_(&name$,#MODE_NEWFILE)
+      If lock
+        *iff\iff_Stream=lock
+        InitIFFasDOS_(*iff)
+        ifferr.l=OpenIFF_(*iff,#IFFF_WRITE)
+        If ifferr=0
+          ifferr=PushChunk_(*iff,ID_ILBM,#ID_FORM,#IFFSIZE_UNKNOWN)
+          If ifferr=0
+            ifferr=PushChunk_(*iff,0,ID_BMHD,SizeOf.BitMapHeader)
+            If ifferr=0
+              ifferr=WriteChunkRecords_(*iff,*bmhd,SizeOf.BitMapHeader,1)
+              If ifferr=1
+                PopChunk_(*iff)
+              End If
+            End If
+            ifferr=PushChunk_(*iff,0,ID_CMAP,#IFFSIZE_UNKNOWN)
+            If ifferr=0
+              If DTPal<0
+                *pal.palette=Addr Palette(Palet)
+                penn=*pal\_numcols
+              Else
+                penn=2^bmdep
+              End If
+              paletsize=(penn)*3
+              *padr=AllocVec_ (paletsize,0) ; change to ?
+              If *padr
+                For t = 0 To penn-1
+                  If DTPal<0
+                    cr.l=*pal\_dat\_rgbs[t]\_red MOD 256
+                    cg.l=*pal\_dat\_rgbs[t]\_green MOD 256
+                    cb.l=*pal\_dat\_rgbs[t]\_blue MOD 256
+                  Else
+                    j.l=t*12
+                    j+*cregs
+                    cr.l=Peek.b(j  ) MOD 256
+                    cg.l=Peek.b(j+4) MOD 256
+                    cb.l=Peek.b(j+8) MOD 256
+                  End If
+                  k.l=*padr+(t*3)
+                  Poke.b k,cr : Poke.b k+1,cg : Poke.b k+2,cb
+                Next t
+                ifferr=WriteChunkBytes_(*iff,*padr,paletsize)
+                If ifferr=paletsize
+                  PopChunk_(*iff)
+                End If
+                FreeVec_ *padr
+              End If
+            End If
+            If modeid
+              ifferr=PushChunk_(*iff,0,ID_CAMG,4)
+              If ifferr=0
+                ifferr=WriteChunkBytes_(*iff,&modeid,4)
+                If ifferr=4
+                  PopChunk_(*iff)
+                End If
+              End If
+            End If
+            ifferr=PushChunk_(*iff,0,#ID_BODY,#IFFSIZE_UNKNOWN)
+            If ifferr=0
+              *badr=AllocVec_ (bitmapsize,0)
+              If *badr
+                iloffset=0 : bmoffset=0
+                If leaved=1
+                  bmoffset=*dbm\Planes[0]
+                  For n=0 To bmhit*bmwid*bmdep-1
+                    Poke.b *badr+n,Peek.b(bmoffset+n)
+                  Next n
+                Else
+                  For y=0 To bmhit-1
+                    For dep=0 To bmdep-1
+                      For x=0 To bmwid-1
+                        iloffset+1
+                        Poke.b *badr+iloffset-1,Peek.b(*dbm\Planes[dep]+bmoffset+x)
+                      Next x
+                    Next dep
+                    bmoffset+bmwid
+                  Next y
+                End If
+                ifferr=WriteChunkBytes_(*iff,*badr,bitmapsize)
+                If ifferr=bitmapsize
+                  PopChunk_(*iff)
+                  OK+1
+                End If
+                FreeVec_ *badr
+              End If
+            End If
+            PopChunk_(*iff)
+          End If
+          CloseIFF_(*iff)
+        End If
+        Close_(lock)
+      End If
+      If OK=0 Then DeleteFile_(&name)
+      FreeIFF_(*iff)
+    End If
+  End If
+  Function Return OK
+End Function
+
+; ----------------------------------------------------------
+
+._DTSave
+Function.l DTSave {Fyle.s,OBJ}
+; Save the 'OBJ'ect to 'file'
+
+; If a picture is'nt remapped to a screen then for some reason
+; DTSave doesn't output a legal File. (Missing the palette info.)
+; This is a problem with datatypes, not this function
+; Also can produce overruns on width.
+
+; Because the only picture datatype that is able to save
+; is the RGFX one, I'm just sending all objects to Save_IFF{}
+; when more datatypes support the DTM_WRITE method I'll redo
+; the code to allow exporting.
+
+  SHARED DTPictures()
+  If DTPictures(OBJ)\obj
+    name$=Fyle.s
+; Get details and send over to Save_IFF{}
+    *bbm.BitMap=DTPictures(OBJ)\bm
+    bwid=DTPictures(OBJ)\bmw
+    bmid=DTPictures(OBJ)\ModeID
+    bhit=DTPictures(OBJ)\bmh
+    bdep=DTPictures(OBJ)\bmd
+    *scr.Screen     = Peek.l(Addr Screen(0))
+    disdep          = *scr\BitMap\Depth
+    If DTPictures(OBJ)\mapped=1 Then bdep=disdep : OBJ=-1
+    *bm2.BitMap=AllocBitMap_(bwid,bhit,bdep,#BMF_CLEAR,0)
+    If *bm2
+      suc=BM_2_BM {*bbm,bwid,bhit,*bm2,bwid,bhit}
+      If suc
+        OK=Save_IFF{name$,*bm2,1,bwid,bmid,OBJ}
+      End If
+      FreeBitMap_ *bm2
+    End If
+;    DEFTYPE .dtWrite  dtw
+;    fh.l=Open_(&name$,#MODE_NEWFILE)
+;    If fh
+;      dtw\MethodID=#DTM_WRITE
+;      dtw\dtw_FileHandle=fh
+;      dtw\dtw_Mode=FRMT
+;      OK=DoDTMethodA_ (DTPictures(OBJ)\obj,-1,-1,&dtw)
+;      Close_ fh
+;      If OK=0 Then DeleteFile_(&name$)
+;    End If
+  End If
+  Function Return OK
+End Function
+
+.
+; ----------------------------------------------------------
+
+._DT_2_BM ; (Blitz BitMap)
+;Function DT_2_BM {OBJ,bmap,nbmw,nbmh}
+;; OBJ = number of the object
+;; bmap is the number of BitMap to create
+;; nbmw & nbmh are new width and height of bitmap
+;; leave 0 to keep original sizes - just copy into (N)BitMap
+
+;  SHARED DTPictures()
+;  *scr.Screen     = Peek.l(Addr Screen(Used Screen))
+;  disdep          = *scr\BitMap\Depth
+;  If DTPictures(OBJ)\obj
+;    success=0
+;    bmw=DTPictures(OBJ)\bmw
+;    bmh=DTPictures(OBJ)\bmh
+;    bmd=DTPictures(OBJ)\bmd
+;    If nbmw=0 OR nbmh=0
+;      nbmw=bmw : nbmh=bmh
+;    End If
+;    *bm1=Addr BitMap(bmap)
+;    If *bm1
+;      Free BitMap bmap
+;    EndIf
+;    BitMap bmap,nbmw,nbmh,disdep
+;    *bm1=Addr BitMap(bmap)
+;    If *bm1
+;      success=BM_2_BM {DTPictures(OBJ)\bm,bmw,bmh,*bm1,nbmw,nbmh}
+;    EndIf
+;  End If
+;  Function Return success
+;End Function
+
+; ------------------------------------------------------------

@@ -1,0 +1,975 @@
+/****h* SystemDevices/SysDevs.c [1.0] ********************************
+*
+* NAME
+*    SysDevs.c
+*
+* DESCRIPTION
+*    Display a list of all Devices currently known to the OS.
+*
+* FUNCTIONAL INTERFACE:
+*
+*   FUNCTIONS FROM SysCommon.c:
+*
+*     PUBLIC int  SetupSystemList( (*OpenWindowFunc)( void ) );
+*
+*     PUBLIC void ShutdownSystemList( void );
+*
+*   FUNCTIONS FROM Priority.c:
+*
+*     PUBLIC int ChangePriorityHandler( char *name, int ObjType, 
+*                                       int frompri
+*                                     );
+**********************************************************************
+*
+*/
+
+#include <string.h>
+
+#include <exec/execbase.h>
+#include <exec/types.h>
+#include <exec/devices.h>
+#include <exec/libraries.h>
+
+#include <intuition/intuition.h>
+#include <intuition/classes.h>
+#include <intuition/classusr.h>
+#include <intuition/gadgetclass.h>
+
+#include <libraries/gadtools.h>
+
+#include <graphics/displayinfo.h>
+#include <graphics/gfxbase.h>
+
+#include <clib/exec_protos.h>
+#include <clib/intuition_protos.h>
+#include <clib/gadtools_protos.h>
+#include <clib/graphics_protos.h>
+#include <clib/diskfont_protos.h>
+
+#include "CPGM:GlobalObjects/CommonFuncs.h"
+
+#include "SysLists.h"
+
+#ifndef  StrBfPtr
+# define StrBfPtr( g ) (((struct StringInfo *)g->SpecialInfo)->Buffer)
+#endif
+
+#define DLV       0
+#define Update    1
+#define Cancel    2
+#define RemoveBt  3
+#define Priority  4
+#define Close     5
+#define Flush     6
+
+#define DEVICELISTGADGET DLRGadgets[ DLV ]
+
+#define DLR_CNT   7
+
+PUBLIC struct List *DevListPtr = NULL;
+
+PRIVATE char ver[] = "$VER: SysDevices 1.0 (12/20/1999) by J.T. Steichen";
+
+PRIVATE char tstr[] = "Address  Type      Pri  Open Version    Neg   Pos Name";
+PRIVATE char fmt[]  = "%08LX %-8.8s %4d %5d %-8.8s %5d %5d %-29.29s";
+
+
+PRIVATE struct Library *CurrentDLR = NULL;
+
+
+PRIVATE struct Window       *DLRWnd   = NULL;
+PRIVATE struct Gadget       *DLRGList = NULL;
+PRIVATE struct IntuiMessage  DLRMsg;
+PRIVATE struct Gadget       *DLRGadgets[ DLR_CNT ];
+PRIVATE struct TextFont     *DLRFont  = NULL;
+
+PRIVATE UWORD  DLRLeft   = 0;
+PRIVATE UWORD  DLRTop    = 16;
+PRIVATE UWORD  DLRWidth  = 635;
+PRIVATE UWORD  DLRHeight = 230;
+PRIVATE UBYTE *DLRWdt    = "System Device/Library/Resource Info:";
+
+// -------------------------------------------------------------------
+
+#define MAXDEVS    150
+#define NODELENGTH 80
+
+PRIVATE struct MinList DLRList;
+PRIVATE struct Node    DLRNode;
+PRIVATE struct Node    DLRNodes[ MAXDEVS ] = { NULL, };
+PRIVATE UBYTE          NodeStrs[ MAXDEVS * NODELENGTH ] = "";
+
+// -------------------------------------------------------------------
+
+UWORD DLRGTypes[] = {
+
+   LISTVIEW_KIND,   BUTTON_KIND,   BUTTON_KIND,
+   BUTTON_KIND,     BUTTON_KIND,   BUTTON_KIND, 
+   BUTTON_KIND
+};
+
+PRIVATE int DLVClicked(      int whichitem );
+PRIVATE int UpdateClicked(   int dummy     );
+PRIVATE int CancelClicked(   int dummy     );
+PRIVATE int RemoveClicked(   int dummy     );
+PRIVATE int PriorityClicked( int dummy     );
+PRIVATE int CloseClicked(    int dummy     );
+PRIVATE int FlushClicked(    int dummy     );
+
+PRIVATE struct NewGadget DLRNGad[] = {
+
+     2,   3, 627, 200,                NULL,    NULL, DLV,      0, 
+   NULL, (APTR) DLVClicked,
+   
+     4, 205,  72,  17, (UBYTE *) "_Update",    NULL, Update,
+   PLACETEXT_IN, NULL, (APTR) UpdateClicked,
+
+   554, 205,  72,  17, (UBYTE *) "_Cancel",    NULL, Cancel,
+   PLACETEXT_IN, NULL, (APTR) CancelClicked,
+
+    89, 205,  72,  17, (UBYTE *) "Remove",     NULL, RemoveBt,
+   PLACETEXT_IN, NULL, (APTR) RemoveClicked,
+
+   172, 205,  72,  17, (UBYTE *) "Priority",   NULL, Priority, 
+   PLACETEXT_IN, NULL, (APTR) PriorityClicked,
+   
+   255, 205,  72,  17, (UBYTE *) "Close",      NULL, Close,
+   PLACETEXT_IN, NULL, (APTR) CloseClicked,
+
+   338, 205,  82,  17, (UBYTE *) "_Flush Sys", NULL, Flush,
+   PLACETEXT_IN, NULL, (APTR) FlushClicked
+};
+
+PRIVATE ULONG DLRGTags[] = {
+
+   GTLV_ShowSelected, NULL, LAYOUTA_Spacing, 2, TAG_DONE,
+
+   GT_Underscore, '_', TAG_DONE,
+   GT_Underscore, '_', TAG_DONE,
+   GA_Disabled, TRUE,  TAG_DONE,
+   GA_Disabled, TRUE,  TAG_DONE,
+   GA_Disabled, TRUE,  TAG_DONE,
+   GA_Disabled, TRUE,  GT_Underscore, '_', TAG_DONE
+};
+
+// -------------------------------------------------------------------
+
+PRIVATE int InitializeDeviceList( void )
+{
+   IMPORT struct ExecBase *SysBase;
+
+   struct Node   *ptr  = NULL;
+   struct Device *d    = NULL;
+   char v[20],   *vers = &v[0];
+   char t[10],   *type = &t[0];
+   char          *nm   = NULL;
+   int            i    = 0, version, rev;
+
+   HideListFromView( DEVICELISTGADGET, DLRWnd );
+
+   Forbid();
+
+     DevListPtr = &SysBase->DeviceList;
+     ptr        = DevListPtr->lh_Head;
+     d          = (struct Device  *) ptr;
+     CurrentDLR = &(d->dd_Library);
+     version    = CurrentDLR->lib_Version;
+     rev        = CurrentDLR->lib_Revision;
+
+     while (i < MAXDEVS && CurrentDLR != NULL)
+        {
+        nm = CurrentDLR->lib_Node.ln_Name; //lib_IdString;
+
+        if (strlen( nm ) < 1)
+           goto SkipBlankDeviceName;
+
+        if (CurrentDLR->lib_Node.ln_Type == NT_DEVICE)
+           strcpy( type, "device" );
+        else
+           strcpy( type, "????????" );
+           
+        sprintf( vers, "%4d.%-4d", version, rev );
+
+        // "Address  Type    Pri  Open Version  Neg  Pos  Name"        
+        sprintf( &NodeStrs[ i++ * NODELENGTH ],
+                 &fmt[0],
+                 CurrentDLR, 
+                 type,
+                 CurrentDLR->lib_Node.ln_Pri,
+                 CurrentDLR->lib_OpenCnt,
+                 vers,
+                 CurrentDLR->lib_NegSize,
+                 CurrentDLR->lib_PosSize,
+                 (nm == NULL ? "** NO NAME **" : nm)
+               );
+
+SkipBlankDeviceName:
+         
+        CurrentDLR = ((struct Library *) 
+                       CurrentDLR)->lib_Node.ln_Succ;
+
+        if (CurrentDLR == NULL)
+           break;
+
+        version = CurrentDLR->lib_Version;
+        rev     = CurrentDLR->lib_Revision;
+        } 
+
+   Permit();
+
+   Forbid();   
+
+     if (i < MAXDEVS)
+        {
+        DevListPtr = &SysBase->ResourceList;
+        CurrentDLR = (struct Library *) DevListPtr->lh_Head;
+        version    = CurrentDLR->lib_Version;
+        rev        = CurrentDLR->lib_Revision;
+
+        while (i < MAXDEVS && CurrentDLR != NULL)
+           {
+           nm = CurrentDLR->lib_Node.ln_Name; // lib_IdString;
+
+           if (strlen( nm ) < 1)
+              goto SkipBlankResourceName;
+
+           if (CurrentDLR->lib_Node.ln_Type == NT_RESOURCE)
+              strcpy( type, "resource" );
+           else
+              strcpy( type, "????????" );
+
+           sprintf( vers, "%4d.%-4d", version, rev );
+
+           // "Address  Type    Pri  Open Version  Neg  Pos  Name"        
+           sprintf( &NodeStrs[ i++ * NODELENGTH ], 
+                    &fmt[0],
+                    CurrentDLR, 
+                    type,
+                    CurrentDLR->lib_Node.ln_Pri,
+                    CurrentDLR->lib_OpenCnt,
+                    vers,
+                    CurrentDLR->lib_NegSize,
+                    CurrentDLR->lib_PosSize,
+                    (nm == NULL ? "** NO NAME **" : nm)
+                  );
+
+SkipBlankResourceName:
+         
+           CurrentDLR = ((struct Library *) 
+                          CurrentDLR)->lib_Node.ln_Succ;
+      
+           if (CurrentDLR == NULL)
+              break;
+
+           version = CurrentDLR->lib_Version;
+           rev     = CurrentDLR->lib_Revision;
+           } 
+        }   
+
+   Permit();
+
+   Forbid();
+
+     if (i < MAXDEVS)
+        {
+        DevListPtr = &SysBase->LibList;
+        CurrentDLR = (struct Library *) DevListPtr->lh_Head;
+        version    = CurrentDLR->lib_Version;
+        rev        = CurrentDLR->lib_Revision;
+        
+        while (i < MAXDEVS && CurrentDLR != NULL)
+           {
+           nm = CurrentDLR->lib_Node.ln_Name;
+
+           if (strlen( nm ) < 1)
+              goto SkipBlankLibName;
+              
+           if (CurrentDLR->lib_Node.ln_Type == NT_LIBRARY)
+              strcpy( type, "library" );
+           else
+              strcpy( type, "????????" );
+
+           sprintf( vers, "%4d.%-4d", version, rev );
+
+           // "Address  Type    Pri  Open Version  Neg  Pos  Name"        
+           sprintf( &NodeStrs[ i++ * NODELENGTH ], 
+                    &fmt[0],
+                    CurrentDLR, 
+                    type,
+                    CurrentDLR->lib_Node.ln_Pri,
+                    CurrentDLR->lib_OpenCnt,
+                    vers,
+                    CurrentDLR->lib_NegSize,
+                    CurrentDLR->lib_PosSize,
+                    (nm == NULL ? "** NO NAME **" : nm)
+                  );
+
+SkipBlankLibName:
+         
+           CurrentDLR = ((struct Library *) 
+                          CurrentDLR)->lib_Node.ln_Succ;
+      
+           if (CurrentDLR == NULL)
+              break;
+
+           version = CurrentDLR->lib_Version;
+           rev     = CurrentDLR->lib_Revision;
+           }
+        }
+
+     // Reset CurrentDLR to the Head of the list.
+     DevListPtr = &SysBase->DeviceList;
+     CurrentDLR = (struct Library *) DevListPtr->lh_Head;
+
+   Permit();
+
+   GT_SetGadgetAttrs( DEVICELISTGADGET, DLRWnd, NULL,
+                      GTLV_Labels,       &DLRList,
+                      GTLV_Selected,     0, 
+                      GTLV_MaxPen,       255,
+                      GTLV_ItemHeight,   12,
+                      TAG_END
+                    );
+
+   DisplayTitle( DLRWnd, DLRWdt );
+
+   return( i );
+}
+
+// -----------------------------------------------------------------
+
+PRIVATE void CloseDLRWindow( void )
+{
+   if (DLRWnd != NULL)
+      {
+      CloseWindow( DLRWnd );
+      DLRWnd = NULL;
+      }
+
+   if (DLRGList != NULL)
+      {
+      FreeGadgets( DLRGList );
+      DLRGList = NULL;
+      }
+
+   if (DLRFont != NULL)
+      {
+      CloseFont( DLRFont );
+      DLRFont = NULL;
+      }
+
+   return;
+}
+
+// -----------------------------------------------------------------
+
+PRIVATE char wt[80] = { 0, }, *modtitle = &wt[0];
+
+
+PRIVATE int DLVClicked( int whichitem )
+{
+   ULONG addr = 0L;
+
+   if (whichitem == 0)
+      {
+      // Disable buttons because user selected the title item:
+
+      GT_SetGadgetAttrs( DLRGadgets[ RemoveBt ], DLRWnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( DLRGadgets[ Priority ], DLRWnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+   
+      GT_SetGadgetAttrs( DLRGadgets[ Close ], DLRWnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+   
+      GT_SetGadgetAttrs( DLRGadgets[ Flush ], DLRWnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+   
+      DisplayTitle( DLRWnd, DLRWdt );
+      
+      CurrentDLR = NULL;
+
+      return( (int) TRUE );
+      }
+
+   // Now get address from the item:
+   
+   (void) stch_l( DLRNodes[ whichitem ].ln_Name, (long *) &addr );
+
+   CurrentDLR = (struct Library *) addr;
+    
+   if (addr != NULL)
+      {
+      sprintf( modtitle, "%-53.53s  You Selected:  %08LX", DLRWdt, addr );
+
+      DisplayTitle( DLRWnd, modtitle );
+      }
+
+   // Enable buttons because user made a valid selection from the ListView:
+
+   GT_SetGadgetAttrs( DLRGadgets[ RemoveBt ], DLRWnd, NULL,
+                      GA_Disabled, FALSE, TAG_DONE 
+                    );
+
+   GT_SetGadgetAttrs( DLRGadgets[ Priority ], DLRWnd, NULL,
+                      GA_Disabled, FALSE, TAG_DONE 
+                    );
+   
+   GT_SetGadgetAttrs( DLRGadgets[ Close ], DLRWnd, NULL,
+                      GA_Disabled, FALSE, TAG_DONE 
+                    );
+
+   GT_SetGadgetAttrs( DLRGadgets[ Flush ], DLRWnd, NULL,
+                      GA_Disabled, FALSE, TAG_DONE 
+                    );
+   
+   return( (int) TRUE );
+}
+
+// -----------------------------------------------------------------
+
+PRIVATE int UpdateClicked( int dummy )
+{
+   int i;
+
+   DisplayTitle( DLRWnd, "Updating list..." );
+   
+   for (i = 1; i <= MAXDEVS; i++)
+       NodeStrs[ i * NODELENGTH ] = '\0'; // Kill old ListView strings.
+
+   if (InitializeDeviceList() <= 0)
+      {
+      // No Devices/Libraries/Resources known to SysBase!!
+      UserInfo( "No Device/Libraries/Resources found!", "OS ERROR??" );
+      }  
+
+   GT_RefreshWindow( DLRWnd, NULL );
+
+   DisplayTitle( DLRWnd, DLRWdt );
+
+   return( (int) TRUE );
+}
+
+// -----------------------------------------------------------------
+
+PRIVATE int DLRCloseWindow( void )
+{
+   CloseDLRWindow();
+   return( (int) FALSE );
+}
+
+// -----------------------------------------------------------------
+
+PRIVATE int CancelClicked( int dummy )
+{
+   return( DLRCloseWindow() );
+}
+
+// -----------------------------------------------------------------
+
+// Flush Unused Libraries, Resources, etc., out of Memory:
+
+PRIVATE int FlushClicked( int dummy )
+{
+   char command[32];
+
+   strcpy( &command[0], "AVAIL FLUSH >NIL:" );
+   
+   if (System( &command[0], TAG_DONE ) < 0)
+      {
+      sprintf( ErrMsg, 
+               "%s couldn't be run by the System,\ncheck your path!",
+               &command[0]
+             );
+
+      UserInfo( ErrMsg, "Invalid command path?" );
+
+      return( (int) TRUE );
+      }
+
+   (void) UpdateClicked( 0 ); // Re-make the ListView contents.
+
+   return( (int) TRUE );
+}
+
+// -----------------------------------------------------------------
+
+PRIVATE int CloseClicked( int dummy )
+{
+   char *name = CurrentDLR->lib_Node.ln_Name;
+   int   type = CurrentDLR->lib_Node.ln_Type;
+   BOOL  ans  = 0;
+   
+   sprintf( ErrMsg, "Close will change the Open Count\n"
+                    "for %s, are you sure about this?",
+                    name
+          );
+   
+   ans = SanityCheck( ErrMsg );
+   
+   if (ans == FALSE)
+      return( TRUE ); // User came to her senses!
+         
+   switch (type)
+      {
+      case NT_LIBRARY:
+         if (CurrentDLR->lib_OpenCnt > 0)
+            CloseLibrary( CurrentDLR );
+         else
+            {
+            Forbid();
+               RemLibrary( CurrentDLR );
+            Permit();
+            }
+
+         break;
+
+      case NT_DEVICE:
+         UserInfo( "NOT Implemented for devices!", "User Information:" );
+/*
+         if (CurrentDLR->lib_OpenCnt > 0)
+            CloseDevice( (struct Device *) CurrentDLR );
+         else
+            {
+            Forbid();
+               RemDevice( (struct Device *) CurrentDLR );
+            Permit();
+            }         
+*/       
+         break;
+
+      case NT_RESOURCE:
+
+         Forbid();
+            Remove( &(CurrentDLR->lib_Node) );
+         Permit();
+
+         (void) FlushClicked( 0 );
+
+         break;
+/*
+      case NT_DEVICE:
+         {
+         struct MsgPort        *dmport = NULL;
+         struct DosPacket      *reply  = NULL;
+         struct DevProc        *dp     = NULL;
+
+         struct Message         msg    = { 0, };
+         struct StandardPacket  spack  = { 0, };
+         struct MsgPort         dport  = { 0, };
+         struct MsgPort         drport = { 0, };
+
+         dp     = GetDeviceProc( name, dp );
+         dmport = dp->dvp_DevNode->dol_Task;   // Task MsgPort!
+         
+         or: 
+
+         dmport = DeviceProc( (STRPTR) name ); // Task MsgPort!
+
+         msg.mn_Node.ln_Name     = name;
+         msg.mn_ReplyPort        = &drport;
+
+         spack.sp_Msg            = msg;
+
+         spack.sp_Pkt.dp_Port    = &dport;
+         spack.sp_Pkt.dp_Status  = 0;
+         spack.sp_Pkt.dp_Status2 = 0;
+         spack.sp_Pkt.dp_Action  = ACTION_FLUSH;
+         
+         SendPkt( &spack.sp_Pkt, (dp->dvp_Port or dmport), &drport );
+         reply = WaitPkt();
+
+         if (spack.sp_Pkt.dp_Status != DOSTRUE)
+            {
+            }
+         // error checking????
+
+         msg.mn_Node.ln_Name     = name;
+         msg.mn_ReplyPort        = &drport;
+
+         spack.sp_Msg            = msg;
+
+         spack.sp_Pkt.dp_Port    = &dport;
+         spack.sp_Pkt.dp_Status  = 0;
+         spack.sp_Pkt.dp_Status2 = 0;
+         spack.sp_Pkt.dp_Action  = ACTION_DIE;
+
+         SendPkt( &spack.sp_Pkt, (dp->dvp_Port or dmport), &drport );
+         reply = WaitPkt();
+
+         if (spack.sp_Pkt.dp_Status != DOSTRUE)
+            {
+            }
+
+         // Error checking???
+
+         FreeDeviceProc( dp );
+         }
+         break;
+*/
+      }
+
+   (void) FlushClicked(  0 ); // Remove from system memory.
+   (void) UpdateClicked( 0 ); // Update the ListViewer.
+
+   return( (int) TRUE );
+}
+
+// -----------------------------------------------------------------
+
+PRIVATE void RemoveTheDevice( struct Library *dev )
+{
+//   char *name = CurrentDLR->lib_Node.ln_Name;
+   int type = dev->lib_Node.ln_Type;
+
+   switch (type)
+      {
+      case NT_LIBRARY:
+         while (dev->lib_OpenCnt > 0)
+            CloseLibrary( dev );
+         
+         Forbid();
+            RemLibrary( dev );
+         Permit();
+
+         break;
+          
+      case NT_DEVICE:
+/*         
+         while (dev->lib_OpenCnt > 0)
+            CloseDevice( (struct IORequest *) dev );
+
+         Forbid();
+            RemDevice( (struct Device *) dev );
+         Permit();         
+*/
+         break;
+
+      case NT_RESOURCE:
+         /*
+         More work is needed here!!
+         */
+         break;      
+      }
+      
+   (void) FlushClicked( 0 ); // Remove from system & update ListView.
+
+   return;
+}
+
+PRIVATE int RemoveClicked( int dummy )
+{
+   if (CurrentDLR != NULL)
+      {
+      if (CurrentDLR->lib_Node.ln_Type == NT_LIBRARY
+          || CurrentDLR->lib_Node.ln_Type == NT_DEVICE)
+         {
+         sprintf( ErrMsg, "Are you SURE you want to Remove 0x%08LX?\n"
+                          "The open count is %d", 
+                          CurrentDLR, CurrentDLR->lib_OpenCnt
+                );
+
+         if (SanityCheck( ErrMsg ) != FALSE)
+            {
+            RemoveTheDevice( CurrentDLR );
+
+            if (InitializeDeviceList() <= 0)
+               {
+               // No Devices known to SysBase!!
+               UserInfo( "No Devices/Libraries/Resources found!",
+                         "OS ERROR??"
+                       );
+               }
+ 
+            GT_RefreshWindow( DLRWnd, NULL );
+            }
+         }
+      else
+         UserInfo( "Removal of resources NOT implemented yet!",
+                   "User Information:"
+                 );
+      }
+   else
+      {
+      // No Devices selected by the user:
+      UserInfo( "Select a Device/Library/Resource first!", "USER ERROR:" );
+
+      return( (int) TRUE );
+      }
+
+   return( (int) TRUE );
+}
+
+// -----------------------------------------------------------------
+
+PRIVATE int PriorityClicked( int dummy )
+{
+   IMPORT int ChangePriorityHandler( char *name, int ObjType, 
+                                     int frompri
+                                   );
+
+   char *name   = CurrentDLR->lib_Node.ln_Name;
+   int   pri    = CurrentDLR->lib_Node.ln_Pri;
+   int   type   = CurrentDLR->lib_Node.ln_Type;
+      
+   if (ChangePriorityHandler( name, type, pri ) < 0)
+      {
+      int ans = 0;
+      
+      ans = Handle_Problem( "Couldn't open Priority Requester!\n"
+                            "   (Low memory condition?)", 
+                            "System ERROR:", NULL
+                          );
+
+      if (ans != 0) // User pressed the ABORT! button.
+         {
+         return( FALSE );
+         }
+      }
+
+   return( (int) TRUE );
+}
+
+// -----------------------------------------------------------------
+
+PRIVATE int OpenDLRWindow( void )
+{
+   struct NewGadget  ng;
+   struct Gadget    *g;
+   UWORD             lc, tc;
+   UWORD             wleft = DLRLeft, wtop = DLRTop, ww, wh;
+
+   ComputeFont( Scr, Font, &CFont, DLRWidth, DLRHeight );
+
+   ww = ComputeX( CFont.FontX, DLRWidth );
+   wh = ComputeY( CFont.FontY, DLRHeight );
+
+   if ((wleft + ww + CFont.OffX + Scr->WBorRight) > Scr->Width)
+      wleft = Scr->Width - ww;
+
+   if ((wtop + wh + CFont.OffY + Scr->WBorBottom) > Scr->Height)
+      wtop = Scr->Height - wh;
+
+   if ((DLRFont = OpenDiskFont( Font )) == NULL)
+      return( -5 );
+
+   if ((g = CreateContext( &DLRGList )) == NULL)
+      return( -1 );
+
+   for (lc = 0, tc = 0; lc < DLR_CNT; lc++)
+      {
+      CopyMem( (char *) &DLRNGad[lc], (char *) &ng, 
+               (long) sizeof( struct NewGadget )
+             );
+
+      ng.ng_VisualInfo = VisualInfo;
+      ng.ng_TextAttr   = Font;
+
+      ng.ng_LeftEdge   = CFont.OffX + ComputeX( CFont.FontX,
+                                                ng.ng_LeftEdge
+                                              );
+
+      ng.ng_TopEdge    = CFont.OffY + ComputeY( CFont.FontY,
+                                                ng.ng_TopEdge
+                                              );
+
+      ng.ng_Width      = ComputeX( CFont.FontX, ng.ng_Width );
+      ng.ng_Height     = ComputeY( CFont.FontY, ng.ng_Height );
+
+      DLRGadgets[lc] = g = CreateGadgetA( (ULONG) DLRGTypes[lc], 
+                             g, 
+                             &ng, 
+                             (struct TagItem *) & DLRGTags[tc] );
+
+      while (DLRGTags[tc] != NULL)
+         tc += 2;
+
+      tc++;
+
+      if (g == NULL)
+         return( -2 );
+      }
+
+   if ((DLRWnd = OpenWindowTags( NULL,
+
+                   WA_Left,        wleft,
+                   WA_Top,         wtop,
+                   WA_Width,       ww + CFont.OffX + Scr->WBorRight,
+                   WA_Height,      wh + CFont.OffY + Scr->WBorBottom,
+
+                   WA_IDCMP,       LISTVIEWIDCMP | BUTTONIDCMP 
+                     | IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW,
+
+                   WA_Flags,       WFLG_DRAGBAR | WFLG_DEPTHGADGET 
+                     | WFLG_CLOSEGADGET | WFLG_SMART_REFRESH 
+                     | WFLG_ACTIVATE | WFLG_RMBTRAP,
+                   
+                   WA_Gadgets,     DLRGList,
+                   WA_Title,       DLRWdt,
+                   WA_ScreenTitle, &ScrTitle[0],
+                   TAG_DONE )
+      ) == NULL)
+      return( -4 );
+
+   GT_RefreshWindow( DLRWnd, NULL );
+
+   return( 0 );
+}
+
+PRIVATE int DLRVanillaKey( int whichkey )
+{
+   int rval = TRUE;
+   
+   switch (whichkey)
+      {
+      case 'u':
+      case 'U':
+         rval = UpdateClicked( 0 );
+         break;
+         
+      case 'c':
+      case 'C':
+      case 'q':
+      case 'Q':
+         rval = CancelClicked( 0 );
+         break;
+      }
+
+   return( rval );
+}
+
+PRIVATE int HandleDLRIDCMP( void )
+{
+   struct IntuiMessage  *m;
+   int                 (*func)( int code );
+   BOOL                  running = TRUE;
+
+   while (running == TRUE)
+      {
+      if ((m = GT_GetIMsg( DLRWnd->UserPort )) == NULL)
+         {
+         (void) Wait( 1L << DLRWnd->UserPort->mp_SigBit );
+         continue;
+         }
+
+      CopyMem( (char *) m, (char *) &DLRMsg, 
+               (long) sizeof( struct IntuiMessage )
+             );
+
+      GT_ReplyIMsg( m );
+
+      switch (DLRMsg.Class)
+         {
+         case IDCMP_REFRESHWINDOW:
+            GT_BeginRefresh( DLRWnd );
+            GT_EndRefresh( DLRWnd, TRUE );
+            break;
+
+         case IDCMP_CLOSEWINDOW:
+            running = DLRCloseWindow();
+            break;
+
+         case IDCMP_VANILLAKEY:
+            running = DLRVanillaKey( (int) DLRMsg.Code );
+            break;
+
+         case IDCMP_GADGETUP:
+         case IDCMP_GADGETDOWN:
+            func = (void *) ((struct Gadget *) DLRMsg.IAddress)->UserData;
+            if (func != NULL)
+               running = func( (int) DLRMsg.Code );
+   
+            break;
+         }
+      }
+   
+   return( running );
+}
+
+PUBLIC int HandleDeviceLV( void )
+{
+   int i = 0;
+
+   // Open Libraries, Screen & Window:
+   if (SetupSystemList( &OpenDLRWindow ) < 0)
+      {
+      UserInfo( "Couldn't open a System ListViewer!", 
+                "Allocation Problem:"
+              );
+
+      return( -1 );
+      }
+
+   // Disable buttons until user selects a Device from the ListView:
+
+   GT_SetGadgetAttrs( DLRGadgets[ RemoveBt ], DLRWnd, NULL,
+                      GA_Disabled, TRUE, TAG_DONE 
+                    );
+
+   GT_SetGadgetAttrs( DLRGadgets[ Priority ], DLRWnd, NULL,
+                      GA_Disabled, TRUE, TAG_DONE 
+                    );
+
+   GT_SetGadgetAttrs( DLRGadgets[ Close ], DLRWnd, NULL,
+                      GA_Disabled, TRUE, TAG_DONE 
+                    );
+   
+   DLRNode.ln_Succ = (struct Node *) DLRList.mlh_Tail;
+   DLRNode.ln_Pred = (struct Node *) DLRList.mlh_Head;
+   DLRNode.ln_Type = 0;
+   DLRNode.ln_Pri  = MAXDEVS - 129;
+   DLRNode.ln_Name = tstr;
+
+   DLRNodes[0]     = DLRNode;
+
+   SetNotifyWindow( DLRWnd ); // For Handle_Problem().
+
+   DisplayTitle( DLRWnd, "Initializing list..." );
+
+   // DLRNodes[0] is already set up:
+
+   for (i = 1; i <= MAXDEVS; i++)
+       {
+       DLRNodes[i].ln_Name = &NodeStrs[ i * NODELENGTH ];
+       DLRNodes[i].ln_Pri  = MAXDEVS - i - 129;
+       }     
+
+   NewList( (struct List *) &DLRList );
+
+   for (i = 0; i < MAXDEVS; i++)
+      Enqueue( (struct List *) &DLRList, &DLRNodes[i] );
+
+   (void) InitializeDeviceList();
+
+   GT_SetGadgetAttrs( DEVICELISTGADGET, DLRWnd, NULL,
+                      GTLV_Labels,       &DLRList,
+                      GTLV_Selected,     0, 
+                      GTLV_MaxPen,       255,
+                      GTLV_ItemHeight,   12,
+                      TAG_END
+                    );
+
+   GT_RefreshWindow( DLRWnd, NULL );
+
+   (void) HandleDLRIDCMP();
+
+   // Close the Screen & Libraries:   
+   ShutdownSystemList();
+   return( 0 );
+}
+
+#ifdef DEBUG
+
+PUBLIC int main( void )
+{
+   return( HandleDeviceLV() );
+}
+
+#endif
+
+/* ----------------------- END of SysDevs.c file! ----------------- */

@@ -1,0 +1,940 @@
+                       Shadow.library  Documentation
+                            Library Version 4.6
+
+                              By David Navas
+                         Updated:  09 Feb 1992
+
+                      Copyright © 1992 by David Navas
+                            All Rights Reserved
+
+Method definition for the following classes as defined in SHADOW 4.3:
+      DirectorClass
+      MetaClass
+      MetaCluster
+      PatcherClass
+      ProcessClass
+      RootClass
+      RootCluster
+
+REVIEW
+
+   Methods are handled by the 'class' of an object.  Classes are objects
+   whose 'classes' are referred to as 'metas'.  So the 'class' of a Class
+   object is a Meta.  The 'class' of a meta is the instance of itself.
+
+   if this confuses you, you need to Read Introduction.doc first.  And
+   then re-read it.  And then refer to the Glossary.doc for the difference
+   between a Class and a class....
+
+   Methods are implemented as strings, and the MethodTable is an array of
+   MethodHandlers that have been defined for a class of objects that are
+   managed by the object's class.  Similarly, 'attributes' are implemented
+   as strings.  Attributes contain the definition of the variables that
+   are stored in an object.  For instance, a BookClass might have an
+   attribute ATTR_NUMBERPAGES which would represent an integer inside
+   of a BookObject that contains the number of pages that that book had.
+
+   In addition to Classes, SHADOW defines Clusters as the 'class' of
+   Composite Objects.  A Composite Object is sort of like a bag of objects.
+   When the composite is fully initialized (see: METHOD_META_INIT), it
+   contains a number of objects stored in a binary tree.  The attribute of
+   this binary tree is represented as ATTR_BAG.  Therefore, you can
+   get a pointer to the binary tree (which is what y0u need to pass to the
+   various binary tree manipulation functions) by calling:
+      bt = (AVLTREE *)FindAttribute(compositeObject, ATTR_BAG);
+   Or you can merely use the structure 'struct CoreComposite' and
+   de-reference directly off of that.
+
+   Once the composite is initialized, you may add or remove as many of the
+   objects as you like.  Caution: if you remove an object, please remember
+   to send the removed object a METHOD_META_REMOVE method so that it can
+   be removed from it's class' instance tree.
+
+
+INHERITENCE
+
+   Methods are inherited from a superclass, as are attributes.  The
+   following discussion will only explain the NEW methods and attributes
+   which a 'class' defines, or the methods which are subclassed by the
+   'class'.  Each 'class' inherits methods from its superclass by default.
+   Therefore, we will talk about classes in the order in which they appear
+   in the inheritence hierarchy.  The hierarchy is as follows:
+
+                                 MetaClass
+                                     |
+                                     |
+                                MetaCluster
+
+
+
+
+
+                                 RootClass
+                        ________/    |    \__________
+                       |             |               |
+                  DirectorClass  PatcherClass  ProcessClass
+
+
+
+
+                                RootCluster
+
+
+CLASS OVERVIEW:
+
+   MetaClass and MetaCluster are the meta descriptiosn for Class and
+   Cluster.
+
+   RootClass and RootCluster are the roots of the Class and Cluster
+   inheritence hiearchies  They do things like store the object into the
+   class' ATTR_OBJECTLIST (a watched binary tree), and they define the
+   Cluster as starting with an ATTR_BAG.
+
+   DirectorClass is the class for director objects, usually referred to as
+   watchers.  SHADOW defines a type of variable called WatchedVariables.
+   Director objects are the objects responsible for actually watching
+   these WatchedVariables.  They provide Notification methods, and also
+   sport the ability to watch more than one variable at a time via the
+   ESTABLISH/TERMINATE method protocol.
+
+   PatcherClass is the class for method patch objects.  Every method in
+   SHADOW can be patched -- this is SetFunction() done right!  Method
+   patches for a class are located in a watched list referred to as
+   ATTR_PATCHEDVERBS.  Patches have a priority (higher priority patches
+   get called before lower priority patches -- regular method is default
+   priority zero), can dynamically prevent subsequent patches of lower
+   priority from being called, and may only patch a single verb at a time,
+   unlike watchers.  Please Note!:  it is impossible to patch the DESTROY
+   method -- see RemoveAllPatches() for more details.
+
+   ProcessClass (more accurately referred to as ThreadClass, because of
+   the way AmigaDOS treats Tasks/Processes) is the class for process
+   objects.  They attach themselves to your task->tc_UserData field,
+   SO DON'T MESS WITH THAT FIELD!  Process objects keep track of IPC
+   ports, the parent task pointer (-1 if no parent), the message for use
+   during synchronous communications, etc.   Each program that intends
+   to call methods, either actively via DoJazzMethod() or DJM(), or
+   passively via DropObject(), or possibly even via callbacks in the
+   FindAttribute() code, should call InitOOProgram().  Unfortunately, this
+   makes subclassing ProcessClass for your own process more or less
+   pointless.  However, because METHOD_META_SUB is actually a callback
+   method, it is safe to create a subclass of Process Class and then send
+   that class a METHOD_META_CREATE followed by a METHOD_PROC_ASSOCIATE as
+   documented leter in this file.  The attribute ATTR_JAZZPROCESS -must-
+   be located eight bytes from the start of the object, so please don't
+   define your own private process-class unless it is a subclass of
+   ProcessClass.
+
+
+METHOD CALLING CONVENTIONS
+
+   All methods are called with at least four parameters.  The first is a
+   pointer to an IPCMessage structure.  If this parameter is non-NULL, it
+   means that the method was called with an asynchronous method, and the
+   passed IPCMessage is the message which was sent to the task.  The
+   name of this parameter is 'msg'.
+
+   The second parameter is the object that the method was called on.
+   However, the term 'object' would be ambiguous, as the instance that
+   the method was called on may well be a class-object or a meta-object.
+   Nevertheless, in the code, the parameter is named 'object'.
+
+   The third parameter is the class pointer, which is the pointer to
+   the class for which the method is defined (under the hierarchy of the
+   object->cob_class, of course).  The parameter's name in the code is
+   'class'.
+
+   The last default parameter is the MethodID itself.  This is guaranteed
+   to be a pointer to the system string which stores the name of the
+   method.  This parameter is named 'MethodID'.
+
+   All four of these parameters can be found in the METHOD_ARGS #define in
+   the include file: shadow/misc.h.
+
+
+SYSTEM CLASS DEFINITIONS
+
+   METACLASS
+
+      attributes:
+         ATTR_CORE         -- the minimal class variables, including the
+                               attribute and method table pointers
+         ATTR_PATCHEDVERBS -- watched list of method patches.
+         ATTR_OBJECTLIST   -- watched binary tree of meta's instances.
+                               Metas are kept on a special watched binary
+                               tree located in ShadowBase->sb_metaTree.
+                               Classes (as instances of MetaClass) are
+                               kept on this OBJECTLIST.  Note that even
+                               though Metas are, strictly, instances of
+                               themselves, they do not exist on their
+                               own OBJECTLIST tree.
+
+      methods:
+         METHOD_META_CREATE
+            run as:
+               function in caller's process.
+            arguments:
+               none.
+
+               NOTE: this function may NOT be called asynchronously!
+               Returns a pointer to an unitialized object.
+
+            function:
+               Allocates an instance of a particular class.  IE:this is a
+               method which is sent to a Class, not its instances.
+               It creates an object, fills in the class field and any
+               default attribute values as specified in the class attribute
+               table, and returns the allocated object.
+
+               Note that this object CANNOT have anything done to it UNTIL
+               it is sent a METHOD_META_INIT.  Among other things, the
+               useCount is zero.  DJM() correctly fails and frees the
+               object if a call to METHOD_META_INIT fails for any reason
+               (like the destination process has it's port closed, or
+               memory is running low).
+
+               Memory is allocated :: (MEMF_PUBLIC | MEMF_CLEAR)
+
+         METHOD_META_DESTROY
+            run as:
+               function in caller's process.
+            arguments:
+               none
+            function:
+               Invalidates the cache for any cache lines with the class
+               being destroyed.  See InvalidateCache() for details.
+               Frees any leftover watchers on the class
+               [FreeObjectWatchers()], destroys the method and attribute
+               tables, drops the class name and superclass references,
+               frees the object, drops its class, and hopefully handles
+               the case of transferring the pointer from the 'msg' field
+               to non-existence, just in case this method is called
+               asynchronously (which should NEVER happen).  This method
+               should ONLY be called by the internals of DropObject().
+               Please do not call it yourself.  This is the second half of
+               the two-level resource tracking.  This function is called
+               by DropObject() when the useCount of the object drops to
+               zero, implying no one has a pointer to the object.  As
+               evidenced by the FreeObjectWatchers() call, this may not be
+               entirely TRUE, but is nearly so....
+               Also calls RemoveAllPatches().
+
+         METHOD_META_INIT
+            run as:
+               function in caller's process.
+            arguments:
+               JSTR -- name of the class to create
+               JOBJ -- optional superclass of the class to create.  This
+                        method is, however, sent to the class that is to
+                        be subclassed, so if this parameter is NULL, it
+                        defaults to the object which the method was sent
+                        to.
+               TAGL -- NULL terminated array of struct AttributeTag.  NULL
+                        is also valid.
+               TAGL -- NULL terminated array of struct MethodTag.  NULL is
+                        also valid.
+
+               Returns a pointer to the initialized object.  NULL on
+               failure.  Object destroyed on failure....
+
+            function:
+               As all good METHOD_META_INIT functions that can be called
+               by metas should, this method does not fill in the
+               superclass, attribute array, or method array, if the method
+               is called by a meta.  CreateMeta() should have already done
+               those things.
+
+               Otherwise, this function fills in the superclass field,
+               creates the attribute array for the instance of the class,
+               fills in the instance size specification, and creates the
+               Method array.
+
+               In both cases, it fills in the class name, binds all the
+               appropriate class watchers for its attributes  [Ed:
+               watched variables have both a list of watchers, and a
+               pointer to a second list of watcher.  SHADOW uses this
+               pointer to point to a list of watchers managed by the
+               class.  Under MetaClass and MetaCluster, these 'class'
+               watchers are copied into all subclasses.  See
+               BindSuperWatchers() for more details], and adds the object
+               into its class' ATTR_OBJECTLIST.  In the case of a meta,
+               this would be Shadow->sb_metaTree.  It also calls
+               BindWatchers() on the object which binds the second
+               watch-list pointer of all watched variables to the class'
+               attributes' SList.  See the struct Attribute definition and
+               the AutoDocs for BindWatchers().
+
+         METHOD_META_REMOVE
+            run as:
+               function in caller's process.
+            arguments:
+               none
+            function:
+               Frees all class watchers associated with this class.  See
+               FreeClassWatchers() for further details.  Removes the
+               instance (in this method, the instance is a Class) from its
+               class' ATTR_OBJECTLIST.  If this is a Meta being removed,
+               the Meta is removed from ShadowBase->sb_metaTree instead.
+               This is the first of the two-level resource tracking done
+               on objects.  In addition, removal from this tree implies
+               that the system can no longer find your class/meta,
+               effectively removing it from the system.  It is not
+               destroyed, however, until no one has a pointer to it
+               (assuming they have used UseObject() and DropObject()
+               appropriately.  All self-references, either direct or
+               indirect, should be eliminated in this method.
+
+         METHOD_META_SUB
+            run as:
+               function in caller's process.
+            arguments:
+               JSTR -- name of the class to create
+               JOBJ -- optional superclass of the class to create.  This
+                        method is, however, sent to the class that is to
+                        be subclassed, so if this parameter is NULL, it
+                        defaults to the object which the method was sent to.
+               TAGL -- NULL terminated array of struct AttributeTag.  NULL
+                        is also valid.
+               TAGL -- NULL terminated array of struct MethodTag.  NULL is
+                        also valid.
+            function:
+               If this method is sent to a meta (that is, if object ==
+               object->cob_class), then CreateMeta() is called with the
+               parameter list (minus the default msg pointer) sent to
+               CreateMeta() as the InitMeta structure.  Returns whatever
+               CreateMeta() does.
+
+
+               Otherwise it instantiates a meta (creating a Class Object)
+               and sends a METHOD_META_INIT to it, returning whatever the
+               INIT method returns.
+
+
+   METACLUSTER
+
+      attributes:
+         ATTR_CLASSTABLE   -- struct ClusterClassTable, list of classes
+                               to create and INIT when composite INIT'd.
+
+      methods:
+         METHOD_META_DESTROY
+            run as:
+               function in caller's process.
+            arguments:
+               none
+            function:
+               ATTR_CLASSTABLE is freed, and method sent to superclass.
+               'msg' variables should be updated as transferred as well....
+
+         METHOD_META_INIT
+            run as:
+               function in caller's process.
+            arguments:
+               JSTR -- name of the class to create
+               JOBJ -- optional superclass of the class to create.  This
+                        method is, however, sent to the class that is to
+                        be subclassed, so if this parameter is NULL, it
+                        default to the object which the method was sent to.
+               TAGL -- NULL terminated array of struct AttributeTag.  NULL
+                        is also valid.
+               TAGL -- NULL terminated array of struct MethodTag.  NULL is
+                        also valid.
+               TAGL -- NULL terminated array of classes to fill in the
+                        ATTR_CLASSTABLE.  NULL is also valid.
+
+               Returns a pointer to the initialized object.  NULL on
+               failure.  Object destroyed on failure....
+
+            function:
+               As all good METHOD_META_INIT functions that can be called
+               by metas should, this method does not fill in the
+               superclass, attribute array, or method array, if the method
+               is called by a meta.  CreateMeta() should have already done
+               those things.
+
+               Otherwise, this function fills in the superclass field,
+               creates the attribute array for the instance of the cluster,
+               fills in the instance size specification, and creates the
+               Method array.
+
+               In both cases, it fills in the class name, binds all the
+               appropriate class watchers for its attributes  [Ed:
+               watched variables have both a list of watchers, and a
+               pointer to a second list of watcher.  SHADOW uses this
+               pointer to point to a list of watchers managed by the
+               class.  Under MetaClass and MetaCluster, these 'class'
+               watchers are copied into all subclasses.  See
+               BindSuperWatchers() for more details], adds the object
+               into its class' ATTR_OBJECTLIST (in the case of a meta,
+               this would be Shadow->sb_metaTree), and creates the class
+               array from the third tags list (ATTR_CLASSTABLE).  It also
+               calls BindWatchers() on the object which binds the second
+               watch-list pointer of all watched variables to the class'
+               attributes' SList.  See the struct Attribute definition and
+               the AutoDocs for BindWatchers().
+
+         METHOD_META_SUB
+            run as:
+               function in caller's process.
+            arguments:
+               JSTR -- name of the class to create
+               JOBJ -- optional superclass of the class to create.  This
+                        method is, however, sent to the class that is to
+                        be subclassed, so if this parameter is NULL, it
+                        defaults to the object which the method was sent to.
+               TAGL -- NULL terminated array of struct AttributeTag.  NULL
+                        is also valid
+               TAGL -- NULL terminated array of struct MethodTag.  NULL is
+                        also valid.
+               TAGL -- NULL terminated array of classes to fill in
+                        ATTR_CLASSTABLE with.  NULL is also valid.
+
+            function:
+               If this method is sent to a meta (that is, if object ==
+               object->cob_class), then CreateMeta() is called with the
+               parameter list (minus the default msg pointer) sent to
+               CreateMeta() as the InitMeta structure.  Returns whatever
+               CreateMeta() does.
+
+
+               Otherwise it instantiates a meta (creating a Class Object)
+               and sends a METHOD_META_INIT to it, returning whatever the
+               INIT method returns.
+
+
+   ROOTCLASS
+
+      attributes:
+         none
+      methods:
+         METHOD_META_CREATE
+            see METHOD_META_CREATE in MetaClass.
+
+         METHOD_META_DESTROY
+            run as:
+               function in caller's process.
+            arguments:
+               none
+            function:
+               Frees any leftover watchers on the object
+               [FreeObjectWatchers()], frees the object, and drops its
+               class.  Hopefully handles the case of transferring the
+               pointer from the 'msg' field to non-existence, just in case
+               this method is called asynchronously (which should NEVER
+               happen).  This method should ONLY be called by the
+               internals of DropObject().  Do not call it yourself.  This
+               is the second half of the two-level resource tracking.
+               This function is called by DropObject() when the usecount
+               of the object drops to zero, implying no one has a pointer
+               to the object.  As evidenced by the FreeObjectWatchers()
+               call, this may not be entirely TRUE, but is nearly so....
+
+         METHOD_META_INIT
+            run as:
+               function in caller's process
+            arguments:
+               JSTR -- name of the object to create (optional).  If
+                        specified, object stored on ATTR_OBJECTLIST sorted
+                        by address of string, rather than address of
+                        itself.
+
+               Returns a pointer to the initialized object.  NULL on
+               failure.
+            function:
+               Adds object to ATTR_OBJECTLIST of its class, either sorted
+               by the address of the passed string, or, if NULL string, by
+               its own address.  Note that these are AVL trees, so it's
+               still well balanced.
+
+               It also calls BindWatchers() to bind all the watched
+               attributes of the object's second List to the class
+               attribute's watched list.  See BindWatchers() for more
+               details.
+
+         METHOD_META_REMOVE
+            run as:
+               function in caller's process.
+            arguments:
+               JSTR -- optional string under which the object might have
+                        been stored (in the ATTR_OBJECTLIST tree). Iif the
+                        METHOD_META_INIT was called with a string as a
+                        parameter, then the METHOD_META_REMOVE better be,
+                        or it will fail to work properly.
+            function:
+               Removes the object from its class' ATTR_OBJECTLIST.
+
+
+   ROOTCLUSTER
+
+      attributes:
+         ATTR_BAG -- binary tree which all objects are stored on.
+                     NOT watched!
+      methods:
+         METHOD_META_CREATE
+            see METHOD_META_CREATE in MetaClass
+
+         METHOD_META_DESTROY
+            run as:
+               function in caller's process.
+            arguments:
+               none
+            function:
+               Frees any leftover watchers on the object
+               [FreeObjectWatchers()], frees the object, and drops its
+               class.  Hopefully handles the case of transferring the
+               pointer from the 'msg' field to non-existence, just in case
+               this method is called asynchronously (which should NEVER
+               happen).  This method should ONLY be called by the
+               internals of DropObject().  do not call it yourself.  This
+               is the second half of the two-level resource tracking.
+               This function is called by DropObject() when the usecount
+               of the object drops to zero, implying no one has a pointer
+               to the object.  As evidenced by the FreeObjectWatchers()
+               call, this may not be entirely TRUE, but is nearly so....
+
+               Also, removes all the objects on the composite's
+               ATTR_BAG, and sends a METHOD_META_REMOVE to all of those
+               removed objects.
+
+         METHOD_META_INIT
+            run as:
+               function in caller's process
+            arguments:
+               JSTR -- name of the object to create (optional).  If
+                        specified, object stored on ATTR_OBJECTLIST sorted
+                        by address of string, rather than address of
+                        itself.
+
+               Returns a pointer to the initialized object.  NULL on
+               failure.
+
+            function:
+               Adds object to ATTR_OBJECTLIST of its class, either sorted
+               by the address of the passed string, or, if NULL string, by
+               its own address.  Note that these are AVL trees, so it's
+               still well balanced.
+
+               It also calls BindWatchers() to bind all the watched
+               attributes of the object's second List to the class
+               attribute's watched list.  See BindWatchers() for more
+               details.
+
+               Additionally, CREATEs and INITs (without arguments) all
+               objects whose classes are on the ATTR_CLASSTABLEof the
+               object's class.  Objects are stored on the ATTR_BAG's
+               binary tree under the name of the class.
+
+         METHOD_META_REMOVE
+            run as:
+               function in caller's process.
+            arguments:
+               JSTR -- optional string under which the object might have
+                        been stored (in the ATTR_OBJECTLIST tree).  If the
+                        METHOD_META_INIT was called with a string as a
+                        parameter, then the METHOD_META_REMOVE better be,
+                        or it will fail to work properly.
+            function:
+               Removes the object from its class' ATTR_OBJECTLIST.
+
+
+   DIRECTORCLASS
+      attributes:
+         ATTR_MANAGER  -- struct ManagementNode.  The place where useful
+                           information about the director is stored.  For
+                           instance, information managing the conditions
+                           under which notification is sent, and to whom
+                           it is sent.
+         ATTR_DIRECTOR -- a WatchedList.  It is a list of all the
+                           established connections that have been made,
+                           in short, a list of all objects this Director
+                           is watching.  Interestingly, you can get
+                           notification of when the notification lists
+                           change.  And, of course, you can even have a
+                           class watcher watch everything at once!
+      methods:
+         METHOD_DIRECTOR_ESTABLISH
+            run as:
+               function in caller's process.
+            arguments:
+               APTR -- the attribute of the object to watch, or a pointer
+                        to the actual watchedVariable, if no object is
+                        specified.  This implies that this method CANNOT
+                        be safely called ASYNCronously
+               JOBJ -- the object in which the WatchedVariable is.  If
+                        this parameter is NULL, the method assumes that
+                        the APTR is a pointer to the WatchedVariable, and
+                        not the name of the attribute.
+               long -- priority of the watcher.
+
+               Returns a handle to the connection.  You should either
+               DropObject() the handle, or keep it to pass to the
+               TERMINATE method, after which you should DropObject() it....
+
+            function:
+               Establishes a connection, and adds that connection to the
+               ATTR_DIRECTOR list of connections.  Uses either
+               AddClassWatcher() or AddWatcherNode(), depending on the
+               type of Watcher this director-object is.  Please see the
+               AutoDocs for more information on these functions.
+
+               The Watcher may either be a SHADOW_OBJECT watcher or a
+               SHADOW_CLASS watcher.  This is specified in the flags
+               argument to the METHOD_META_INIT.
+
+            METHOD_DIRECTOR_TERMINATE
+               run as:
+                  function in caller's process.
+               arguments:
+                  JOBJ -- either the handle as returned by the ESTABLISH
+                           method, or a pointer to the object from which a
+                           watcher should be removed.  The latter case
+                           should be restricted to the
+                           Free[Object|Class]Watchers() functions.  Mostly
+                           because you are not guaranteed which handle of
+                           the watcher is removed.  For instance, if one
+                           watcher is watching more than one watched
+                           variable of a single object, then calling
+                           TERMINATE with the object being watched may
+                           release the watcher from any of those watched
+                           variables.
+                  long -- flags dictating whether this is a handle, or
+                           the object being watched, not specifying
+                           this parameter defaults to the type 'handle'
+                           (0), the other case is SHADOW_SORT -- value 1.
+               function:
+                  If flags are NULL, then simply removes the connection
+                  that that handle symbolizes.  If this is the last
+                  connection, and if the AUTOREMOVE flag was specified in
+                  the INIT call, then the Director is Remove()'d from the
+                  system.
+
+                  Otherwise, if SHADOW_SORT is specified, the first handle
+                  on the list that is stored as being authorized by the
+                  passed object is terminated.
+
+                  Uses RemoveClassWatcher() or RemoveWatcherNode()
+                  internally to remove the watcher from the watching-list.
+                  Please see the AutoDocs for more information on thse
+                  functions.
+
+         METHOD_META_DESTROY
+            run as:
+               function in caller's process.
+            arguments:
+               none
+            function:
+               Name is Drop()'d from the ATTR_MANAGER node->mnn_name field.
+               If W_SECOND was specified during the METHOD_META_INIT, the
+               node->mnn_value is Drop()'d as well.  The superclass is
+               called, and the msg's object is transferred out of the
+               message, allowing for ASYNC methods to be sent to this object.
+
+         METHOD_META_INIT
+            run as:
+               function in caller's process.
+            arguments:
+               JSTR -- the name of the object.
+               JOBJ -- object to send the notification method to.
+               JSTR -- the notification method.
+               long -- various flags controlling the type of watcher
+                        (object or class), the function of the
+                        notification, etc.
+               long -- optional value for the W_SECOND or W_MATCH_FIRST
+                        flags.  If W_SECOND is specified in the flags
+                        field, then this method cannot be called
+                        asynchronously, because this would be a pointer
+                        to a string....
+
+               returns the initialized object, or NULL on failure.
+
+            function:
+               As with all INIT functions, if the object is not
+               successfully INIT'd, the object is UseObject()'d and
+               DropObject()'d, resulting in a call to the
+               METHOD_META_DESTROY function.  Usually, the party
+               interested in receiving notification is UseObject()'d
+               and stored in the ATTR_MANAGER's node->mnn_method and
+               node->mnn_object.  The name is used and put into the
+               structure at node->mnn_name.  If  W_SECOND is specified
+               in the flags field, the optional value is treated as a
+               string.  In addition, this function parcels the long
+               flags value into its pieces.  The bottom 16 bits
+               become the instrument that controls when the Director
+               sends out its notification.  The next eight bits has only
+               one flag allocated that distinguish between SHADOW_OBJECT
+               and SHADOW_CLASS types of Directors.  (One watches a
+               particular object, the other watches all objects in a
+               class.)  The last eight bits control the working of the
+               internal resource tracking.  One bit is the
+               SHADOW_AUTOREMOVE.  When specified, the last connection
+               TERMINATion causes a METHOD_META_REMOVE to be sent to
+               itself.  The other bit is the SHADOW_AUTOBREAK flag.  When
+               it is specified, the REMOVE method automatically TERMINATEs
+               all connections.  Unless you do something very bizarre,
+               you should specify both bits.  An internal bit
+               (SHADOW_REMOVED) prevents an infinite recursion when both
+               bits are specified.
+
+               You can control the notification so that it occurs only on
+               specific types of events.  This is controlled by the first
+               16 bits of the 'flags' parameter.  The W_* flags which
+               control the notification restriction are specified in the
+               method below.
+
+         METHOD_META_NOTIFY
+            run as:
+               function in caller's process.
+            arguments:
+               long -- flags specifying what changed.
+               APTR -- a pointer to the WatchedVariable that caused the
+                        notification.  Note: this pointer will NOT be
+                        valid if sent ASYNC!  This implies that the method
+                        to which notification is sent might also inherit
+                        nonsense in this value, so don't do anything
+                        brash with the NOTIFY method!
+               APTR -- the new node/value of the WatchedVariable.  Once
+                        again, ASYNC causes nightmares.
+               JSTR -- the name of the new node, if specified.
+            function:
+               If this Director is interested in the particular piece of
+               information being broadcast, then notification is sent out.
+
+               The following are the flags that effect this control.
+               These are the flags in the lower 16bits of the flags field
+               sent to the INIT function.
+
+                  /*
+                   * Match either.
+                   */
+                  #define W_CHANGE_ZERO      1
+                  #define W_CHANGE_NON_ZERO  2
+                  #define W_CHANGE_VALUE     3
+
+                  /*
+                   * Match exactly
+                   */
+                  #define W_NODE             4
+                  #define W_WATCH_CHANGE     8
+                  #define W_REMOVE           16
+                  #define W_INSERT           32
+
+                  /*
+                   * Control matching.
+                   */
+                  #define W_MATCH            64
+                  #define W_MATCH_VALUE      W_MATCH
+                  #define W_SECOND           128
+
+                  #define W_MATCH_FIRST      W_MATCH
+                  #define W_MATCH_SECOND     (W_SECOND | W_MATCH)
+
+                  #define W_INSERT_NODE      (W_NODE | W_INSERT)
+                  #define W_REMOVE_NODE      (W_NODE | W_REMOVE)
+
+                  #define W_INSERT_WATCHER   (W_WATCH_CHANGE | W_INSERT)
+                    /* Not valid during... */
+                  #define W_REMOVE_WATCHER   (W_WATCH_CHANGE | W_REMOVE)
+                    /* ... INIT[]/DESTROY[]  */
+
+               The first three flags apply only to non-(list/tree)
+               variables.  IE: the simple longword type of watched
+               variable -- the WatchedValue.  W_CHANGE_ZERO is for when
+               the variable changes to a zero, W_CHANGE_NON_ZERO is for
+               when a variable changes to a non-zero, and W_CHANGE_VALUE
+               is for when either happens.  Note that the value may have
+               already been zero or non-zero.
+
+               W_NODE is for any addition or removal of nodes from lists or
+               trees.  W_WATCH_CHANGE sends notification out when a watcher
+               is added.  A watcher can get notification when it adds
+               itself, but not when it removes itself -- sorry, you'll have
+               to use two watchers for that....  W_REMOVE and W_INSERT
+               control whether you want notification when something is
+               added or removed to/from the list/tree.
+
+               W_MATCH is used for a simple matching capability.  You can
+               watch for a particular object to be removed from the tree,
+               or added to the tree, or whatever....
+
+               W_MATCH_FIRST uses the value sent to the INIT function as
+               the value of, either:
+                  (a) the value that the WatchedVariable should take on.
+                  (b)the address of the object added to a list/tree.
+                depending on the type of WatchedVariable.
+
+               W_MATCH_SECOND uses the value sent to the INIT function
+               as the address of a string which would be the name under
+               which the node is added to the list/tree.
+
+            METHOD_META_REMOVE
+               run as:
+                  function in caller's process.
+               arguments:
+                  none
+               function:
+                  If the Director had its SHADOW_AUTOBREAK specified, all
+                  connections are TERMINATEd.  The notification destination
+                  object and method are Drop()'d, cleared, and the Method
+                  is sent to the superclass.
+
+
+   PATCHERCLASS
+      attributes:
+         ATTR_METHODHANDLER -- must be at offset 8!  Contains a struct
+                                MethodHandler followed by a class pointer
+                                which indicates the class that was
+                                patched.
+      method:
+         METHOD_META_DESTROY
+            run as:
+               function in caller's prcoess.
+            arguments:
+               none
+            function:
+               Drop()s the procObject, defnObject and MethodID of the
+               patch.  Calls the superclass, then transfers the object
+               from the msg so that it will work properly when/if called
+               asynchronously.
+
+         METHOD_META_REMOVE
+            run as:
+               function in caller's process.
+            arguments:
+               none
+            function:
+               Patch is removed from the ATTR_PATCHEDVERBS list of the
+               class that this object is patching.  Superclass is then
+               called.
+
+         METHOD_META_INIT
+            run as:
+               function in caller's process.
+            arguments:
+               APTR -- A MethodTag.  This does NOT cause problems for
+                        ASYNC methods....
+               JOBJ -- class to patch, or an object of that class, in
+                        which case, unless the object has an
+                        ATTR_PATCHEDVERBS attribute, the class, not the
+                        object, is patched.
+
+               returns the initialized object, or NULL on failure.
+
+            function:
+               As with all INIT functions, if the object is not
+               successfully INIT'd, the object is UseObject()'d
+               and DropObject()'d, resulting in a call to the
+               METHOD_META_DESTROY function.
+
+               Usually, the method to be patched is found (failure to
+               find the method in the class requested causes the patch
+               to fail -- DOES NOT CHECK superclasses!), procObject and
+               defnObject in the MethodTag fields are Use()'d and put
+               into the ATTR_METHODHANDLER.  MethodID is also Use()'d.
+               In addition, all other MethodTag information is copied into
+               the MethodHandler structure.  Class information is saved in
+               the patched-class field -- this is NOT Use()'d!  Patch is
+               inserted, and method is sent to the superclass.
+
+
+   PROCESSCLASS
+      attributes:
+         ATTR_JAZZPROCESS   -- must be at offset 8!  Contains a struct
+                                JazzProcess.
+         ATTR_RESOURCETREE  -- Watched binary tree that you can store
+                                your resources on.
+         ATTR_RESOURCESTACK -- Watched list that you can store last
+                                minute removal resources.  Freed only
+                                during RemoveThread()
+      method:
+         METHOD_META_DESTROY
+            run as:
+               function in caller's process.
+            arguments:
+               none
+            function:
+               ATTR_RESOURCETREE is freed.
+
+               ATTR_JAZZPROCESS' parent is NULLed.  If there is an
+               associated task, the task is Signalled with a ^C.  THAT
+               task should receive the ^C, check if parent is NULL,
+               and call RemoveThread() -- this function calls the
+               METHOD_META_DESTROY for the superclass of PROCESSCLASS
+               (ROOTCLASS, specifically), and then the task should quit.
+
+               If there is no associated task, the superclass is called
+               directly.
+
+         METHOD_META_REMOVE
+            run as:
+               function in caller's process.
+            arguments:
+               none
+            function:
+               Sent to superclass with the process' name -- found in
+               ATTR_JAZZPROCESS structure.
+               Also removes all resources stored in the ATTR_RESOURCETREE
+                (but NOT those in the ATTR_RESOURCESTACK).
+
+         METHOD_META_INIT
+            run as:
+               function in caller's process.
+            arguments:
+               JSTR -- name of the process to create.
+               FUNC -- the function to start the thread with.
+                        Defaults to defaultThreadStart internally in
+                        library.  You will need to check out
+                        WaitThread(), InitThread(), and the example
+                        in gui.c for your own FUNC.
+               SEMF -- an optional semaphore to own shared by the started
+                        process.  Semaphore is Release()'d when task exits.
+               TAGL -- a NULL terminated array of struct TagItem to send to
+                        the CreateNewProc call.  If the INIT fails AFTER
+                        the process is created, the tags' ti_Tag are set
+                        to TAG_IGNORE, so you don't have to free the
+                        resources that might be in the TAGL if the process
+                        fails to be created.  (In fact, the ti_Tags are
+                        set to TAG_IGNORE even if the process successfully
+                        opens.)
+
+               returns the initialized object, or NULL on failure.
+
+            function:
+               As with all INIT functions, if the object is not
+               successfully INITed, the object is UseObject()'d
+               and DropObject()'d, resulting in a call to the
+               METHOD_META_DESTROY function.
+
+               Method sent to superclass.
+
+               Semaphore Obtain()'d shared, process is created, and various
+               magic done to ensure a safe startup between processes.
+
+               Will set all ti_Tag elements to TAG_IGNORE if process is
+               successfully started, even if process subsequently shuts
+               down due to a startup error.  This allows you to free
+               resources correctly (hopefully) when process' fail to start
+               properly, independent upon whether it was the
+               CreateNewProc() call that failed, or something else....
+
+         METHOD_PROC_ASSOCIATE
+            run as:
+               function in caller's process.
+            arguments:
+               JSTR -- name of the current process.  Defaults to
+                        FindTask(NULL)->tc_node.ln_Name
+               TASK -- pointer to the task.  Defaults to
+                        FindTask(NULL).  Needs to be run in the
+                        that task's frame anyway, because Signals
+                        for message ports are allocated....
+
+               returns object  which should NOT be DROP()'d!  This is
+               handled by the RemoveCurrentProgram() call.  This method
+               is usually called by the InitOOProgram() call.
+
+            function:
+               Creates a SHADOW process object for a task that already
+               exists.  Stores it into task->tc_UserData, and then the
+               jp_parent field of the ATTR_JAZZPROCESS attribute is set
+               to -1.  Creates ports and synchronous messages for this
+               process.  Usually done by InitThread() during thread
+               startup....

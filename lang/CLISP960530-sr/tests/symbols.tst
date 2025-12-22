@@ -1,0 +1,14 @@
+
+(SYMBOL-NAME (QUOTE XYZ))
+"XYZ"
+
+(PROGN (SETQ *GENSYM-COUNTER* 32) (GENSYM) T) T
+
+(PRIN1-TO-STRING (GENSYM "FOO-"))
+"#:FOO-33"
+
+(PRIN1-TO-STRING (GENSYM "garbage-"))
+#+XCL "#:|garbage|-34"
+#+(or CLISP AKCL) "#:|garbage-34|"
+#-(or XCL CLISP AKCL) UNKNOWN
+

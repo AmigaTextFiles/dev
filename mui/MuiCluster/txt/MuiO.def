@@ -1,0 +1,2390 @@
+|##########|
+|#MAGIC   #|FDLAGMGN
+|#PROJECT #|"MuiImport"
+|#PATHS   #|"StdProject"
+|#LINK    #|""
+|#GUIDE   #|""
+|#STACK   #|"4096"
+|#FLAGS   #|xx---x-xxx--x-x-----------------
+|#USERSW  #|--------------------------------
+|#USERMASK#|--------------------------------
+|#SWITCHES#|xx---xxxxx-xx---
+|##########|
+
+DEFINITION MODULE MuiO;
+
+(*------------------------------------------
+
+  :Module.      MuiO.mod
+  :Author.      Henning Thielemann
+  :Address.     Veilchenweg 34, 06118 Halle, Germany
+  :EMail.       henning.thielemann@student.uni-halle.de
+  :Version.     $VER: MuiO.mod 19.0 (12.03.97)
+  :Copyright.   Henning Thielemann
+  :Language.    Cluster
+  :Translator.  Amiga Cluster V2.0
+  :Contents.    Interface for MUI
+  :Bugs.        No warranty given for completeness, expect changes!
+  :Bugs.        All tags for subclasses are chained to the complete MuiTags type.
+  :Bugs.        This shall be changed, when Cluster accepts multi inherited tags
+  :Bugs.        or accepts sub tags without qualification
+  :Usage.       <Angaben zur Anwendung>
+  :History.     3.8    [ht]  12-Mar-1997 : Not much to update, only Bubble creation
+  :History.            [ht]  04-Mar-1997 : A new Cluster version is announced !!! Contact support@mom.gun.de !!!
+  :History.            [ht]  04-Mar-1997 : Tags chained
+  :History.            [ht]     Jan-1997 : Input&Event-Handler support
+  :History.     3.6    [ht]  30-Nov-1996 : Get ready for Aminet.
+  :History.     3.1    [ht]     Feb-1996 :
+  :History.     2.3    [ht]     Aug-1995 : I get registered -> own tags become possible
+  :History.     2.1    [ht]     Jun-1995 : initial version
+
+--------------------------------------------*)
+
+
+FROM System      IMPORT Regs, SysStringPtr, LONGSET;
+FROM Utility     IMPORT StdTags, HookPtr;
+FROM Intuition   IMPORT MenuItemPtr, ScreenPtr, WindowPtr, ImagePtr, GadgetPtr,
+			ImageDrawStates, IClassPtr, IDCMPFlagSet, DrawInfoPtr,
+			MethodID, Msg, MsgRoot, IntuitionBase;
+FROM Commodities IMPORT NewBrokerPtr;
+FROM Exec        IMPORT MsgPortPtr, LibraryPtr, ListPtr, TaskSigSet, MinNode;
+FROM Workbench   IMPORT DiskObjectPtr, AppMessagePtr;
+FROM GadTools    IMPORT NewMenu, IntuiMessagePtr;
+FROM Rexx        IMPORT RexxMsgPtr;
+FROM Graphics    IMPORT TextFontPtr, BitMapPtr, RegionPtr;
+FROM Asl         IMPORT AslRequesterPtr, RequestType;
+FROM IFFParse    IMPORT IFFHandlePtr;
+
+| all functions, attributes and methods involved in comments
+| are obsolete in the current version of MUI
+
+TYPE
+  RenderInfoPtr     = POINTER TO RenderInfo;
+  NotifyDataPtr     = POINTER TO NotifyData;
+  MinMaxPtr         = POINTER TO MinMax;
+  AreaDataPtr       = POINTER TO AreaData;
+  GlobalInfoPtr     = POINTER TO GlobalInfo;
+
+  Object            = POINTER TO ObjectRec;
+  ApplicationObject = POINTER TO ApplicationRec;
+  WindowObject      = POINTER TO WindowRec;
+  AreaObject        = POINTER TO AreaRec;
+  FamilyObject      = POINTER TO FamilyRec;
+  ListObject        = POINTER TO ListRec;
+  GroupObject       = POINTER TO GroupRec;
+  PopstringObject   = POINTER TO PopstringRec;
+
+  CommandPtr        = POINTER TO Command;
+
+  NewMenuArrPtr     = POINTER TO ARRAY OF NewMenu;
+  StringArrPtr      = POINTER TO ARRAY OF SysStringPtr;
+  BrokerPtr         = NewBrokerPtr;
+  RxMsgPtr          = RexxMsgPtr;
+
+
+  | Cluster assumes TRUE as -1,
+  | this works in most cases but not if you create a notification on a boolean attribute
+  CBOOLEAN = (false, true, makeLong=$10000);
+  LongID   = ARRAY [4] OF CHAR;
+
+  Dispatcher = PROCEDURE (class IN A0 : IClassPtr; obj IN A2 : Object; message IN A1 : Msg);
+
+  PoolHeaderPtr = DEFERRED POINTER Exec39.PoolHeaderPtr;
+
+
+(* Instance data of notify class *)
+
+TYPE
+  NotifyData  = RECORD
+		   globalInfo : GlobalInfoPtr;
+		   userData   : LONGINT;
+		   priv       : ARRAY [5] OF LONGINT;
+		 END;
+
+
+(* MinMax structure holds information about minimum, maximum
+   and default dimensions of an object. *)
+
+  MinMax  = RECORD
+	       minWidth    : INTEGER;
+	       minHeight   : INTEGER;
+	       maxWidth    : INTEGER;
+	       maxHeight   : INTEGER;
+	       defWidth    : INTEGER;
+	       defHeight   : INTEGER;
+	     END;
+
+CONST maxmax   = 10000; (* use this if a dimension is not limited. *)
+
+
+(* (partial) instance data of area class *)
+
+TYPE
+  AreaDataFlags =          (drawObject,    | completely redraw yourself
+			    drawUpdate,    | only update yourself
+			    makeLong=31);
+  AreaDataFlagSet = SET OF AreaDataFlags;
+
+  AreaData  = RECORD
+		renderInfo   : RenderInfoPtr;         (* RenderInfo for this object *)
+		priv0        : ANYPTR;                (* !!! private data !!! *)
+		font         : Graphics.TextFontPtr;  (* Font *)
+		minMax       : MinMax;                (* min/max/default sizes *)
+		box          : Intuition.IBox;        (* position and dimension *)
+		addleft      : SHORTINT;              (* frame & innerspacing left offset *)
+		addtop       : SHORTINT;              (* frame & innerspacing top offset  *)
+		subwidth     : SHORTINT;              (* frame & innerspacing add. width  *)
+		subheight    : SHORTINT;              (* frame & innerspacing add. height *)
+		flags        : AreaDataFlagSet;       (* see definitions above *)
+		(* ... private data follows ... *)
+	      END;
+
+(* Global information about parent application. *)
+
+TYPE
+  GlobalInfo  = RECORD;
+		   priv0             : ANYPTR; (* !!! private data !!! *)
+		   applicationObject : ApplicationObject;
+
+		   (* ... private data follows ... *)
+		 END;
+
+(* MUI's draw pens *)
+
+TYPE
+  MuiPens = (shine,      halfshine, background,
+	     halfshadow, shadow,    text,
+	     fill,       activeObj, count);
+
+  MuiPenPtr = POINTER TO ARRAY MuiPens OF INTEGER;
+
+(* Information on display environment *)
+
+  RenderInfo  = RECORD;
+		   windowObject    : WindowObject;           (* valid between mSetup/mCleanup *)
+		   screen          : Intuition.ScreenPtr;    (* valid between mSetup/mCleanup *)
+		   drawInfo        : DrawInfoPtr;            (* valid between mSetup/mCleanup *)
+		   pens            : MuiPenPtr;              (* valid between mSetup/mCleanup *)
+		   window          : Intuition.WindowPtr;    (* valid between mShow/mHide *)
+		   rastPort        : Graphics.RastPortPtr;   (* valid between mShow/mHide *)
+		   (* ... private data follows ...*)
+		 END;
+
+
+TYPE
+|  ObjectRecord     = RECORD OF Intuition.Object END;
+  | MUI-Objects are Intuition-Boopsi-Objects,
+  | but the notify instance data are often used,
+  | and Intuition's negative offsets can't be accessed directly
+  ObjectRec      = RECORD mnd : NotifyData END;
+  ApplicationRec = RECORD OF ObjectRec END;
+  WindowRec      = RECORD OF ObjectRec END;
+  AreaRec        = RECORD OF ObjectRec; mad : AreaData END;
+  FamilyRec      = RECORD OF ObjectRec END;
+  ListRec        = RECORD OF AreaRec   END;
+  GroupRec       = RECORD OF AreaRec   END;
+  PopstringRec   = RECORD OF GroupRec  END;
+
+(****************************************************************************)
+(** ARexx Interface                                                        **)
+(****************************************************************************)
+
+TYPE
+  Command  = RECORD
+	       name       : SysStringPtr;
+	       template   : SysStringPtr;
+	       parameters : LONGINT;
+	       hook       : HookPtr;
+	       reserved   : ARRAY [5] OF LONGINT;
+	     END;
+
+CONST
+  templateID = SysStringPtr(-1);
+
+TYPE
+  rxError = (badSyntax=-4, unknownCommand, outOfMemory, badDefinition);
+
+
+(****************************************************************************)
+(** Return values for Error()                                              **)
+(****************************************************************************)
+
+TYPE
+  MuiError = (ok, outOfMemory, outOfGfxMemory, invalidWindowObject,
+	      missingLibrary, noARexx, singleTask, makeLong = $10000);
+
+EXCEPTION
+  OutOfMemory         : "Out Of Memory";
+  OutOfGfxMemory      : "Out Of Gfx Memory";
+  InvalidWindowObject : "Invalid Window Object";
+  MissingLibrary      : "Missing Library";
+  NoARexx             : "No ARexx";
+  SingleTask          : "Single Task";
+
+  MuiErr = OutOfMemory,         OutOfGfxMemory,
+	   InvalidWindowObject, MissingLibrary,
+	   NoARexx,             SingleTask;
+
+PROCEDURE AssertMuiError (bool : BOOLEAN);
+
+(****************************************************************************)
+(** Standard MUI Images                                                    **)
+(****************************************************************************)
+
+TYPE
+  StandardImages = (windowBack, requesterBack, buttonBack, listBack,
+		    textBack,   propBack,      popupBack,  selectedBack,
+		    listCursor, listSelect,    listSelCur,
+		    arrowUp,    arrowDown,     arrowLeft,  arrowRight,
+		    checkMark,  radioButton,   cycle,
+		    popUp,      popFile,       popDrawer,
+		    propKnob,
+		    drawer,     hardDisk,      disk,
+		    chip,       volume,        popUpBack,
+		    network,    assign,
+		    tapePlay,   tapePlayBack,  tapePause,
+		    tapeStop,   tapeRecord,
+		    groupBack,
+		    sliderBack, sliderKnob,
+		    tapeUp,     tapeDown,      count,
+
+	BACKGROUND = 128,    (* These are direct color    *)
+	SHADOW,              (* combinations and are not  *)
+	SHINE,               (* affected by users prefs.  *)
+	FILL,
+	SHADOWBACK,          (* Generally, you should     *)
+	SHADOWFILL,          (* avoid using them. Better  *)
+	SHADOWSHINE,         (* use one of the customized *)
+	FILLBACK,            (* images above.             *)
+	FILLSHINE,
+	SHINEBACK,
+	FILLBACK2,
+	HSHINEBACK,
+	HSHADOWBACK,
+	HSHINESHINE,
+	HSHADOWSHADOW,
+	N1HSHINE,
+	LASTPAT);
+
+
+(****************************************************************************)
+(** Object Types for MakeObject()                                          **)
+(****************************************************************************)
+
+  SimpleLabelFlags = (commandKeyCheck=0, singleFrame=8, doubleFrame, leftAligned, centered, freeVert, makeLong=31);
+  SimpleLabelFlagSet = SET OF SimpleLabelFlags;
+
+  SimpleObjects =
+    (label = 1,      | pLabel
+     button,         | pButton
+     checkmark,      | pButton
+     cycle,          | pCycle
+     radio,          | pCycle
+     slider,         | pSlider
+     string,         | pString
+     popButton,      | pPopButton
+     hSpace,         | pSpace
+     vSpace,         | pSpace
+     hBar,           | pSpace
+     vBar,           | pSpace
+     menustripNM,    | pMenuStrip
+     menuitem,       | pMenuItem
+     barTitle,       | pButton
+     numericButton); | pNumeric
+
+  pSimple = RECORD END;
+
+  pLabel     = RECORD OF pSimple; label : SysStringPtr; flags : SimpleLabelFlagSet; END;
+  pButton    = RECORD OF pSimple; label : SysStringPtr; END;
+  pCycle     = RECORD OF pSimple; label : SysStringPtr; entries : StringArrPtr; END;
+  pSlider    = RECORD OF pSimple; label : SysStringPtr; min, max : LONGINT; END;
+  pString    = RECORD OF pSimple; label : SysStringPtr; maxlen   : LONGINT; END;
+  pPopButton = RECORD OF pSimple; imagespec : StandardImages; END;
+  pSpace     = RECORD OF pSimple; space : LONGINT; END;
+  pMenuStrip = RECORD OF pSimple; nm : NewMenuArrPtr; flags : SimpleLabelFlagSet; END;
+  pMenuItem  = RECORD OF pSimple; label, shortcut : SysStringPtr; flags : SimpleLabelFlagSet; data : LONGCARD; END;
+  pNumeric   = RECORD OF pSlider; format : SysStringPtr; END;
+
+(****************************************************************************)
+(** Special values for some methods                                        **)
+(****************************************************************************)
+
+CONST
+  triggerValue        = $49893131;
+  notTriggerValue     = $49893133;
+  everyTime           = $49893131;
+
+  ptrTriggerValue     = ANYPTR (triggerValue);
+  ptrEveryTime        = ANYPTR (everyTime);
+
+  realTriggerValue    = CAST (REAL, triggerValue);
+  realEveryTime       = CAST (REAL, everyTime);
+
+  boolTriggerValue    = CBOOLEAN (triggerValue);
+  boolNotTriggerValue = CBOOLEAN (notTriggerValue);
+  boolEveryTime       = CBOOLEAN (everyTime);
+
+  notifySelf          = Object (1);
+  notifyWindow        = Object (2);
+  notifyApplication   = Object (3);
+  notifyParent        = Object (4);
+
+  applicationSaveENV      = SysStringPtr( 0);
+  applicationSaveENVARC   = SysStringPtr(-1);
+  applicationLoadENV      = SysStringPtr( 0);
+  applicationLoadENVARC   = SysStringPtr(-1);
+  applicationReturnIDQuit  = -1;
+
+  colorpanelGetColorActive = -1;
+  colorpanelSetColorActive = -1;
+
+TYPE
+  ScrollbarTypes   = (default, bottom, top, sym);
+  Precision        = (exact = -1, image = 0, icon = 16, gui = 32);   | from graphics/view.h
+  ImageadjustTypes = (all, image, background, pen);
+
+(****************************************************************************)
+(** Control codes for text strings                                         **)
+(****************************************************************************)
+
+CONST
+  xR = &27+"r";    (* right justified *)
+  xC = &27+"c";    (* centered        *)
+  xL = &27+"l";    (* left justified  *)
+
+  xN = &27+"n";    (* normal     *)
+  xB = &27+"b";    (* bold       *)
+  xI = &27+"i";    (* italic     *)
+  xU = &27+"u";    (* underlined *)
+
+  xPT = &27+"2";   (* text pen           *)
+  xPH = &27+"8";   (* highlight text pen *)
+
+(****************************************************************************)
+(** Notify                                                                 **)
+(****************************************************************************)
+
+CONST
+  cNotify  = "Notify.mui";
+
+(* Attributes *)
+
+| the sequential linking of the tag types don't represent the object class tree
+| but in the current version of cluster it is the only way to split the tags
+TYPE
+  NotifyTags = TAGS OF StdTags
+    appMessage             = $80421955 : AppMessagePtr;     |  V5 ..g
+|   helpFile               = $80423A6E : SysStringPtr;      |  V4 isg
+    helpLine               = $8042A825 : LONGINT;           |  V4 isg
+    helpNode               = $80420B85 : SysStringPtr;      |  V4 isg
+    noNotify               = $804237F9 : CBOOLEAN;          |  V7 .s.
+    parent                 = $8042E35F : Object;            | V11 ..g
+    revision               = $80427EAA : LONGINT;           |  V4 ..g
+    userData               = $80420313 : LONGINT;           |  V4 isg
+    version                = $80422301 : LONGINT;           |  V4 ..g
+  END;
+
+(* Methods *)
+
+CONST
+  mCallHook                     = MethodID($8042B96B); | V4
+  mExport                       = MethodID($80420F1C); | V12
+  mFindUData                    = MethodID($8042C196); | V8
+  mGetConfigItem                = MethodID($80423EDB); | V11
+  mGetUData                     = MethodID($8042ED0C); | V8
+  mImport                       = MethodID($8042D012); | V12
+  mKillNotify                   = MethodID($8042D240); | V4
+  mKillNotifyObj                = MethodID($8042B145); | V16
+  mMultiSet                     = MethodID($8042D356); | V7
+  mNoNotifySet                  = MethodID($8042216F); | V9
+  mNotify                       = MethodID($8042C9CB); | V4
+  mSet                          = MethodID($8042549A); | V4
+  mSetAsString                  = MethodID($80422590); | V4
+  mSetUData                     = MethodID($8042C920); | V8
+  mSetUDataOnce                 = MethodID($8042CA19); | V11
+  mWriteLong                    = MethodID($80428D86); | V6
+  mWriteString                  = MethodID($80424BF4); | V6
+
+(* Parameters are below, because MUI tags have to be defined before *)
+
+(****************************************************************************)
+(** Family                                                                 **)
+(****************************************************************************)
+
+CONST
+  cFamily  = "Family.mui";
+
+(* Attributes *)
+
+TYPE
+  FamilyTags = TAGS OF NotifyTags;
+    familyChild            = $8042C696 : FamilyObject;      |  V8 i..
+  END;
+
+(* Methods *)
+
+CONST
+  mFamilyAddHead     = MethodID($8042E200); | V8
+  mFamilyAddTail     = MethodID($8042D752); | V8
+  mFamilyInsert      = MethodID($80424D34); | V8
+  mFamilyRemove      = MethodID($8042F8A9); | V8
+  mFamilySort        = MethodID($80421C49); | V8
+  mFamilyTransfer    = MethodID($8042C14A); | V8
+
+  METHOD AddHead (o : FamilyObject; newo       : Object);
+  METHOD AddTail (o : FamilyObject; newo       : Object);
+  METHOD Insert  (o : FamilyObject; newo, pred : Object);
+  METHOD Remove  (o : FamilyObject; remo       : Object);
+  METHOD Sort    (o : FamilyObject; VAR child : ARRAY OF Object);
+  METHOD Transfer(o, family : FamilyObject);
+
+(****************************************************************************)
+(** Application                                                            **)
+(****************************************************************************)
+
+CONST
+  cApplication  = "Application.mui";
+
+(* Attributes *)
+
+TYPE
+  ApplicationTags = TAGS OF FamilyTags
+    applicationActive      = $804260AB : CBOOLEAN;          |  V4 isg
+    applicationAuthor      = $80424842 : SysStringPtr;      |  V4 i.g
+    applicationBase        = $8042E07A : SysStringPtr;      |  V4 i.g
+    applicationBroker      = $8042DBCE : BrokerPtr;         |  V4 ..g
+    applicationBrokerHook  = $80428F4B : HookPtr;           |  V4 isg
+    applicationBrokerPort  = $8042E0AD : MsgPortPtr;        |  V6 ..g
+    applicationBrokerPri   = $8042C8D0 : LONGINT;           |  V6 i.g
+    applicationCommands    = $80428648 : CommandPtr;        |  V4 isg
+    applicationCopyright   = $8042EF4D : SysStringPtr;      |  V4 i.g
+    applicationDescription = $80421FC6 : SysStringPtr;      |  V4 i.g
+    applicationDiskObject  = $804235CB : DiskObjectPtr;     |  V4 isg
+    applicationDoubleStart = $80423BC6 : CBOOLEAN;          |  V4 ..g
+    applicationDropObject  = $80421266 : Object;            |  V5 is.
+    applicationForceQuit   = $804257DF : CBOOLEAN;          |  V8 ..g
+    applicationHelpFile    = $804293F4 : SysStringPtr;      |  V8 isg
+    applicationIconified   = $8042A07F : CBOOLEAN;          |  V4 .sg
+    applicationMenu        = $80420E1F : NewMenuArrPtr;     |  V4 i.g
+    applicationMenuAction  = $80428961 : LONGCARD;          |  V4 ..g
+    applicationMenuHelp    = $8042540B : LONGCARD;          |  V4 ..g
+    applicationMenustrip   = $804252D9 : FamilyObject;      |  V8 i..
+    applicationRexxHook    = $80427C42 : HookPtr;           |  V7 isg
+    applicationRexxMsg     = $8042FD88 : RxMsgPtr;          |  V4 ..g
+    applicationRexxString  = $8042D711 : SysStringPtr;      |  V4 .s.
+    applicationSingleTask  = $8042A2C8 : CBOOLEAN;          |  V4 i..
+    applicationSleep       = $80425711 : CBOOLEAN;          |  V4 .s.
+    applicationTitle       = $804281B8 : SysStringPtr;      |  V4 i.g
+    applicationUseCommodities
+			   = $80425EE5 : CBOOLEAN;          | V10 i..
+    applicationUseRexx     = $80422387 : CBOOLEAN;          | V10 i..
+    applicationVersion     = $8042B33F : SysStringPtr;      |  V4 i.g
+    applicationWindow      = $8042BFE0 : WindowObject;      |  V4 i..
+    applicationWindowList  = $80429ABE : ListPtr;           | V13 ..g
+  END;
+
+(* Methods *)
+
+CONST
+  mApplicationAboutMUI         = MethodID($8042D21D); | V14
+  mApplicationAddInputHandler  = MethodID($8042F099); | V11
+  mApplicationCheckRefresh     = MethodID($80424D68); | V11
+  mApplicationGetMenuCheck     = MethodID($8042C0A7); | V4
+  mApplicationGetMenuState     = MethodID($8042A58F); | V4
+  mApplicationInput            = MethodID($8042D0F5); | V4
+  mApplicationInputBuffered    = MethodID($80427E59); | V4
+  mApplicationLoad             = MethodID($8042F90D); | V4
+  mApplicationNewInput         = MethodID($80423BA6); | V11
+  mApplicationOpenConfigWindow = MethodID($804299BA); | V11
+  mApplicationPushMethod       = MethodID($80429EF8); | V4
+  mApplicationRemInputHandler  = MethodID($8042E7AF); | V11
+  mApplicationReturnID         = MethodID($804276EF); | V4
+  mApplicationSave             = MethodID($804227EF); | V4
+  mApplicationSetConfigItem    = MethodID($80424A80); | V11
+  mApplicationSetMenuCheck     = MethodID($8042A707); | V4
+  mApplicationSetMenuState     = MethodID($80428BEF); | V4
+  mApplicationShowHelp         = MethodID($80426479); | V4
+
+
+(* Parameter *)
+
+TYPE
+| pApplicationGetMenuCheckPtr = POINTER TO pApplicationGetMenuCheck;
+| pApplicationGetMenuCheck    = RECORD OF MsgRoot; menuID : LONGINT END;
+
+| pApplicationGetMenuStatePtr = POINTER TO pApplicationGetMenuState;
+| pApplicationGetMenuState    = pApplicationGetMenuCheck;
+
+| pApplicationSetMenuCheckPtr = POINTER TO pApplicationSetMenuCheck;
+| pApplicationSetMenuCheck    = RECORD OF MsgRoot;
+|                                 menuID : LONGINT;
+|                                 set    : LONGINT;
+|                               END;
+
+| pApplicationSetMenuStatePtr = POINTER TO pApplicationSetMenuState;
+| pApplicationSetMenuState    = pApplicationSetMenuCheck;
+
+| pApplicationInputPtr        = POINTER TO pApplicationInput;
+| pApplicationInput           = RECORD OF MsgRoot; signal : POINTER TO TaskSigSet END;
+
+  pApplicationAboutMUIPtr     = POINTER TO pApplicationAboutMUI;
+  pApplicationAboutMUI        = RECORD OF MsgRoot; refwindow : WindowObject END;
+
+  pApplicationNewInputPtr     = POINTER TO pApplicationNewInput;
+  pApplicationNewInput        = RECORD OF MsgRoot; signal : POINTER TO TaskSigSet END;
+
+  pApplicationLoadPtr         = POINTER TO pApplicationLoad;
+  pApplicationLoad            = RECORD OF MsgRoot; name : SysStringPtr END;
+
+  pApplicationSavePtr         = POINTER TO pApplicationSave;
+  pApplicationSave            = pApplicationLoad;
+
+  pApplicationPushMethodPtr   = POINTER TO pApplicationPushMethod;
+  pApplicationPushMethod      = RECORD OF MsgRoot;
+				  dest   : Object;
+				  count  : LONGINT;
+				| beginning of method + parameters
+				| msg    : MsgRoot;
+				END;
+
+  pApplicationReturnIDPtr     = POINTER TO pApplicationReturnID;
+  pApplicationReturnID        = RECORD OF MsgRoot; retid : LONGINT END;
+
+  pApplicationShowHelpPtr     = POINTER TO pApplicationShowHelp;
+  pApplicationShowHelp        = RECORD OF MsgRoot;
+				  window     : Object;
+				  name, node : SysStringPtr;
+				  line       : LONGINT;
+				END;
+
+  InputHandlerFlags   = (timer, makeLong = 31);
+  InputHandlerFlagSet = SET OF InputHandlerFlags;
+  InputHandlerNodePtr = POINTER TO InputHandlerNode;
+  InputHandlerNode    = RECORD OF MinNode
+			  object  : Object;
+			  IF KEY  : InputHandlerFlagSet      | it would be smarter to define flags first and the union after them
+			  OF {}      THEN signals : TaskSigSet
+			  OF {timer} THEN millis, current : CARDINAL
+			  END;
+			  flags   : InputHandlerFlagSet;
+			  method  : MethodID;
+			END ;
+
+  pApplicationAddInputHandlerPtr = POINTER TO pApplicationAddInputHandler;
+  pApplicationAddInputHandler    = RECORD OF MsgRoot; ihnode : InputHandlerNodePtr END;
+
+  pApplicationRemInputHandlerPtr = POINTER TO pApplicationRemInputHandler;
+  pApplicationRemInputHandler    = pApplicationAddInputHandler;
+
+  pApplicationCheckRefreshPtr = POINTER TO pApplicationCheckRefresh;
+  pApplicationCheckRefresh    = RECORD OF MsgRoot; END;
+
+  OpenConfigWindowFlagSet = SET OF [32];  | currently not used
+  pApplicationOpenConfigWindowPtr = POINTER TO pApplicationOpenConfigWindow;
+  pApplicationOpenConfigWindow    = RECORD OF MsgRoot; flags : OpenConfigWindowFlagSet END;
+
+  pApplicationSetConfigItemPtr = POINTER TO pApplicationSetConfigItem;
+  pApplicationSetConfigItem    = RECORD OF MsgRoot; item : LONGINT; data : ANYPTR END;
+
+| METHOD GetMenuCheck (o : ApplicationObject; menuID : LONGINT);
+| METHOD GetMenuState (o : ApplicationObject; menuID : LONGINT);
+| METHOD Input        (o : ApplicationObject; VAR signal : TaskSigSet) : LONGINT;
+  METHOD InputBuffered(o : ApplicationObject);
+  METHOD NewInput     (o : ApplicationObject; VAR signal : TaskSigSet) : LONGINT;
+  METHOD Load         (o : ApplicationObject; name   : SysStringPtr);
+  METHOD PushMethod   (o : ApplicationObject; dest   : Object; msg : LIST OF LONGINT );
+  METHOD PushMethodA  (o : ApplicationObject; dest   : Object; REF msg : ANYTYPE );
+  METHOD ReturnID     (o : ApplicationObject; retid  : LONGINT);
+  METHOD Save         (o : ApplicationObject; name   : SysStringPtr);
+| METHOD SetMenuCheck (o : ApplicationObject; menuID : LONGINT; set : LONGINT);
+| METHOD SetMenuState (o : ApplicationObject; menuID : LONGINT; set : LONGINT);
+  METHOD ShowHelp     (o : ApplicationObject;
+		  window : Object;
+	      name, node : SysStringPtr;
+		    line : LONGINT);
+
+
+(****************************************************************************)
+(** Window                                                                 **)
+(****************************************************************************)
+
+CONST
+  cWindow  = "Window.mui";
+
+(* Attributes *)
+
+PROCEDURE windowAltHeightMinMax   (p:LONGINT): LONGINT;
+PROCEDURE windowAltHeightVisible  (p:LONGINT): LONGINT;
+PROCEDURE windowAltHeightScreen   (p:LONGINT): LONGINT;
+CONST windowAltHeightScaled       = -1000;
+CONST windowAltLeftEdgeCentered   = -1;
+CONST windowAltLeftEdgeMoused     = -2;
+CONST windowAltLeftEdgeNoChange   = -1000;
+CONST windowAltTopEdgeCentered    = -1;
+CONST windowAltTopEdgeMoused      = -2;
+PROCEDURE windowAltTopEdgeDelta   (p:LONGINT): LONGINT;
+CONST windowAltTopEdgeNoChange    = -1000;
+PROCEDURE windowAltWidthMinMax    (p:LONGINT): LONGINT;
+PROCEDURE windowAltWidthVisible   (p:LONGINT): LONGINT;
+PROCEDURE windowAltWidthScreen    (p:LONGINT): LONGINT;
+CONST windowAltWidthScaled        = -1000;
+PROCEDURE windowHeightMinMax      (p:LONGINT): LONGINT;
+PROCEDURE windowHeightVisible     (p:LONGINT): LONGINT;
+PROCEDURE windowHeightScreen      (p:LONGINT): LONGINT;
+CONST windowHeightScaled          = -1000;
+CONST windowHeightDefault         = -1001;
+CONST windowLeftEdgeCentered      = -1;
+CONST windowLeftEdgeMoused        = -2;
+CONST windowMenuNoMenu            = -1;
+CONST windowTopEdgeCentered       = -1;
+CONST windowTopEdgeMoused         = -2;
+PROCEDURE windowTopEdgeDelta      (p:LONGINT): LONGINT;
+PROCEDURE windowWidthMinMax       (p:LONGINT): LONGINT;
+PROCEDURE windowWidthVisible      (p:LONGINT): LONGINT;
+PROCEDURE windowWidthScreen       (p:LONGINT): LONGINT;
+CONST windowWidthScaled           = -1000;
+CONST windowWidthDefault          = -1001;
+
+TYPE
+  EventHandlerFlags     = (alwaysKeys, makeWord = 15); | other values reserved for future use
+  EventHandlerFlagSet   = SET OF EventHandlerFlags;
+
+  EventHandlerResults   = (eat, makeLong=31);          | return values for MUIM_HandleEvent (bit-masked, all other bits must be 0)
+  EventHandlerResultSet = SET OF EventHandlerResults;  | eat = stop MUI from calling other handlers */
+
+  EventHandlerNodePtr = POINTER TO EventHandlerNode;
+  EventHandlerNode    = RECORD OF MinNode;
+			  reserved : SHORTINT;              (* don't touch! *)
+			  priority : SHORTINT;              (* event handlers are inserted according to their priority. *)
+			  flags    : EventHandlerFlagSet;   (* certain flags, see below for definitions. *)
+			  object   : Object;                (* object which should receive MUIM_HandleEvent. *)
+			  class    : IClassPtr;             (* if !=NULL, MUIM_HandleEvent is invoked on exactly this class with CoerceMethod(). *)
+			  events   : IDCMPFlagSet;          (* one or more IDCMP flags this handler should react on. *)
+			END;
+
+  WindowActiveObject = (none = 0, next = -1, prev = -2);
+
+  WindowTags = TAGS OF ApplicationTags
+    windowActivate         = $80428D2F : CBOOLEAN;          |  V4 isg
+    windowActiveObject     = $80427925 : Object;            |  V4 .sg
+    windowActiveObjectMove = $80427925 : WindowActiveObject;|  V4 .sg
+    windowAltHeight        = $8042CCE3 : LONGINT;           |  V4 i.g
+    windowAltLeftEdge      = $80422D65 : LONGINT;           |  V4 i.g
+    windowAltTopEdge       = $8042E99B : LONGINT;           |  V4 i.g
+    windowAltWidth         = $804260F4 : LONGINT;           |  V4 i.g
+    windowAppWindow        = $804280CF : CBOOLEAN;          |  V5 i..
+    windowBackdrop         = $8042C0BB : CBOOLEAN;          |  V4 i..
+    windowBorderless       = $80429B79 : CBOOLEAN;          |  V4 i..
+    windowCloseGadget      = $8042A110 : CBOOLEAN;          |  V4 i..
+    windowCloseRequest     = $8042E86E : CBOOLEAN;          |  V4 ..g
+    windowDefaultObject    = $804294D7 : Object;            |  V4 isg
+    windowDepthGadget      = $80421923 : CBOOLEAN;          |  V4 i..
+    windowDragBar          = $8042045D : CBOOLEAN;          |  V4 i..
+    windowHeight           = $80425846 : LONGINT;           |  V4 i.g
+    windowID               = $804201BD : LONGCARD;          |  V4 isg
+    windowIDChar           = $804201BD : LongID;            |  V4 isg
+    windowInputEvent       = $804247D8 : SysStringPtr;      |  V4 ..g
+|   windowInputEvent       = $804247D8 : InputEventPtr;     |  V4 ..g
+    windowLeftEdge         = $80426C65 : LONGINT;           |  V4 i.g
+|   windowMenu             = $8042DB94 : NewMenuArrPtr;     |  V4 i..
+    windowMenuAction       = $80427521 : LONGCARD;          |  V8 isg
+    windowMenustrip        = $8042855E : FamilyObject;      |  V8 i..
+    windowMouseObject      = $8042BF9B : Object;            | V10 ..g
+    windowNeedsMouseObject = $8042372A : CBOOLEAN;          | V10 i..
+    windowNoMenus          = $80429DF5 : CBOOLEAN;          |  V4 is.
+    windowOpen             = $80428AA0 : CBOOLEAN;          |  V4 .sg
+    windowPublicScreen     = $804278E4 : SysStringPtr;      |  V6 isg
+    windowRefWindow        = $804201F4 : WindowObject;      |  V4 is.
+    windowRootObject       = $8042CBA5 : Object;            |  V4 i..
+    windowScreen           = $8042DF4F : ScreenPtr;         |  V4 isg
+    windowScreenTitle      = $804234B0 : SysStringPtr;      |  V5 isg
+    windowSizeGadget       = $8042E33D : CBOOLEAN;          |  V4 i..
+    windowSizeRight        = $80424780 : CBOOLEAN;          |  V4 i..
+    windowSleep            = $8042E7DB : CBOOLEAN;          |  V4 .sg
+    windowTitle            = $8042AD3D : SysStringPtr;      |  V4 isg
+    windowTopEdge          = $80427C66 : LONGINT;           |  V4 i.g
+    windowUseBottomBorderScroller = $80424E79 : CBOOLEAN;   | V13 is.
+    windowUseLeftBorderScroller   = $8042433E : CBOOLEAN;   | V13 is.
+    windowUseRightBorderScroller  = $8042C05E : CBOOLEAN;   | V13 is.
+    windowWidth            = $8042DCAE : LONGINT;           |  V4 i.g
+    windowWindow           = $80426A42 : WindowPtr;         |  V4 ..g
+  END;
+
+(* Methods *)
+
+CONST
+  mWindowAddEventHandler       = MethodID($804203B7); | V16
+| mWindowGetMenuCheck          = MethodID($80420414); | V4
+| mWindowGetMenuState          = MethodID($80420D2F); | V4
+  mWindowRemEventHandler       = MethodID($8042679E); | V16
+  mWindowScreenToBack          = MethodID($8042913D); | V4
+  mWindowScreenToFront         = MethodID($804227A4); | V4
+| mWindowSetCycleChain         = MethodID($80426510); | V4
+| mWindowSetMenuCheck          = MethodID($80422243); | V4
+| mWindowSetMenuState          = MethodID($80422B5E); | V4
+  mWindowToBack                = MethodID($8042152E); | V4
+  mWindowToFront               = MethodID($8042554F); | V4
+
+
+(* Parameter *)
+
+TYPE
+  pWindowAddEventHandlerPtr    = POINTER TO pWindowAddEventHandler;
+  pWindowAddEventHandler       = RECORD OF MsgRoot; ehnode : EventHandlerNodePtr END;
+
+| pWindowGetMenuCheckPtr       = POINTER TO pWindowGetMenuCheck;
+| pWindowGetMenuCheck          = RECORD OF MsgRoot; menuID : LONGINT END;
+
+| pWindowGetMenuStatePtr       = POINTER TO pWindowGetMenuState;
+| pWindowGetMenuState          = RECORD OF MsgRoot; menuID : LONGINT END;
+
+  pWindowRemEventHandlerPtr    = POINTER TO pWindowRemEventHandler;
+  pWindowRemEventHandler       = pWindowAddEventHandler;
+
+| pWindowSetCycleChainPtr      = POINTER TO pWindowSetCycleChain;
+| pWindowSetCycleChain         = RECORD OF MsgRoot; END  | object list is appended
+
+| pWindowSetMenuCheckPtr       = POINTER TO pWindowSetMenuCheck;
+| pWindowSetMenuCheck          = RECORD OF MsgRoot; menuID, set : LONGINT END;
+
+| pWindowSetMenuStatePtr       = POINTER TO pWindowSetMenuState;
+| pWindowSetMenuState          = RECORD OF MsgRoot; menuID, set : LONGINT END;
+
+  METHOD AddEventHandler (o : WindowObject; VAR ehnode : EventHandlerNode);
+  METHOD RemEventHandler (o : WindowObject; VAR ehnode : EventHandlerNode);
+  METHOD ScreenToBack  (o : WindowObject);
+  METHOD ScreenToFront (o : WindowObject);
+  METHOD ToBack        (o : WindowObject);
+  METHOD ToFront       (o : WindowObject);
+| METHOD GetMenuCheck  (o : WindowObject; menuID : LONGINT);
+| METHOD GetMenuState  (o : WindowObject; menuID : LONGINT);
+| METHOD SetMenuCheck  (o : WindowObject; menuID : LONGINT; set : LONGINT);
+| METHOD SetMenuState  (o : WindowObject; menuID : LONGINT; set : LONGINT);
+| METHOD SetCycleChain (o : WindowObject; obj : LIST OF Object);
+
+
+(****************************************************************************)
+(** Area                                                                   **)
+(****************************************************************************)
+
+CONST cArea  = "Area.mui";
+
+(* Attributes *)
+
+TYPE
+  Fonts = (big = -6, title, fixed, tiny, list, normal, inherit);
+
+  Frames = (none, button, imageButton, text,  string,  readList, inputList,
+	    prop, gauge,  group,       popUp, virtual, slider,   count);
+
+  InputModes = (none, relVerify, immediate, toggle);
+
+  AreaTags = TAGS OF WindowTags
+    applicationObject      = $8042D3EE : ApplicationObject; |  V4 ..g
+    background             = $8042545B : StandardImages;    |  V4 is.
+    bottomEdge             = $8042E552 : LONGINT;           |  V4 ..g
+    contextMenu            = $8042B704 : Object;            | V11 isg
+    contextMenuTrigger     = $8042A2C1 : Object;            | V11 ..g
+    controlChar            = $8042120B : LONGCHAR;          |  V4 i..
+    cycleChain             = $80421CE7 : LONGINT;           | V11 isg
+    disabled               = $80423661 : CBOOLEAN;          |  V4 isg
+    draggable              = $80420B6E : CBOOLEAN;          | V11 isg
+    dropable               = $8042FBCE : CBOOLEAN;          | V11 isg
+|   exportID               = $8042D76E : LONGINT;           |  V4 isg
+    fixHeight              = $8042A92B : LONGINT;           |  V4 i..
+    fixHeightTxt           = $804276F2 : SysStringPtr;      |  V4 i..
+    fixWidth               = $8042A3F1 : LONGINT;           |  V4 i..
+    fixWidthTxt            = $8042D044 : SysStringPtr;      |  V4 i..
+    font                   = $8042BE50 : TextFontPtr;       |  V4 i.g
+    fontDefault            = $8042BE50 : Fonts;             |  V4 i.g
+    frame                  = $8042AC64 : Frames;            |  V4 i..
+    framePhantomHoriz      = $8042ED76 : CBOOLEAN;          |  V4 i..
+    frameTitle             = $8042D1C7 : SysStringPtr;      |  V4 i..
+    height                 = $80423237 : LONGINT;           |  V4 ..g
+    horizDisappear         = $80429615 : LONGINT;           | V11 isg
+    horizWeight            = $80426DB9 : LONGINT;           |  V4 i..
+    innerBottom            = $8042F2C0 : LONGINT;           |  V4 i..
+    innerLeft              = $804228F8 : LONGINT;           |  V4 i..
+    innerRight             = $804297FF : LONGINT;           |  V4 i..
+    innerTop               = $80421EB6 : LONGINT;           |  V4 i..
+    inputMode              = $8042FB04 : InputModes;        |  V4 i..
+    leftEdge               = $8042BEC6 : LONGINT;           |  V4 ..g
+    maxHeight              = $804293E4 : LONGINT;           | V11 i..
+    maxWidth               = $8042F112 : LONGINT;           | V11 i..
+    objectID               = $8042D76E : LONGCARD;          | V11 isg
+    pressed                = $80423535 : CBOOLEAN;          |  V4 ..g
+    rightEdge              = $8042BA82 : LONGINT;           |  V4 ..g
+    selected               = $8042654B : CBOOLEAN;          |  V4 isg
+    shortHelp              = $80428FE3 : SysStringPtr;      | V11 isg
+    showMe                 = $80429BA8 : CBOOLEAN;          |  V4 isg
+    showSelState           = $8042CAAC : CBOOLEAN;          |  V4 i..
+    timer                  = $80426435 : LONGINT;           |  V4 ..g
+    topEdge                = $8042509B : LONGINT;           |  V4 ..g
+    vertDisappear          = $8042D12F : LONGINT;           | V11 isg
+    vertWeight             = $804298D0 : LONGINT;           |  V4 i..
+    weight                 = $80421D1F : LONGINT;           |  V4 i..
+    width                  = $8042B59C : LONGINT;           |  V4 ..g
+    window                 = $80421591 : WindowPtr;         |  V4 ..g
+    windowObject           = $8042669E : WindowObject;      |  V4 ..g
+  END;
+
+(* Methods *)
+
+CONST
+  mAskMinMax         = MethodID($80423874); | V4  (* Custom Class *)
+  mCleanup           = MethodID($8042D985); | V4  (* Custom Class *)
+  mDraw              = MethodID($80426F3F); | V4  (* Custom Class *)
+  mDrawBackground    = MethodID($804238CA); | V11
+  mHandleInput       = MethodID($80422A1A); | V4  (* Custom Class *)
+  mHandleEvent       = MethodID($80426D66); | V16 (* Custom Class *)
+  mHide              = MethodID($8042F20F); | V4  (* Custom Class *)
+  mSetup             = MethodID($80428354); | V4  (* Custom Class *)
+  mShow              = MethodID($8042CC84); | V4  (* Custom Class *)
+
+  mContextMenuBuild  = MethodID($80429D2E); | V11
+  mContextMenuChoice = MethodID($80420F0E); | V11
+  mCreateBubble      = MethodID($80421C41); | V18
+  mCreateShortHelp   = MethodID($80428E93); | V18
+  mDeleteBubble      = MethodID($804211AF); | V18
+  mDeleteShortHelp   = MethodID($8042D35A); | V18
+  mDragBegin         = MethodID($8042C03A); | V11
+  mDragDrop          = MethodID($8042C555); | V11
+  mDragFinish        = MethodID($804251F0); | V11
+  mDragQuery         = MethodID($80420261); | V11
+  mDragReport        = MethodID($8042EDAD); | V11
+
+(* Parameter *)
+
+TYPE
+  (* User configurable keyboard events coming with mHandleInput *)
+  MuiKeys =
+    (release     = -2, (* not a real key, faked when wenn keyPress is released *)
+     none        = -1,
+     press,       toggle,
+     up,          down,
+     pageUp,      pageDown,
+     top,         bottom,
+     left,        right,
+     wordLeft,    wordRight,
+     lineStart,   lineEnd,
+     gadgetNext,  gadgetPrev, gadgetOff,
+     windowClose, windowNext, windowPrev,
+     help);
+
+  pAskMinMaxPtr         = POINTER TO pAskMinMax;
+  pAskMinMax            = RECORD OF MsgRoot; minMax : MinMaxPtr END;
+
+  pDrawPtr              = POINTER TO pDraw;
+  pDraw                 = RECORD OF MsgRoot; flags : AreaDataFlagSet END;
+
+  pDrawBackgroundPtr    = POINTER TO pDrawBackground;
+  pDrawBackground       = RECORD OF MsgRoot; left, top, width, height, xoffset, yoffset : LONGINT; flags : LONGSET END;
+
+  pHandleEventPtr       = POINTER TO pHandleEvent;
+  pHandleEvent          = RECORD OF MsgRoot; imsg : IntuiMessagePtr; muikey : MuiKeys END;
+
+  pHandleInputPtr       = POINTER TO pHandleInput;
+  pHandleInput          = RECORD OF MsgRoot;
+			    imsg   : Intuition.IntuiMessagePtr;
+			    muikey : MuiKeys;
+			  END;
+
+  pSetUpPtr             = POINTER TO pSetUp;
+  pSetUp                = RECORD OF MsgRoot; renderInfo : RenderInfoPtr END;
+
+
+  pContextMenuBuildPtr  = POINTER TO pContextMenuBuild;
+  pContextMenuBuild     = RECORD OF MsgRoot; mx, my : LONGINT END;
+
+  pContextMenuChoicePtr = POINTER TO pContextMenuChoice;
+  pContextMenuChoice    = RECORD OF MsgRoot; item : Object END;
+
+  pCreateBubblePtr      = POINTER TO pCreateBubble;
+  pCreateBubble         = RECORD OF MsgRoot; x, y : LONGINT; txt : SysStringPtr; flags : LONGSET END;
+
+  pCreateShortHelpPtr   = POINTER TO pCreateShortHelp;
+  pCreateShortHelp      = RECORD OF MsgRoot; mx, my : LONGINT END;
+
+  pDeleteBubblePtr      = POINTER TO pDeleteBubble;
+  pDeleteBubble         = RECORD OF MsgRoot; bubble : ANYPTR END;
+
+  pDeleteShortHelpPtr   = POINTER TO pDeleteShortHelp;
+  pDeleteShortHelp      = RECORD OF MsgRoot; help : SysStringPtr END;
+
+  DragQuery  = (refuse, accept);
+  DragReport = (abort, continue, lock, refresh);
+
+  pDragBeginPtr         = POINTER TO pDragBegin;
+  pDragDropPtr          = POINTER TO pDragDrop;
+  pDragFinishPtr        = POINTER TO pDragFinish;
+  pDragQueryPtr         = POINTER TO pDragQuery;
+  pDragReportPtr        = POINTER TO pDragReport;
+
+  pDrag                 = RECORD OF MsgRoot; obj : Object; END;
+  pDragBegin            = RECORD OF pDrag; END;
+  pDragDrop             = RECORD OF pDrag; x, y : LONGINT END;
+  pDragFinish           = RECORD OF pDrag; END;
+  pDragQuery            = RECORD OF pDrag; END;
+  pDragReport           = RECORD OF pDrag; x, y : LONGINT; update : LONGINT END;
+
+  METHOD Cleanup     (o : AreaObject);
+  METHOD Hide        (o : AreaObject);
+  METHOD Show        (o : AreaObject);
+  METHOD AskMinMax   (o : AreaObject; VAR minMax : MinMax);
+  METHOD Draw        (o : AreaObject;     flags  : AreaDataFlagSet);
+  METHOD HandleInput (o : AreaObject;     imsg   : IntuiMessagePtr; muikey : MuiKeys);
+  METHOD SetUp       (o : AreaObject; renderInfo : RenderInfoPtr );
+
+| METHOD DisplayBeep (o : AreaObject);  | not really a MUI method
+
+(****************************************************************************)
+(** String                                                                 **)
+(****************************************************************************)
+
+CONST cString  = "String.mui";
+
+TYPE StringFormats = (left, center, right);
+
+(* Attributes *)
+
+TYPE
+  StringTags = TAGS OF AreaTags
+    stringAccept           = $8042E3E1 : SysStringPtr;      |  V4 isg
+    stringAcknowledge      = $8042026C : SysStringPtr;      |  V4 ..g
+    stringAdvanceOnCR      = $804226DE : CBOOLEAN;          | V11 isg
+    stringAttachedList     = $80420FD2 : ListObject;        |  V4 i..
+    stringBufferPos        = $80428B6C : LONGINT;           |  V4 .sg
+    stringContents         = $80428FFD : SysStringPtr;      |  V4 isg
+    stringDisplayPos       = $8042CCBF : LONGINT;           |  V4 .sg
+    stringEditHook         = $80424C33 : HookPtr;           |  V7 isg
+    stringFormat           = $80427484 : StringFormats;     |  V4 i.g
+    stringInteger          = $80426E8A : LONGCARD;          |  V4 isg
+    stringLonelyEditHook   = $80421569 : CBOOLEAN;          | V11 isg
+    stringMaxLen           = $80424984 : LONGINT;           |  V4 i..
+    stringReject           = $8042179C : SysStringPtr;      |  V4 isg
+    stringSecret           = $80428769 : CBOOLEAN;          |  V4 i.g
+  END;
+
+
+(****************************************************************************)
+(** Prop                                                                   **)
+(****************************************************************************)
+
+CONST cProp  = "Prop.mui";
+
+TYPE
+  WinBorders    = (none, left, right, bottom);
+
+(* Attributes *)
+
+| see below
+
+(* Methods *)
+
+CONST
+  mPropDecrease                = MethodID($80420DD1); | V16
+  mPropIncrease                = MethodID($8042CAC0); | V16
+
+(* Parameters *)
+
+TYPE
+  pPropDecreasePtr             = POINTER TO pPropDecrease;
+  pPropDecrease                = RECORD OF MsgRoot; amount : LONGINT END;
+  pPropIncreasePtr             = POINTER TO pPropIncrease;
+  pPropIncrease                = pPropDecrease;
+
+
+(****************************************************************************)
+(** List                                                                   **)
+(****************************************************************************)
+
+CONST
+  cList  = "List.mui";
+
+(* Attributes *)
+
+CONST
+  listInsertTop        =  0;
+  listInsertActive     = -1;
+  listInsertSorted     = -2;
+  listInsertBottom     = -3;
+
+  listRemoveFirst      =  0;
+  listRemoveActive     = -1;
+  listRemoveLast       = -2;
+
+  listGetEntryActive   = -1;
+  listSelectActive     = -1;
+  listSelectAll        = -2;
+
+  listRedrawActive     = -1;
+  listRedrawAll        = -2;
+
+  listMoveTop          =  0;
+  listMoveActive       = -1;
+  listMoveBottom       = -2;
+  listMoveNext         = -3; (* only valid for second parameter *)
+  listMovePrevious     = -4; (* only valid for second parameter *)
+
+  listExchangeTop      =  0;
+  listExchangeActive   = -1;
+  listExchangeBottom   = -2;
+  listExchangeNext     = -3; (* only valid for second parameter *)
+  listExchangePrevious = -4; (* only valid for second parameter *)
+
+  listJumpTop          =  0;
+  listJumpActive       = -1;
+  listJumpBottom       = -2;
+
+  listNextSelectedStart   = -1;
+  listNextSelectedEnd     = -1;
+
+  listCopyHookString      = HookPtr(-1);
+  listConstructHookString = HookPtr(-1);
+  listDestructHookString  = HookPtr(-1);
+
+TYPE
+  ListCursorTypes = (none, bar, rect);
+  ListActive      = (pageDown = -7, pageUp, down, up, bottom, top, off);
+
+  ListTags = TAGS OF StringTags
+    listActive             = $8042391C : LONGINT;           |  V4 isg
+    listActiveMove         = $8042391C : ListActive;        |  V4 isg
+    listAdjustHeight       = $8042850D : CBOOLEAN;          |  V4 i..
+    listAdjustWidth        = $8042354A : CBOOLEAN;          |  V4 i..
+    listAutoVisible        = $8042A445 : CBOOLEAN;          | V11 isg
+    listCompareHook        = $80425C14 : HookPtr;           |  V4 is.
+    listConstructHook      = $8042894F : HookPtr;           |  V4 is.
+    listDestructHook       = $804297CE : HookPtr;           |  V4 is.
+    listDisplayHook        = $8042B4D5 : HookPtr;           |  V4 is.
+    listDragSortable       = $80426099 : CBOOLEAN;          | V11 isg
+    listDropMark           = $8042ABA6 : LONGINT;           | V11 ..g
+    listEntries            = $80421654 : LONGINT;           |  V4 ..g
+    listFirst              = $804238D4 : LONGINT;           |  V4 ..g
+    listFormat             = $80423C0A : SysStringPtr;      |  V4 isg
+    listInsertPosition     = $8042D0CD : LONGINT;           |  V9 ..g
+    listMultiTestHook      = $8042C2C6 : HookPtr;           |  V4 is.
+    listPool               = $80423431 : PoolHeaderPtr;     | V13 i..
+    listPoolPuddleSize     = $8042A4EB : LONGCARD;          | V13 i..
+    listPoolThreshSize     = $8042C48C : LONGCARD;          | V13 i..
+    listQuiet              = $8042D8C7 : CBOOLEAN;          |  V4 .s.
+    listShowDropMarks      = $8042C6F3 : CBOOLEAN;          | V11 isg
+    listSourceArray        = $8042C0A0 : ANYPTR;            |  V4 i..
+    listTitle              = $80423E66 : SysStringPtr;      |  V6 isg
+    listTitleMultiColumn   = $80423E66 : CBOOLEAN;          |  V6 isg
+    listVisible            = $8042191F : LONGINT;           |  V4 ..g
+  END;
+
+(* Methods *)
+
+CONST
+  mListClear         = MethodID($8042AD89); | V4
+  mListCreateImage   = MethodID($80429804); | V11
+  mListDeleteImage   = MethodID($80420F58); | V11
+  mListExchange      = MethodID($8042468C); | V4
+  mListGetEntry      = MethodID($804280EC); | V4
+  mListInsert        = MethodID($80426C87); | V4
+  mListInsertSingle  = MethodID($804254D5); | V7
+  mListJump          = MethodID($8042BAAB); | V4
+  mListMove          = MethodID($804253C2); | V9
+  mListNextSelected  = MethodID($80425F17); | V6
+  mListRedraw        = MethodID($80427993); | V4
+  mListRemove        = MethodID($8042647E); | V4
+  mListSelect        = MethodID($804252D8); | V4
+  mListSort          = MethodID($80422275); | V4
+  mListTestPos       = MethodID($80425F48); | V11
+
+(* Parameters *)
+
+TYPE
+  ListCreateImageFlagSet = SET OF [32];  | currently not used
+  pListCreateImagePtr = POINTER TO pListCreateImage;
+  pListCreateImage    = RECORD OF MsgRoot; obj : Object; flags : ListCreateImageFlagSet END;
+  pListDeleteImagePtr = POINTER TO pListDeleteImage;
+  pListDeleteImage    = RECORD OF MsgRoot; listimg : ANYPTR END;
+
+  pListExchangePtr    = POINTER TO pListExchange;
+  pListExchange       = RECORD OF MsgRoot; pos1, pos2 : LONGINT END;
+
+  pListGetEntryPtr    = POINTER TO pListGetEntry;
+  pListGetEntry       = RECORD OF MsgRoot; pos : LONGINT; entry : ANYPTR END;
+
+  AnyptrArrayPtr      = ANYPTR;  | actually POINTER TO ARRAY OF ANYPTR
+  pListInsertPtr      = POINTER TO pListInsert;
+  pListInsert         = RECORD OF MsgRoot;
+			  entries : AnyptrArrayPtr;
+			  count   : LONGINT;
+			  pos     : LONGINT;
+			END;
+
+  pListInsertSinglePtr = POINTER TO pListInsertSingle;
+  pListInsertSingle    = RECORD OF MsgRoot;
+			   entry : ANYPTR;
+			   pos   : LONGINT;
+			 END;
+
+  pListJumpPtr         = POINTER TO pListJump;
+  pListJump            = RECORD OF MsgRoot; pos : LONGINT END;
+
+  pListMovePtr         = POINTER TO pListMove;
+  pListMove            = RECORD OF MsgRoot; from, to : LONGINT END;
+
+  pListNextSelectedPtr = POINTER TO pListNextSelected;
+  pListNextSelected    = RECORD OF MsgRoot; pos : POINTER TO LONGINT END;
+
+  pListRedrawPtr       = POINTER TO pListRedraw;
+  pListRedraw          = pListJump;
+
+  pListRemovePtr       = POINTER TO pListRemove;
+  pListRemove          = pListJump;
+
+  ListSelect           = (off, on, toggle, ask, makeLong = 31);
+  pListSelectPtr       = POINTER TO pListSelect;
+  pListSelect          = RECORD OF MsgRoot;
+			   pos     : LONGINT;
+			   selType : ListSelect;
+			   state   : POINTER TO LONGINT;
+			 END;
+
+  ListTestPosFlags     = (above, below, left, right, makeWord = 15);
+  ListTestPosFlagSet   = SET OF ListTestPosFlags;
+
+  ListTestPosResultPtr = POINTER TO ListTestPosResult;
+  ListTestPosResult    = RECORD
+			   entry   : LONGINT;               (* number of entry, -1 if mouse not over valid entry *)
+			   column  : INTEGER;               (* numer of column, -1 if no valid column *)
+			   flags   : ListTestPosFlagSet;    (* see above *)
+			   xoffset,                         (* currently unused *)
+			   yoffset : INTEGER;               (* y offset of mouse click from center of line
+				                               (negative values mean click was above center,
+				                                positive values mean click was below center) *)
+			 END ;
+
+  pListTestPosPtr      = POINTER TO pListTestPos;
+  pListTestPos         = RECORD OF MsgRoot; x, y : LONGINT; res : ListTestPosResultPtr END;
+
+  METHOD Clear        (o : ListObject);
+  METHOD Sort         (o : ListObject);
+  METHOD DirlistReRead(o : ListObject);
+  METHOD Exchange     (o : ListObject; pos1, pos2 : LONGINT);
+  METHOD GetEntry     (o : ListObject; pos : LONGINT; VAR entry   : ANYPTR);
+  METHOD Insert       (o : ListObject; pos : LONGINT;     entries : AnyptrArrayPtr; count : LONGINT := -1 );           | REF entries : ARRAY OF ANYPTR);
+  METHOD InsertSingle (o : ListObject; pos : LONGINT;     entry   : ANYPTR);
+  METHOD Jump         (o : ListObject; pos : LONGINT);
+  METHOD Move         (o : ListObject; from, to : LONGINT);
+  METHOD NextSelected (o : ListObject; VAR pos : LONGINT);
+  METHOD Redraw       (o : ListObject; pos : LONGINT);
+  METHOD Remove       (o : ListObject; pos : LONGINT);
+  METHOD Select       (o : ListObject; pos : LONGINT; selType : ListSelect; VAR state : LONGINT);
+
+
+(****************************************************************************)
+(** Listview                                                               **)
+(****************************************************************************)
+
+CONST
+  cListview  = "Listview.mui";
+
+(* Attributes *)
+
+TYPE
+  ListViewMultiSelect = (none, default, shifted, always);
+  ListViewScrollerPos = (default, left, right);
+  ListViewDragTypes   = (none, immediate);
+
+  ListviewTags = TAGS OF ListTags
+    listviewClickColumn    = $8042D1B3 : LONGINT;           |  V7 ..g
+    listviewDefClickColumn = $8042B296 : LONGINT;           |  V7 isg
+    listviewDoubleClick    = $80424635 : CBOOLEAN;          |  V4 i.g
+    listviewDragType       = $80425CD3 : ListViewDragTypes; | V11 isg
+    listviewInput          = $8042682D : CBOOLEAN;          |  V4 i..
+    listviewList           = $8042BCCE : ListObject;        |  V4 i..
+    listviewMultiSelect    = $80427E08 : ListViewMultiSelect; | V7 i..
+    listviewSelectChange   = $8042178F : CBOOLEAN;          |  V4 ..g
+    listviewScrollerPos    = $8042B1B4 : ListViewScrollerPos; | V10 i..
+  END;
+
+(****************************************************************************)
+(** Dirlist                                                                **)
+(****************************************************************************)
+
+CONST
+  cDirlist  = "Dirlist.mui";
+
+(* Attributes *)
+
+TYPE
+  DirlistSortDirs  = (first, last, mix);
+  DirlistSortTypes = (name,  date, size);
+  DirlistStatus    = (invalid, reading, valid);
+
+  DirlistTags = TAGS OF ListviewTags
+    dirlistAcceptPattern   = $8042760A : SysStringPtr;      |  V4 is.
+    dirlistDirectory       = $8042EA41 : SysStringPtr;      |  V4 is.
+    dirlistDrawersOnly     = $8042B379 : CBOOLEAN;          |  V4 is.
+    dirlistFilesOnly       = $8042896A : CBOOLEAN;          |  V4 is.
+    dirlistFilterDrawers   = $80424AD2 : CBOOLEAN;          |  V4 is.
+    dirlistFilterHook      = $8042AE19 : HookPtr;           |  V4 is.
+    dirlistMultiSelDirs    = $80428653 : CBOOLEAN;          |  V6 is.
+    dirlistNumBytes        = $80429E26 : LONGINT;           |  V4 ..g
+    dirlistNumDrawers      = $80429CB8 : LONGINT;           |  V4 ..g
+    dirlistNumFiles        = $8042A6F0 : LONGINT;           |  V4 ..g
+    dirlistPath            = $80426176 : SysStringPtr;      |  V4 ..g
+    dirlistRejectIcons     = $80424808 : CBOOLEAN;          |  V4 is.
+    dirlistRejectPattern   = $804259C7 : SysStringPtr;      |  V4 is.
+    dirlistSortDirs        = $8042BBB9 : DirlistSortDirs;   |  V4 is.
+    dirlistSortHighLow     = $80421896 : CBOOLEAN;          |  V4 is.
+    dirlistSortType        = $804228BC : DirlistSortTypes;  |  V4 is.
+    dirlistStatus          = $804240DE : DirlistStatus;     |  V4 ..g
+  END;
+
+(* Methods *)
+
+CONST
+  mDirlistReRead  = MethodID($80422D71); | V4
+
+
+(****************************************************************************)
+(** Numeric                                                                **)
+(****************************************************************************)
+
+CONST
+  cNumeric = "Numeric.mui";
+
+(* Attributes *)
+
+TYPE
+  NumericTags = TAGS OF DirlistTags
+    numericDefault         = $804263E8 : LONGINT;           | V11 isg
+    numericFormat          = $804263E9 : SysStringPtr;      | V11 isg
+    numericMax             = $8042D78A : LONGINT;           | V11 isg
+    numericMin             = $8042E404 : LONGINT;           | V11 isg
+    numericReverse         = $8042F2A0 : CBOOLEAN;          | V11 isg
+    numericRevLeftRight    = $804294A7 : CBOOLEAN;          | V11 isg
+    numericRevUpDown       = $804252DD : CBOOLEAN;          | V11 isg
+    numericValue           = $8042AE3A : LONGINT;           | V11 isg
+  END;
+
+(* Methods *)
+
+CONST
+  mNumericDecrease             = MethodID($804243A7); | V11
+  mNumericIncrease             = MethodID($80426ECD); | V11
+  mNumericScaleToValue         = MethodID($8042032C); | V11
+  mNumericSetDefault           = MethodID($8042AB0A); | V11
+  mNumericStringify            = MethodID($80424891); | V11
+  mNumericValueToScale         = MethodID($80423E4F); | V11
+
+TYPE
+  pNumericDecrease             = RECORD OF MsgRoot; amount : LONGINT END;
+  pNumericIncrease             = pNumericDecrease;
+  pNumericScaleToValue         = RECORD OF MsgRoot; scalemin, scalemax, scale : LONGINT END;
+  pNumericSetDefault           = RECORD OF MsgRoot; END;
+  pNumericStringify            = RECORD OF MsgRoot; value : LONGINT END;
+  pNumericValueToScale         = RECORD OF MsgRoot; scalemin, scalemax : LONGINT END;
+
+(****************************************************************************)
+(** Pendisplay                                                             **)
+(****************************************************************************)
+
+CONST
+  cPendisplay  = "Pendisplay.mui";
+
+(* Attributes *)
+
+| see below
+
+(* Methods *)
+
+CONST
+  mPendisplaySetColormap        = MethodID($80426C80); | V13
+  mPendisplaySetMUIPen          = MethodID($8042039D); | V13
+  mPendisplaySetRGB             = MethodID($8042C131); | V13
+
+(* Parameters *)
+
+TYPE
+  pPendisplaySetColormapPtr     = POINTER TO pPendisplaySetColormap;
+  pPendisplaySetColormap        = RECORD OF MsgRoot; colormap : LONGINT END;
+  pPendisplaySetMUIPenPtr       = POINTER TO pPendisplaySetMUIPen;
+  pPendisplaySetMUIPen          = RECORD OF MsgRoot; muipen : MuiPens END;
+  pPendisplaySetRGBPtr          = POINTER TO pPendisplaySetRGB;
+  pPendisplaySetRGB             = RECORD OF MsgRoot; red, green, blue : LONGCARD END;
+
+
+(****************************************************************************)
+(** Group                                                                  **)
+(****************************************************************************)
+
+CONST
+  cGroup = "Group.mui";
+
+(* Attributes *)
+
+TYPE
+  GroupTags = TAGS OF NumericTags
+    groupActivePage        = $80424199 : LONGINT;           |  V5 isg
+    groupChild             = $804226E6 : AreaObject;        |  V4 i..
+    groupChildList         = $80424748 : ListPtr;           |  V4 ..g
+    groupColumns           = $8042F416 : LONGINT;           |  V4 is.
+    groupHoriz             = $8042536B : CBOOLEAN;          |  V4 i..
+    groupHorizSpacing      = $8042C651 : LONGINT;           |  V4 is.
+    groupLayoutHook        = $8042C3B2 : HookPtr;           | V11 i..
+    groupPageMode          = $80421A5F : CBOOLEAN;          |  V5 is.
+    groupRows              = $8042B68F : LONGINT;           |  V4 is.
+    groupSameHeight        = $8042037E : CBOOLEAN;          |  V4 i..
+    groupSameSize          = $80420860 : CBOOLEAN;          |  V4 i..
+    groupSameWidth         = $8042B3EC : CBOOLEAN;          |  V4 i..
+    groupSpacing           = $8042866D : LONGINT;           |  V4 is.
+    groupVertSpacing       = $8042E1BF : LONGINT;           |  V4 is.
+
+    registerFrame          = $8042349B : CBOOLEAN;          |  V7 i.g
+    registerTitles         = $804297EC : StringArrPtr;      |  V7 i.g
+
+    penadjustPSIMode       = $80421CBB : CBOOLEAN;          | V11 i..
+
+    virtgroupInput         = $80427F7E : CBOOLEAN;          | V11 i..
+    virtgroupHeight        = $80423038 : LONGINT;           |  V6 ..g
+    virtgroupLeft          = $80429371 : LONGINT;           |  V6 isg
+    virtgroupTop           = $80425200 : LONGINT;           |  V6 isg
+    virtgroupWidth         = $80427C49 : LONGINT;           |  V6 ..g
+
+    scrollgroupContents    = $80421261 : Object;            |  V4 i..
+    scrollgroupFreeHoriz   = $804292F3 : CBOOLEAN;          |  V9 i..
+    scrollgroupFreeVert    = $804224F2 : CBOOLEAN;          |  V9 i..
+    scrollgroupHorizBar    = $8042B63D : Object;            | V16 ..g
+    scrollgroupUseWinBorder= $804284C1 : CBOOLEAN;          | V13 i..
+    scrollgroupVertBar     = $8042CDC0 : Object;            | V16 ..g
+  END;
+
+(* Methods *)
+
+CONST
+  mGroupExitChange             = MethodID($8042D1CC); | V11
+  mGroupInitChange             = MethodID($80420887); | V11
+
+TYPE
+  pGroupExitChange             = RECORD OF MsgRoot END;
+  pGroupInitChange             = RECORD OF MsgRoot END;
+
+  METHOD ExitChange (o : GroupObject);
+  METHOD InitChange (o : GroupObject);
+
+(****************************************************************************)
+(** Settingsgroup                                                          **)
+(****************************************************************************)
+
+CONST
+  cSettingsgroup = "Settingsgroup.mui";
+
+(* Attributes *)
+
+| not available
+
+(* Methods *)
+
+CONST
+  mSettingsgroupConfigToGadgets    = MethodID($80427043); | V11
+  mSettingsgroupGadgetsToConfig    = MethodID($80425242); | V11
+
+(* Parameters *)
+
+TYPE
+  pSettingsgroupConfigToGadgetsPtr = POINTER TO pSettingsgroupConfigToGadgets;
+  pSettingsgroupConfigToGadgets    = RECORD OF MsgRoot; configdata : Object END;
+  pSettingsgroupGadgetsToConfigPtr = POINTER TO pSettingsgroupGadgetsToConfig;
+  pSettingsgroupGadgetsToConfig    = RECORD OF MsgRoot; configdata : Object END;
+
+
+(****************************************************************************)
+(** Semaphore                                                              **)
+(****************************************************************************)
+
+CONST
+  cSemaphore = "Semaphore.mui";
+
+(* Attributes *)
+
+TYPE
+  SemaphoreTags = TAGS OF GroupTags
+  END;
+
+(* Methods *)
+
+CONST
+  mSemaphoreAttempt            = MethodID($80426CE2); | V11
+  mSemaphoreAttemptShared      = MethodID($80422551); | V11
+  mSemaphoreObtain             = MethodID($804276F0); | V11
+  mSemaphoreObtainShared       = MethodID($8042EA02); | V11
+  mSemaphoreRelease            = MethodID($80421F2D); | V11
+
+TYPE
+  pSemaphoreAttempt            = RECORD OF MsgRoot END;
+  pSemaphoreAttemptShared      = RECORD OF MsgRoot END;
+  pSemaphoreObtain             = RECORD OF MsgRoot END;
+  pSemaphoreObtainShared       = RECORD OF MsgRoot END;
+  pSemaphoreRelease            = RECORD OF MsgRoot END;
+
+(****************************************************************************)
+(** Dataspace                                                              **)
+(****************************************************************************)
+
+CONST
+  cDataspace = "Dataspace.mui";
+
+(* Attributes *)
+
+TYPE
+  DataspaceTags = TAGS OF SemaphoreTags
+    dataspacePool          = $80424CF9 : PoolHeaderPtr;     | V11 i..
+  END;
+
+(* Methods *)
+
+CONST
+  mDataspaceAdd                = MethodID($80423366); | V11
+  mDataspaceClear              = MethodID($8042B6C9); | V11
+  mDataspaceMerge              = MethodID($80423E2B); | V11
+  mDataspaceReadIFF            = MethodID($80420DFB); | V11
+  mDataspaceRemove             = MethodID($8042DCE1); | V11
+  mDataspaceWriteIFF           = MethodID($80425E8E); | V11
+
+TYPE
+  pDataspaceAdd                = RECORD OF MsgRoot; data : ANYPTR; len : LONGINT; id : LONGCARD END;
+  pDataspaceClear              = RECORD OF MsgRoot; END;
+  pDataspaceMerge              = RECORD OF MsgRoot; dataspace : Object END;
+  pDataspaceReadIFF            = RECORD OF MsgRoot; handle    : IFFHandlePtr END;
+  pDataspaceRemove             = RECORD OF MsgRoot; id        : LONGCARD END;
+  pDataspaceWriteIFF           = RECORD OF MsgRoot; handle    : IFFHandlePtr; type, id : LONGCARD END;
+
+(****************************************************************************)
+(** Cycle                                                                  **)
+(****************************************************************************)
+
+CONST
+  cCycle  = "Cycle.mui";
+
+TYPE
+  CycleActive = (next = -1, prev = -2);
+
+(* Attributes *)
+
+  CycleTags = TAGS OF DataspaceTags
+    cycleActive            = $80421788 : LONGINT;           |  V4 isg
+    cycleActiveMove        = $80421788 : CycleActive;       |  V4 isg
+    cycleEntries           = $80420629 : StringArrPtr;      |  V4 i..
+  END;
+
+
+(****************************************************************************)
+(** Popstring                                                              **)
+(****************************************************************************)
+
+CONST
+  cPopstring  = "Popstring.mui";
+
+(* Attributes *)
+
+TYPE
+  PopstringTags = TAGS OF CycleTags
+    popstringButton        = $8042D0B9 : Object;            |  V7 i.g
+    popstringCloseHook     = $804256BF : HookPtr;           |  V7 isg
+    popstringOpenHook      = $80429D00 : HookPtr;           |  V7 isg
+    popstringString        = $804239EA : Object;            |  V7 i.g
+    popstringToggle        = $80422B7A : CBOOLEAN;          |  V7 isg
+  END;
+
+(* Methods *)
+
+CONST
+  mPopstringClose    = MethodID($8042DC52); | V7
+  mPopstringOpen     = MethodID($804258BA); | V7
+
+(* Parameters *)
+
+TYPE
+
+  pPopstringClosePtr  = POINTER TO pPopstringClose;
+  pPopstringClose = RECORD OF MsgRoot;
+		      result : CBOOLEAN;
+		    END;
+
+  METHOD Open  (o : PopstringObject);
+  METHOD Close (o : PopstringObject; result : CBOOLEAN);
+
+
+
+(****************************************************************************)
+(** Parameter structures for some classes                                  **)
+(****************************************************************************)
+
+TYPE
+  PaletteEntryPtr  = POINTER TO PaletteEntry;
+  PaletteEntry  = RECORD;
+		     id      : LONGINT;
+		     red,
+		     green,
+		     blue    : LONGINT;
+		     group   : LONGINT;
+		   END;
+
+CONST paletteEntryEnd = -1;
+
+TYPE
+  ScrmodelistEntryPtr  = POINTER TO ScrmodelistEntry;
+  ScrmodelistEntry  = RECORD;
+			 name     : SysStringPtr;
+			 modeID   : LONGCARD;
+		       END;
+
+(****************************************************************************)
+(** Black box specification structures for images, pens, frames            **)
+(****************************************************************************)
+
+  PenSpecPtr = POINTER TO PenSpec;
+  PenSpec    = RECORD
+		 buf : ARRAY [32] OF CHAR;
+	       END ;
+
+  RGBcolorPtr = POINTER TO RECORD red, green, blue : LONGCARD END;  | only for Public Screen Inspector
+
+
+  METHOD app       (obj : Object) : ApplicationObject;
+  METHOD win       (obj : AreaObject) : WindowObject;
+  METHOD dri       (obj : AreaObject) : DrawInfoPtr;
+  METHOD window    (obj : AreaObject) : Intuition.WindowPtr;
+  METHOD screen    (obj : AreaObject) : Intuition.ScreenPtr;
+  METHOD rp        (obj : AreaObject) : Graphics.RastPortPtr;
+  METHOD left      (obj : AreaObject) : INTEGER;
+  METHOD top       (obj : AreaObject) : INTEGER;
+  METHOD width     (obj : AreaObject) : INTEGER;
+  METHOD height    (obj : AreaObject) : INTEGER;
+  METHOD right     (obj : AreaObject) : INTEGER;
+  METHOD bottom    (obj : AreaObject) : INTEGER;
+  METHOD addleft   (obj : AreaObject) : SHORTINT;
+  METHOD addtop    (obj : AreaObject) : SHORTINT;
+  METHOD subwidth  (obj : AreaObject) : SHORTINT;
+  METHOD subheight (obj : AreaObject) : SHORTINT;
+  METHOD mleft     (obj : AreaObject) : INTEGER;
+  METHOD mtop      (obj : AreaObject) : INTEGER;
+  METHOD mwidth    (obj : AreaObject) : INTEGER;
+  METHOD mheight   (obj : AreaObject) : INTEGER;
+  METHOD mright    (obj : AreaObject) : INTEGER;
+  METHOD mbottom   (obj : AreaObject) : INTEGER;
+  METHOD font      (obj : AreaObject) : TextFontPtr;
+  METHOD flags     (obj : AreaObject) : AreaDataFlagSet;
+
+(* Mui.CustomClass returned by Mui.CreateCustomClass() *)
+
+TYPE
+  CustomClassPtr = POINTER TO CustomClass;
+  CustomClass = RECORD
+		  userData       : ANYPTR;      (* use for whatever you want *)
+		  utilityBase    : LibraryPtr;  (* MUI has opened these libraries *)
+		  dosBase        : LibraryPtr;  (* for you automatically. You can *)
+		  gfxBase        : LibraryPtr;  (* use them or decide to open     *)
+		  intuitionBase  : LibraryPtr;  (* your libraries yourself.       *)
+		  super          : IClassPtr;   (* pointer to super class   *)
+		  class          : IClassPtr;   (* pointer to the new class *)
+		  (* ... private data follows ... *)
+		 END;
+
+(***************************************************************************
+**
+** For Boopsi Image Implementors Only:
+**
+** If MUI is using a boopsi image object, it will send a special method
+** immediately after object creation. This method has a parameter structure
+** where the boopsi can fill in its minimum and maximum size and learn if
+** its used in a horizontal or vertical context.
+**
+** The boopsi image must use the method id (mBoopsiQuery) as return
+** value. That's how MUI sees that the method is implemented.
+**
+** Note: MUI does not depend on this method. If the boopsi image doesn't
+**       implement it, minimum size will be 0 and maximum size unlimited.
+**
+***************************************************************************)
+
+CONST
+  mBoopsiQuery = MethodID($80427157);  (* this is send to the boopsi and *)
+				       (* must be used as return value   *)
+
+  bqMaxMax = 10000;         (* use this for unlimited MaxWidth/Height *)
+
+TYPE
+  BoopsiQueryFlagSet = SET OF (horiz);   | object used in a horizontal context (else vertical)
+
+  pBoopsiQuery =
+    RECORD OF MsgRoot;     (* parameter structure *)
+      screen      : Intuition.ScreenPtr;  (* read only, display context *)
+      flags       : BoopsiQueryFlagSet;   (* read only, see below *)
+
+      minWidth    : LONGINT;              (* write only, fill in min width  *)
+      minHeight   : LONGINT;              (* write only, fill in min height *)
+      maxWidth    : LONGINT;              (* write only, fill in max width  *)
+      maxHeight   : LONGINT;              (* write only, fill in max height *)
+      renderInfo  : RenderInfoPtr;        (* read only, display context *)
+      (* ... may grow in future ... *)
+    END;
+
+
+(****************************************************************************)
+(** Objects without any method or special value                            **)
+(****************************************************************************)
+
+CONST
+  cMenustrip     = "Menustrip.mui";
+  cMenu          = "Menu.mui";
+  cMenuitem      = "Menuitem.mui";
+
+  cRectangle     = "Rectangle.mui";
+  cImage         = "Image.mui";
+  cBitmap        = "Bitmap.mui";
+  cBodychunk     = "Bodychunk.mui";
+  cText          = "Text.mui";
+
+  cGauge         = "Gauge.mui";
+  cScale         = "Scale.mui";
+  cBoopsi        = "Boopsi.mui";
+  cColorfield    = "Colorfield.mui";
+
+  cFloattext     = "Floattext.mui";
+  cVolumelist    = "Volumelist.mui";
+  cScrmodelist   = "Scrmodelist.mui";
+
+  cRegister      = "Register.mui";
+  cVirtgroup     = "Virtgroup.mui";
+  cScrollgroup   = "Scrollgroup.mui";
+  cScrollbar     = "Scrollbar.mui";
+
+  cRadio         = "Radio.mui";
+
+  cSlider        = "Slider.mui";
+  cKnob          = "Knob.mui";
+  cNumericbutton = "Numericbutton.mui";
+  cColoradjust   = "Coloradjust.mui";
+  cPalette       = "Palette.mui";
+  cColorpanel    = "Colorpanel.mui";
+
+  cPopobject     = "Popobject.mui";
+  cPoplist       = "Poplist.mui";
+  cPopasl        = "Popasl.mui";
+
+  cPoppen        = "Poppen.mui";
+  cAboutmui      = "Aboutmui.mui";
+  cKeyentry      = "Keyentry.mui";
+  cBalance       = "Balance.mui";
+
+TYPE
+  MuiTags = TAGS OF PopstringTags
+    scrollbarType          = $8042FB6B : ScrollbarTypes;    | V11 i..
+
+    dataspacePool          = $80424CF9 : PoolHeaderPtr;     | V11 i..
+
+    menustripEnabled       = $8042815B : CBOOLEAN;          |  V8 isg
+
+    menuEnabled            = $8042ED48 : CBOOLEAN;          |  V8 isg
+    menuTitle              = $8042A0E3 : SysStringPtr;      |  V8 isg
+
+    menuitemChecked        = $8042562A : CBOOLEAN;          |  V8 isg
+    menuitemCheckit        = $80425ACE : CBOOLEAN;          |  V8 isg
+    menuitemCommandString  = $8042B9CC : CBOOLEAN;          | V16 isg
+    menuitemEnabled        = $8042AE0F : CBOOLEAN;          |  V8 isg
+    menuitemExclude        = $80420BC6 : LONGINT;           |  V8 isg
+    menuitemShortcut       = $80422030 : LONGCHAR;          |  V8 isg
+    menuitemTitle          = $804218BE : SysStringPtr;      |  V8 isg
+    menuitemToggle         = $80424D5C : CBOOLEAN;          |  V8 isg
+    menuitemTrigger        = $80426F32 : MenuItemPtr;       |  V8 ..g
+
+    aboutmuiApplication    = $80422523 : Object;            | V11 i..
+
+    rectangleBarTitle      = $80426689 : SysStringPtr;      | V11 i.g
+    rectangleHBar          = $8042C943 : CBOOLEAN;          |  V7 i.g
+    rectangleVBar          = $80422204 : CBOOLEAN;          |  V7 i.g
+
+    imageFontMatch         = $8042815D : CBOOLEAN;          |  V4 i..
+    imageFontMatchHeight   = $80429F26 : CBOOLEAN;          |  V4 i..
+    imageFontMatchWidth    = $804239BF : CBOOLEAN;          |  V4 i..
+    imageFreeHoriz         = $8042DA84 : CBOOLEAN;          |  V4 i..
+    imageFreeVert          = $8042EA28 : CBOOLEAN;          |  V4 i..
+    imageOldImage          = $80424F3D : ImagePtr;          |  V4 i..
+    imageExtern            = $804233D5 : SysStringPtr;      |  V4 i..   For C programmers, where no typecheck is done for tags, this solution maybe possible,
+    imageSpec              = $804233D5 : StandardImages;    |  V4 i..   but for Cluster it is not acceptable in most cases
+    imageState             = $8042A3AD : ImageDrawStates;   |  V4 is.
+
+    bitmapBitmap           = $804279BD : BitMapPtr;         |  V8 isg
+    bitmapHeight           = $80421560 : LONGINT;           |  V8 isg
+    bitmapMappingTable     = $8042E23D : POINTER TO ARRAY OF SHORTCARD; | V8 isg
+    bitmapPrecision        = $80420C74 : Precision;         | V11 isg
+    bitmapRemappedBitmap   = $80423A47 : BitMapPtr;         | V11 ..g
+    bitmapSourceColors     = $80425360 : POINTER TO ARRAY OF LONGCARD; |  V8 isg
+    bitmapTransparent      = $80422805 : LONGINT;           |  V8 isg
+    bitmapUseFriend        = $804239D8 : CBOOLEAN;          | V11 i..
+    bitmapWidth            = $8042EB3A : LONGINT;           |  V8 isg
+
+    bodychunkBody          = $8042CA67 : POINTER TO ARRAY OF SHORTCARD; | V8 isg
+    bodychunkCompression   = $8042DE5F : SHORTCARD;         |  V8 isg
+    bodychunkDepth         = $8042C392 : LONGINT;           |  V8 isg
+    bodychunkMasking       = $80423B0E : SHORTCARD;         |  V8 isg
+
+    textContents           = $8042F8DC : SysStringPtr;      |  V4 isg
+    textHiChar             = $804218FF : LONGCHAR;          |  V4 i..
+    textPreParse           = $8042566D : SysStringPtr;      |  V4 isg
+    textSetMax             = $80424D0A : CBOOLEAN;          |  V4 i..
+    textSetMin             = $80424E10 : CBOOLEAN;          |  V4 i..
+    textSetVMax            = $80420D8B : CBOOLEAN;          | V11 i..
+
+    gadgetGadget           = $8042EC1A : GadgetPtr;         | V11 ..g
+
+    propEntries            = $8042FBDB : LONGINT;           |  V4 isg
+    propFirst              = $8042D4B2 : LONGINT;           |  V4 isg
+    propHoriz              = $8042F4F3 : CBOOLEAN;          |  V4 i.g
+    propSlider             = $80429C3A : CBOOLEAN;          |  V4 isg
+    propUseWinBorder       = $8042deee : WinBorders;        | V13 i..
+    propVisible            = $8042FEA6 : LONGINT;           |  V4 isg
+
+    gaugeCurrent           = $8042F0DD : LONGINT;           |  V4 isg
+    gaugeDivide            = $8042D8DF : CBOOLEAN;          |  V4 isg
+    gaugeHoriz             = $804232DD : CBOOLEAN;          |  V4 i..
+    gaugeInfoText          = $8042BF15 : SysStringPtr;      |  V7 isg
+    gaugeMax               = $8042BCDB : LONGINT;           |  V4 isg
+
+    scaleHoriz             = $8042919A : CBOOLEAN;          |  V4 isg
+
+    boopsiClass            = $80426999 : IClassPtr;         |  V4 isg
+    boopsiClassID          = $8042BFA3 : SysStringPtr;      |  V4 isg
+    boopsiMaxHeight        = $8042757F : LONGCARD;          |  V4 isg
+    boopsiMaxWidth         = $8042BCB1 : LONGCARD;          |  V4 isg
+    boopsiMinHeight        = $80422C93 : LONGCARD;          |  V4 isg
+    boopsiMinWidth         = $80428FB2 : LONGCARD;          |  V4 isg
+    boopsiObject           = $80420178 : Object;            |  V4 ..g
+    boopsiRemember         = $8042F4BD : LONGCARD;          |  V4 i..
+    boopsiSmart            = $8042B8D7 : CBOOLEAN;          |  V9 i..
+    boopsiTagDrawInfo      = $8042BAE7 : LONGCARD;          |  V4 isg
+    boopsiTagScreen        = $8042BC71 : LONGCARD;          |  V4 isg
+    boopsiTagWindow        = $8042E11D : LONGCARD;          |  V4 isg
+
+    colorfieldBlue         = $8042D3B0 : LONGCARD;          |  V4 isg
+    colorfieldGreen        = $80424466 : LONGCARD;          |  V4 isg
+    colorfieldPen          = $8042713A : LONGCARD;          |  V4 ..g
+    colorfieldRed          = $804279F6 : LONGCARD;          |  V4 isg
+    colorfieldRGB          = $8042677A : POINTER TO ARRAY OF LONGCARD; | V4 isg
+
+    floattextJustify       = $8042DC03 : CBOOLEAN;          |  V4 isg
+    floattextSkipChars     = $80425C7D : SysStringPtr;      |  V4 is.
+    floattextTabSize       = $80427D17 : LONGINT;           |  V4 is.
+    floattextText          = $8042D16A : SysStringPtr;      |  V4 isg
+
+    pendisplayPen          = $8042A748 : Object;            | V13 ..g
+    pendisplayReference    = $8042DC24 : Object;            | V13 isg
+    pendisplayRGBcolor     = $8042A1A9 : RGBcolorPtr;       | V11 isg
+    pendisplaySpec         = $8042A204 : PenSpecPtr;        | V11 isg
+
+    levelmeterLabel        = $80420DD5 : SysStringPtr;      | V11 isg
+
+    sliderHoriz            = $8042FAD1 : CBOOLEAN;          | V11 isg
+|   sliderLevel            = $8042AE3A : LONGINT;           |  V4 isg
+|   sliderMax              = $8042D78A : LONGINT;           |  V4 i..
+|   sliderMin              = $8042E404 : LONGINT;           |  V4 i..
+    sliderQuiet            = $80420B26 : CBOOLEAN;          |  V6 i..
+|   sliderReverse          = $8042F2A0 : CBOOLEAN;          |  V4 isg
+
+    radioActive            = $80429B41 : LONGINT;           |  V4 isg
+    radioEntries           = $8042B6A1 : StringArrPtr;      |  V4 i..
+
+    coloradjustBlue        = $8042B8A3 : LONGCARD;          |  V4 isg
+    coloradjustGreen       = $804285AB : LONGCARD;          |  V4 isg
+    coloradjustModeID      = $8042EC59 : LONGCARD;          |  V4 isg
+    coloradjustRed         = $80420EAA : LONGCARD;          |  V4 isg
+    coloradjustRGB         = $8042F899 : POINTER TO ARRAY OF LONGCARD; | V4 isg
+
+    paletteEntries         = $8042A3D8 : POINTER TO ARRAY OF PaletteEntry; | V6 i.g
+    paletteGroupable       = $80423E67 : CBOOLEAN;          |  V6 isg
+    paletteNames           = $8042C3A2 : StringArrPtr;      |  V6 isg
+
+    popobjectFollow        = $80424CB5 : CBOOLEAN;          |  V7 isg
+    popobjectLight         = $8042A5A3 : CBOOLEAN;          |  V7 isg
+    popobjectObject        = $804293E3 : Object;            |  V7 i.g
+    popobjectObjStrHook    = $8042DB44 : HookPtr;           |  V7 isg
+    popobjectStrObjHook    = $8042FBE1 : HookPtr;           |  V7 isg
+    popobjectVolatile      = $804252EC : CBOOLEAN;          |  V7 isg
+    popobjectWindowHook    = $8042F194 : HookPtr;           |  V9 isg
+
+    poplistArray           = $8042084C : StringArrPtr;      |  V8 i..
+
+    popaslActive           = $80421B37 : CBOOLEAN;          |  V7 ..g
+    popaslStartHook        = $8042B703 : HookPtr;           |  V7 isg
+    popaslStopHook         = $8042D8D2 : HookPtr;           |  V7 isg
+    popaslType             = $8042DF3D : RequestType;       |  V7 i.g
+  END;
+
+MuiTagAPtr = POINTER TO MuiTagA;
+MuiTagA    = ARRAY OF MuiTags;
+
+
+(* Parameters for Notify class *)
+
+TYPE
+  pCallHookPtr     = POINTER TO pCallHook;
+  pCallHook        = RECORD OF MsgRoot;
+		       hook      : HookPtr;
+		     | beginning of hook parameters list
+		     | hookParam : LONGINT;
+		     END;
+
+  pExportPtr       = POINTER TO pExport;
+  pExport          = RECORD OF MsgRoot; dataspace : Object END;
+
+  pGetConfigItemPtr = POINTER TO pGetConfigItem;
+  pGetConfigItem     = RECORD OF MsgRoot; id : LONGCARD; storage : POINTER TO LONGINT END;
+
+  pImportPtr       = POINTER TO pImport;
+  pImport          = pExport;
+
+  pMultiSetPtr     = POINTER TO pMultiSet;
+  pMultiSet        = RECORD OF MsgRoot;
+		       tag      : MuiTags;
+		     | beginning of objects list
+		     | firstObj : Object;
+		     END;
+
+  pNotifyPtr       = POINTER TO pNotify;
+  pNotify          = RECORD OF MsgRoot;
+		       trigger : MuiTags;
+		       destObj : Object;
+		       count   : LONGINT;
+		     | beginning of method + parameters list
+		     | destMsg : MsgRoot;
+		     END;
+
+  pSetPtr          = POINTER TO pSet;
+  pSet             = RECORD OF MsgRoot; tag : MuiTags END;
+
+  pNoNotifySetPtr  = pSetPtr;
+  pNoNotifySet     = pSet;
+
+  pSetAsStringPtr  = POINTER TO pSetAsString;
+  pSetAsString     = RECORD OF MsgRoot;
+		       tag : MuiTags;
+		     | beginning of the arguements list for format string in tag
+		     | val : LONGINT;
+		     END;
+
+  pWriteLongPtr    = POINTER TO pWriteLong;
+  pWriteLong       = RECORD OF MsgRoot; val : LONGINT; memory : POINTER TO LONGINT END;
+
+  pWriteStringPtr  = POINTER TO pWriteString;
+  pWriteString     = RECORD OF MsgRoot; str, memory : SysStringPtr END;
+
+  pFindUDataPtr    = POINTER TO pFindUData;
+  pFindUData       = RECORD OF MsgRoot; END;
+
+  pGetUDataPtr     = POINTER TO pGetUData;
+  pGetUData        = RECORD OF MsgRoot; udata : LONGCARD; attr : LONGCARD; storage : POINTER TO LONGINT END;
+
+  pSetUDataPtr     = POINTER TO pSetUData;
+  pSetUData        = RECORD OF MsgRoot; udata : LONGCARD; attr : MuiTags END;
+
+  pSetUDataOncePtr = POINTER TO pSetUDataOnce;
+  pSetUDataOnce    = pSetUData;
+
+  METHOD FindUData  (o : Object; udata : LONGINT) : Object;
+  METHOD GetUData   (o : Object; udata : LONGINT; attr : MuiTags; VAR storage : LONGINT);
+  METHOD SetUData   (o : Object; udata : LONGINT; tag  : MuiTags);
+
+  METHOD CallHook   (o : Object; hook : HookPtr;     hookParam : LIST OF LONGINT );
+  METHOD CallHookA  (o : Object; hook : HookPtr; REF hookParam : ANYTYPE );  | muß RECORD OF MsgRoot sein
+
+  METHOD MultiSet (o      : Object;
+		   tag    : MuiTags;
+		   obj    : LIST OF Object );
+
+  METHOD Notify (o          : Object;
+		 trigger    : MuiTags;
+		 destObj    : Object;
+		 destMsg    : LIST OF LONGINT );
+
+  METHOD NotifyA (o         : Object;
+		 trigger    : MuiTags;
+		 destObj    : Object;
+	     REF destMsg    : ANYTYPE );     | muß RECORD OF MsgRoot sein
+
+  METHOD KillNotify (o : Object; trigAttr : MuiTags);
+
+  METHOD SetAsString (o        : Object;
+		      tag      : MuiTags;
+		      val      : LIST OF LONGINT);
+
+  METHOD SetAsStringA (o       : Object;
+		      tag      : MuiTags;
+		  REF val      : ARRAY OF LONGINT);
+
+  METHOD WriteLong (o         : Object;
+		    val       : LONGINT;
+		VAR memory    : LONGINT; );
+
+  METHOD WriteString (o         : Object;
+		      str       : SysStringPtr;
+		  VAR memory    : STRING; );
+
+  METHOD AddMember (o, add : Object);
+  METHOD RemMember (o, rem : Object);
+
+
+EXCEPTION UnknownAttribute : "Attribute not recognized";
+  METHOD Get       (obj : Object; attrID : MuiTags; VAR store : LONGINT);
+  METHOD GetA      (obj : Object; attrID : MuiTags) : LONGINT;
+  METHOD GetB      (obj : Object; attrID : MuiTags; VAR store : LONGINT) : BOOLEAN;
+  METHOD GetG      (obj : Object; tag    : LONGCARD) : LONGINT;
+  METHOD GetT      (obj : Object; VAR attrID : MuiTags);
+  METHOD Set       (obj : Object; tag    : MuiTags);
+  METHOD NNSet     (obj : Object; tag    : MuiTags);
+  METHOD SetAttrs  (obj : Object; tags   : LIST OF MuiTags);
+  METHOD SetAttrsA (obj : Object; tags   : MuiTagAPtr);
+  METHOD SetG      (obj : Object; tag    : LONGCARD; data : LONGINT);
+  METHOD SetAttrsG (obj : Object; tags   : LIST OF LONGCARD);
+
+  METHOD SetMutex     (obj : Object;     n : LONGINT);
+  METHOD SetCycle     (obj : Object;     n : LONGINT);
+  METHOD SetString    (obj : Object; REF s : STRING);
+  METHOD SetCheckmark (obj : Object;     b : BOOLEAN);
+  METHOD SetSlider    (obj : Object;     l : LONGINT);
+
+
+(****************************************************************************)
+(** Functions in muimaster.library                                         **)
+(****************************************************************************)
+
+VAR
+  MuiBase   : LibraryPtr;
+
+LIBRARY MuiBase BY -30
+  PROCEDURE NewObjectA (class IN A0 : SysStringPtr;
+			tags  IN A1 : MuiTagAPtr): Object;
+
+LIBRARY MuiBase BY -30
+  PROCEDURE NewObject  (class IN A0 : SysStringPtr;
+			tags  IN A1 : LIST OF MuiTags): Object;
+
+LIBRARY MuiBase BY -36
+  PROCEDURE DisposeObject (obj IN A0 : Object);
+
+LIBRARY MuiBase BY -42
+  PROCEDURE RequestA (app     IN D0 : ApplicationObject;
+		      win     IN D1 : WindowObject;
+		      flags   IN D2 : LONGSET;      | noch keine Flags verfügbar
+		      title   IN A0 : SysStringPtr;
+		      gadgets IN A1 : SysStringPtr;
+		      format  IN A2 : SysStringPtr;
+		      params  IN A3 : MuiTagAPtr) : LONGINT;
+
+LIBRARY MuiBase BY -42
+  PROCEDURE Request  (app     IN D0 : ApplicationObject;
+		      win     IN D1 : WindowObject;
+		      flags   IN D2 : LONGSET;
+		      title   IN A0 : SysStringPtr;
+		      gadgets IN A1 : SysStringPtr;
+		      format  IN A2 : SysStringPtr;
+		      params  IN A3 : LIST OF MuiTags) : LONGINT;
+
+LIBRARY MuiBase BY -48
+  PROCEDURE AllocAslRequest     (typ  IN D0 : RequestType;
+				 tags IN A0 : MuiTagAPtr) : AslRequesterPtr;
+
+LIBRARY MuiBase BY -48
+  PROCEDURE AllocAslRequestTags (typ  IN D0 : RequestType;
+				 tags IN A0 : LIST OF MuiTags) : AslRequesterPtr;
+
+LIBRARY MuiBase BY -54
+  PROCEDURE AslRequest     (req  IN A0 : AslRequesterPtr;
+			    tags IN A1 : MuiTagAPtr) : BOOLEAN;
+
+LIBRARY MuiBase BY -54
+  PROCEDURE AslRequestTags (req  IN A0 : AslRequesterPtr;
+			    tags IN A1 : LIST OF MuiTags) : BOOLEAN;
+
+LIBRARY MuiBase BY -60
+  PROCEDURE FreeAslRequest (req  IN A0 : AslRequesterPtr );
+
+|LIBRARY MuiBase BY -66
+|  PROCEDURE Error () : MuiError;
+
+(* functions to be used with custom classes *)
+
+|LIBRARY MuiBase BY -72
+|  PROCEDURE SetError (errnum IN D0 : MuiError);
+
+|LIBRARY MuiBase BY -78
+|  PROCEDURE GetClass (classname IN A0 : SysStringPtr) : IClassPtr;
+
+|LIBRARY MuiBase BY -84
+|  PROCEDURE FreeClass (classptr IN A0 : IClassPtr);
+
+LIBRARY MuiBase BY -90
+  PROCEDURE RequestIDCMP (obj IN A0 : Object; flags IN D0 : IDCMPFlagSet);
+
+LIBRARY MuiBase BY -96
+  PROCEDURE RejectIDCMP  (obj IN A0 : Object; flags IN D0 : IDCMPFlagSet);
+
+LIBRARY MuiBase BY -102
+  PROCEDURE Redraw (obj IN A0 : Object; flags IN D0 : AreaDataFlagSet);
+
+LIBRARY MuiBase BY -108
+  PROCEDURE CreateCustomClass (base      IN A0 : LibraryPtr;
+			       supername IN A1 : SysStringPtr;
+			       supermcc  IN A2 : CustomClassPtr;
+			       datasize  IN D0 : LONGINT;
+			       dispfunc  IN A3 : Dispatcher) : CustomClassPtr;
+
+LIBRARY MuiBase BY -114
+  PROCEDURE DeleteCustomClass (mcc IN A0 : CustomClassPtr) : BOOLEAN;
+
+
+LIBRARY MuiBase BY -120
+  PROCEDURE MakeObject (objtype IN D0 : SimpleObjects;
+			params  IN A0 : LIST OF ANYPTR) : Object;
+
+LIBRARY MuiBase BY -120
+  PROCEDURE MakeObjectA (objtype IN D0 : SimpleObjects;
+		     REF params  IN A0 : pSimple) : Object;
+
+LIBRARY MuiBase BY -156
+  PROCEDURE ObtainPen (mri  IN A0 : RenderInfoPtr;
+		       spec IN A1 : PenSpecPtr) : LONGINT;
+
+LIBRARY MuiBase BY -162
+  PROCEDURE ReleasePen (mri IN A0 : RenderInfoPtr;
+			pen IN D0 : LONGINT);
+
+TYPE
+  ClippingHandlePtr   = HIDDEN;
+  ClipRegionHandlePtr = HIDDEN;
+
+LIBRARY MuiBase BY -168
+  PROCEDURE AddClipping (mri    IN A0  : RenderInfoPtr;
+			 left   IN D0,
+			 top    IN D1,
+			 width  IN D2,
+			 height IN D3 : INTEGER) : ClippingHandlePtr;
+
+LIBRARY MuiBase BY -174
+  PROCEDURE RemoveClipping (mri    IN A0 : RenderInfoPtr;
+			    handle IN A1 : ClippingHandlePtr);
+
+LIBRARY MuiBase BY -180
+  PROCEDURE AddClipRegion (mri IN A0 : RenderInfoPtr;
+			   r   IN A1 : RegionPtr) : ClipRegionHandlePtr;
+
+LIBRARY MuiBase BY -186
+  PROCEDURE RemoveClipRegion (mri    IN A0 : RenderInfoPtr;
+			      handle IN A1 : ClipRegionHandlePtr);
+
+LIBRARY MuiBase BY -192
+  PROCEDURE BeginRefresh (mri   IN A0 : RenderInfoPtr;
+			  flags IN D0 : LONGSET) : BOOLEAN;
+
+LIBRARY MuiBase BY -198
+  PROCEDURE EndRefresh (mri   IN A0 : RenderInfoPtr;
+			flags IN D0 : LONGSET);
+
+
+(*************************************************************)
+(* layout function, use only in custom layout callback hook! *)
+(*************************************************************)
+
+LIBRARY MuiBase BY -126
+  PROCEDURE Layout (obj    IN A0 : Object;
+		    left   IN D0,
+		    top    IN D1,
+		    width  IN D2,
+		    height IN D3 : LONGINT;
+		    flag   IN D4 : LONGCARD) : BOOLEAN;
+
+
+PROCEDURE DOMethodA (obj IN A2 : Object; msg IN A1 : Msg) : LONGINT;
+
+TYPE
+  DoMethodRefNRProc  = PROCEDURE (obj IN A2 : Object; REF msg IN A1 : MsgRoot);
+  DoMethodListNRProc = PROCEDURE (obj IN A2 : Object;     msg IN A1 : LIST OF LONGINT);
+  DoMethodListProc   = PROCEDURE (obj IN A2 : Object;     msg IN A1 : LIST OF LONGINT) : LONGINT;
+
+CONST
+  DoMethodRef = DoMethodRefNRProc  (DOMethodA);
+  DoMethod    = DoMethodListNRProc (DOMethodA);
+  DOMethod    = DoMethodListProc   (DOMethodA);
+
+  METHOD OClass   (o : Object) : IClassPtr;
+  METHOD InstData (o : Object) : ANYPTR;
+
+
+LIBRARY IntuitionBase BY -636
+  PROCEDURE NewCustomObjectA (class   IN A0 : IClassPtr;
+			      classID IN A1 : SysStringPtr;
+			      tags    IN A2 : MuiTagAPtr) : Object;
+
+LIBRARY IntuitionBase BY -636
+  PROCEDURE NewCustomObject  (class   IN A0 : IClassPtr;
+			      classID IN A1 : SysStringPtr;
+			      tags    IN A2 : LIST OF MuiTags) : Object;
+
+
+GROUP
+   NotifyGrp =
+     mCallHook,    mFindUData, mGetUData,    mKillNotify,
+     mMultiSet,    mNotify,    mNoNotifySet, mSet,
+     mSetAsString, mSetUData,  mWriteLong,   mWriteString,
+
+     everyTime,     triggerValue,     notTriggerValue,
+     ptrEveryTime,  ptrTriggerValue,
+     realEveryTime, realTriggerValue,
+     boolEveryTime, boolTriggerValue, boolNotTriggerValue,
+     notifySelf,    notifyWindow,
+     notifyParent,  notifyApplication;
+
+   ApplicationGrp =
+     ApplicationObject,          ApplicationRec,
+
+     mApplicationGetMenuCheck,   mApplicationGetMenuState,
+     mApplicationSetMenuCheck,   mApplicationSetMenuState,
+     mApplicationInput,          mApplicationInputBuffered,
+     mApplicationLoad,           mApplicationSave,
+     mApplicationPushMethod,     mApplicationReturnID,
+     mApplicationShowHelp,
+
+     applicationSaveENV,         applicationSaveENVARC,
+     applicationLoadENV,         applicationLoadENVARC,
+     applicationReturnIDQuit;
+
+   WindowGrp =
+     WindowObject,               WindowRec,
+     LongID,                     WindowActiveObject,
+
+|    mWindowGetMenuCheck,        mWindowGetMenuState,
+|    mWindowSetMenuCheck,        mWindowSetMenuState,
+     mWindowScreenToBack,        mWindowScreenToFront,
+     mWindowToBack,              mWindowToFront,
+|    mWindowSetCycleChain,
+
+     windowAltHeightMinMax,      windowAltHeightVisible,
+     windowAltHeightScreen,      windowAltHeightScaled,
+     windowAltLeftEdgeCentered,
+     windowAltLeftEdgeMoused,    windowAltLeftEdgeNoChange,
+     windowAltTopEdgeCentered,   windowAltTopEdgeMoused,
+     windowAltTopEdgeDelta,      windowAltTopEdgeNoChange,
+     windowAltWidthMinMax,       windowAltWidthVisible,
+     windowAltWidthScreen,       windowAltWidthScaled,
+     windowHeightMinMax,         windowHeightVisible,
+     windowHeightScreen,         windowHeightScaled,
+     windowHeightDefault,        windowLeftEdgeCentered,
+     windowLeftEdgeMoused,       windowMenuNoMenu,
+     windowTopEdgeCentered,      windowTopEdgeMoused,
+     windowTopEdgeDelta,         windowWidthMinMax,
+     windowWidthVisible,         windowWidthScreen,
+     windowWidthScaled,          windowWidthDefault;
+
+   AreaGrp =
+     AreaObject,        AreaRec,
+     AreaDataFlags,     AreaDataFlagSet,
+
+     mSetup,            mCleanup,
+     mDraw,             mAskMinMax,
+     mHide,             mShow,
+     mDragBegin,        mDragFinish,
+     mDragQuery,        mDragDrop,
+     mDragReport,       mHandleInput,
+
+     mContextMenuBuild, mContextMenuChoice,
+     mCreateBubble,     mCreateShortHelp,
+     mDeleteBubble,     mDeleteShortHelp,
+
+     Fonts, Frames, InputModes;
+
+   FamilyGrp =
+     FamilyObject,      FamilyRec,
+
+     mFamilyAddHead,    mFamilyAddTail,
+     mFamilyInsert,     mFamilyRemove,
+     mFamilySort,       mFamilyTransfer;
+
+   ListGrp =
+     ListObject,        ListRec,
+
+     mListInsert,       mListInsertSingle,
+     mListRemove,       mListClear,
+     mListJump,         mListMove,
+     mListNextSelected, mListSelect,
+     mListSort,         mListRedraw,
+     mListExchange,     mListGetEntry,
+     mDirlistReRead,
+
+     listInsertTop,     listInsertActive,
+     listInsertSorted,  listInsertBottom,
+     listRemoveFirst,   listRemoveActive,
+     listRemoveLast,    listGetEntryActive,
+     listSelectActive,  listSelectAll,
+     listRedrawActive,  listRedrawAll,
+     listMoveTop,       listMoveActive,
+     listMoveBottom,    listMoveNext,
+     listMovePrevious,
+     listExchangeTop,   listExchangeActive,
+     listExchangeBottom,listExchangeNext,
+     listExchangePrevious,
+     listJumpTop,       listJumpActive,
+     listJumpBottom,
+     listNextSelectedStart,listNextSelectedEnd,
+     ListActive,        ListSelect,
+     ListCursorTypes,
+     listConstructHookString, listCopyHookString,
+     listDestructHookString,
+
+     DirlistSortDirs,     DirlistSortTypes,    DirlistStatus,
+     ListViewMultiSelect, ListViewScrollerPos, ListViewDragTypes;
+
+   PopstringGrp =
+     PopstringObject, PopstringRec,
+     mPopstringClose, mPopstringOpen;
+
+   SimpleObjectsGrp =
+     MakeObject,       MakeObjectA,
+     SimpleObjects,
+     SimpleLabelFlags, SimpleLabelFlagSet,
+     pSimple,          pSpace,
+     pLabel,           pButton,
+     pCycle,           pSlider,
+     pString,          pPopButton,
+     pMenuStrip,       pMenuItem;
+
+   OtherValuesGrp =
+     CBOOLEAN, StandardImages, maxmax,
+     xR, xC, xL,   xN, xB, xI, xU,   xPT, xPH,
+     colorpanelGetColorActive, colorpanelSetColorActive,
+     CycleActive,              ImageDrawStates,
+     paletteEntryEnd,          StringFormats;
+
+   MethodGrp =
+     DOMethodA, DoMethodRef, DoMethod, DOMethod;
+
+   ObjectHandlingGrp =
+     Object,       ObjectRec,
+     GroupObject,  GroupRec,
+     MethodGrp,    PopstringGrp, ListGrp,
+     AreaGrp,      WindowGrp,
+     NotifyGrp,    ApplicationGrp,
+     FamilyGrp,    OtherValuesGrp;
+
+   MessageGrp =
+     pBoopsiQuery,             BoopsiQueryFlagSet,
+     pCallHook,                pCallHookPtr,
+     pMultiSet,                pMultiSetPtr,
+     pNotify,                  pNotifyPtr,
+     pSet,                     pSetPtr,
+     pNoNotifySet,             pNoNotifySetPtr,
+     pSetAsString,             pSetAsStringPtr,
+     pWriteLong,               pWriteLongPtr,
+     pWriteString,             pWriteStringPtr,
+|    pApplicationGetMenuCheck, pApplicationGetMenuCheckPtr,
+|    pApplicationGetMenuState, pApplicationGetMenuStatePtr,
+|    pApplicationInput,        pApplicationInputPtr,
+     pApplicationNewInput,     pApplicationNewInputPtr,
+     pApplicationLoad,         pApplicationLoadPtr,
+     pApplicationPushMethod,   pApplicationPushMethodPtr,
+     pApplicationReturnID,     pApplicationReturnIDPtr,
+     pApplicationSave,         pApplicationSavePtr,
+|    pApplicationSetMenuCheck, pApplicationSetMenuCheckPtr,
+|    pApplicationSetMenuState, pApplicationSetMenuStatePtr,
+     pApplicationShowHelp,     pApplicationShowHelpPtr,
+|    pWindowGetMenuCheck,      pWindowGetMenuCheckPtr,
+|    pWindowGetMenuState,      pWindowGetMenuStatePtr,
+|    pWindowSetCycleChain,     pWindowSetCycleChainPtr,
+|    pWindowSetMenuCheck,      pWindowSetMenuCheckPtr,
+|    pWindowSetMenuState,      pWindowSetMenuStatePtr,
+     pAskMinMax,               pAskMinMaxPtr,
+     pDraw,                    pDrawPtr,
+     pContextMenuBuild,        pContextMenuBuildPtr,
+     pContextMenuChoice,       pContextMenuChoicePtr,
+     pCreateBubble,            pCreateBubblePtr,
+     pCreateShortHelp,         pCreateShortHelpPtr,
+     pDeleteBubble,            pDeleteBubblePtr,
+     pDeleteShortHelp,         pDeleteShortHelpPtr,
+     pDragBegin,               pDragBeginPtr,
+     pDragDrop,                pDragDropPtr,
+     pDragFinish,              pDragFinishPtr,
+     pDragQuery,               pDragQueryPtr,
+     pDragReport,              pDragReportPtr,
+     pHandleInput,             pHandleInputPtr,
+     pSetUp,                   pSetUpPtr,
+     pListExchange,            pListExchangePtr,
+     pListGetEntry,            pListGetEntryPtr,
+     pListInsert,              pListInsertPtr,
+     pListInsertSingle,        pListInsertSinglePtr,
+     pListJump,                pListJumpPtr,
+     pListMove,                pListMovePtr,
+     pListNextSelected,        pListNextSelectedPtr,
+     pListRedraw,              pListRedrawPtr,
+     pListRemove,              pListRemovePtr,
+     pListSelect,              pListSelectPtr,
+     pPopstringClose,          pPopstringClosePtr;
+
+   RecordGrp =
+     Command,          CommandPtr,
+     PaletteEntry,     PaletteEntryPtr,
+     ScrmodelistEntry, ScrmodelistEntryPtr,
+     NotifyData,       NotifyDataPtr,
+     MinMax,           MinMaxPtr,
+     AreaData,         AreaDataPtr,
+     GlobalInfo,       GlobalInfoPtr,
+     RenderInfo,       RenderInfoPtr;
+
+   ObjectGrp =
+     NewObjectA, NewObject, DisposeObject,
+     NewCustomObjectA,      NewCustomObject,
+     MuiTags,    MuiTagA,   MuiTagAPtr;
+
+   CustomClassGrp =
+|    GetClass,          FreeClass,
+     CustomClass,       CustomClassPtr,
+     CreateCustomClass, DeleteCustomClass,
+     AddClipping,       RemoveClipping,
+     AddClipRegion,     RemoveClipRegion,
+     ClippingHandlePtr, ClipRegionHandlePtr,
+     BeginRefresh,      EndRefresh,
+     ObtainPen,         ReleasePen,
+     Layout,
+     EventHandlerFlags,   EventHandlerFlagSet,
+     EventHandlerResults, EventHandlerResultSet,
+     EventHandlerNode,    EventHandlerNodePtr;
+
+   ClassGrp =
+     cNotify,      cFamily,      cApplication, cWindow,     cArea,
+     cString,      cList,        cDirlist,     cListview,   cCycle,
+     cPopstring,   cMenustrip,   cMenu,        cMenuitem,   cRectangle,
+     cImage,       cBitmap,      cBodychunk,   cText,       cProp,
+     cGauge,       cScale,       cBoopsi,      cColorfield, cFloattext,
+     cVolumelist,  cScrmodelist, cGroup,       cRegister,   cVirtgroup,
+     cScrollgroup, cScrollbar,   cRadio,       cSlider,     cColoradjust,
+     cPalette,     cColorpanel,  cPopobject,   cPoplist,    cPopasl,
+     cPoppen,      cAboutmui,    cKeyentry,    cBalance;
+
+
+   FuncGrp =
+     RequestA,          Request,
+     AllocAslRequest,   AllocAslRequestTags,
+     AslRequest,        AslRequestTags,      FreeAslRequest,
+|    Error,             SetError,
+     RequestIDCMP,      RejectIDCMP,
+     Redraw;
+
+   ErrorGrp =
+     OutOfMemory,         OutOfGfxMemory,
+     InvalidWindowObject, MissingLibrary,
+     NoARexx,             SingleTask,
+     MuiErr,              AssertMuiError;
+
+   All = FuncGrp,  RecordGrp, SimpleObjectsGrp, CustomClassGrp,
+	 ObjectHandlingGrp, MessageGrp, ObjectGrp, ClassGrp,
+	 ErrorGrp;
+
+END MuiO.
+
+

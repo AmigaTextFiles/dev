@@ -1,0 +1,475 @@
+                       Shadow Development Documentation
+                            Library Version 4.6
+
+                              By David Navas
+                         Updated:  09 Feb 1992
+
+                      Copyright © 1992 by David Navas
+                         with help from Karen Lien
+                            All Rights Reserved
+
+
+                                THE PLAN
+
+          Basic Concepts
+              Navas rants....
+          OverView -- Meat and Potatoes
+              Resource Tracking calls
+              Semaphore calls
+              AVLTREE calls
+              SLIST calls
+              WatchedVariable calls
+              Object-Oriented calls
+              Init-calls.
+
+          Detail -- more information about the following.
+              System String Constants
+              System Semaphoring
+              AVL Trees
+              Resource Tracking
+                   Global
+                        Double Pass -- REMOVE/DESTROY
+                   Local
+                        Auto Resources.
+
+              Object-Oriented System
+                   Classes
+                   Clusters
+                   Objects
+                   Composites
+                   Metas
+              Watched Variables
+                   three types
+                   usage in Browser
+              Method Patching
+                   Prioritized
+                   Conditional Continue
+                   Sane Asynchronous Handling
+
+
+
+                              BASIC CONCEPTS
+
+          SHADOW is a concurrent-object-oriented addition to AmigaDOS.
+     Its principle design goal is to help standardize an extensible
+     environment paradigm.  It takes advantage of some of the better
+     AmigaDOS facilities (shared memory system, IPC ports, and fast
+     context switching) by internally managing much of the inter-task
+     communications, resource tracking, and resource allocation.
+
+          Traditional object-oriented systems separate function
+     interfaces from internal data structures and manage the allocation
+     and access of these structures within objects.  SHADOW takes this
+     interface separation one step further by uncoupling the method
+     invocation from the parameter specification.  It also manages the
+     allocation of structures in a transparent manner, allowing the use
+     of the faster, hard-coded structure offsets of C structs.
+
+          SHADOW was created to solve the problems which I ran into with
+     my first programming project -- JazzBench.  That experience taught
+     me that the most important thing in a co-operative multi-program
+     environment is flexibility.  You need to be able to change the
+     behaviour of EVERYTHING -as- -it- -runs-.  This lesson was the
+     principle reason behind the initial design of SHADOW, and the result
+     of that principle was the entire WatchedVariable construct. To a
+     lesser extent, it was also responsible for Patches.
+
+          However, that was not the only lesson that was learned.  Trying
+     to locate governing control in some kind of super-server was a real
+     bust.  Turns out so much information had to cross through that
+     server to correctly manage all the resources that the server turns
+     into a real bottleneck.  So what I needed was a subsystem which
+     effectively dealt with the concurrency and shared resource management
+     problems.
+
+          The other major subsystem of SHADOW supports the increased use
+     of more complicated data structures.  Sounds easy, but there've got
+     to be a dozen BinTree functions alone, and that doesn't include
+     constant string management and singly-linked, priority lists, etc.
+
+
+          This introduction is an attempt to acquaint the reader with
+     SHADOW's capabilities and limitations, and to introduce the programming
+     paradigm it offers to Amiga programmers.
+
+
+
+                                 OVERVIEW
+
+          The number of functions in SHADOW is truly daunting.  However,
+     only a very few need to be well-understood in order to program SHADOW
+     effectively.  These functions fall into about seven categories, which
+     we will take up in turn.  The following is an informal introduction
+     to familiarize you with the terminology and the pertinent function
+     calls in SHADOW.  Confusing terms can (hopefully) be found in
+     Glossary.doc.  If they can't by, please let me know what they are.
+
+          If instead what you want is an in-depth look at the same
+     feature-set, please read the section headed by "DETAIL".
+
+
+     RESOURCE TRACKING CALLS
+
+          SHADOW gives the programmer the ability to track resources, and
+     in fact forces him/her to do so.  Objects are NEVER freed until the
+     useCount drops to zero.  Objects are often returned from functions
+     as Use()'d, meaning that the programmer needs to specifically tell
+     the computer when the resource is no longer needed.  For instance,
+     the FindBinNode(), and the DoJazzMethod() call when the METHOD
+     returns an object both require the programmer to call DropObject()
+     on the returned object.
+
+          There are two main functions that do resource tracking --
+     UseObject() and DropObject().  One increases the useCount of an
+     object, the other decreases it.
+
+          So far so good?  Good.
+
+          There are analogous functions for string constants which are
+     useful as well.  I suggest you read the AutoDocs on UseString() and
+     DropString().  FindString() is another useful function to understand.
+     You should understand that SHADOW keeps string constants on a global
+     table, and returns the addresses to these constants on demand.  This
+     allows very fast searching of large tables of strings.  You can
+     compare the address, rather than the string contents!
+
+          All of the other string manipulation calls are based on the
+     UseString()/DropString()/FindString() trio.  There is more info
+     on system strings below.
+
+
+     SEMAPHORES
+
+          Semaphores are easy -- there are only two functions -- PSem()
+     and VSem().  SHADOW allows you to semaphore any given address with
+     the PSem() call, and you can release that semaphore with the VSem()
+     call.
+
+
+     AVLTREES
+
+          Not too tricky yet, eh?
+          There are only four really important AVLTREE calls to
+     understand:
+          AddNodeBinTree() adds an object to an AVL tree sorted by a
+                            passed key.
+          RemoveBinNode()  removes an object from the AVL tree.
+          FindBinNode()    finds the object in an AVL tree, and returns
+                            this object.  You should DropObject() that
+                            object when you are done using it, as is TRUE
+                            of any resource that SHADOW returns to you.
+          RecurseBinTree() calls a function for every object in the binary
+                            tree.
+
+     The other function which is NOT a derivative of these four is
+     FreeAllNodesBinTree().  It's a pretty esoteric call -- it just removes
+     all objects from the AVL tree, though.  Nothing special.
+
+     All other AVL tree calls are derivatives of the first three calls,
+     and three other calls [DoPreOrderBinTree() for example] are built
+     directly on top of RecurseBinTree() as #defines.
+
+
+     SLISTS
+
+          Boring, but I'll cover these briefly.  Take a look at these
+     functions: AddSListNode(), RemoveSListNode(), and
+     FindNodePriInSList().  Guess what they do?  You're almost surely
+     correct.
+
+
+     WATCHEDVARIABLES
+
+          You really want to understand the DIRECTORCLASS for these.  The
+     only important function to look at is the WatcherDispatch() function.
+     It is responsible for dispatching notification to all interested
+     parties.  More information about Watched Variables can be found near
+     the end of this document.
+
+
+     OBJECT-ORIENTED
+
+          You want to be able to look up an attribute in an object, for
+     which you use FindAttribute().  Send it the object and the attribute
+     name, and it returns the pointer to the attribute in your object.
+     Very simple, very straight-forward.
+
+          You also want to be able to send off methods, so have a gander
+     at DoJazzMethod() -- send it the object, a class (optional), a
+     method, the arguments (all optional -- they will default to NULL at
+     run-time if left unspecified), and an appended METHOD_END, and you've
+     just sent a method.
+
+          You'll want to be able to get at public classes as well -- take
+     a quick peek at FindInstanceInMeta(), and then realize that
+     FindJazzClass() is merely:
+          #define FindJazzClass(className) \
+                              FindInstanceInMeta(className, METACLASS)
+
+          In fact, you may not be surprised to learn that
+     FindInstanceInMeta() is just built up from FindString() and
+     FindBinNode() [if you've been following me, that is].
+
+          Lastly you need some information about creating you're own
+     method-functions.  If the examples don't provide enough, I suggest
+     you read the AutoDocs describing SetMethodArgs() and
+     SetupMethodTags().
+
+
+     INIT-CALLS
+
+          Last but not least: start your program by opening
+     shadow.library, and calling the InitOOProgram() call.  End your
+     program by calling RemoveCurrentProgram().
+
+
+     That is -IT- folks.  Every other call is either a wrapper, or
+     feature-added call that is some kind of variation on these calls,
+     or a function which you will almost certainly not need.
+
+     Now, of course, you need to understand the methods as well, but
+     you've got a handy-dandy Browser for that, and a MUCH shorter
+     ShadowLibMethods.doc file too.
+
+
+
+                                  DETAIL
+
+          This is a more in-depth look at the above features which are
+     found in SHADOW.  It starts with simple key concepts like AVL trees,
+     system-wide class descriptions and dual-pass Resource Tracking.
+     Then it progresses to the more complex topics of watched variables
+     and method patching.
+
+
+     SYSTEM STRING CONSTANTS
+
+          SHADOW uses the concept of unique strings as borrowed from the
+     NeXT platform.  Each string is assigned a unique address by the
+     system.  Two or more strings of the same contents have the same
+     system address.  This allows the system to find strings faster --
+     by comparing the address, rather than the contents.
+
+          The implementation is via the UseString/DropString/FindString
+     library functions, as well as the QuickUseString and QuickDropString
+     functions.  System strings are stored on a 1024 entry hash table
+     where collisions are linked by a sorted binary tree.  This table is
+     found in ShadowBase->sb_systemStrings.
+
+          UseString() will lookup the passed string in the table.  If it
+     does not find it, the string is created and stored into the table.
+     Otherwise, the object's usecount of the located system string is
+     incremented.  The system string's address is then returned.
+
+          DropString() will lookup the passed string in the table, and,
+     if found, the string's useCount is decremented.  If the usecount has
+     dropped to zero, the string object is freed and removed from the
+     system string list.
+
+          FindString() returns the address of a requested system string,
+     if one can be found.  It will not increment the usecount, and
+     therefore should only be used as an address, rather than as an
+     actual string pointer, as that string may go away unexpectedly
+     at any time.
+
+          QuickUseString() and QuickDropString() take known system string
+     addresses and manually increments or decrements the usecount.  If
+     the usecount drops to zero, the normal DropString() is used to
+     remove the string from the system.
+
+
+     SYSTEM SEMAPHORING
+
+          SHADOW maintains a global semaphoring system that allows
+     programmers to use the concurrent aspects of its object-oriented
+     system.  Any address on the Amiga architecture can be semaphored
+     via the PSem() call.  They may be locked as SHARED or EXCLUSIVE in
+     the same manner as EXEC's Signal Semaphores.  Please see the
+     AutoDocs for ObtainSemaphore() and ObtainSharedSemaphore() for
+     more information.  System Semaphores are released by the VSem() call.
+
+          These semaphores are used internally by the SList and BinTree
+     (AVL tree) management calls.
+
+
+     AVL TREES
+
+          AVL trees are auto-balancing binary trees.  SHADOW defines its
+     BinTrees as AVL trees.  You can find out more about AVL trees by
+     referring to the AutoDoc's AddNodeBinTree() function.  All of
+     the associated BinTree functions are listed in the SEE ALSO
+     section.  It is important to remember that the BinTree code
+     does not keep objects sorted by string value, but rather, by the
+     associated system string address.
+
+          SHADOW keeps object instances on an AVLTREE in the object's
+     class, sometimes sorted by the object's name, usually by the
+     object's address, depending on how the METHOD_META_INIT is
+     passed to the RootClass or RootCluster.  Please see the documentation
+     of the Methods for more information.
+
+          All of the library functions, including RecurseBinTree(), are
+     implemented WITHOUT recursion.  This allows them to use a minimal
+     amount of stack space (far less than 256bytes), REGARDLESS of how big
+     the tree gets.  The functions do assume an addressable range of 2^32
+     power....
+
+
+     RESOURCE TRACKING
+
+          SHADOW uses a simple usecount resource tracking facility to
+     allow objects to be shared between several processes.  However,
+     SHADOW defines a dual-pass resource tracking algorithm which allows
+     circular references, as long as those circular references are
+     removed during the first pass removal mechanism.  The
+     METHOD_META_REMOVE is meant to serve as the first pass.  When an
+     object receives the METHOD_META_REMOVE message, it should remove all
+     circular references, and also remove itself from the system lists --
+     usually the ATTR_OBJECTLIST of its class (object->cob_class).
+
+          The second pass is the METHOD_META_DESTROY.  This method is
+     sent to objects whose usecount has fallen to zero.  The memory
+     of that object should be freed, as well as any references that
+     object makes to other resources.  DropObject() is responsible
+     for sending out the METHOD_META_DESTROY.  The programmer
+     should never send out a METHOD_META_DESTROY to an object; he/she is,
+     however, required to send the METHOD_META_REMOVE to objects.  In
+     addition, DropObject() correctly frees any ClasslessObjects
+     (see: struct ClasslessObject) whose usecount falls to zero.
+
+          The above refers to the GLOBAL resource tracking facilities.
+     SHADOW also provides a LOCAL resource tracking facility, which
+     helps to reduce the clean-up code (at the expense of some init
+     code).  When a resource is allocated that you want to be
+     freed when the process exits, you can pass a pointer to the object
+     (must be a SHADOW object!) to the AddAutoResource().
+
+          If that resource is later freed by your program, before the
+     program actually exits, you can remove the reference to it with
+     RemoveAutoResource().  Please see the AutoDocs for more details.
+     The example code may also be helpful, although not all of it relies
+     on auto-tracked resources.
+
+          When the METHOD_META_REMOVE method is sent to your program,
+     all resources that were added (via AddAutoResource()) are sent
+     a METHOD_META_REMOVE, and are then removed from the resource
+     tree.  The RemoveCurrentProgram() sends a METHOD_META_REMOVE to
+     your program, for example.
+
+
+     OBJECT-ORIENTED SYSTEM
+
+          Besides the resource tracking and management library functions
+     mentioned above, the other three most useful functions will be
+     DoJazzMethod(), FindAttribute() and FindJazzClass().  DoJazzMethod()
+     is a wrapper around the library DJM() call, and FindJazzClass() is
+     a #define wrapper around the library function FindInstanceInMeta().
+     All of these functions deal with the object-oriented system within
+     SHADOW.
+
+          Methods and Attributes are all implemented using the system
+     strings mentioned above.  All methods and attributes are named.
+     Their definitions are stored in a qsort()'d array inside of the
+     class whose instances make use of them.  Methods can be defined
+     to run synchronously to a class of processes, synchronously to a
+     particular process, asynchronously on a particular process, or
+     asynchronously on a particular process 'B' if and only if the
+     current process is not of some subclass of the process 'B'.  Methods
+     also resource track the process in which they were defined, so that
+     the program that defines a method cannot disappear until all
+     references to a method (or, really, its class) disappear.
+
+          Attributes are allocated in the order in which they appear in the
+     defining AttributeTags:  superclass attributes at the lower offsets,
+     subclass attributes at the higher offsets.  Attributes may have
+     default values associated with them, which are copied into an object
+     during the METHOD_META_CREATE method.  In addition, attributes may
+     be Watched -- more info on this can be found below.
+
+          Every Object has a class.  Every class is an object.  This
+     causes a recursive definition.  Therefore, SHADOW contains the
+     notion of Metas, which are classes that describe themselves.
+     In SHADOW parlance, every Object has a class, every Class has a meta,
+     every Meta can usually be found on the ShadowBase->sb_metaTree.
+
+          When Classes are created, usually by calling METHOD_META_SUB on
+     some existing Class, they are stored in their associated Metas in
+     the ATTR_OBJECTLIST attribute.  Metas, in turn, are stored in
+     ShadowBase->sb_metaTree.  To allow easy  access to these fundamental
+     building blocks, the library function FindInstanceInMeta() is
+     provided, and two useful #defines are found in one of the include
+     files -- FindJazzClass() and FindJazzCluster().
+
+          Classes are your normal every day types of classes.  Clusters
+     are defined by the MetaCluster as a class whose instances contain
+     a tree of objects, instead of just one.  The instance of a Cluster
+     is referred to as a Composite.
+
+
+     WATCHED VARIABLES
+
+          SHADOW defines a special kind of variable or attribute --
+     the WATCHED variable.  These are variables that allow other
+     processes to get notification when the contents of the variable
+     change.  There are three types of WatchedVariables, the
+     WatchedBinTree, the WatchedSList and the WatchedValue.  The
+     WatchedBinTree is an AVL tree with the "watch" extensions added.
+     The WatchedSList is a singly-linked list with the "watch"
+     extensions, and the WatchedValue is a simple longword with the
+     "watch" extensions.
+
+          Processes can request notification by creating an instance
+     of DIRECTORCLASS and requesting a METHOD_DIRECTOR_ESTABLISH method
+     on the created object.  Please refer to the ShadowLibMethods.doc
+     for more details on DIRECTORCLASS.
+
+          There are two ways to get notification, and the included
+     Browser program demonstrates them both:  ClassWatchers and
+     ObjectWatchers.  An ObjectWatcher is a director which ESTABLISH's
+     a watch over a particular instance.  A ClassWatcher is a director
+     which watches a set of attributes.  In particular, it watches one
+     attribute in ALL of the instances of a class, and all of the
+     instances of all of the subclasses of the class.  You will usually
+     work with ObjectWatchers, although if the need arises, ClassWatchers
+     are available.
+
+          Browser uses ObjectWatchers to maintain a current list of
+     the available classes, objects, and number of patches on a method.
+     If you add a class while the Browser is showing a list of the classes,
+     that list is updated automatically, without the active knowledge of
+     the program creating the class!
+
+
+     METHOD PATCHING
+
+          In addition to watched variables, every method in every class
+     defined in SHADOW can be "patched".  Patches are additional
+     method descriptions (using the same MethodTag structure used for
+     regular methods) which allow for more than one function to be called
+     for each method invocation.
+          Patches have an associated priority, can automatically block
+     patches of lower priority, and can dynamically block patches of
+     lower priority based upon the contents of the data register d1 as
+     returned by the higher priority patch.  The normal method is
+     assigned a priority of zero by the system for these purposes.
+     See the AutoDoc DJM() for more details.
+          DJM() also has some special case code for handling methods
+     which are forced to be asynchronous on some other task so that
+     the entire patch "chain" is called asynchronously.
+
+
+
+                                CONCLUSION
+
+     And that is all she wrote.  This is a good beginning for
+     understanding SHADOW.  If you have been confused, you may want to
+     look at both Glossary.doc, and at ShadowLibMethods.doc.  It is a
+     lot to swallow in one gulp.
+
+     If you have understood all of this -- congratulations!  You've done
+     better than I would have.  Try and figure out the source, and contact
+     me with cash for your includes and shadow.lib today!
+
+               David C. Navas [SHADOW]
+               950 Mt. View Dr. #6
+               Lafayette, CA 94549

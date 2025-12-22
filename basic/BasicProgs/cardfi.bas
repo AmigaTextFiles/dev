@@ -1,0 +1,933 @@
+0     scnclr:?:?"Do a 'goto 13000' first to create the Index file":?:?"Then delete line 0 and resave this program.":stop
+
+1     y%=5
+
+2     rgb 7,8,6,4
+
+3     rgb 15,8,6,4
+
+4     rgb 2,2,8,5
+
+5     rgb 0,2,8,5
+
+6     audio 15,1
+
+7     screen 0,4
+
+10    dim dm$(12),f$(9),m$(7),mi(8),sm$(18),y$(2700),yn$(1),z$(9)
+
+20    e$=chr$(27):g$=chr$(7)
+
+30    re$=chr$(10):sp$=chr$(32):ft=0:rt=0
+
+40    yn$(0)="N":yn$(1)="Y":lm=1:sp=1:pf=0
+
+50    hf=1:for i=1 to 7:read m$(i):next i
+
+60    mi(0)=1:for i=1 to 7:read t:mi(i+1)=mi(i)+t
+
+70    for j=mi(i) to mi(i+1)-1:read sm$(j):next j,i
+
+80    for i=0 to 2:read dm$(i):next i
+
+90    bl$=sp$:for i=1 to 36:bl$=bl$+sp$
+
+100   l$=l$+chr$(61):next i:scnclr
+
+105   goto 12000
+
+110   pena 0:box(0,0;300,200),1:gosub 2400
+
+115   on error goto 0
+
+120   s%=sound(15,0,50,64,220)
+
+125   '  MAIN MENU
+
+130   '
+
+131   pena 0:box(0,24;300,149),1
+
+140   r$="Home Information Manager":gosub 2720
+
+145   box(0,24;300,149),1
+
+150   for i=1 to 6
+
+160   ?tab(1);"<";i;"> ";m$(i);re$:next i
+
+170   ?tab(5);"Selection -->";
+
+180   a$="6":gosub 2300:ms=val(k$)
+
+190   if k$=e$ then ms=7
+
+200   if (ms <>3 and ms<>4) or rt>0 then 230
+
+210   gosub 2700:?" No Cards Present."
+
+220   gosub 2100:goto 110
+
+230   on ms goto 240,560,900,1020,1340,1390,1890
+
+240   FL=29:GOSUB 3000:if k$=e$ then 130
+
+250   A$=STR$(FT):IF SE>2 OR RT<1 THEN 270
+
+260   GOSUB 2710:GOSUB 2500:if K$=E$ then 240
+
+265   rt=0
+
+270   IF FT=0 AND SE>1 THEN 440
+
+275   q=2
+
+280   ON SE GOTO 290,370,460,530
+
+290   GOSUB 3100:IF FT<9 THEN 320
+
+300   ?"A Card has Only 9 Lines!"
+
+310   GOSUB 2100:GOTO 240
+
+320   FT=FT+1:C=FT
+
+325   y%=5+ft
+
+330   H$="Line "+STR$(C)+":":T$=""
+
+340   GOSUB 6000:IF K$=E$ THEN FT=FT-1:GOTO 540
+
+350   F$(FT)=T$:IF FT<9 THEN 290
+
+360   gosub 3100:goto 310
+
+370   GOSUB 3100:IF FT<1 THEN 450
+
+380   A$=STR$(FT)
+
+390   ?"Which Line do you Want to Delete? ";
+
+400   gosub 2300:if k$=e$ then 540
+
+410   c=val(k$):if c=ft then 430
+
+420   for i=c to ft-1:f$(i)=f$(i+1):next i
+
+430   ft=ft-1:if ft>0 then 370
+
+440   gosub 2710
+
+450   ?" No Lines Present.":gosub 2100:goto 540
+
+460   gosub 3100
+
+470   ?"Change the Name of Which Line #? ";
+
+480   gosub 2300:if k$=e$ then 240
+
+490   ?k$:c=val(k$)
+
+500   h$="Line "+str$(c)+":":t$=f$(c)
+
+505   y%=12
+
+510   gosub 6000:if k$=e$ then 460
+
+520   f$(c)=t$:goto 460
+
+530   gosub 3100:goto 240
+
+540   max=0:if ft>0 then max=int(2700/ft)
+
+550   goto 240
+
+560   y%=5:q=1:w$=e$:if ft>0 then 590
+
+570   gosub 2700:?"You Must ";m$(1);" (option 1"
+
+580   ?"on Main Menu) First.":gosub 2100:goto 110
+
+590   if rt=max then gosub 2700:goto 650
+
+600   gosub 3000:if k$=e$ then 110
+
+610   gosub 2710:fl=38:if se=2 then 760
+
+620   gosub 2600
+
+630   rt=rt+1:if rt<max+1 then 660
+
+640   rt=max
+
+650   ?g$;dm$(2):gosub 2100:goto 110
+
+660   ?at(15,4);"Card ";rt
+
+670   c=rt:for l=1 to ft:gosub 3200
+
+675   y%=y%+q
+
+680   if k$<>e$ then y$(t)=t$:goto 700
+
+690   l=ft:rt=rt-1
+
+700   next L:if k$=e$ then 600
+
+710   ?l$:?dm$(0)
+
+720   ?at(1,20);"Cards Used: ";rt
+
+730   ?at(1,21);"Cards Left: ";max-rt;sp$;
+
+740   gosub 2200:on k$=sp$ goto 620:goto 130
+
+750   gosub 2710:if rt=max then 650
+
+760   h$="Insert Before Which Card #?":t$=""
+
+765   y%=5
+
+770   fl=39:gosub 6000:if k$=e$ then 600
+
+780   gosub 2710
+
+790   c=val(t$):if c>0 and c<rt+1 then 810
+
+800   ?g$;dm$(1):gosub 2100:goto 590
+
+810   ?tab(10);"New Card ";c
+
+815   y%=5:q=1
+
+820   y%=y%+q:for l=1 to ft:gosub 3200
+
+825   y%=y%+q
+
+830   if k$=e$ then L=ft:goto 850
+
+840   z$(L)=t$
+
+850   next L:if k$=e$ then 600
+
+860   for j=rt*ft to (c-1)*ft+1 step -1
+
+870   y$(j+ft)=y$(j):next j:rt=rt+1
+
+880   for j=1 to ft:y$((c-1)*ft+j)=z$(j):next j
+
+890   goto 750
+
+900   f=-1
+
+910   gosub 3000:if k$=e$ then 110
+
+920   gosub 2710:if se =2 then 1010
+
+925   box(0,24;300,159),1
+
+930   h$="Start with Which Card?":t$="":fl=32
+
+935   y%=5
+
+940   gosub 6000:if k$=e$ then 910
+
+950   v=val(t$):if v>0 and v<rt+1 then 970
+
+960   ?at(0,10);l$:?dm$(1):gosub 2100:goto 910
+
+970   gosub 3900:j=v
+
+980   w$="":gosub 4000:if w$=e$ then 910
+
+990   j=j+1:if j<rt+1 then 980
+
+1000  box(0,0;300,175),1:?dm$(2):gosub 2100:goto 910
+
+1010  gosub 5000:goto 910
+
+1020  ra$=" (1-"+str$(rt)+")?"
+
+1030  fl=6:gosub 3000:if k$=e$ then 110
+
+1040  gosub 2710:on se goto 1050,1080,1130,1140,1150
+
+1050  ?"Print which Card #";ra$
+
+1055  y%=6
+
+1060  gosub 3700:if rf then 1030
+
+1070  r1=t:r2=t:gosub 3800:goto 1020
+
+1080  ?"Start with which Card #";ra$
+
+1085  y%=6
+
+1090  gosub 3700:r1=t:if rf then 1030
+
+1100  ?"Stop with which Card #";ra$
+
+1105  y%=9
+
+1110  gosub 3700:r2=t:if (rf) or r2<r1 then 1030
+
+1120  gosub 3800:goto 1020
+
+1130  r1=1:r2=rt:gosub 3800:goto 1020
+
+1140  gosub 5000:goto 1020
+
+1150  fl=37:h$="Left Margin (0-40):"
+
+1155  y%=5
+
+1160  t$=str$(lm)
+
+1170  gosub 6000:if k$=e$ then 1020
+
+1180  lm=val(t$):if lm> -1 and lm < 41  then 1210
+
+1190  lm=1:?at(0,4);bl$
+
+1200  ?at(1,4);:goto 1160
+
+1210  h$="Blank Lines Between Cards (0-66):"
+
+1215  y%=6
+
+1220  t$=str$(sp)
+
+1230  gosub 6000:if k$=e$ then 1020
+
+1240  sp=val(t$):if sp > -1 and sp < 67 then 1270
+
+1250  sp=0:?at(0,5);bl$
+
+1260  ?at(1,5);:goto 1220
+
+1270  h$="Pause after each Card (Y/N):":t$=yn$(pf)
+
+1275  y%=7
+
+1280  gosub 6000:if k$=e$ then 1020
+
+1290  pf=(Left$(t$,1) = "Y")
+
+1300  h$="Print Line Names (Y/N):":t$=yn$(hf)
+
+1305  y%=8
+
+1310  gosub 6000:if k$=e$ then 1020
+
+1320  hf=(left$(t$,1) = "Y")
+
+1330  ?l$:gosub 2100:goto 1020
+
+1340  gosub 2700:on error goto 1370
+
+1350  box(0,24;300,149),1
+
+1360  ?: dir 
+
+1370  ?l$:gosub 2400:gosub 2100
+
+1380  on error goto 0:goto 110
+
+1383  box(0,0;300,200),1
+
+1385  goto 110
+
+1390  fl=35:box(0,24;300,149),1
+
+1395  y%=5
+
+1400  gosub 3000: if k$=e$ then 110
+
+1405  gosub 2400
+
+1410  gosub 2710
+
+1420  if se <> 2 or rt < 1 then 1440
+
+1430  gosub 2500:box(0,24;300,139),1:if k$=e$ then 1400
+
+1440  t$="":if se =1 then h$="Store under What Name?"
+
+1450  if se=2 then h$="Get which Filebox?"
+
+1460  if se=3 then h$="Remove which Filebox?"
+
+1470  gosub 6000:if t$="" or k$=e$ then 1400
+
+1480  if val(t$)<>0 or asc(t$) =48 then 1400
+
+1485  che$=t$
+
+1490  t$=t$+".him":box(0,25;300,149),1:on error goto 1510
+
+1500  on se goto 1640,1790,1620
+
+1510  '
+
+1520  box(0,24;300,149),1
+
+1530  close:?g$;
+
+1535  er=err
+
+1540  '
+
+1550  if er=57 then ?"Disk I/O Error"
+
+1560  if er=53 then ?"Filebox Not on This Disk"
+
+1570  '
+
+1580  if er=221 then ?"Sorry, this Disk is Full"
+
+1600  close:?l$:gosub 2400:gosub 2100:resume 1400
+
+1610  on error goto 0
+
+1612  gosub 2400
+
+1615  sleep 1*10^6:goto 1400
+
+1620  scratch t$
+
+1630  gosub 2400:goto 1610
+
+1640  on error goto 0
+
+1641  on error goto 14000
+
+1650  open "i",#1,t$
+
+1670  close :?g$;"That Filebox Already Exists"
+
+1680  ?"Press <space bar> to Replace It."
+
+1690  gosub 2400:gosub 2200:if k$=e$ then 1610
+
+1700  box(0,24;300,149),1:scratch t$
+
+1710  close #1:open "O",#1,t$
+
+1720  cmd 1
+
+1730  ?"FILEBOX":?ft:?rt
+
+1740  ?lm:?sp:?pf:?hf
+
+1750  for j=1 to ft:?f$(j)
+
+1760  next j:if rt=0 then 1780
+
+1770  for j=1 to rt*ft:?y$(j):next j
+
+1780  cmd 0:close #1:on error goto 0:gosub 13000:gosub 2400:goto 1610
+
+1790  open "i",#1,t$
+
+1800  close:open "I",#1,t$
+
+1810  '
+
+1815  if lof(1) < 5 then er=53:goto 1530
+
+1820  input#1, c$:if c$ <> "FILEBOX" then er=53:goto 1530
+
+1830  input#1, ft,rt,lm,sp,pf,hf
+
+1840  for j=1 to ft:line input#1, f$(j):next j:if rt=0 then 1860
+
+1850  for j=1 to rt*ft:line input#1, y$(j):next j
+
+1860  max=0:if ft>0 then max=int(2700/ft)
+
+1870  cmd 0:close
+
+1880  ?"Filebox is Now in Memory":getkey xr$:goto 110
+
+1890  gosub 3000:if se=1 or k$=e$ then 110
+
+1900  scnclr:end
+
+2000  getkey k$:return
+
+2100  gosub 2000: if k$<>e$ then 2100:return
+
+2200  gosub 2000:if k$<>e$ and k$<>sp$ then 2200
+
+2210  return
+
+2300  getkey k$:?k$
+
+2310  if k$ <> e$ and (k$ < "0" or k$ > a$) then 2300
+
+2320  return
+
+2400  ?at(0,23);l$
+
+2405  s%=sound(15,0,30,64,582)
+
+2410  ?at(10,24);"Press <Esc> to Exit";
+
+2415  '?at(0,0);l$:?re$;l$
+
+2420  return
+
+2500  ?"Warning Use of this Option will Erase"
+
+2510  ?"contents of All Cards from Memory."
+
+2520  ?:?dm$(0):gosub 2200:return
+
+2600  box(0,0;300,139),1:?at(0,0);:return
+
+2700  box(0,0;300,151),1:r$=m$(ms):goto 2720
+
+2710  box(0,24;300,151),1:r$=sm$(mi(ms)+se-1)
+
+2720  ?at(0,0);l$:?re$;l$:?at(0,2);bl$:print at(0,2);
+
+2730  ?spc((40-len(r$))/2);r$:?at(0,4):return
+
+3000  gosub 2400:box(0,20;300,167),1:gosub 2700:?:for i=mi(ms) to mi(ms+1)-1
+
+3010  ?tab(3);"<"i-mi(ms)+1"> "sm$(i)
+
+3020  ?:next i:a$=str$(mi(ms+1)-mi(ms))
+
+3030  ?:?tab(9)"Selection -->";
+
+3040  gosub 2300:se=val(k$):return
+
+3100  gosub 2710:if ft<1 then return
+
+3110  ?"LIne";0;": All Lines"
+
+3115  for i=1 to ft
+
+3120  ?"Line";I;": ";f$(i):next i
+
+3125  if ft>1 then q=1
+
+3128  y%=y%+q
+
+3130  ?L$:if ms=3 or ms=4 then return
+
+3140  if se=4 then gosub 2100
+
+3150  return
+
+3200  t=(c-1)*ft+l:h$=f$(l)+":":t$=""
+
+3210  if w$="C" then t$=y$(t)
+
+3220  gosub 6000:return
+
+3300  w$="":?tab(lm+15);"Card  ";j
+
+3310  for z=1 to ft:t$="":if hf then t$=f$(z)+": "
+
+3320  ?tab(lm);t$;y$((j-1)*ft+z)
+
+3330  get w$:if w$=e$ then z=ft:j=r2
+
+3340  next z:if w$=e$ then return
+
+3350  if sp=0 then 3370
+
+3360  for z=1 to sp:?:next z
+
+3370  gosub 2600:if pf=0 then return
+
+3380  close #2:cmd 0:?dm$(0):gosub 2200
+
+3390  open "O",#2,"prt:":if k$=sp$ then return
+
+3400  j=r2:return
+
+
+
+3505  s%=sound(15,0,20,64,320)
+
+3510  for z=1 to ft:?f$(z);" : ";y$((j-1)*ft+z)
+
+3520  next z:?l$:return
+
+3600  ?"Press <space> When Printer Ready"
+
+3610  gosub 2200:return
+
+3700  rf=1:h$="?":t$="":gosub 6000:?l$
+
+3710  if k$=e$ or t$="" then return
+
+3720  t=val(t$):if t>0 and t<=rt then rf=0:return
+
+3730  ?g$;dm$(1):?l$
+
+3740  gosub 2100:return
+
+3800  gosub 3600:if k$=e$ then return
+
+3810  open "O",#2,"prt:":cmd 2
+
+3820  for j=r1 to r2:gosub 3300
+
+3830  next j:cmd 0:close #2:return
+
+3900  ?at(0,19);
+
+3910  ?"Press <C> to Change this Card    "
+
+3920  ?"Press <P> to Print Card"
+
+3930  ?"Press <R> to Remove It, or           "
+
+3940  ?"Press<space bar>to Move to Next Card.":return
+
+4000  gosub 2600:gosub 3500
+
+4010  gosub 2000:if k$=e$ then w$=e$:j=rt:return
+
+4020  if k$=sp$ then return
+
+4030  if k$="C" or k$="c" then 4110
+
+4035  if k$="R" or k$="r" then 4170
+
+4040  if k$="P" or k$="p" then 4050
+
+4045  goto 4010
+
+4050  box(0,24;300,139),1
+
+4060  if f then gosub 3600:if k$=e$ then 4100
+
+4070  f=0:?"Now Printing Card ";j
+
+4080  open "O",#2,"prt:":cmd 2
+
+4090  gosub 3300:cmd 0:close #2
+
+4100  j=j-1:gosub 3900:return
+
+4110  box(0,0;300,139),1:gosub 2710
+
+4115  q=1:y%=6
+
+4120  fl=39:?tab(15);"Card ";j
+
+4130  c=j:w$="C":for l=1 to ft:gosub 3200
+
+4135  y%=y%+1
+
+4140  if k$=e$ then l=ft:goto 4160
+
+4150  y$(t)=t$
+
+4160  next l:j=j-1:gosub 3900:return
+
+4170  box(0,24;300,139),1:gosub 3500
+
+4180  ?"Press <space> to Remove This Card";
+
+4190  gosub 2200:gosub 3900:if k$=e$ then j=j-1:return
+
+4200  if j=rt then 4230
+
+4210  for z=(j-1)*ft+1 to (rt-1)*ft
+
+4220  y$(z)=y$(z+ft):next z
+
+4230  rt=rt-1:j=j-1:return
+
+5000  gosub 3110:a$=str$(ft)
+
+5010  w$="":?"Select Cards by Which Line?";
+
+5020  gosub 2300:if k$=e$ then return
+
+5030  v=val(k$):gosub 2600
+
+5032  bb=1
+
+5035  if v=0 then bb=v:v=1
+
+5040  y%=2:?"What Text to Search For?"
+
+5050  fl=38:h$="?":t$="":gosub 6000
+
+5060  if k$=e$ or t$="" then return
+
+5070  box(0,24;300,139),1:?
+
+5080  ?tab(5);"<1> Match from Begin or Line"
+
+5090  ?re$;tab(5);"<2> Search Whole Line":?
+
+5100  a$="2":?tab(9);"Selection -->";
+
+5110  gosub 2300:if k$=e$ then return
+
+5120  sf=0:sr$=t$:ls=len(sr$)
+
+5130  j=1:if k$="2" then 5215
+
+5140  box(0,0;300,139),1
+
+5150  ?at(0,10);"Checking Card ";j
+
+5160  if sr$ <> left$(y$((j-1)*ft+v),ls) then 5180
+
+5170  sf=1:w$="":gosub 3900:gosub 4000:box(0,24;300,139),1
+
+5180  get x$
+
+5190  if w$=e$ or x$=e$ then return
+
+5195  if bb=0 then v=v+1:if v<= ft then 5150
+
+5200  j=j+1:if j<= rt then 5150
+
+5210  goto 5330
+
+5215  box(0,0;300,139),1
+
+5220  z$=y$((j-1)*ft+v):lz=len(z$)
+
+5230  ?at(0,10);"Checking Card ";j;" line ";v
+
+5240  if z$="" then 5320
+
+5250  for w=1 to lz-ls+1
+
+5260  if sr$ <> Mid$(z$,w,ls) then 5280
+
+5270  w=256:sf=1:w$="":gosub 3900:gosub 4000:box(0,0;300,139),1
+
+5280  get x$
+
+5290  if w$=e$ or x$=e$ then w=300
+
+5300  next w
+
+5310  if w$=e$ or (x$=e$ and k$<>e$) then return
+
+5315  if bb=0 then v=v+1: if v<=ft then 5220 else v=1
+
+5320  j=j+1:if j<rt+1 then 5220
+
+5330  box(0,0;300,139),1:if sf<1 then 5350
+
+5340  ?"No More Cards Match":gosub 2100:return
+
+5350  ?"No Cards Match":gosub 2100:return
+
+6000  ?at(0,y%);h$;:x%=pos(0)
+
+6010  pc=2:t$=sp$+t$
+
+6020  ?at(x%+1,y%);t$;
+
+6030  ?at(x%+pc,y%);"";
+
+6040  line input;k$
+
+6042  if (w$="C" or w$="c") and len(k$)=0 then t$=y$(t):goto 6160
+
+6044  if len(k$)=0 then k$=e$
+
+6045  goto 6150
+
+6050  if asc(kk$)<>155 and k > 31 then 6120
+
+6060  er=(k=13)+(k=27):if er then 6150
+
+6070  cu=(k=67)-(k=8):if k=4 then 6110
+
+6080  if cu=0 then 6030
+
+6090  pc=pc+cu:pc=pc+(pc<2)-(pc>len(t$)+1)
+
+6100  goto 6030
+
+6110  t$=left$(t$,pc-1)+mid$(t$,pc+1,len(t$)):goto 6020
+
+6120  if len(t$) > fl-x%-1 then 6040
+
+6130  t$=left$(t$,pc-1)+k$+mid$(t$,pc,len(t$))
+
+6140  pc=pc+1:goto 6020
+
+6150  t$=k$
+
+6160  ?at(x%+2,y%);t$;sp$
+
+6170  return
+
+7000  DATA Design Card Format, Add Card(s)
+
+7010  data Display/Change/Remove Card(s),Print Card(s)
+
+7020  data List All Files on Disk
+
+7030  data Get New/Store/Remove Filebox,Quit
+
+7040  data 4,Add New Lines,Delete Lines
+
+7050  data Change Names of Lines,Display Card Format
+
+7060  data 2,Add at End,Insert Before End
+
+7070  data 2,Look at Cards Consecutively
+
+7080  data Work with Selected Card(s)
+
+7090  data 5,Print One Card,Print a Range of Cards
+
+7100  data Print All Cards,Print Selected Card(s)
+
+7110  data Change Printer Options,1,Disk
+
+7120  data 3,Store This Filebox on Disk
+
+7130  data Get a Filebox from Disk
+
+7140  data Remove a File from Disk
+
+7150  data 2,Return to Main Menu,Quit
+
+8000  data "Press <space bar> to continue."
+
+8010  data No Such Card!,No More Cards
+
+10000 scnclr
+
+10010 rgb 4,12,1,1
+
+10020 rgb 14,1,3,6
+
+10030 peno 1
+
+10040 outline 1
+
+10050 graphic(1)
+
+10060 x=144:y=24
+
+10070 for num =1 to 7
+
+10080 pena 13
+
+10090 area(x,y to x+60,y to x+60,y-10 to x+140,y-10 to x+150,y to x+150,y+60 to x,y+60)
+
+10100 pena 4:penb 13
+
+10105 draw(x+140,y-10 to x+140,y to x+150,y)
+
+10110 ?at(x+62,y-2);fa$(num)
+
+10120 pena 14
+
+10130 ?at(x+1,y+8);num
+
+10140 x=x-16:y=y+16
+
+10150 next
+
+10160 z=2
+
+10170 pena z mod 2:penb 0
+
+10172 xx%=z*100
+
+10174 if xx% > 800 then xx%=200:z=2
+
+10175 s%=sound(15,0,20,64,xx%)
+
+10176 audio 15,1
+
+10180 ?at(10,10);"Select Folder # ?";:get ke$:if ke$ = "" then z=z+1 :pena z mod 2:sleep .4*10^6:goto 10170
+
+10190 t$=fa$(val(ke$)):graphic(0)
+
+10195 outline 0
+
+10200 rgb 0,10,7,2
+
+10210 rgb 2,10,7,2
+
+10290 on error goto 11000
+
+10300 t$=t$+".him"
+
+10310 open "i",#1,t$
+
+10320 input#1, c$:if c$<>"FILEBOX" then er=53:goto 1530
+
+10330 input#1, ft,rt,lm,sp,fp,hf
+
+10340 for j=1 to ft:input#1,f$(j):next j:if rt=0 then 10360
+
+10350 for j=1 to rt*ft:input#1,y$(j):next j
+
+10360 max=0:if ft>0 then max=int(2700/ft)
+
+10370 close #1
+
+10375 graphic(0)
+
+10380 ?"Filebox is Now in Memory":?"Press a key            ":getkey xr$
+
+11000 if err=53 then graphic(0):resume 110
+
+11100 goto 110
+
+12000 'on error goto 13000
+
+12010 open "i",#3,"Index.him"
+
+12030 for j=1 to 7
+
+12040 input#3,fa$(j)
+
+12060 next j:close #3
+
+12065 on error goto 0
+
+12070 goto 10000
+
+13000 close
+
+13010 open "o",#3,"Index.him"
+
+13020 p$(1)="Address"
+
+13030 ?#3,p$(1)
+
+13050 for j=2 to 7
+
+13060 p$(J)=fa$(j)
+
+13070 next j
+
+13080 if se=1 then p$(val(ke$))=che$
+
+13090 for j=2 to 7
+
+13100 ?#3,p$(j)
+
+13110 next j
+
+13115 close #3
+
+13120 return
+
+14000 resume 1710
+
+65000 ' FAMILY COMPUTING NOV. 85

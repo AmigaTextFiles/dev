@@ -1,0 +1,166 @@
+
+TEKLIB MULTITASKING, WHY POLLING SUCKS
+------------------------------------------------------------
+
+tasks in a multithreaded application usually need to
+exchange data in one or another way.  try to imagine the
+following scenarios:
+
+1.  a subtask is launched with a clearly defined,
+time-consuming calculation.  all parameters are known upon
+startup.
+
+2.  a subtask is launched to act as a maintenance service in
+the background.  it checks certain data fields at regular
+time intervals, and sometimes performs some calculations
+accordingly.
+
+3.  a subtask is launched, performs some initializations,
+and then goes to sleep.  the main program (or another task)
+wakes it up and commissions jobs to the subtask whenever
+needed.
+
+in reality, these cases are not so clearly separated from
+each other.  consider a fractal generator.  the parameters
+for the calculation are known upon startup:  all we need to
+do is to launch a task with a data packet containing the
+fractal's paramater range, number of iterations, pointer to
+a destination buffer, etc.
+
+TEKlib offers you a very simple data sharing mechanism for
+that purpose.  a packet of userdata can be supplied upon a
+task's creation, and queried later from the task handle in
+the child context.
+
+put all required data into a structure, and submit a pointer
+to it throughout the tag argument TTask_UserData:
+
+struct fractaldata
+{
+	TFLOAT x1, y1, x2, y2;
+	TINT iterations;
+	TAPTR destbuffer;
+	TINT width, height;
+};
+
+void main(void)
+{
+	..
+	
+	TTAGITEM tasktags[2];
+	struct fractaldata userdata;
+
+	userdata.x1 = -0.2;
+	userdata.y1 = -0.2;
+	userdata.x2 = 0.2;
+	userdata.y2 = 0.2;
+	userdata.iterations = 1024;
+	userdata.destbuffer = gfxbuffer;
+
+	TInitTags(tasktags);
+	TAddTag(tasktags, TTask_UserData, &userdata);
+	
+	fractaltask = TCreateTask(basetask, fractalfunc, tasktags);
+	
+	..
+}
+
+TVOID fractalfunc(TAPTR task)
+{
+	struct fractaldata *userdata = TTaskGetData(task);
+
+	..
+}
+
+first have a look at how the userdata argument is handled:
+for passing n tags to a function, you need to reserve a tag
+array with n+1 entries.  a tag is merely an ID/data pair
+each.  a tag array is initialized with TInitTags(),
+individual entries can then be added to the array with
+TAddTag().
+
+now have a look at fractalfunc(), and see how the shared
+data packet is retrieved from the task handle.  this is a
+very raw and primitive example; no synchronization needs to
+take place here, and the same could normally be achieved
+with a few global variables.
+
+but for heaven's sake, DO NOT USE GLOBAL VARIABLES for
+sharing data between tasks in TEKlib.  not only that your
+application may shortly look confusing and become overly
+complex; parts of it will be no longer reusable, and
+race-conditions start creeping into your design.  however.
+global variables for sharing data between tasks simply DO
+NOT WORK on all supported platforms, and you'd be
+sacrificing portability.  it's as easy as that.
+
+ok, let's get back to the example.  how does the parent task
+know when the child task has finished?  how do we tell the
+parent task to draw a new line from the destination buffer
+to the screen?  there are many ways to achieve this; we
+start with the bad ones and come to the more elegant
+solutions later.
+
+first, we might extend the userdata structure with some more
+fields:
+
+struct fractaldata
+{
+	..
+	
+	TINT line_rendered;
+	TBOOL finished;
+};
+
+the subtask would have to update the field line_rendered
+with the current line, and set the boolean to TTRUE once it
+has finished.  the parent could then check the userdata
+structure from time to time, and update the display
+accordingly:
+
+void main(void)
+{
+	..
+	userdata.finished = TFALSE;	
+	userdata.line_rendered = 0;
+	..
+	fractaltask = TCreateTask(basetask, fractalfunc, tasktags);
+	if (fractaltask)
+	{
+		TINT lastline = 0;
+		
+		while (!userdata.finished)
+		{
+			if (userdata.line_rendered != lastline)
+			{
+				lastline = userdata.line_rendered;
+				drawline(screen, gfxbuffer, lastline - 1);
+			}
+
+			/* maybe do something else here */
+		}
+
+		TDestroy(fractaltask);
+	}
+	..
+}
+
+that would work, undoubtedly.  but this example is awful;
+the loop will consume all the CPU time it can get, leaving
+only 50% of the available resources to the fractal task,
+thus making the application behave very slow and unfriendly.
+
+to get away from that, you should insert a call to
+TTimeDelayF() to the loop.  that would make the program,
+well, acceptable at best.  this is called polling.  its
+disadvantage should be obvious:  the less time you waste for
+polling, the larger the latency inflicted to your program!
+
+you may think that you've got enough clock cycles in your
+brand new Dual Athlium 5,7ghz computer to waste for polling
+in intervals of microseconds...  but try to imagine HOW MANY
+threads of execution might be handling their execution flow
+like that, leading to gazillions of useless context
+switches, and in the end, to accelerated increase of entropy
+in our local universe.
+

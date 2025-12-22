@@ -1,0 +1,332 @@
+
++-----------------------------------------------------------------------+
+|                      Manuel de Noise Compiler v1.0                    |
++-----------------------------------------------------------------------+
+                         par Wouter van Oortmerssen
+
+
+Brêve : Le compilateur noise est un programme qui traduit les fichiers sources
+        de type 'langage de programmation de musique' en fichiers compatibles
+        Noise/ProTracker (tm).
+
+Matériel nécessaire : n'importe quel Amiga (tm).
+         recommandé : 1 ou 2 méga de mémoire vive, un disque dur, un sampler.
+
+La grammaire de noise peut être décrit comme suit :
+
+        - Une grammaire à contexte large (context free grammar),
+        - Un langage de programmation pour la musique,
+        - Un formalisme spécifique pour la musique.
+
+Il peut être utilisé comme :
+
+        - Un programme de musique,
+        - Langage de spécification pour des structures de musique,
+        - Un outil expérimental pour générer de la musique
+
++-----------------------------------------------------------------------+
+|                       La Grammaire de Noise                           |
++-----------------------------------------------------------------------+
+
+Le compilateur noise lit les sources ASCII contenant une description d'un
+morceau de musique, découpe le texte dans un 'arbre syntaxique', et commence
+à générer une séquence de notes en lisant récursivement votre définition.
+Finallement, il chargera tous les samples et écrira les données vers un
+fichier ProTracker (tm).
+
+Un programme noise (suffixe .ngr) consiste en un nombre illimité de 'règles'
+(ça vous aidera, si vous connaissez déja un peu la grammaire à context large
+[context-free grammar]). Chaque règle ressemble à ça :
+
+<sym> "->" <symlist> ";"
+
+(NOTE : J'utilise une notation informelle, tant la programmation ressemble
+        au langage lui-même. J'utilise :
+        <> pour signaler un mot qui doit être remplacé par quelques ligne ASCII,
+        "" pour les chaines qui doivent être pris telles-quelles)
+Exemple:
+
+beat -> drum [C#,1]                     /* a C-flat */
+        { [D,2] | [D#,2] | [Db,2] }     /* D, D-sharp, D-flat */
+        ( boomboom 1 );                 /* index=1 */
+
+Chaque mot (token) doit être séparé par un espace, qui différencie un quelconque
+nombre d'espaces/tabulations/saut de ligne, et les commentaires, commençant
+par '/*' et finissant par '*/'.
+
+Un <symlist> est un ou plusieurs <item>s. Un <item> peut être :
+
+        <sym> <index>
+
+sera remplacé récursivement par la définition de <sym>.
+<index> est optionnel et est expliqué plus loin.
+exemple : drum
+
+        "(" <weight> <symlist> ")"
+
+comme <sym>, seulement un <weight> optionnel ( par défault = 500, compris entre
+0 et 1000) spécifie la 'chance' de <symlist> d'être reécrit, avec 0 aucune
+chance.
+Exemple :
+
+(beat)          (250 beat)
+
+decide pendant la génération, si la définition de 'beat' doit être ou non jouée
+, respectivement 50% et 25% de chance.
+
+        "{" <weight> <symlist> "|" ..... "}"
+
+Tous les <symlist> doivent être entre {} et être séparé par |.
+<weight> est encore là optionnel, et doit être entre 0 et 1000, seulement
+maintenant la valeur par défaut est 1. Sans <weight>, simplement un des
+<symlist> est pris.
+Exemple :
+
+{ beat | boomboom | [Gb+,4] }           /* chances: each 33% */
+{ 3 beat | 7 boomboom }                 /* chances: 30%,70% resp. */
+
+        <samplename> <vol>
+
+un chemin AmigaDos vers un sample, <vol> est un entier optionnel, entre 0 et
+64.
+Exemple: "samples:guitar.iff"
+
+        "[" <note> "," <duration> "]"
+
+un note spécifiée, voir plus bas.
+
+        <hexinteger>
+
+un effet spécial, voir plus bas.
+
+
+NOTES.
+------
+
+une <note> est un caractère comme :  C D E F G A B
+elle peut être suivit par un nombre quelconque de modificateur :
+
+"#" = dièse
+"b" = bémol
+"+" = octave supérieure
+"-" = octave inférieure
+
+en général, vous pouvez indiquer seulement une octave en plus ou en moins,
+et le programme retournera une erreur si vous écrivez 'E+++' par exemple.
+Autant de '#' et de 'b' sont permis, seulement en général vous écrirez plutôt
+'D' pour 'C##', or 'F' pour 'E#'etc. Notez que cette version de noise n'accepte
+seulement pour 'C-major'.
+Exemple :
+
+C       C (celui au milieu du piano)
+C#+     C-dièse, une octave en haut
+Dbb-    C une octave en bas
+
+pour ceux qui ne sont pas familiés avec les notes classiques (anglaise), une
+note est définie par des entiers de -12 à 23, avec 0 pour le C du milieu,
+une note négative indique un note plus basse.
+
+La durée <duration> est un entier indiquant le temps en unité entre 1 et 100
+pour jouer la note, avec de jouer la suivante.
+Un unité est environ un quart de note, ainsi une note entière doit être
+écrit '4' etc.
+exemples :
+[C,1]
+[F#,4]           /* un F-dièse d'une seconde */
+
+
+EFFETS SPECIAUX.
+----------------
+
+de nombreux effets spéciaux peuvent être utilisés sous forme d'entiers
+héxadécimaux. Un effet ne peut uniquement être utilisé qu'avec la note
+suivante.
+exemple :
+
+mainpart -> $E01 drums solo drums
+
+éteint le filtre audio avant de jouer. Rappel des effets :
+
+----------------------------------------------------------------------------
+0 - Normal play or Arpeggio             0xy : x-first halfnote add, y-second
+1 - Slide Up                            1xx : upspeed
+2 - Slide Down                          2xx : downspeed
+3 - Tone Portamento                     3xx : up/down speed
+4 - Vibrato                             4xy : x-speed,   y-depth
+5 - Tone Portamento + Volume Slide      5xy : x-upspeed, y-downspeed
+6 - Vibrato + Volume Slide              6xy : x-upspeed, y-downspeed
+7 - Tremolo                             7xy : x-speed,   y-depth
+9 - Set SampleOffset                    9xx : offset (23 -> 2300)
+A - VolumeSlide                         Axy : x-upspeed, y-downspeed
+C - Set Volume                          Cxx : volume, 00-40
+E - E-Commands                          Exy : see below...
+F - Set Speed                           Fxx : speed (00-1F) / tempo (20-FF)
+----------------------------------------------------------------------------
+E0- Set Filter                          E0x : 0-filter on, 1-filter off
+E1- FineSlide Up                        E1x : value
+E2- FineSlide Down                      E2x : value
+E3- Glissando Control                   E3x : 0-off, 1-on (use with tonep.)
+E4- Set Vibrato Waveform                E4x : 0-sine, 1-ramp down, 2-square
+E5- Set Loop                            E5x : set loop point
+E6- Jump to Loop                        E6x : jump to loop, play x times
+E7- Set Tremolo Waveform                E7x : 0-sine, 1-ramp down. 2-square
+E9- Retrig Note                         E9x : retrig from note + x vblanks
+EA- Fine VolumeSlide Up                 EAx : add x to volume
+EB- Fine VolumeSlide Down               EBx : subtract x from volume
+EC- NoteCut                             ECx : cut from note + x vblanks
+ED- NoteDelay                           EDx : delay note x vblanks
+EF- Invert Loop                         EFx : speed
+----------------------------------------------------------------------------
+
+
+INDEXATION.
+-----------
+
+Alors que () et {|||} sont des moyens pratiques de générer une musique
+totallement au hasard, ou de rendre de votre morceau de musique plus naturel,
+dû à quelques variations. Certains préfèrent souvent avoir le choix du hasard
+répété : par exemple, si vous définissez un symbole 'beat' que vous voulez
+réutiliser dans certaines parties de votre programme, et la définition contient
+des variations 'au hasard', vous voulez avoir le hasard fixé la seconde fois,
+parce qu'il sera completement hasrdeux sinon. Par exemple, considerez la pseudo
+définition de 'beat' ci-dessous.
+
+beats -> beat boomboom beat boomboom;
+
+Ca ressemble à un rythme normal, mais 'beat' est remplacé par 2 différentes
+séquences de notes. A savoir :
+
+beats -> beat1 boomboom2 beat1 boomboom2;
+
+vous spécifiez qu'avec le premier 'beat', le choix du hasard est enregistré
+et tous les autres qui sont de même indéxés auront leurs notes générés de la
+même facon que la première note. Notez que cela ne marche pas avec les samples
+par ex. :
+
+beats -> "bass.iff" beat1 "hihat.iff" beat1;
+
+générera 2 même séquences, mais joué par des instruments différents.
+
+SYMBOLES AND CANALS.
+---------------------
+
+Un symbole consiste en un nombre de caractères en minuscules. Comme
+l'amiga joue sur 4 canaux simultanément, il n'y a pas un symbole de départ
+pour la grammaire, mais 4, appelés : 'one', 'two', 'three', 'four'.
+Enfin, l'un d'eux doit être définis dans la grammaire.
+Exemple :
+
+one -> "dat:noiz/Dguitar" 20 aa1;
+two -> "dat:noiz/drumz/bassdrum" aa1;
+
+aa -> a $E00 a $E01 a a;
+
+a -> { c d c c d d | d d | c d c d | c c };
+
+c -> [C,1] [C#,3];
+d -> [D,2] [D,3];
+
+joue la séquence 'aa' simultanément sur 2 canaux, avec 2 instruments
+différents, avec des volumes de 20 et 64. La séquence 'aa' consiste en
+plusieurs 'a', pendant qu'on change le filtre. 'a' consiste en 4 séquences
+possibles, qui sont les notes à jouer. NOTE : n'essayez pas ces exemples,
+ce ne sont pas des morceau de musique, mais des 'exemples'.
+
+
+CRÉATION DE MORCEAUX DE MUSIQUES (TUNES).
+-----------------------------------------
+La création de votre musique peut être réalisée de 2 façons :
+de bas en ahut ou de haut en bas...
+Dans le second cas vous aurez une idée à quoi doit ressembler votre musique :
+vous écrivez les structures globales de la chanson, et pas à pas sortez les
+symboles à jouer.
+Dans le premier cas, vous pouvez définir des symboles, chacuns étant une
+séquence de note, et ainsi construire des blocs plus grands pour créer votre
+musique.
+Par exemple, pour un petit morceau de guitar, vous commencrez par la
+définition de 2 notes, a et b
+
+a -> [D,1] [E,3];
+b -> [D,1] [D#,7];
+
+Puis, vous les combinerez en une séquence :
+
+c -> a a a b;
+
+Finallement, vous les jouerez sur le canal 1, et définissez un sample :
+
+one -> guitar c c c a [C,16];          /* just one channel */
+
+/* l'instrument */
+guitar -> "dat:noiz/Dguitar";
+
+Notez que les notes seront joués par l'instrument au moment où elles sont
+rencontrés dans la grammaire.
+
+Exemple:
+
+
+/* "gaspits.ngr":
+   gaspits qui fait le bruit des vibrations d'un réfrégirateur,
+   combiné à d'autres instruments */
+
+gaspits -> "dat:noiz/gaspits";         /* les samples */
+drum -> "dat:noiz/drumz/bassdrum" 50;
+guitar -> "dat:noiz/dguitar" 32;
+
+
+one -> gaspits c;                      /* joue la règle "c", canal 1 */
+
+a -> [C,4] [D,8];
+b -> [E,2] [E,2] [D#,8];
+
+c -> a b [E-,16]
+     a b [E-,16]
+       b [D#-,8];
+
+
+two -> drum f;                         /* drums sur canaux 2 and 3 */
+three -> drum [C,1] f;
+
+d -> g [C,2] [C,2];
+e -> g [C,1] [C,1] [C,1] [C,1];
+
+f -> d e d e d e;
+
+g -> [C,4] [C,4] [C,4];
+
+
+four -> guitar [Fb-,64] [F-,64];       /* guitare sur canal 4 */
+
+
+
+
+UTILISATION DU HASARD
+---------------------
+Vous pouvez utiliser le hasard pour donner des variations subtiles à votre
+morceau des musique, avec :
+
+mynote -> { 10 [D,2] | 1 [D#,2] | 1 [Db,2] };
+
+On définie une note qui est jouée comme un 'D' la plupart du temps, mais
+occasionnellement douce ou piquée. On peut facilement faire la même chose avec
+la durée, ou même avec l'ordre de certaines séquences jouées.
+En tout cas, n'espérez pas un hasard pur : le hasard est généré par la
+fonction de l'ordinateur, qui ne peut être parfait (du moins dans cette
+impléméntation). par ex. quand vous spécifiez 80% 10% 10%, en réalité vous
+aurez 75% 5% 20%.
+
+Vous pouvez alors créer des musiques au hasard : vous avez à spécifier
+seulement ce que le morceau doit être, seulement au points cruciaux vous
+laissez l'ordinateur décider : vous aurez certainement envie de compiler
+plusieurs fois la grammaire, pour voir se qui sonne le mieux, et trouver
+d'étrange mais interressant sons, que vous n'auriez pas suspecté !
+
+---------------------------------------------------------------------
+
+
+Contactez l'auteur :
+
+        Wouter@alf.let.uva.nl
+        Wouter@mars.let.uva.nl
+        Oortmers@gene.fwi.uva.nl

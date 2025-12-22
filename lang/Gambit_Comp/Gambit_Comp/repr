@@ -1,0 +1,298 @@
+Object representation specification for Gambit
+----------------------------------------------
+
+This document describes the object representation scheme that all Gambit
+back ends must support.
+
+
+1. Abstract object representation
+---------------------------------
+
+Objects are encoded by (signed) integers.  It is required that the
+size of the encoding be the same as that for a C `long' (so that
+Scheme and C can interface easily).  A certain number of bits are
+allocated for each of 2 fields in encodings: the `data' and `type
+tag'.  The type tag determines which class the object belongs to out
+of 7 possible classes.  Thus, the type tag field must be at least 3
+bits wide.  Some of the objects are scalars (the encoding of a scalar
+is always the same), the others are known as memory allocated objects
+(a memory allocated object might have a different encoding after a GC
+because its encoding depends on its address).  The actual mapping of
+type tags to object classes is totally left to the implementor and can
+thus be different from machine to machine.
+
+The 7 object classes are defined as follows:
+
+Class        Objects represented
+
+FIXNUM       small signed integers
+SPECIAL      characters, #t, #f, () and other special objects
+PAIR         cons cells
+WEAK_PAIR    'weak' cons cells (car is replaced by #f if not referenced)
+PLACEHOLDER  placeholders (returned by `future' special form)
+SUBTYPED     vectors, strings, symbols, flonums, ports, etc.
+PROCEDURE    procedures (includes true closures and return addresses)
+
+The FIXNUM and SPECIAL classes are scalars.  The PAIR, WEAK_PAIR,
+SUBTYPED, PROCEDURE and PLACEHOLDER classes are memory allocated objects.
+
+There are some restrictions to the representation of scalars.  The
+encoding of the fixnum `n' is required to have `n' in the data field
+(in 2s-complement representation).  This should make the
+implementation of fixnum arithmetic simple on most machines and also
+simplifies the interface to the object representation.  Additionally,
+the encoding of a character is required to have `n' in the data field,
+where `n' is the machine representation of the character and 0<=n<=255
+(i.e. the lower 8 bits of the data field are the machine
+representation of the character and the other data field bits are 0).
+
+Also, in order to permit the creation of new scalars by the runtime or the
+user (e.g.  the introduction of an `end-of-file' object), there should
+be a reserved range of encodings in the SPECIAL class.  This range is
+back end dependent.
+
+Some memory allocated objects have a header.  Headers are used to
+store length and subtype information.  PAIRS, WEAK_PAIRS and PLACEHOLDERS
+don't have a header because their length is fixed.  PAIRS and WEAK_PAIRS
+have two fields (the CAR and CDR).  PLACEHOLDERS have 4 fields (the VALUE,
+LOCK, THUNK and QUEUE).  The VALUE slot of placeholders must come first.
+
+SUBTYPED objects have a header.  Headers are the same
+size as a C `long' and are always at the very beginning of the object.
+Headers contain two fields, the `length' and `subtype'.  The length
+corresponds to the length of the object in bytes (excluding the
+header).  The following is a list of the required subtypes:
+
+VECTOR, SYMBOL, PORT, RATNUM, COMPNUM, STRING, BIGNUM, FLONUM
+
+SUBTYPED objects are all vector-like.  They are subdivided into 2
+classes: object-vectors (those whose elements are objects) and
+byte-vectors (those that contain binary information).  The key
+difference between these is that the first type has to be scanned by
+the GC and the second doesn't.  There must be reserved ranges of
+subtypes for the creation of both new object-vector and byte-vector
+object types.  These ranges are back end dependent.
+
+Closures (i.e. special PROCEDURE objects) have two parts.  The first
+part contains binary data that is not scanned by the GC.  The second
+part holds the closed variables of the closure and is thus scanned by
+the GC.  The length of the first part is constant and is back end
+dependent.
+
+
+2. Notes on implementation
+--------------------------
+
+The abstract representation leaves a certain amount of freedom to the
+implementor so that representation decisions can be tailored to each
+target machine.  What follows is a sample implementation for the M68000.
+
+First of all, we can choose encodings to be 32 bits wide (the length of
+a C `long'), using the lower 3 bits for the type tag and the upper
+29 for the data field.
+
+We can then elect to allocate memory allocated objects at addresses that
+are multiples of 8.  This should not waste too much memory as pairs
+neatly fit in 8 bytes and 2 bytes are wasted on the average per
+object-vector.  The address of a memory allocated object thus has the 3
+bits `000' in the type field.  The encoding of memory allocated objects
+can thus be the address of the start of the object plus the type tag
+in the lower 3 bits.  This has the advantage that no addressing range
+is lost and the address of a slot in an object can be computed simply
+by adding an offset to the object encoding.
+
+We can also be clever in the selection of the type tags.  For example,
+we could choose the following:
+
+000 FIXNUM        001 WEAK_PAIR     010 PROCEDURE     011 SUBTYPED
+100 PAIR          101 PLACEHOLDER   110 not used      111 SPECIAL
+
+The advantages of this mapping are:
+
+  1) Fixnum arithmetic is very simple.  For addition and substraction,
+     just add or substract the encodings themselves.  Multiplication
+     and division require a single extra shift by 3.
+
+  2) Pairs can be represented as: CDR followed by CAR.  This means that
+     the encoding of a pair is the address of the CAR of the pair.
+     Thus, `address register indirect' addressing can be used to access
+     the CAR and `address register indirect with predecrement' addressing
+     can be used to access the CDR.  Both of these are efficient
+     addressing modes on the M68000.
+
+  3) Type tags can be tested in a single instruction.  This is done with
+     a `btst' (bit-test) instruction and a couple of data registers that
+     contain masks.  For example, if register d1 must be tested for
+     `pair?' and register d7 always contains the `pair mask' value
+     11101111111011111110111111101111, then the instruction sequence
+
+        btst d1,d7
+        beq  xxx
+
+     will jump to `xxx' if register d1 is a pair.  The mask for
+     placeholders is 11011111110111111101111111011111.  Note that these
+     two values are in fact valid encodings of SPECIAL objects and we
+     could choose:
+
+        pair mask        = encoding of #f
+        placeholder mask = encoding of ()
+
+     Tests for `falseness' and `null?' would then be very efficient if
+     these two masks are in fact kept in registers.
+
+  4) If the entry point of procedures is at an offset of 2 off of the
+     start of the procedure object then jumps to procedures can be
+     performed by a direct jump to the encoding of the procedure.  This
+     respects the M68000 restriction that only even addresses can be jumped
+     to.  Note that this will require careful alignment of the procedure
+     entry points (and return addresses which are also `procedures') to
+     addresses having 010 in the lower 3 bits.
+
+  5) The format of SUBTYPED objects can be defined as:
+
+                               upper 24 bits       lower 8 bits
+        start of     +---------+---------+---------+---------+
+        object   --> |   length of data in bytes   | subtype |  header
+                     +---------+---------+---------+---------+
+                     |  object 0    (or first 4 bytes)       | \
+                     +---------------------------------------+ |
+                     |  object 1    (or next 4 bytes)        | | data
+                     +---------------------------------------+ |
+                     | ...                                   | /
+                     +---------------------------------------+
+                      <-------------- 32 bits -------------->
+
+     where `subtype' = n*8 with `n' in the range 0..15 for object-vectors
+     and in the range 16..31 for byte-vectors.  It is then fairly easy to get
+     the subtype and the length information.  The encoding of a SUBTYPED
+     object is the address of the subtype information so `address register
+     indirect' addressing can be used to get the subtype.  The length of an
+     object-vector (in fixnum format) is the header shifted right by 7.
+     For a byte vector, a shift of 5 followed by a resetting of the lower
+     3 bits to 0 is needed.
+
+Similar implementation tricks can be used for other machines to take
+advantage of their architecture and instruction set.
+
+
+3. Interface to the object representation
+-----------------------------------------
+
+The interface to the object representation is defined through global
+variable bindings that all back ends must have.  Some of these
+bindings are to procedures (which we will call primitives).
+The primitives described are not expected to check for error
+conditions (e.g. type and bounds checks).  The names of the global
+variables used are prefixed by `##' so that they reside in a different
+name space than the identifiers available to the user.
+
+
+Miscellaneous
+
+  (##NOT x)                 #t if x is false, else #f
+
+  (##EQ? x y)               #t if encoding of x and y are the same, else #f
+
+
+Type tags
+
+  (##TYPE obj)              Returns the fixnum equal to type tag of `obj'.
+                            E.g. (##type "") --> SUBTYPED type tag.
+
+  (##TYPE-CAST obj tag)     Returns the `data' field of `obj' with `tag'
+                            in the `type tag' field.
+                            E.g. (##type-cast x (##type 0)) --> fixnum
+                            equal to data field part of encoding of x.
+                            Notice that it is safe to convert a memory
+                            allocated object into a scalar type, but
+                            generally not the reverse.
+
+
+Subtype tags
+
+  (##SUBTYPE obj)           Returns fixnum equal to subtype tag of SUBTYPED
+                            object `obj'.
+                            E.g. (##subtype "hi") --> subtype of strings.
+
+  (##SUBTYPE-SET! obj tag)  Changes the subtype of the SUBTYPED object `obj'
+                            to `tag' and returns `obj'.
+
+
+Pairs and weak pairs
+
+  (##CONS x y)              Same as (cons x y).
+  (##SET-CAR! x val)        Same as (set-car! x val) but returns `x'.
+  (##SET-CDR! x val)        Same as (set-cdr! x val) but returns `x'.
+  (##CAR x)                 Same as (car x).
+  (##CDR x)                 Same as (cdr x).
+
+  (##WEAK-CONS x y)         Similar but for weak pairs
+  (##WEAK-SET-CAR! x val)   
+  (##WEAK-SET-CDR! x val)   
+  (##WEAK-CAR x)            
+  (##WEAK-CDR x)            
+
+
+Object vectors
+
+  (##MAKE-VECTOR n val)     Same as (make-vector n val).
+  (##VECTOR-LENGTH x)       Same as (vector-length x).
+  (##VECTOR-REF x i)        Same as (vector-ref x i).
+  (##VECTOR-SET! x i val)   Same as (vector-set! x i val) but returns `x'.
+  (##VECTOR-SHRINK! x n)    Shrinks length of object-vector `x' to `n'
+                            and returns `x'.
+
+
+Byte vectors
+
+  (##MAKE-STRING n val)     Same as (make-string n val).
+  (##STRING-LENGTH x)       Same as (string-length x).
+  (##STRING-REF x i)        Same as (string-ref x i).
+  (##STRING-SET! x i val)   Same as (string-set! x i val) but returns `x'.
+  (##STRING-SHRINK! x n)    Shrinks length of byte-vector `x' to `n'
+                            and returns `x'.
+
+
+Fixnums
+
+(numeric arguments and results are fixnums)
+
+  (##FIXNUM.+ x...)
+  (##FIXNUM.* x...)
+  (##FIXNUM.- x y...)
+  (##FIXNUM.QUOTIENT x y)   
+
+  (##FIXNUM.= x...)
+  (##FIXNUM.< x...)
+
+
+Flonums
+
+(numeric arguments and results are flonums)
+
+  (##FLONUM.+ x...)
+  (##FLONUM.* x...)
+  (##FLONUM.- x y...)
+  (##FLONUM./ x y...)
+
+  (##FLONUM.= x...)
+  (##FLONUM.< x...)
+
+
+Procedures
+
+  (##APPLY p args)
+  (##CALL-WITH-CURRENT-CONTINUATION p)
+
+
+Placeholders
+
+  (##TOUCH x)  Return `x' if it is not a placeholder, otherwise
+               wait until value of `x' is known and return it.
+
+
+Interpreter related
+
+  (##GLOBAL-VAR name)            Return index of global var. `name'
+  (##GLOBAL-VAR-REF index)       Reference a global var. using its index
+  (##GLOBAL-VAR-SET! index val)  Assign value to a global var. using its index

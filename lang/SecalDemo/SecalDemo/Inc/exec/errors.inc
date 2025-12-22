@@ -1,0 +1,8 @@
+def IOERR_OPENFAIL = (-1);
+def IOERR_ABORTED = (-2);
+def IOERR_NOCMD = (-3);
+def IOERR_BADLENGTH = (-4);
+def IOERR_BADADDRESS = (-5);
+def IOERR_UNITBUSY = (-6);
+def IOERR_SELFTEST = (-7);
+

@@ -1,0 +1,132 @@
+
+			   QINT DOCUMENTATION
+
+	    Matthew Dillon
+
+	    dillon@ucbvax.berkeley.edu	ARPA
+	    ...!ihnp4!ucbvax!dillon	USENET
+
+NOTE!!!!!   Lattice Users must replace the 'jsr _geta4' call with the
+	    appropriate call to retrieve the address register for the
+	    small data model before compiling!	You might have to make
+	    other modifications as well (I don't know since I don't
+	    have Lattice).
+
+
+The Calls:
+	char oldpri;	    range -128 to 127
+	char newpri;
+	char pri;
+	long signum;	    0 .. 31
+
+	void (*vector)();   function vector returning nothing
+	void (*oldvec)();
+
+
+    While active Q interrupt vectors exist, the tc_ExceptCode in the
+    task structure will be modified.  The old tc_ExceptCode is used if
+    an unknown exception occurs (one that is not a Q interrupt).
+
+    oldpri = SetQPri(newpri)
+
+	Set the task's current Q priority.  Any Q interrupts of lower or
+	equal priority that occur will be queued until the priority is
+	dropped sufficiently.
+
+	The initial task priority is -128 (essentially allowing all Q
+	interrupts -127 to 127 to occur).
+
+    oldvec = SetQVector(signum, vector, arg, pri)
+
+	If vector is non-null, enables the exception at the specified
+	priority (-127 to 127).  specified vector is called in a C
+	compatible way with one user argument (arg).  Specifying a
+	priority of -128 does not make sense because this is the lowest
+	allowed priority and the Q interrupt will thus never occur.
+
+	If vector is null, the exception and Q interrupt is disabled.
+	After the last Q interrupt is removed, tc_ExceptCode is restored
+	to its original value.
+
+
+BUGS:
+	The only bug that I know of is a problem with EXEC.
+
+	What is Good:	An exception will not occur while one is Forbid()n
+	What is Bad:	If an exception comes in while Forbid()n, it will
+			NOT be immediately entered when you Permit().
+
+	Whoops.  The exception *will* occur when EXEC next checks its
+	signals and exceptions, which occurs on the obvious EXEC library
+	calls (SetExcept(), SetSignal(), etc...)  and perhaps Wait().
+
+	In most cases you can ignore the problem.
+
+
+GENERAL WORKINGS OF Q INTERRUPTS:
+
+	If you know how EXEC signals and the 68000 interrupt structure
+	works, then you know how Q interrupts work.  Simply replace
+	"processor" with "task" and "0-7" with "-128 to 127" for task
+	Q interrupt priorities (this is different from the Task's
+	scheduler priority).
+
+	Q interrupts work just like 68000 interrupts.  If the task is
+	currently running at a Q interrupt priority N, only Q interrupts
+	of HIGHER priority can occur.  Q interrupts of LOWER OR EQUAL
+	priority are queued and will occur as soon as the priority is
+	lowered.  Everything occurs in priority order, the highest priority
+	pending interrupt is always the one running (or the task's main
+	routine if it has the highest priority).
+
+	Thus, while a Q interrupt handler is running at some specific
+	priority, other Q interrupts at the same priority will wait
+	until the first one finishes and then execute in a FIFO fashion.
+
+THE INTERRUPT VECTOR ROUTINE:
+
+	A specific Q interrupt vector is a C subroutine called with one
+	longword argument (that specified when you SetQVector()'d it).
+	This works fine with the small model.
+
+	The handler runs with all normal EXEC processing enabled, and in
+	the context of its task.  It can be viewed almost as a subroutine
+	call from the task.  However, you must be careful about the
+	reentrancy of certain functions.  STDIO, DOS, and many other
+	library calls are not reentrant, and you must use SetQPri() to
+	ensure such calls are not interrupted.	NOTE that you CAN mix
+	certain calls.	I don't have much info on what combinations work,
+	but certainly most library calls that do not depend on being
+	called singularly from tasks will work (for example, GetMsg()).
+	And, of course, if all your handler does is make some small
+	calculations this can interrupt anything.
+
+	If you cause an exception (the same exception) from within the
+	handler, it will be remembered.  (That is, the signal is cleared
+	before the handler is called), and occur after your handler
+	returns.
+
+USES FOR Q INTERRUPTS:
+
+	Use #1:     To be able to execute menu options which do not effect
+		    the 'current' operation.  E.G. if you are doing a
+		    ray tracing you could make the intuition window's
+		    signal bit a Q interrupt and handle Intuition messages
+		    that way....   The main loop generating the ray
+		    tracing would not have to continuously check for
+		    Intuition messages.
+
+	Use #2:     Lets say you are writing a terminal program and want
+		    to display data comming in smoothly while sending a
+		    file.  While this can be done easily with the
+		    asynchronous ability of IO devices, it would be even
+		    easier if you handled the receive with a Q interrupt...
+		    that way, you could display received data (SendIO to
+		    the console device) even if the file sender is in
+		    the middle of a DOS call to read the next file block.
+
+	Many more uses (I hope!).
+
+			    -Matt
+
+

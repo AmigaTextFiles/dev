@@ -1,0 +1,350 @@
+/* blocktube, Copyright (c) 2003 Lars Damerow <lars@oddment.org>
+ *
+ * Based on Jamie Zawinski's original dangerball code.
+ *
+ * Ported to Hollywood by Andreas Falkenhahn
+ *
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation.  No representations are made about the suitability of this
+ * software for any purpose.  It is provided "as is" without express or 
+ * implied warranty.
+ */
+
+@VERSION 6,0
+
+@REQUIRE "glgalore"
+
+@BRUSH 1, "texture.png"
+
+@DISPLAY {Sizeable = True, Title = "BlockTube"}
+
+Const #DEF_HOLDTIME = 1000
+Const #DEF_CHANGETIME = 200
+Const #MAX_ENTITIES = 1000
+Const #DEF_TEXTURE = True
+Const #DEF_FOG = True
+
+holdtime = #DEF_HOLDTIME
+changetime = #DEF_CHANGETIME
+do_texture = #DEF_TEXTURE
+do_fog = #DEF_FOG
+
+Function p_LoadGLTextures(lp)
+	
+	Local tmp = gl.GenTextures(1)
+	lp.envTexture = tmp[0]
+	
+    	gl.BindTexture(#GL_TEXTURE_2D, lp.envTexture)
+    	gl.TexImageFromBrush(0, 1)
+    	
+        gl.TexParameter(#GL_TEXTURE_2D, #GL_TEXTURE_MIN_FILTER, #GL_LINEAR)
+        gl.TexParameter(#GL_TEXTURE_2D, #GL_TEXTURE_MAG_FILTER, #GL_LINEAR)
+        gl.TexGen(#GL_S, #GL_TEXTURE_GEN_MODE, #GL_SPHERE_MAP)
+        gl.TexGen(#GL_T, #GL_TEXTURE_GEN_MODE, #GL_SPHERE_MAP)
+
+EndFunction
+
+Function p_NewTargetColor(lp)
+
+	Local luminance = 0
+
+	While luminance <= 150
+        	lp.targetR = Rnd(256)
+        	lp.targetG = Rnd(256)
+        	lp.targetB = Rnd(256)
+        	lp.deltaR = (lp.targetR - lp.currentR) / changetime
+        	lp.deltaG = (lp.targetG - lp.currentG) / changetime
+        	lp.deltaB = (lp.targetB - lp.currentB) / changetime
+        	luminance = 0.3 * lp.targetR + 0.59 * lp.targetG + 0.11 * lp.targetB
+   	Wend
+
+EndFunction
+
+Function p_RandomizeEntity(lp, ent)
+
+	ent.id = lp.nextID
+   	ent.tVal = 1 - (RndF() / 1.5)
+    	ent.age = 0
+    	ent.lifetime = 100
+    	ent.angle = Rnd(360)
+    	ent.angularVelocity = 0.5 - RndF()
+
+    	ent.position = {}
+    	ent.position[0] = RndF() + lp.tunnelWidth
+    	ent.position[1] = RndF() * 2
+    	ent.position[2] = -RndF() * lp.tunnelLength
+    	
+	lp.nextID = lp.nextID + 1
+
+EndFunction
+
+Function p_EntityTick(lp, ent)
+
+	ent.angle = ent.angle + ent.angularVelocity
+    	ent.position[2] = ent.position[2] + 0.1
+    	If ent.position[2] > lp.zoom Then ent.position[2] = -lp.tunnelLength + RndF() * 20
+	ent.age = ent.age + 0.1
+
+EndFunction
+
+Function p_Tick(lp)
+	
+	lp.counter = lp.counter - 1
+	
+    	If Not lp.counter
+    		
+        	If Not lp.changing
+            		p_NewTargetColor(lp)
+            		lp.counter = changetime
+            	Else	
+			lp.counter = holdtime
+        	EndIf
+        	
+        	lp.changing = Not lp.changing
+
+        ElseIf lp.changing
+        	
+            lp.currentR = lp.currentR + lp.deltaR
+            lp.currentG = lp.currentG + lp.deltaG
+            lp.currentB = lp.currentB + lp.deltaB
+            
+        EndIf
+
+EndFunction
+
+Function p_InitBlockTube(msg)
+
+	Local fogColor = {0,0,0,1}
+	Local lp = {}
+	
+	lp.nextID = False
+	lp.changing = False
+	lp.zoom = 30
+    	lp.tilt = 4.5
+    	lp.tunnelLength = 200
+    	lp.tunnelWidth = 5
+	lp.block_dlist = gl.GenLists(1)
+    	gl.NewList(lp.block_dlist, #GL_COMPILE)
+    	lp.polys = p_CubeVertices(0.15, 1.2, 5.25)
+	gl.EndList()
+
+	If do_texture
+		p_LoadGLTextures(lp)
+		gl.Enable(#GL_TEXTURE_2D)
+    	EndIf
+
+	; kick on the fog machine
+	If do_fog
+      		gl.Enable(#GL_FOG)
+      		gl.Fog(#GL_FOG_MODE, #GL_LINEAR)
+      		gl.Hint(#GL_FOG_HINT, #GL_NICEST)
+      		gl.Fog(#GL_FOG_START, 0)
+      		gl.Fog(#GL_FOG_END, lp.tunnelLength / 1.8)
+      		gl.Fog(#GL_FOG_COLOR, fogColor)
+      		gl.Hint(#GL_PERSPECTIVE_CORRECTION_HINT, #GL_NICEST)
+    	EndIf
+    	
+    	gl.ShadeModel(#GL_SMOOTH)
+    	gl.Enable(#GL_DEPTH_TEST)
+    	gl.Enable(#GL_CULL_FACE)
+    	gl.ClearDepth(1.0)
+
+	If Not do_texture
+		
+		; If there is no texture, the boxes don't show up without a light.
+		; Though I don't understand why all the blocks come out gray.
+       
+      		Local pos = {0.0, 1.0, 1.0, 0.0}
+      		Local amb = {0.2, 0.2, 0.2, 1.0}
+     		Local dif = {1.0, 1.0, 1.0, 1.0}
+      		Local spc = {1.0, 1.0, 1.0, 1.0}
+      		
+      		gl.Light(#GL_LIGHT0, #GL_POSITION, pos)
+      		gl.Light(#GL_LIGHT0, #GL_AMBIENT, amb)
+      		gl.Light(#GL_LIGHT0, #GL_DIFFUSE, dif)
+      		gl.Light(#GL_LIGHT0, #GL_SPECULAR, spc)
+      		gl.Enable(#GL_LIGHTING)
+      		gl.Enable(#GL_LIGHT0)
+    	EndIf
+
+    	lp.counter = holdtime
+    	lp.currentR = Rnd(256)
+    	lp.currentG = Rnd(256)
+    	lp.currentB = Rnd(256)
+    	p_NewTargetColor(lp)
+    	
+    	lp.entities = {}
+	For Local loop = 0 To #MAX_ENTITIES - 1
+		lp.entities[loop] = {}
+		p_RandomizeEntity(lp, lp.entities[loop])
+    	Next
+    	
+    	p_Reshape(msg)
+    	
+	gl.Flush()
+    
+	lps = lp
+
+EndFunction
+
+Function p_Reshape(msg)
+
+    	Local h = msg.height / msg.width
+
+	gl.Viewport(0, 0, msg.width, msg.height)
+	gl.MatrixMode(#GL_PROJECTION)
+    	gl.LoadIdentity()
+    	glu.Perspective(45.0, 1/h, 1.0, 100.0)
+    	gl.MatrixMode(#GL_MODELVIEW)
+
+EndFunction
+
+Function p_CubeVertices(x, y, z)
+
+	Local polygon_count = 0
+	Local nv = 0.7
+    	Local x2 = x/2
+    	Local y2 = y/2
+    	Local z2 = z/2
+
+    	gl.FrontFace(#GL_CW)
+
+    	gl.Normal(0, 0, nv)
+    	gl.Begin(#GL_QUADS)
+    	gl.TexCoord(0.0, 0.0)
+    	gl.Vertex(-x2,  y2,  z2)
+    	gl.TexCoord(1.0, 0.0)
+    	gl.Vertex( x2,  y2,  z2)
+    	gl.TexCoord(1.0, 1.0)
+    	gl.Vertex( x2, -y2,  z2)
+    	gl.TexCoord(0.0, 1.0)
+    	gl.Vertex(-x2, -y2,  z2)
+    	polygon_count = polygon_count + 1
+	gl.End()
+
+	gl.Normal(0, 0, -nv)
+    	gl.Begin(#GL_QUADS)
+    	gl.TexCoord(1.0, 0.0)
+    	gl.Vertex(-x2, -y2, -z2)
+    	gl.TexCoord(1.0, 1.0)
+    	gl.Vertex( x2, -y2, -z2)
+    	gl.TexCoord(0.0, 1.0)
+    	gl.Vertex( x2,  y2, -z2)
+    	gl.TexCoord(0.0, 0.0)
+    	gl.Vertex(-x2,  y2, -z2)
+    	polygon_count = polygon_count + 1
+	gl.End()
+
+    	gl.Normal(0, nv, 0)
+    	gl.Begin(#GL_QUADS)
+    	gl.TexCoord(0.0, 1.0)
+    	gl.Vertex(-x2,  y2, -z2)
+    	gl.TexCoord(0.0, 0.0)
+    	gl.Vertex( x2,  y2, -z2)
+    	gl.TexCoord(1.0, 0.0)
+    	gl.Vertex( x2,  y2,  z2)
+    	gl.TexCoord(1.0, 1.0)
+    	gl.Vertex(-x2,  y2,  z2)
+    	polygon_count = polygon_count + 1
+	gl.End()
+
+    	gl.Normal(0, -nv, 0)
+    	gl.Begin(#GL_QUADS)
+    	gl.TexCoord(1.0, 1.0)
+    	gl.Vertex(-x2, -y2, -z2)
+    	gl.TexCoord(0.0, 1.0)
+    	gl.Vertex(-x2, -y2,  z2)
+    	gl.TexCoord(0.0, 0.0)
+    	gl.Vertex( x2, -y2,  z2)
+    	gl.TexCoord(1.0, 0.0)
+    	gl.Vertex( x2, -y2, -z2)
+    	polygon_count = polygon_count + 1
+	gl.End()
+
+    	gl.Normal(nv, 0, 0)
+    	gl.Begin(#GL_QUADS)
+    	gl.TexCoord(1.0, 0.0)
+    	gl.Vertex( x2, -y2, -z2)
+    	gl.TexCoord(1.0, 1.0)
+    	gl.Vertex( x2, -y2,  z2)
+    	gl.TexCoord(0.0, 1.0)
+    	gl.Vertex( x2,  y2,  z2)
+    	gl.TexCoord(0.0, 0.0)
+    	gl.Vertex( x2,  y2, -z2)
+    	polygon_count = polygon_count + 1
+	gl.End()
+
+    	gl.Normal(-nv, 0, 0)
+    	gl.Begin(#GL_QUADS)
+    	gl.TexCoord(0.0, 0.0)
+    	gl.Vertex(-x2, -y2, -z2)
+    	gl.TexCoord(1.0, 0.0)
+    	gl.Vertex(-x2,  y2, -z2)
+    	gl.TexCoord(1.0, 1.0)
+    	gl.Vertex(-x2,  y2,  z2)
+    	gl.TexCoord(0.0, 1.0)
+    	gl.Vertex(-x2, -y2,  z2)
+    	polygon_count = polygon_count + 1
+	gl.End()
+
+    	Return(polygon_count)
+
+EndFunction
+
+Function p_DrawBlock(lp)
+	gl.CallList(lp.block_dlist)
+EndFunction
+
+Function p_DrawBlockTube(lp)
+	
+	gl.Clear(#GL_COLOR_BUFFER_BIT|#GL_DEPTH_BUFFER_BIT)
+
+	If do_texture
+      		gl.Enable(#GL_TEXTURE_GEN_S)
+      		gl.Enable(#GL_TEXTURE_GEN_T)
+     		gl.BindTexture(#GL_TEXTURE_2D, lp.envTexture)
+    	EndIf
+
+	For Local loop = 0 To #MAX_ENTITIES - 1
+
+       		Local cEnt = lp.entities[loop]
+
+        	gl.LoadIdentity()
+        	gl.Translate(0.0, 0.0, lp.zoom)
+        	gl.Rotate(lp.tilt, 1.0, 0.0, 0.0)
+        	gl.Rotate(cEnt.angle, 0.0, 0.0, 1.0)
+        	gl.Translate(cEnt.position[0], cEnt.position[1], cEnt.position[2])
+        	gl.Color((lp.currentR * cEnt.tVal) / 255, (lp.currentG * cEnt.tVal) / 255, (lp.currentB * cEnt.tVal) / 255, 255)
+        	p_DrawBlock(lp)
+        	p_EntityTick(lp, cEnt)
+    	Next
+    	
+    	p_Tick(lp)
+
+	gl.Finish()
+
+EndFunction
+
+p_InitBlockTube({width = 640, height = 480})
+
+InstallEventHandler({SizeWindow = Function(msg) p_Reshape(msg) EndFunction,
+	ModeSwitch = Function(msg) p_InitBlockTube(msg) EndFunction})
+
+; Setup a hardware doublebuffer managed by GL Galore	
+BeginDoubleBuffer(True)
+
+EscapeQuit(True)
+
+Repeat
+	DisableLineHook()
+	p_DrawBlockTube(lps)
+	EnableLineHook()
+	
+	; Swap buffers
+	Flip
+
+	CheckEvent
+Forever

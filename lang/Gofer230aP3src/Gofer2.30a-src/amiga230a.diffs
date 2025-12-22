@@ -1,0 +1,337 @@
+diff --context orig/cmachine.c amiga/cmachine.c
+*** orig/cmachine.c	Thu Jun 23 17:00:00 1994
+--- amiga/cmachine.c	Thu Sep 01 08:13:33 1994
+***************
+*** 23,28 ****
+--- 23,30 ----
+  #else
+  #if     RISCOS
+  #define GOFC_INCLUDE "\"Lib:h.gofc\""
++ #elif   (S_AMISAS | R_AMISAS | L_AMISAS)
++ #define GOFC_INCLUDE  "\"gofc.h\""
+  #else
+  #define GOFC_INCLUDE  "\"/usr/local/lib/Gofer/gofc.h\""
+  #endif
+diff --context orig/commonui.c amiga/commonui.c
+*** orig/commonui.c	Thu Jun 23 17:00:00 1994
+--- amiga/commonui.c	Mon Aug 22 14:56:25 1994
+***************
+*** 273,279 ****
+      }
+      else
+  	for (charCount=0; *what; charCount++)
+! 	    putchar(*what++);
+      fflush(stdout);
+  }
+  
+--- 273,279 ----
+      }
+      else
+  	for (charCount=0; *what; charCount++)
+! 	    fputc(*what++, stdout);
+      fflush(stdout);
+  }
+  
+diff --context orig/machdep.c amiga/machdep.c
+*** orig/machdep.c	Thu Jun 23 17:00:00 1994
+--- amiga/machdep.c	Tue Sep 20 13:37:44 1994
+***************
+*** 58,63 ****
+--- 58,78 ----
+  #include <sys/stat.h>
+  #endif
+  
++ #if (S_AMISAS | R_AMISAS | L_AMISAS)
++ #include <exec/types.h>
++ #include <stdlib.h>
++ #include <stdio.h>
++ #include <signal.h>
++ #include <fcntl.h>
++ #include <sys/types.h>
++ #include <sys/stat.h>
++ #include <dos.h>
++ #ifndef MACHDEP_RUNTIME
++ __near long __stack = 25000L;
++ unsigned char amigabreak = 0;
++ #endif
++ #endif
++ 
+  /* --------------------------------------------------------------------------
+   * Machine dependent code is used in each of:
+   *	- The gofer interpreter		MACHDEP_GOFER
+***************
+*** 355,364 ****
+--- 370,462 ----
+  static Bool terminalEchoReqd = TRUE;
+  
+  #if (MACHDEP_GOFER | MACHDEP_GOFC)
++ #if (S_AMISAS | R_AMISAS | L_AMISAS)
++ Int getTerminalWidth() {
++     int lm, rm;
++     int c;
++ 
++     if (amigaIsTrueConsole() && rawcon(1) == 0) {
++         printf("%c%s",0x9B,"0 q");	/* Request window size report. */
++ 	/*
++ 	 * Now read the size report.
++ 	 * <CSI>1;1;<bottom>;<right>r
++ 	 */
++ 	c = getchar();
++ 	for (;;) {
++             if (c != 0x9B) {		/* <CSI>                       */
++                 c = getchar();
++                 continue;
++             }
++             if (!isdigit(c = getchar()))
++ 	        continue;		/* Top margin (not used).      */
++ 	    while (isdigit(c = getchar()))
++ 	        ;
++ 	    if (c != ';')
++                 continue;		/* ';' seperator.              */
++ 	    if (!isdigit(c = getchar()))
++ 	        continue;		/* Left margin.                */
++             lm = c - '0';
++             while (isdigit(c = getchar()))
++                 lm = lm * 10 + c - '0';
++             if (c != ';')
++                 continue;		/* ';' seperator.              */
++             if (!isdigit(c = getchar()))
++                 continue;		/* Bottom margin (not used).   */
++             while (isdigit(c = getchar()))
++                 ;
++             if (c != ';')
++                 continue;		/* ';' seperator.              */
++             if (!isdigit(c = getchar()))
++                 continue;		/* Right margin.               */
++             rm = c - '0';
++             while (isdigit(c = getchar()))
++                 rm = rm * 10 + c - '0';
++             if (c != ' ')
++                 continue;		/* " r" terminator.            */
++             if ((c = getchar()) != 'r')
++                 continue;
++ 	    break;
++         }
++         if (terminalEchoReqd) rawcon(0);
++         return rm - lm + 1;
++     }
++     else
++         return 77;			/* Anybody's guess...		   */
++ }
++ #else
+  Int getTerminalWidth() {		/* PC screen is fixed 80 chars	   */
+      return 80;
+  }
+  #endif
++ #endif
++ 
++ #if (S_AMISAS | R_AMISAS | L_AMISAS)
++ 
++ Void normalTerminal() {			/* restore terminal initial state  */
++     terminalEchoReqd = TRUE;
++     rawcon(0);
++ }
++ 
++ Void noechoTerminal() {			/* turn terminal echo on/off	   */
++     terminalEchoReqd = FALSE;
++     rawcon(1);
++ }
++ 
++ Int readTerminalChar() {		/* read character from terminal	   */
++     Int c = getchar();
++     /*
++      * This circumvents a problem with
++      * Gofer code like  'run (map toUpper)'
++      */
++     if (c == 3) {			/* Ctrl-C is swallowed raw        */
++         normalTerminal();		/* turn echo on                   */
++ 	raise(SIGINT);
++ 	c = '\n';			/* is this reasonable?            */
++     }
++     return c=='\r' ? '\n' : c;
++ }
++ 
++ #else
+  
+  Void normalTerminal() {			/* restore terminal initial state  */
+      terminalEchoReqd = TRUE;
+diff --context orig/prelude.h amiga/prelude.h
+*** orig/prelude.h	Thu Jun 23 17:00:00 1994
+--- amiga/prelude.h	Tue Sep 20 14:08:19 1994
+***************
+*** 30,39 ****
+  #define OS2      0	/* For IBM OS/2 2.0 using EMX GCC		   */
+  #define SUNOS    0      /* For Sun 3/Sun 4 running SunOs 4.x		   */
+  #define MIPS	 0	/* For MIPS RC6280/Sony machine NWS-3870	UN */
+! #define NEXTSTEP 1      /* For NeXTstep 3.0 using NeXT cc		   */
+  #define NEXTGCC  0	/* For NeXTstep with gcc 2.x, doesn't work w/ NS3.2*/
+  #define MINIX68K 0	/* For Minix68k with gcc			UN */
+! #define AMIGA    0	/* For Amiga using gcc 2.2.2			UN */
+  #define HPUX     0      /* For HPUX using gcc				   */
+  #define LINUX    0      /* For Linux using gcc				UN */
+  #define RISCOS   0	/* For Acorn DesktopC and RISCOS2 or 3		   */
+--- 30,42 ----
+  #define OS2      0	/* For IBM OS/2 2.0 using EMX GCC		   */
+  #define SUNOS    0      /* For Sun 3/Sun 4 running SunOs 4.x		   */
+  #define MIPS	 0	/* For MIPS RC6280/Sony machine NWS-3870	UN */
+! #define NEXTSTEP 0      /* For NeXTstep 3.0 using NeXT cc		   */
+  #define NEXTGCC  0	/* For NeXTstep with gcc 2.x, doesn't work w/ NS3.2*/
+  #define MINIX68K 0	/* For Minix68k with gcc			UN */
+! #define S_AMISAS 0      /* For Amiga using SAS/C 6.51 (16bit small)        */
+! #define R_AMISAS 1      /* For Amiga using SAS/C 6.51 (32bit regular)      */
+! #define L_AMISAS 0      /* For Amiga using SAS/C 6.51 (32bit large)        */
+! #define AMIGAGCC 0      /* For Amiga using gcc 2.2.2                    UN */
+  #define HPUX     0      /* For HPUX using gcc				   */
+  #define LINUX    0      /* For Linux using gcc				UN */
+  #define RISCOS   0	/* For Acorn DesktopC and RISCOS2 or 3		   */
+***************
+*** 80,105 ****
+   *   FIXED_SUBST    to force a fixed size for the current substitution
+   *-------------------------------------------------------------------------*/
+  
+! #define UNIX		(SUNOS  | NEXTSTEP | HPUX | NEXTGCC | LINUX | AMIGA | \
+  			 MINIX68K | ALPHA | OS2 | SVR4 | ULTRIX | AIX | MIPS |\
+  			 SGI4 | NETBSD)
+! #define SMALL_GOFER	(TURBOC | BCC)
+! #define REGULAR_GOFER	(RISCOS | DJGPP | ZTC | ATARI)
+! #define LARGE_GOFER	(UNIX   | WATCOM)
+  #define JMPBUF_ARRAY	(UNIX   | DJGPP | RISCOS | ZTC | ATARI)
+! #define DOS_IO		(TURBOC | BCC | DJGPP | ZTC | WATCOM | ATARI)
+  #define TERMIO_IO	(LINUX  | HPUX | OS2 | SVR4 | SGI4)
+! #define SGTTY_IO	(SUNOS  | NEXTSTEP | NEXTGCC | AMIGA | MINIX68K | \
+  			 ALPHA  | ULTRIX | AIX | MIPS)
+  #define TERMIOS_IO      (NETBSD)
+! #define BREAK_FLOATS	(TURBOC | BCC)
+  #define HAS_FLOATS	(REGULAR_GOFER | LARGE_GOFER | BREAK_FLOATS)
+  
+  #define HASKELL_ARRAYS	(REGULAR_GOFER | LARGE_GOFER)
+  #define IO_MONAD	(REGULAR_GOFER | LARGE_GOFER)
+  #define IO_DIALOGUE	1 /* Warning: This may become 0 in future versions */
+  #define NPLUSK		1 /* Warning: This may become 0 in future versions */
+! #define DO_COMPS	0 /* Warning: This may become 1 in future versions */
+  #define FIXED_SUBST	0 /* Warning: This may not be appropriate for PCs  */
+  
+  /*---------------------------------------------------------------------------
+--- 83,109 ----
+   *   FIXED_SUBST    to force a fixed size for the current substitution
+   *-------------------------------------------------------------------------*/
+  
+! #define UNIX		(SUNOS  | NEXTSTEP | HPUX | NEXTGCC | LINUX | AMIGAGCC | \
+  			 MINIX68K | ALPHA | OS2 | SVR4 | ULTRIX | AIX | MIPS |\
+  			 SGI4 | NETBSD)
+! #define SMALL_GOFER	(TURBOC | BCC | S_AMISAS)
+! #define REGULAR_GOFER	(RISCOS | DJGPP | ZTC | R_AMISAS | ATARI)
+! #define LARGE_GOFER	(UNIX   | WATCOM | L_AMISAS)
+  #define JMPBUF_ARRAY	(UNIX   | DJGPP | RISCOS | ZTC | ATARI)
+! #define DOS_IO		(TURBOC | BCC | DJGPP | ZTC | WATCOM | ATARI | \
+!                          S_AMISAS | R_AMISAS | L_AMISAS)
+  #define TERMIO_IO	(LINUX  | HPUX | OS2 | SVR4 | SGI4)
+! #define SGTTY_IO	(SUNOS  | NEXTSTEP | NEXTGCC | AMIGAGCC | MINIX68K | \
+  			 ALPHA  | ULTRIX | AIX | MIPS)
+  #define TERMIOS_IO      (NETBSD)
+! #define BREAK_FLOATS	(TURBOC | BCC | S_AMISAS)
+  #define HAS_FLOATS	(REGULAR_GOFER | LARGE_GOFER | BREAK_FLOATS)
+  
+  #define HASKELL_ARRAYS	(REGULAR_GOFER | LARGE_GOFER)
+  #define IO_MONAD	(REGULAR_GOFER | LARGE_GOFER)
+  #define IO_DIALOGUE	1 /* Warning: This may become 0 in future versions */
+  #define NPLUSK		1 /* Warning: This may become 0 in future versions */
+! #define DO_COMPS	1 /* Warning: This may become 1 in future versions */
+  #define FIXED_SUBST	0 /* Warning: This may not be appropriate for PCs  */
+  
+  /*---------------------------------------------------------------------------
+***************
+*** 195,201 ****
+  #define farCalloc(n,s)	(Void *)valloc(((unsigned)n)*((unsigned)s))
+  #endif
+  
+! #if     AMIGA
+  #include <stdlib.h>
+  #define	Main		int
+  #define	far
+--- 199,205 ----
+  #define farCalloc(n,s)	(Void *)valloc(((unsigned)n)*((unsigned)s))
+  #endif
+  
+! #if     AMIGAGCC
+  #include <stdlib.h>
+  #define	Main		int
+  #define	far
+***************
+*** 213,218 ****
+--- 217,233 ----
+  #define  far
+  #endif
+  
++ #if     (S_AMISAS | R_AMISAS | L_AMISAS)
++ #include <stdlib.h>
++ #define far
++ #define farCalloc(n,s)        (Void *)calloc ((unsigned)n, (unsigned)s)
++ /*
++  * This allowBreak() only checks every 64 times it is called:
++  */
++ extern unsigned char amigabreak;
++ #define allowBreak() if (!(amigabreak -= 4)) chkabort()
++ #endif
++ 
+  #if	RISCOS
+  #include <string.h>
+  #include <stdlib.h>
+***************
+*** 256,262 ****
+  #define MainDone
+  #endif
+  
+! #if (UNIX | DJGPP | RISCOS | ZTC | WATCOM | ATARI)
+  #define ctrlbrk(bh)	   signal(SIGINT,bh)
+  #endif
+  
+--- 271,277 ----
+  #define MainDone
+  #endif
+  
+! #if (UNIX | DJGPP | RISCOS | ZTC | S_AMISAS | R_AMISAS | L_AMISAS | WATCOM | ATARI)
+  #define ctrlbrk(bh)	   signal(SIGINT,bh)
+  #endif
+  
+***************
+*** 265,271 ****
+--- 280,290 ----
+   *-------------------------------------------------------------------------*/
+  
+  #define Void     void   /* older compilers object to: typedef void Void;   */
++ #if (S_AMISAS | R_AMISAS | L_AMISAS)
++ typedef int Bool;
++ #else
+  typedef unsigned Bool;
++ #endif
+  #define TRUE     1
+  #define FALSE    0
+  typedef char    *String;
+***************
+*** 381,387 ****
+  #endif
+  #endif
+  
+! #define DEF_EDITOR	   "vi"			/* replace with ((char *)0)*/
+! #define DEF_EDITLINE	   "vi +%d %s"		/* if no default editor rqd*/
+! 
+  /*-------------------------------------------------------------------------*/
+--- 400,416 ----
+  #endif
+  #endif
+  
+!   
+! #if (S_AMISAS | R_AMISAS | L_AMISAS)
+! /* I use vim, a nice vi clone    - Torsten
+!  * As far as I know, it's the best vi clone
+!  * available for AmigaDOS.
+!  * It's available in comp.sources.misc
+!  */
+! #define DEF_EDITOR         "vim"
+! #define DEF_EDITLINE       "vim +%d %s"
+! #else
+! #define DEF_EDITOR         "vi"                 /* replace with ((char *)0)*/
+! #define DEF_EDITLINE       "vi +%d %s"          /* if no default editor rqd*/
+! #endif
+  /*-------------------------------------------------------------------------*/

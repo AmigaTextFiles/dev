@@ -1,0 +1,262 @@
+
+
+			M.Meany. Source Documentation
+			~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+ This months contribution consists of a couple of device routines, a random
+number generator and a working version of Dave Edwards Encryption algorithm.
+
+ Devices General
+ ~~~~~~~~~~~~~~~
+ It is worth familiarising yourself with using Devices. Why? Because they
+are the means of access to some low level operations from the multi tasking
+enviroment.
+
+ So what is a device? A device is a collection of routines very similar to
+a library. These routines manage the resource, allocating access to it,
+sending commands to and other such tasks.
+
+ For example, take the audio device. This is a collection of routines that
+you can access to obtain the use of specific sound channels. Other programs
+may still get access to channels that your program does not require.
+
+ Once you have allocated a channel, you can use the device to play a sound
+as you will shortly see.
+
+ Your program communicates with a device via a 'port'. The communications
+consist of a message structure ( or several message structures ) that is
+used to carry information between your program and a device.
+
+
+      _______	       ____	      ______
+     |       |        |    |        |      |
+     |Program|--<-->--|Port|--<-->--|Device|
+     |_______|        |____|        |______|
+
+ In general, you send a message to a device and then wait for the device to
+reply to this message. The message will normaly contain one or more
+commands for the device and the reply will contain information on hoe
+successful the device was in executing the command.
+
+ Most devices use their own for of message structure, though all of these
+are just extensions of the standard message structure. A defenition of a
+device message structure can be found in the appropriate include file. This
+will also contain information on what commands and flags can be passed in
+this structure. Owners of Devpac2 are urged to study the Commodore include
+files found on disk two of the package as these are well commented.
+
+ The 'port' used for communication requires some preperation and for this
+purpose I have used a couple of subroutines sent to me some time ago by
+Dave Edwards. I will point out that arp.library has functions for
+allocating and freeing a port, Workbench 2.04 users get the routines in
+ROM.
+
+ Here is a quick outline in the steps required for device communication:
+
+	1/ Allocate memory for message structure ( This is usualy refered
+	  to as an IO Structure ).
+
+	2/ Obtain a port an link to this structure.
+
+	3/ If useful, set any required fields in IO Structure.
+
+	4/ Open the device.
+
+	5/ Send command to device.
+
+	6/ Wait for reply.
+
+	Keep looping back to 5/ until finished with device.
+
+	7/ Close the device.
+
+	8/ Delete the port.
+
+	9/ Free IO Structure memory ( if necessary ).
+
+ Translating each section above into code and using the audio device for
+this example:
+
+ 1/
+AudioReq	ds.l		aio_SIZEOF	reserve space for structure
+
+ aio_SIZEOF is defined in the include file 'devices/audio.i' and it specifies
+the size of the IO Structure expected by the audio device.
+
+ 2/	move.l		#0,d0			priority
+	lea		portname,a0		name
+	bsr		CreatePort		get a port
+	move.l		d0,MyPort		save pointer
+
+ As you can see from this fragment a port is given a name and a priority.
+Unless you want to bog the system down, set priority to NULL. You can
+specify any name you wish as a NULL terminated text string. 
+
+	lea		AudioReq,a1		a1->IO Structure
+	move.l		MyPort,MN_REPLYPORT(a1)	link port to structure
+
+ The pointer to the port should be placed in the IO Structure at offset
+MN_REPLYPORT. This is true no matter what device you are dealing with.
+
+ 3/ Most devices will preform certain tasks when first opened. For
+information on what device will perform what operations on opening you will
+need to consult either the RKM Libraries & Devices manual or Dave Edwards
+doc disk. The audio device will allocate channels to your program upon
+opening if you request it.
+
+ To request the allocation of channels, you need to specify the command
+ADCMD_ALLOCATE and set a pointer to the channel mask that define what
+channels you are interested in. The command should be placed in the
+IO_COMMAND field as for all other devices and the pointer to your channel
+masks should be in the ioa_Data field.
+
+ You should also set the ADIOF_NOWAIT flag in the IO_FLAGS field. Setting
+this will cause the device to return an error straight away if it could not
+allocate channels for you ( ie. They are being used by another task ). If
+you do not set this flag, the device will wait for a channel you require to
+become free before returning.
+
+ Sounds complicated don't it. In practise all this boils down to:
+
+		move.w		#ADCMD_ALLOCATE,IO_COMMAND(a1)	set command
+		move.b		#ADIOF_NOWAIT,IO_FLAGS(a1)	set flag
+		move.l		#chanmask,ioa_Data(a1)		channel masks
+		move.l		#4,ioa_Length(a1)		how many
+
+ A quick note about the channel masks you supply when requesting a channel.
+Each mask is byte size, but only the lower four bits have any meaning. Set
+a bit to request that channel.
+
+ Each mask you supply will be tried until one is satisfied or there are no
+more masks.
+
+ EG:  request all four channels:	chanmask   dc.b %00001111
+
+      only one mask needed
+
+ EG:  request any two channels:		chanmask   dc.b	%00000011
+						   dc.b	%00000101
+						   dc.b	%00001001
+						   dc.b	%00000110
+						   dc.b %00001010
+						   dc.b %00001100
+      six masks in all
+
+ EG:  request a stereo pair		chanmask   dc.b %00000011
+						   dc.b	%00000101
+						   dc.b	%00001010
+						   dc.b	%00001100
+      four masks in all
+
+ 4/ Now the structure is prepared, we can open the device. This requires a
+call to OpenDevice
+
+	lea		audioname,a0		device name
+	lea		AudioReq,a1		IO Structure
+	moveq.l		#0,d0			unit 0 
+	move.l		d0,d1			flags
+	CALLEXEC	OpenDevice		open audio
+	tst.l		d0			error
+	bne.s		.Error			exit if so
+
+ Note the peculiarity with OpenDevice. It returns a NULL only if the device
+opened without error.
+
+ 5/ If the device opened, we can send commands to it. This is done by
+setting relevant fields in the IO Structure and calling any of the
+following Exec functions:
+
+	DoIO()	post IO Structure and wait for reply (NOT WITH AUDIO DEVICE)
+
+	SendIO() post IO, but don't wait for reply (NOT WITH AUDIO DEVICE)
+
+	BEGINIO	a macro that posts IO without waiting for reply
+
+ As we cannot use DoIO() or SendIO() with the audio.device, we'll opt for
+the BEGINIO macro:
+
+ First though, we need to set the structure up to play a sample. To do this
+we need to tell the device the following:
+
+	a/ We are 'writing' a command ( CMD_WRITE )
+	b/ Address of sample to play
+	c/ Size of sample
+	d/ Replay Period ( related to frequency )
+	e/ Volume setting to use ( 0 to 64 )
+	f/ Number of time to play the sample ( 0 = play forever )
+
+	lea		AudioReq,a1
+	move.w		#CMD_WRITE,IO_COMMAND(a1)	a/
+	move.b		#ADIOF_PERVOL,IO_FLAGS(a1)	change speed flag
+	move.l		#Sample,ioa_Data(a1)		b/
+	move.l		#SampleLen,ioa_Length(a1)	c/
+	move.w		Period,ioa_Period(a1)		d/
+	move.w		#64,ioa_Volume(a1)		e/ max volume
+	move.w		#1,ioa_Cycles(a1)		f/ play once
+
+	BEGINIO						start playing
+
+ 6/ It's time to wait for the audio device to tell us it's finished playing
+the sample ( it is possible to avoid doing this using QUICK_IO but thats
+beyond this short intro ).
+
+ We wait for the device to reply to our request using either Wait() or
+WaitPort(). It's up to you. Eg.
+
+	move.l		MyPort,a0
+	CALLEXEC	WaitPort		wait for reply
+
+	move.l		MyPort,a0
+	CALLEXEC	GetMsg			get reply
+
+ 7/ To close the device, call CloseDevice:
+
+	lea		AudioReq,a1
+	CALLEXEC	CloseDevice
+
+ 8/ Delete the port using the supplied subroutine:
+
+	move.l		MyPort,a0
+	bsr		DeletePort
+
+ There is no need to free IO Structure as it was a static allocation.
+
+
+ IntAudio.s puts all this into action allowing the Period to be varied by
+sliding a proportional gadget. Periods in the range 50 to 450 are
+selectable.
+
+ VoiceController
+ ~~~~~~~~~~~~~~~
+ Another device example, this time using the narrator.device. Note you will
+need narrator.device in devs: and translator.library in libs: to run this
+example.
+
+ Compare the method used to call the narrator device and the audio device.
+See the similarity? Refer to the include files for info on narrator IO
+structure and parameter values.
+
+ All the voice parameters can be altered in this example by sliding the
+appropriate prop gadget.
+
+ Random
+ ~~~~~~
+ Some time ago Dave Edwards supplied a basic random number generator. This
+is an adaption to this and will generate a random number within a specified
+range.
+
+ Encrypt
+ ~~~~~~~
+ Dave Edwards encryption docs on this disk contained a sample algorithm.
+This was not functioning correctly, so I played.....
+
+ Props.i
+ ~~~~~~~
+ Following on from last months Intuition tutorial, here are a couple of
+routines for setting a prop gadget and interpretating a prop gadget. See
+the IntAudio.s for an example application.
+
+ That's about the lot I'm afraid. 
+
+					Mark.
+

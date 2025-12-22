@@ -1,0 +1,9 @@
+#define WINDOW_MAIN 0x1
+#define WINDOW_MAIN_GADGETS 0x3B
+#define BT_EINS 0x2
+#define BT_ZWEI 0x4
+#define CUT-RESO 0x5
+#define TG_SLIDE 0x6
+#define CUTOFF 0x3A
+#define HSL_ZAHL 0x37
+#define IG_ZAHL 0x38

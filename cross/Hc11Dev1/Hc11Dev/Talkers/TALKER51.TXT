@@ -1,0 +1,238 @@
+************************ TALKER51.TXT 9/8/89 *******************************
+*   Written by R.Soja, Motorola, East Kilbride                             *
+*   Motorola Copyright 1989                                                *
+*   MCU resident, Interrupt driven Communication routines for HC11         *
+*   monitor. Provides low level memory and stack read/write operations.    *
+*   Also provides a mechanism for breakpoint handling.                     *
+*   Works with Host user interface program PCBUG11.EXE and a 65C51 ACIA to *
+*   communicate through the Host's RS232 serial port.                      *
+*                                                                          *
+*   The communication protocol consists of a series of bytes which         *
+*   depend on the type of the first (Command) Byte.                        *
+*   Five different commands are supported:                                 *
+*                                                                          *
+* 1/ MEMORY READ: (Command Byte=$01)                                       *
+*    Data stream:                                                          *
+*    $01,Count Byte,High Addr Byte,Low Addr Byte,Data Byte 1..Byte N       *
+*                                                                          *
+*    Where Count Byte=N, and if N=0 then 256 Data bytes are transferred    *
+*    from target MCU to host.                                              *
+*                                                                          *
+* 2/ MEMORY WRITE: (Command Byte=$41)                                      *
+*    Data stream:                                                          *
+*    $41,Count Byte,High Addr Byte,Low Addr Byte,Data Byte 1..Byte N       *
+*                                                                          *
+*    Where Count Byte=N, and if N=0 then 256 Data bytes are transferred    *
+*    from host to target MCU.                                              *
+*                                                                          *
+* 3/ STACK READ: (Command Byte=$81)                                        *
+*    Data stream:                                                          *
+*    $81,SPH,SPL,CCR,ACCB,ACCA,IXH,IXL,IYH,IYL,PCH,PCL                     *
+*                                                                          *
+*    All register values are transferred from MCU to host.                 *
+*                                                                          *
+* 4/ STACK WRITE: (Command Byte=$C1)                                       *
+*    Data stream:                                                          *
+*    $C1,SPH,SPL,CCR,ACCB,ACCA,IXH,IXL,IYH,IYL,PCH,PCL                     *
+*                                                                          *
+*    All register values are transferred from host to MCU.                 *
+*                                                                          *
+* 5/ BREAKPOINT ACKNOWLEDGE: (Command Byte=$B5)                            *
+*    Data stream:                                                          *
+*    $B5,BPH,BPL,CCR,ACCB,ACCA,IXH,IXL,IYH,IYL,PCH,PCL                     *
+*                                                                          *
+*    BPH:BPL is the address following the breakpoint.                      *
+*    All register values are transferred from MCU to host.                 *
+*    Breakpoints are inserted by replacing a single byte at the required   *
+*    address with the SWI instruction. The Talker code includes a SWI      *
+*    handler which returns the code byte $A5 to the host.                  *
+*                                                                          *
+* Note: The Command Byte,Count Byte, High and Low Address Bytes are always *
+*       transmitted from the host to the MCU.                              *
+*       During memory reads, the data bytes are transmitted from the MCU   *
+*       to the host.                                                       *
+*       During memory writes, the data bytes are transmitted from the host *
+*       to the MCU.                                                        *
+*       Count Byte,High Addr Byte,Low Addr Byte,SPH,SPL,BPH,BPL are        *
+*       transferred without handshake.                                     *
+*       All other bytes are transferred using a software echo handshake.   *
+*       The ACIA receiver routine (INACIA) incorporates RS232 break        *
+*       detection. This allows any data transfer to be aborted by the host.*
+*       The memory write routine (TWRITMEM) incorporates a data polling    *
+*       algorithm which allows PCBUG11 to transparently write to 2864,     *
+*       38C32 or similar EEPROMs. The algorithm is of course compatible    *
+*       with standard RAMs. A timeout is included in the event of a memory *
+*       or bus failure.                                                    *
+*       Other timeouts are built in for other reasons. See comments in the *
+*       source code for details on these.                                  *
+*                                                                          *
+* CONSTANTS
+TALKBASE  equ $6000
+TALKVECT  equ $FFF4       Start address of vectors used by TALKER51
+ACIA      equ $9000
+BRKCODE   equ $4A         Break point signal code to host.
+BRKACK    equ $B5         Break point acknowledge code from host.
+*
+* ACIA MASKS
+TDRE      equ $10
+RDRF      equ $08
+FE        equ $02
+*
+* PROGRAM
+          org TALKBASE
+*
+TALKSTART EQU *
+          LDS #$1FF
+          LDD #$C91E    Init ACIA to 9600 baud, 8 bit, no parity, Rx intr.
+          STD ACIA+2    Note: Control reg set up for 1.843MHz xtal.
+*
+USERSTART EQU *         This is entry point of user defined reset.
+          TPA           XIRQ must be enabled (Clear X bit in CCR)
+          ANDA #$BF
+          TAP
+IDLE      JMP IDLE      Now hang around for interruption from host.
+* A RESET from host changes above jump destination to start of user code.
+*
+XIRQSRV   EQU *
+          LDAA ACIA+1   If ACIA has generated interrupt, then
+          BMI TXIRQ     Talker code processes received data
+          JMP >TXIRQEX
+* Above 3 bytes are replaced by JMP USERXIRQ instruction from host monitor, if
+* user specified XIRQ vector is detected during download of user code.
+*
+XIRQUJMP  EQU *-2       Label equates to JMP operand.
+*
+TXIRQ     EQU *
+          LDAA ACIA     Read command byte, & echo it as acknowledge
+          BSR OUTACIA   to host.
+          BMI INH1      If command bit 7 set, then process inherent command
+          BSR INACIA    else read byte count from host into ACCB.(0=256)
+          XGDX          Save command and byte count.
+          BSR INACIA    Read high address byte
+          TBA           into ACCA
+          BSR INACIA    then low address byte into ACCB
+          XGDX          Restore command in ACCA,count in ACCB,address in X
+          CMPA #$01
+          BNE TXIRQ1    If command is memory read, then
+*
+TREADMEM  EQU *         REPEAT
+          LDAA ,X       read required address
+          BSR OUTACIA   send it to host
+          TBA           (save byte count)
+          BSR INACIA    and wait for acknowledge
+          TAB           (restore byte count)
+          INX           Increment address
+          DECB          Decrement byte count
+          BNE TREADMEM  UNTIL all done
+          RTI           and return to idle loop or user code.
+*
+TXIRQ1    EQU *
+          CMPA #$41
+          BNE TXIRQEX   If command is memory write then
+*
+          TBA           move byte count to ACCA
+TWRITMEM  EQU *         REPEAT
+          BSR INACIA    Read next byte from host into ACCB,
+          STAB ,X       and store at required address.
+          LDY #20000/14 Set up timeout count of ~10mS
+*
+WAITPOLL  CMPB ,X       Wait until read back data matches written data
+          BEQ WAITEND
+          DEY           or timeout reached,
+          BNE WAITPOLL
+          BRA USERSTART in which case, restart without reloading DSP.
+*
+WAITEND   LDAB ,X       Read stored byte and
+          STAB ACIA     echo it back to host,
+          INX
+          DECA          Decrement byte count
+          BNE TWRITMEM  UNTIL all done
+*
+          LDY #4000/7   Wait ~2mS to permit PCBUG11 to enable write protect
+TXWAITEX  DEY
+          BNE TXWAITEX
+TXIRQEX   RTI           and return
+*
+INACIA    EQU *
+          LDAB ACIA+1
+          BITB #FE      If break detected then
+          BEQ INACIA1   clean up stack and
+          LDS #$1FF     restart from user start,
+          BRA USERSTART
+*
+INACIA1   ANDB #RDRF    else if new data received from host
+          BEQ INACIA
+          LDAB ACIA     then read it
+          RTS           and return with data in ACCB
+*
+OUTACIA   EQU *         Only register Y modified.
+          XGDY          Enter with data to send in ACCA, saved in Y
+OUTACIA1  LDAA ACIA+1
+          ANDA #TDRE
+          BEQ OUTACIA1
+          XGDY          Restore ACCA
+          LDY #$180
+OUTDELAY  DEY           Wait until transmission complete (@ 9600 baud)
+          BNE OUTDELAY  (to fix spurious loss of transmitted character!)
+          STAA ACIA     Important - Updates CCR!
+          RTS
+*
+INH1      EQU *
+          CMPA #$81     If command is read MCU registers then
+          BNE INH2
+*
+INH1A     TSX           Move stack pointer to X
+          XGDX          then to ACCD
+          BSR OUTACIA   send stack pointer to host (high byte first)
+          TBA
+          BSR OUTACIA   then low byte
+          TSX           Restore X (=stack pointer)
+          LDAB #9       then return 9 bytes on stack
+          BRA TREADMEM  i.e. CCR,ACCB,ACCA,IXH,IXL,IYH,IYL,PCH,PCL
+*
+INH2      EQU *
+          CMPA #$C1     If command is write MCU registers then
+          BNE SWISRV1
+*
+          BSR INACIA    get stack pointer from host (High byte first)
+          TBA
+          BSR INACIA
+          XGDX          Move to X reg
+          TXS           and copy to stack pointer
+          LDAA #9       Then put next 9 bytes from host on to stack
+          BRA TWRITMEM
+*
+SWISRV    EQU *         Breakpoints generated by host-placed SWI instruction.
+          LDAA #BRKCODE Force host to process breakpoints
+          BSR OUTACIA   by sending it the break signal
+SWIIDLE   BRA SWIIDLE   then wait for response from host. (Ibit=1,Xbit=0)
+*
+SWISRV1   EQU *
+          CMPA #BRKACK  If host has acknowledged breakpoint state then
+          BNE TXIRQEX
+          TSX           move stack pointer to SWI stack frame and
+          LDAB #9
+          ABX
+          TXS
+          LDD 7,X       Send user code breakpoint return address to host
+          BSR OUTACIA   (high byte first)
+          TBA
+          BSR OUTACIA   (low byte next)
+          LDD #IDLE     force idle loop on return from breakpoint processing
+          STD 7,X
+          BRA INH1A     but first return all MCU registers to host
+*
+ILLOPSRV  equ *
+          STOP
+          BRA ILLOPSRV
+*
+          org TALKVECT
+          FDB XIRQSRV
+          FDB TXIRQEX   SWI (Changed by Break and Trace monitor commands)
+          FDB ILLOPSRV
+          FDB TXIRQEX   COP Software fail (Unused)
+          FDB TXIRQEX   COP Clock Monitor fail (Reassigned by PCBUG11 Reset)
+          FDB TALKSTART
+*
+          END
+ 

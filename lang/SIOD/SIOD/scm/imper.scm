@@ -1,0 +1,11 @@
+(define (fib n)
+        (do ((a 0 b)
+             (b 1 (+ a b))
+             (c n (- c 1)))
+            ((= c 0) a)))
+
+(define (map2 f l)
+        (do ((l1 l (cdr l1))
+             (l2 '() (cons (f (car l1))
+                           l2)))
+            ((null? l1) l2)))

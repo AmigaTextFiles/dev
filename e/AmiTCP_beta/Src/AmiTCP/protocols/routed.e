@@ -1,0 +1,41 @@
+OPT MODULE, PREPROCESS
+OPT EXPORT
+
+MODULE 'amitcp/sys/socket'
+
+CONST RIPVERSION=1
+
+OBJECT netinfo
+  dst:sockaddr
+  metric
+ENDOBJECT
+
+OBJECT rip
+  cmd:CHAR
+  vers:CHAR
+  res1[2]:ARRAY
+  nets[1]:ARRAY OF netinfo  -> Unioned with tracefile[1]:ARRAY
+ENDOBJECT
+
+ENUM RIPCMD_REQUEST=1, RIPCMD_RESPONSE, RIPCMD_TRACEON, RIPCMD_TRACEOFF,
+     RIPCMD_MAX
+
+DEF ripcmds:PTR TO LONG
+
+#define _ripcmds ['#0','REQUEST','RESPONSE','TRACEON','TRACEOFF']
+
+PROC routed_init_names()
+  IF ripcmds=NIL
+    ripcmds:=_ripcmds
+  ENDIF
+ENDPROC
+
+CONST HOPCNT_INFINITY=16,
+      MAXPACKETSIZE=512
+
+CONST TIMER_RATE=30,
+      SUPPLY_INTERVAL=30,
+      MIN_WAITTIME=2,
+      MAX_WAITTIME=5,
+      EXPIRE_TIME=180,
+      GARBAGE_TIME=240

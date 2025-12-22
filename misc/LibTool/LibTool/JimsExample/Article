@@ -1,0 +1,295 @@
+For Amiga World Tech Journal. Nov 6, 1990. Set your editor's TAB width to 8
+characters (this file contains ASCII graphics).
+
+From: Jim Fiore
+dissidents
+730 Dawes Avenue
+Utica, NY 13502
+(315) 797-0343
+
+
+
+			Shared Libraries for the Lazy
+
+by Jim Fiore, dissidents
+BIX: jfiore
+
+If you've done any significant programming on the Amiga, you are no doubt
+familiar with the concept of a shared library. Shared libraries are an
+integral part of the Amiga operating system. In essence, a shared library
+is a collection of routines which any application can utilize. Since the
+Amiga uses a multi-tasking operating system, it makes sense to offer library
+support as part of the operating system, rather than relying on typical link
+libraries. By doing so, applications using the functions do not require
+duplicates of the code. This saves system memory for other purposes (ie,
+other tasks, or perhaps larger data files in ram). Any collection of routines
+which might be used by several programs should be considered for conversion
+into a library. Classic examples of system libraries include the Intuition
+and Graphics libraries. In this way, graphics and user interface code is
+shared among several applications.
+
+You may also wish to break up a larger program into a series of libraries
+instead of using overlays. In this way, libraries can be loaded as needed,
+keeping the core of the program relatively small. Finally, libraries can be a
+good way of sharing function capabilities with other people without sharing
+source code, or requiring a specific language or compiler. Given the
+pervasive use of libraries and their myriad advantages, learning how to
+create your own libraries is a useful skill. There have been a few techniques
+and examples shown in various places over the past few years. Personally, I
+have always found them lacking in a few specific areas. It seemed that you
+either had to maintain a large number of files in order to create the
+library, or the scheme was very much tied into a particular language or
+compiler. In this article, we'll look at what is perhaps the simplest way of
+creating a library. It doesn't require a lot of maintenance, and it can be
+used with a variety of languages, including assembly and C (both Manx and
+Lattice). All you will need to create (and ever modify in the future) is the
+functions of interest, and a function description file (sometimes referred to
+as ".fd files"). Our example will turn a set of ordinary C language functions
+into a shared library using the Manx C compiler, but you could just as easily
+use the Lattice compiler or assembly language.
+
+Before we look at the example, it will help if we understand the structure of
+a shared library. A library may be broken into four main parts: a Library
+Node, a function jump table (often referred to as a vector table), the set of
+functions, and the global data for the library. In memory, a library looks
+something like this:
+
+	----------------------------
+ ------>|                          |
+ |	|        Functions         |
+ |  --->|                          |
+ |  |	----------------------------
+ |  |
+ |  |	----------------------------
+ |  ----|                          |
+ -------|       Vector Table       |
+	|                          |
+	---------------------------- <---- The Library Base address
+	|                          |
+	|     Library structure    |
+	|                          |
+	----------------------------
+	|                          |
+	|       Library data       |
+	|                          |
+	----------------------------
+
+Let's look at the Library structure first. A Library structure is defined as
+follows:
+
+struct Library {
+	struct Node lib_Node;
+	UBYTE lib_Flags;
+	UBYTE lib_pad;
+	UWORD lib_NegSize;
+	UWORD lib_PosSize;
+	UWORD lib_Version;
+	UWORD lib_Revision;
+	APTR  lib_IdString;
+	ULONG lib_Sum;
+	UWORD lib_OpenCnt;
+};
+
+The Flags field is used by Exec to keep track of what is happening with the
+library. The NegSize and PosSize fields indicate the size (in bytes) of the
+library, on either side of the library base. The Version and Revision fields
+are used to indicate future changes and updates to the library. The IdString
+is a pointer to a null-terminated ASCII string giving further information
+about the library. Sum is the library checksum which is used by Exec to
+ensure library integrity. The OpenCnt field holds the number of tasks which
+have opened the library so far. Every time a task calls OpenLibrary() for
+this library, this field is incremented. Every time the complementary
+CloseLibrary() function is called, this field is decremented. If the Open
+Count is zero, Exec may remove the library in order to free up ram.
+
+The other major item of interest is the vector table. This is comprised of a
+group of 6 byte entries, one entry for each function in the library. Each
+entry consists of a jump instruction (2 bytes) followed by the absolute
+address of the function being called. Each function call then, is a multiple
+of 6 bytes behind the library base. For example, the seventh function in the
+table would be at location LibraryBase-42. These 6 bytes multiples are known
+as Library Vector Offsets, or LVOs, for short. Along with the normal
+application functions, there are four mandatory functions which all shared
+libraries must have. Consequently, the first application function is always
+the fifth one in the list, at position 30 (referred to as the Bias, in a .fd
+file). The four special functions are: Open, Close, Expunge and Reserved. The
+The Open and Close functions are called for each OpenLibrary() and
+CloseLibrary() call. The Expunge routine is used for final cleanup if the
+Open Count has reached zero and Exec has decided to remove the library. The
+Reserved function is for future use. Presently, all it should do is return 0.
+
+In order to properly load a library, Exec needs a RomTag structure. In
+assembly, a RomTag looks something like this:
+
+RomTag:
+	dc.w	$4AFC		;Voodoo magic RomTag word.
+	dc.l	RomTag
+	dc.l	endRom
+	dc.b	NO_AUTO_INIT	;Auto-initialize, or not.
+	dc.b	VERSION		;Library version, as used in OpenLibrary().
+	dc.b	NT_LIBRARY	;Type. This is a Library.
+	dc.b	PRIORITY
+	dc.l	Lib_Name	;Pointer to Name string.
+	dc.l	Lib_Id		;Pointer to ID string.
+	dc.l	Lib_Startup	;Pointer to initialization routine.
+endRom
+
+Normally, Priority is 0. NT_LIBRARY is defined as 9, and we'll be using
+a non auto-initialized library (0) since this saves space and reduces load
+time.
+
+If you were building a library from scratch, besides the functions of
+interest, you would need to create, compile, assemble and link the RomTag,
+the Library structure, the function table, the initialization routine, and
+the Open, Close, and Expunge routines. Some of this may be reused from
+library to library, but there is still a reasonable amount of work involved.
+To circumvent this, you can use the LibTool utility. LibTool was created by
+Jeff Glatt of dissidents. (LibTool and its associated documentation and
+examples are copyrighted, but are freely redistributable. In other words,
+feel free to use it at any time, or give it to friends. You just can't sell
+it to anyone for profit.) LibTool will create all of the auxiliary items
+you'll need for your library (including pragmas and header files) from a
+single .fd file that you create. Using LibTool, you'll only need to make two
+files in order to create a library: the functions of interest, and the .fd
+file.
+
+At this point, it's time to consider the code which will be turned into
+the library functions. There are a few rules which you should remember.
+We'll be using C, but these items are pertinent to any language. First,
+your code should be re-entrant. This means that it does not make use of
+global variables. All variables should either be held on the stack, or should
+be allocated as needed. The reason for this is that it is possible for
+several tasks to open and use a library simultaneously. If two tasks are
+calling the same function at about the same time, it is quite possible for
+one task to alter a global variable before the other task is finished with
+it. The results are chaotic at best. In contrast, it is perfectly acceptable
+to use global constants. Since constants are not altered by a function, there
+is no problem with one task stepping on another task. Examples of acceptable
+constants would be fixed strings and look-up tables (such as a sine wave
+table). The second item to remember is that if your library needs to use the
+functions contained in other libraries, these other libraries must be opened
+(and eventually closed) from within your library.  For example, you might
+wish to create a DrawBox() function based on the system functions Move() and
+Draw(). Since these two functions reside in the graphics library, graphics
+must be opened as part of your library's initialization. Graphics will then
+be closed as part of your library's expunge routine. The final item is that
+you should not use printf() style functions from within the library. The
+library will not have access to stdin, stdout, or stderr. The easy way around
+this is to have library functions which return error codes, which can then be
+interpreted by the calling program.
+
+For our example, we're going to make a library which implements rectangular
+to polar and polar to rectangular conversions. The library will consist of
+four functions: Mag(), which takes the real and imaginary rectangular
+components and returns the polar vector's magnitude; Ang(), which takes the
+rectangular components and returns the vector's angle in degrees; Real(),
+which takes the polar magnitude and angle in degrees, and returns the real
+rectangular component, and Imaj() which takes the same polar arguments and
+returns the imaginary rectangular component. I chose these functions because
+they're reasonably useful, and fortunately, very quick to code. In any case,
+the you don't have to do much typing since all of the example code is found
+on disk.
+
+These functions require the use of floating point math. We have several
+choices. For the sake of expediency, we'll use Motorola fast floating point.
+In order to make our functions, we'll need routines found in mathffp.library
+and mathtrans.library. Consequently, we have to open these two libraries as
+part of our initialization, and we need to close them as part of the expunge
+"clean up". If you look at the library code, AWlib.c, you can see our four
+short functions. We also have two other functions, myInit() and myFree().
+myInit() will be called as part of the initialization routine. It returns a
+BOOL value (TRUE or FALSE). All it does is open the required math libraries.
+If it can't open the libraries, myInit() returns FALSE. This will prevent our
+library from loading. myFree() is called as part of the expunge routine. It
+simply closes the libraries which were initially opened. If we needed to
+perform a certain amount of work each time the library was opened or closed,
+we could add our own custom functions there, as well.
+
+Much of the drudgery of creating the library is going to be taken care of by
+LibTool, in conjunction with a specialized function description file. LibTool
+will create a library startup module which will contain the RomTag, the
+Library structure, the function table, the four mandatory functions, wedges
+into the various routines (eg, the references to our myInit() and myFree()
+functions), the proper version and revision numbers, strings, and the like.
+Also, this module will automatically open Exec, Dos, Intuition, and Graphics
+for you, since they are used so often (and are most likely already present in
+the system). Therefore, if you're only calling functions from these system
+libraries, chances are that you won't even need Init() and Free() routines.
+To aid in the construction of your applications which call your new library,
+LibTool can also create a header file, pragma statements, and C "glue"
+routines. The glue routines are used to pull C arguments off of the stack and
+stuff them into the proper registers for the library. It is possible to
+create libraries with LibTool that expect arguments on the stack. The
+resulting glue is smaller for C applications, but this does make it harder to
+access the library from other languages. Of course, the whole issue of glue
+routines is bypassed if pragmas are used. By using pragmas, the C compiler
+will move the arguments into the registers, and no glue is needed.
+
+The .fd file is an extension of the ordinary .fd files which most Amiga
+programmers are familiar with. LibTool recognizes extra commands which allow
+it to create the complete Library Startup module. Here is our .fd file:
+
+##base AWBase     *the name of our base used by C glue code and C PRAGMAS
+##name AW         *the name of our library (ie, aw.library)
+##vers 1          *version #
+##revs 0          *revision #
+##init myInit     *to be called once (upon loading the lib)
+##expu myFree     *to be called once (upon expunging the lib)
+##libid  Amiga World TJ lib (ver 1.0)
+##bias 30         *first function is always at an offset of -30 from lib base
+*Here are all of the lib functions callable by an application
+*They all return doubles
+##ret double
+Mag( real, imaj )
+Ang( real, imaj )
+Real( mag, ang )
+Imaj( mag, ang )
+##end
+
+Notice that virtually everything you need to describe your library (and
+update it in the future) is found in this one file. Each specialized item is
+given its own command. Of particular interest are the ##init and ##expu
+commands which are followed by the names of our initialization and expunge
+routines. Commands are available for the previously mentioned Open and Close
+routines, if required (##open, ##clos).
+
+Using Manx 5.0 from the CLI, you make the library as follows:
+
+LibTool -cmho glue.asm AWlib.fd
+
+This creates the library startup code (AWlib.src) using C style syntax (ie,
+it prepends an underscore to the function names), the C header file (AWlib.h)
+for the applications, and a C application glue file (glue.asm) which will be
+assembled, and then linked with the application.
+
+as -cd -o LibStart.o AWlib.src
+
+This assembles the library startup module. Note that we are using large code
+and data so that we don't have to worry about saving register A4, as you
+would with the small model.
+
+cc -mcd0b -ff AWlib.c	
+
+Here, we compile the library code, again using the large model. We are
+suppressing the standard Manx startup (.begin), and using fast floating point
+math.
+
+ln -o libs:AW.library LibStart.o AWlib.o -lmfl -lcl
+
+Finally, the library is created by linking together the needed parts. It is
+VERY important that LibStart.o be the first object module in the list.
+
+The applications which call the library are compiled and linked in the
+standard manner. If you are using glue files (as we are here), glue.asm must
+be assembled and then linked with the application program. Our application,
+AWlib_app.c, simply opens the library, and calls each of the functions in 
+turn.
+
+As mentioned earlier, LibTool can be used with the Lattice compiler, and with
+assembly language development systems. It can also be used for other
+purposes, including the creation of BASIC .bmap files, and in the
+construction of devices. Further details concerning LibTool are found on the
+disk, along with other examples.
+
+Hopefully, this little foray has enticed you into creating some of your own
+shared libraries, and eased the programming burden as well. Have fun.

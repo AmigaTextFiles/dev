@@ -1,0 +1,859 @@
+Interface header files for Amiga software development in 'C'
+What are the options, and what should you use?
+
+by Olaf Barthel (2022-01-28)
+
+
+1. An introduction on how operating system functions are called
+
+The following sections will cover how Amiga 'C' compilers evolved over the
+course of 10 years, changing how they would create the code that would call
+the operating system functions. It provides context for the state at which we
+arrived by the year 1999 when multiple different compiler types had to be
+covered by the Amiga operating system interface header files.
+
+Feel free to skip all of this if you are more interested in learning how you
+can make the best use of the of the modern interface header files for 'C' and
+C++ development.
+
+1.1. The early days of the Amiga: Kickstart 1.0-1.3
+
+The original 1985/1986 Amiga operating system was developed using both
+assembly language and 'C' as well as BCPL (for dos.library), using the tools
+available at the time.
+
+The 'C' compiler used (made by Green Hills Software) came from the Unix
+domain. It was modified to produce code for Amiga operating system
+development. Utilities such as the "Preferences" program found on the
+Workbench disk were built with this compiler, too.
+
+Calling an operating system function from 'C' requires bridging a gap. The
+Amiga operating system functions expect their respective parameters to be in
+CPU registers. Yet the 'C' compiler passes parameters to functions using the
+stack. The caller pushes the parameters onto the stack, calls the function
+(which retrieves the parameters from the stack as needed) and then restores
+the stack to how it used to be before the function was called.
+
+In between the 'C' compiler's code and the operating system code sits
+so-called "stub code" whose purpose it is to fetch the parameters from the
+stack, put them into the CPU registers they need to be in, call the operating
+system and return. Such stub code exists for every Amiga operating system
+function in amiga.lib. In fact, the stub code makes up the great bulk of
+amiga.lib as it is.
+
+How does such stub code look like? As an example, here is an excerpt from the
+exec.library/AllocMem function documentation:
+
+   NAME
+        AllocMem -- allocate memory given certain requirements
+
+   SYNOPSIS
+        memoryBlock = AllocMem(byteSize, attributes)
+        D0                     D0        D1
+
+        void * AllocMem(LONG, LONG);
+
+The function has two parameters and these must be provided in registers D0
+and D1. Here is how the stub code for the exec.library function AllocMem()
+looks like:
+
+    SECTION exec,text
+
+    XDEF    _AllocMem
+    XREF    _SysBase
+
+_AllocMem:
+    move.l  a6,-(sp)
+    move.l  _SysBase,a6
+    movem.l 8(sp),d0/d1
+    jsr     -198(a6)
+    move.l  (sp)+,a6
+    rts
+
+    END
+
+Note that calling the exec.library function requires that the global 'C'
+variable SysBase must contain a pointer to the exec.library base, which has
+to be provided in register A6. This is what the line 'move.l _SysBase,a6'
+accomplishes. Also note that the stub code saves the current value of
+register A6 prior to changing it and also restores it before returning.
+
+Why the underscore preceding the "SysBase" variable name? The underscore
+indicates that this should be a global symbol for the linker stage and the
+'C' compiler adds this by default for every global function and global
+variable and constant. Used from assembly language, you have to prepend the
+underscore character to the symbol name or the linker will not know that your
+code is accessing a global symbol created by the 'C' compiler.
+
+The exec.library function is called through a jump table which precedes the
+library base. Each jump table entry is 6 bytes in size. The offset from the
+library base to the jump table entry is called the "library vector offset" or
+"LVO" for short.
+
+198 / 6 = 33, which makes AllocMem() the 33rd exec.library function. You can
+verify this by checking the "exec_lib.fd" file which can be found in the "FD"
+drawer of the Amiga Native Development Kit (NDK). The "exec_lib.fd" file also
+describes how many parameters the AllocMem() function has and in which
+registers these need to be placed. The "fd" stands for "function description"
+and the "fd files" can be used by other programming languages, such as BASIC,
+Pascal, Modula-2 or ARexx.
+
+Please note that the four functions (open, close, expunge, reserved) every
+Amiga shared library and device features are not listed in the "exec_lib.fd"
+file. This is what the line "##bias 30" says, meaning that first function of
+the library your code could call would start at library vector offset 30. You
+can also see why the stub code uses "SysBase" as the name of the variable in
+which the library base is stored. The "exec_lib.fd" file says so in the line
+"##base _SysBase".
+
+The developer material published by Commodore at the time would include the
+header files for both 'C' and assembly language as well as the amiga.lib
+needed to call all the library and device functions. At the time the sole
+commercial 'C' compiler available both for native Amiga development and
+cross-development on MS-DOS was the Lattice 'C' compiler version 3.03 (1986).
+It shipped with the header files and the amiga.lib provided by Commodore
+which complemented the compiler's own 'C' runtime library. If you developed
+Amiga software using it (e.g. Electronic Arts' "Deluxe Paint" was developed
+using exactly this compiler) this is how your software would call Amiga
+operating system functions: using stub code from amiga.lib.
+
+
+1.2. Compiler technology evolves: Lattice 'C' 4.0 (1987)
+
+Workbench and Kickstart 1.3 became available in fall 1987. Later the same
+year the Lattice 'C' compiler version 4.0 was released. It brought 'C'
+language features to the Amiga which would later appear as part of the 1990
+ANSI 'C' standard: function prototypes with parameter type specifications.
+Also, it introduced a feature which made the library function call stubs in
+amiga.lib redundant: the "#pragma libcall" and "#pragma syscall" extensions
+as well as a full set of function prototypes for all Amiga operating system
+functions including Kickstart/Workbench 1.0.
+
+Arguably, the addition of support for function prototypes with parameter
+specifications was a bigger game changer. Prior to Lattice 'C' 4.0 the
+commercially available Amiga compilers followed the 'C' language industry
+standard as it had evolved since the 1978 publication of "The 'C' programming
+language" book by Brian W. Kernighan and Dennis M. Ritchie. This was known as
+the "K&R" language definition.
+
+At the time a 'C' function prototype would only provide the name of the
+function and the type of its return value. Which types the parameters were,
+whether integers or pointers, was not specified, or for that matter, how many
+parameters were mandatory. The compiler could warn you if the function return
+value was the wrong type, but it could not warn you about the parameters
+being the wrong type or the wrong number of parameters.
+
+This lack of parameter specifications had a particularly nasty side-effect
+for Amiga software written using the Aztec 'C' compiler, by Manx Software
+Systems. It was the only 'C' compiler at the time (1986/1987) to use a
+default integer size of 16 bits, but it could be instructed to use 32 bits
+via a compiler option. As the exec.library/AllocMem stub code example shows,
+the amiga.lib stub code expects all function parameters to be 32 bits in
+size. If you were using the Aztec 'C' compiler in its "16 bits per integer"
+mode you had to make sure that integer values were passed as 32 bit values,
+using casts.
+
+For example, the following would get you into trouble because the Aztec 'C'
+compiler would pass the "byteSize" and "attributes" parameters to AllocMem()
+as two 16 bit integers: the stub code would then fetch these two 16 bit
+values as a single 32 bit "byteSize" parameter and whatever was on the stack
+as the "attributes" parameter:
+
+    memory = AllocMem(sizeof(struct FileInfoBlock), MEMF_ANY);
+
+For this to work reliably, you had to change the function call like so:
+
+    memory = AllocMem((LONG)sizeof(struct FileInfoBlock), (LONG)MEMF_ANY);
+
+If you find historic Amiga 'C' source code dating from 1986-1987 you can
+often find that it casts operating system library function call parameters
+with (LONG) or (ULONG) into 32 bit integers. Such casting became redundant
+with the introduction of Amiga 'C' compilers which supported the draft ANSI
+'C' (1990) language standard and beyond.
+
+The Lattice 'C' 4.0 compiler introduced two extensions by the name of
+"libcall" and "syscall" through the "#pragma" preprocessor command. These
+extensions essentially rendered the amiga.lib function call stub code
+redundant. For example, if you were to call the exec.library/AllocMem
+function, you would now include a new header file in your 'C' program:
+
+    #include <proto/exec.h>
+
+This header file would provide function prototypes for all exec.library
+functions, with correct return value types as well as the correct number of
+parameters and their associated types. For the AllocMem() function this would
+be:
+
+    char * AllocMem(long, long);
+
+Complementing this is the "#pragma syscall" command:
+
+    #pragma syscall AllocMem c6 1002
+
+When your program would call the exec.library/AllocMem function now, it would
+be the compiler producing the necessary assembly language code to directly
+call the library function instead of going through the steps of pushing
+parameters onto the stack and having an amiga.lib stub function pull them off
+the stack put them into registers, etc. Not only is this approach faster, it
+can also reduce the size of your software: the compiler no longer has to push
+all the parameters onto the stack for every function, it can often get away
+with merely saving the contents of register A6, moving the parameters into
+registers D0/D1/A0/A1, calling the function and restoring the previous value
+of register A6.
+
+The "#pragma syscall" example for AllocMem() contains essentially everything
+you would find in the amiga.lib stub code. There is the name of the function
+(AllocMem), the library vector offset (c6 = 198) and the register
+specification which is encoded in "1002". The register specification means
+that the function takes parameters in the order D0 and D1, that the function
+result will be returned in register D0 and there are two mandatory parameters
+for this function.
+
+The related "#pragma libcall" command differs from the "#pragma syscall"
+command in that the name of the variable from which the library base address
+should be fetched must be specified. "#pragma syscall" only works for
+exec.library functions but for everything else you need a named library base
+parameter, such as for the intuition.library/OpenWindow function:
+
+    #pragma libcall IntuitionBase OpenWindow cc 801
+
+Note that you could also use "#pragma libcall" for calling exec.library
+functions, which would then look as follows for the AllocMem() function:
+
+    #pragma libcall SysBase AllocMem c6 1002
+
+
+1.3. Support for the draft ANSI 'C' standard arrives (1989/1990)
+
+In 1989 Lattice 'C' 5.0 shipped with support for the upcoming 1990 ANSI 'C'
+standard and Aztec 'C' followed one year later. While the "#pragma syscall"
+and "#pragma libcall" extension features of Lattice 'C' 5.0 remained
+unchanged, Aztec 'C' 5.0 introduced its own vendor-specific extension in the
+form of "#pragma amicall", which would render the amiga.lib stub code
+redundant.
+
+If you were to call the exec.library/AllocMem function with Aztec 'C' 5.0a,
+you would now include two header files in your 'C' program:
+
+    #include <functions.h>
+    #include <pragmas.h>
+
+The <functions.h> header file would now contain full ANSI 'C' compliant
+function prototypes instead of just the K&R prototype forms without parameter
+specifications. Note that the Aztec 'C' compiler already shipped a
+<functions.h> header file in earlier versions, e.g. version 3.6a (1987).
+
+The <pragmas.h> header file would contain the operating system interface
+"#pragma amicall" commands. For the exec.library/AllocMem function it would
+look as follows:
+
+    #pragma amicall(SysBase, 0xc6, AllocMem(d0,d1))
+
+As with the Lattice 'C' "#pragma libcall" example, you can find the name of
+the variable holding the exec.library base address, the library vector offset
+(0xc6 = 198), the name of the library function and the register
+specification. Unlike for "#pragma libcall" the register specification is not
+encoded, it just lists the registers in the order in which the parameters use
+them.
+
+The Aztec 'C' 5.0 manual emphasizes the use of the "#pragma amicall" command
+but also mentions that it supports the same "#pragma syscall" and "#pragma
+libcall" commands which Lattice 'C' versions 4 and 5 already supported at the
+time.
+
+
+1.4. Commodore releases the Native Development Kit (NDK) for Amiga OS 2.0 (1990/1991)
+
+The NDK contains new header files which for the first time cover all the
+Amiga operating system function prototypes. These are found in the "clib"
+drawer, e.g. "clib/exec_protos.h". Prior to this, the respective compiler
+vendor had to supply the function prototypes, based upon the existing
+documentation. This used to be problematic because the source of the function
+prototypes were the Amiga Autodocs, which were not necessarily correct. For
+example, the Kickstart 1.3 documentation for the exec.library/CheckIO
+function still gave its function prototype as "BOOL CheckIO(struct IORequest
+*);", which was incorrect (the CheckIO() function returns a pointer to a
+"struct IORequest *" in progress, not a 16 bit integer value). With Commodore
+supplying the function prototype header files, such errors were eventually
+corrected.
+
+Both the Lattice 'C' and Aztec 'C' compilers were updated to make use of
+these new header files, but both shipped with their own vendor-specific
+"#pragma syscall"/"#pragma libcall" and "#pragma amicall" header files,
+respectively.
+
+For Lattice 'C', these new header files would go into the "pragmas" drawer,
+e.g. "pragmas/exec_pragmas.h". For Aztec 'C' they would go into the "pragma"
+drawer, e.g. "pragma/exec_lib.h".
+
+This means that you now would do the following if you wanted to use the
+exec.library AllocMem() function in your software, regardless of which
+compiler was involved:
+
+    #include <clib/exec_protos.h>
+
+    #ifdef LATTICE
+    #include <pragmas/exec_pragmas.h>
+    #endif
+
+    #ifdef AZTEC
+    #include <pragma/exec_lib.h>
+    #endif
+
+
+1.5. The SAS/C V6 'C' compiler is released (1993)
+
+With SAS/C version 6 another new "#pragma" command was introduced which
+complements the already existing "#pragma libcall" command. The new command
+is called "tagcall" and its purpose is to make use of Amiga library functions
+which use a variable number of parameters.
+
+For example, the dos.library/VPrintf function has a counterpart which works
+similar to the 'C' runtime library function printf(). Before the "#pragma
+tagcall" command was introduced, you had to use the amiga.lib stub code to
+invoke it. But with "#pragma tagcall" the final parameter of a function was
+designated as receiving a variable number of arguments. These arguments were
+pushed onto the stack (always 32 bits per argument) and a pointer to the
+beginning of this argument list was passed in the final parameter of the
+function.
+
+Here is how these related "#pragma" commands would look like in the
+"pragmas/dos_pragmas.h" file:
+
+    #pragma libcall DOSBase VPrintf 3ba 2102
+    #pragma tagcall DOSBase Printf 3ba 2102
+
+
+1.6. The GNU 'C' compiler port becomes an Amiga-native development tool (1991-1995)
+
+One of the first target platforms for the NetBSD Unix port was the Amiga.
+Markus Wild built his own toolset on Amiga OS to enable the port to be
+created. A by-product of his efforts was the creation of ixemul.library which
+emulates a BSD Unix kernel interface for software which runs on the Amiga.
+
+This is what enabled the GNU 'C' compiler to be bootstrapped on the Amiga
+operating system. By 1994-1995 the project was commercialized as "Geek
+Gadgets", which was a collection of Amiga software ports of GNU and BSD
+userland software, produced by Nine Moons Software.
+
+In order to make the GNU 'C' compiler interface with the Amiga operating
+system, its own peculiar set of header files had to be created which were
+found in the "inline" drawer, e.g. "inline/exec.h". These header files would
+use GNU 'C' specific extensions to allow for macros to produce an inline
+function call for each operating system function. For example, the macro for
+invoking the exec.library/AllocMem function could look as follows:
+
+    #define AllocMem(byteSize, requirements) ({ \
+      ULONG _AllocMem_byteSize = (byteSize); \
+      ULONG _AllocMem_requirements = (requirements); \
+      ({ \
+      register char * _AllocMem__bn __asm("a6") = (char *) (EXEC_BASE_NAME);\
+      ((APTR (*)(char * __asm("a6"), ULONG __asm("d0"), ULONG __asm("d1"))) \
+      (_AllocMem__bn - 198))(_AllocMem__bn, _AllocMem_byteSize, _AllocMem_requirements); \
+    });})
+
+If you were to call the exec.library/AllocMem function with the GNU 'C'
+compiler, you would need to include a single header file in your 'C' program:
+
+    #include <inline/exec.h>
+
+
+1.7. The StormC integrated development environment is released (1996)
+
+One of the very last commercial Amiga 'C' compilers would make use of the
+"#pragma amicall" command which Aztec 'C 5.0 had introduced in 1990. But it
+also added the new "#pragma tagcall" command which uses the same syntax as
+the "#pragma amicall" command but serves the same purpose as the SAS/C V6
+"#pragma amicall" command.
+
+Here is how the "#pragma" commands for the related dos.library VPrintf() and
+Printf() would look like in the "pragma/dos_lib.h" file:
+
+    #pragma amicall(DOSBase, 0x3ba, VPrintf(d1,d2))
+    #pragma tagcall(DOSBase, 0x3ba, Printf(d1,d2))
+
+
+1.8. The vbcc portable and retargetable ISO-C compiler becomes available (1996)
+
+Designed by Dr. Volker Barthelmann during his studies, vbcc has its roots on
+the Amiga, hence the AmigaOS target adopted a lot of the established ABIs and
+file formats from existing compilers, like SAS/C. It is still in active
+development today, free for non-commercial use, supports about a dozen
+different target architectures and is written in pure ISO-C, which makes it
+one of the easiest compilers to port to any host OS, for example for
+cross-compiling purposes.
+
+Inlined AmigaOS function calls are supported since the beginning, but for
+simplicity it was decided to use the compiler-specific assembler inline
+functions to implement them, instead of doing a similar "#pragma" approach.
+
+Assembler inline functions in vbcc consist of a prototype function header, an
+assignment token and a string with assembler instructions, which is emitted
+directly into the compiler output. For example:
+
+    int my_add(__reg("d0") int, __reg("d1") int) = "\tadd.l\td1,d0";
+
+Operating system calls are defined using macros, because the assembler inline
+function needs a way to receive the library base pointer, which is not known
+to the compiler in a call like "AllocMem(byteSize, requirements)".
+
+Returning to the AllocMem() example, the inline function definition looks like
+this:
+
+    APTR __AllocMem(__reg("a6") void *, __reg("d0") ULONG byteSize,
+                    __reg("d1") ULONG requirements) = "\tjsr\t-198(a6)";
+    #define AllocMem(byteSize, requirements) __AllocMem(SysBase, (byteSize),
+                                                        (requirements))
+
+The function's prototype instructs the compiler to load the arguments into the
+specified registers, before the single inline assembler instruction is
+inserted.
+
+All these inlines for exec.library live in "inline/exec_protos.h". Although
+there is rarely a reason to include these headers directly, but it is
+recommended to prefer the de-facto standard <proto/exec.h>, which includes the
+inlines from <inline/exec_protos.h> and function prototypes from
+<clib/exec_protos.h> automatically.
+
+Until NDK 3.2 a vbcc installation had to rely on its own set of "proto" and
+"inline" header files, which overrode the standard "proto" header files with
+an include path of higher priority.
+
+By using the C99 __VA_ARGS__ macro argument varargs/tagcall functions can also
+be written directly as assembler inlines. The example for Printf() looks like
+this:
+
+#if !defined(NO_INLINE_STDARG) && (__STDC__ == 1L) && (__STDC_VERSION__ >= 199901L)
+LONG __Printf(__reg("a6") void *, __reg("d1") CONST_STRPTR format, ...)=
+"\tmove.l\td2,-(a7)\n\tmove.l\ta7,d2\n\taddq.l\t#4,d2\n\tjsr\t-954(a6)\n\tmove.l\t(a7)+,d2";
+#define Printf(...) __Printf(DOSBase, __VA_ARGS__)
+#endif
+
+These definitions use some guards to make sure C99 is enabled, and the
+developer may decide to prefer the stub code from amiga.lib over the inline by
+defining NO_INLINE_STDARG (vbcc-only).
+
+One reason for NO_INLINE_STDARG is that these varargs inlines do not work
+equally well as "#pragma tagcall" does and may have side effects. For example
+"#pragma tagcall" makes sure that arguments in a tagcall are evaluated from
+left to right, while vbcc, passing them on the stack, does it the other way
+around.
+
+Also, additional preprocessor directives are not allowed within the macro
+arguments of such an inlined tagcall, because the compiler's behaviour is
+undefined according to ISO-C, for "sequences of preprocessing tokens within
+the list of arguments that would otherwise act as preprocessing directives".
+Example:
+
+    scr = OpenScreenTags(NULL,
+        SA_Pens, (ULONG) pens,
+    #ifdef BETA
+        SA_Title, "Beta app",
+    #else
+        SA_Title, "MyApp",
+    #endif
+        SA_AutoScroll, TRUE,
+    TAG_DONE);
+
+
+1.9. Putting it (almost) all together for the AmigaOS 3.5 NDK
+
+In 1999 the first Amiga operating system update after the demise of Commodore
+was released, along with the AmigaOS 3.5 NDK, also available as part of the
+"Amiga Developer CD 2.1".
+
+The operating system header files were revised and updated, which mainly
+focused on correcting errors, improving the robustness of macros, improving
+C++ compatibility and resolving dependencies between the individual header
+files. Prior to this work, the order in which source code would use
+"#include" commands for the operating system header files would make a
+difference.
+
+The operating system interface header files in the "clib", "pragmas" and
+"pragma" drawers were updated and reworked, covering both the Lattice 'C'
+("pragmas") and Aztec 'C' ("pragma") interface files alike. For every
+function prototype declared in a "clib" header file such as
+"clib/intuition_protos.h" you could now be certain that each data structure
+and data type referenced was properly defined, resolving compiler warnings
+about undefined structure types.
+
+The AmigaOS 3.5 NDK brought back the "proto" drawer for the 'C' header files
+which Lattice 'C' 4.0 had introduced in 1987. The header files in the "proto"
+drawer would both include the function prototype header files from the "clib"
+drawer and the pragma header files from the "pragmas" drawer. Also, they
+would define the library base type and declare an external definition for the
+global variable library base. Here is how this would look like for the
+exec.library header file "proto/exec.h":
+
+    #ifndef PROTO_EXEC_H
+    #define PROTO_EXEC_H
+
+    #ifndef PRAGMAS_EXEC_PRAGMAS_H
+    #include <pragmas/exec_sysbase_pragmas.h>
+    #endif
+
+    #ifndef EXEC_EXECBASE_H
+    #include <exec/execbase.h>
+    #endif
+
+    extern struct ExecBase * SysBase;
+
+    #endif /* PROTO_EXEC_H */
+
+In this context including the "pragmas" header file would have the effect of
+also including the matching "clib" prototype header file. The "#pragma"
+commands do not work well without their corresponding function prototypes.
+
+While support for both the Lattice and SAS/C 'C' style as well as Aztec 'C'
+"#pragma" commands was provided, you still had to use the same approach as in
+1990/1991 to make use of them:
+
+    #include <clib/exec_protos.h>
+
+    #ifdef LATTICE
+    #include <pragmas/exec_pragmas.h>
+    #endif
+
+    #ifdef AZTEC
+    #include <pragma/exec_lib.h>
+    #endif
+
+Note that the support for Aztec 'C' style "#pragma" commands also covered the
+DICE, Maxon 'C' and StormC compilers. However, the header files in the
+"proto" drawer were restricted to checking only for the Lattice and SAS/C
+compilers as well as Aztec 'C' version 5.
+
+The AmigaOS 3.5 NDK still lacked support for the native Amiga GNU 'C'
+compiler and did not ship with a proper set of header files in the "inline"
+drawer.
+
+
+2. Interface header files in the AmigaOS NDK 3.2
+
+Starting with the initial NDK 3.2 release the interface header files for the
+following compilers are provided:
+
+   * Lattice 'C' versions 4 and 5 and SAS/C versions 5.10 through 6
+   * Aztec 'C' version 5
+   * DICE version 3
+   * Maxon 'C' version 3 and beyond
+   * StormC version 1 and beyond
+   * Amiga GNU 'C' compiler version 2.95.3 and beyond
+
+Support for vbcc was not included in the initial NDK 3.2, but was added later
+with the third NDK 3.2 update ("NDK 3.2 R3").
+
+2.1. How to use the interface header files?
+
+As described in this article, the needs of the different Amiga 'C' compilers
+lead to a complex set of preprocessor checks to identify the specific type
+and then to "#include" commands which cover them. For example, these could
+look as follows for the exec.library interfaces:
+
+    #include <clib/exec_protos.h>
+
+    /* Lattice 'C', SAS/C and DICE */
+    #if defined(LATTICE) || defined(__SASC) || defined(_DCC)
+        #include <pragmas/exec_pragmas.h>
+    /* Aztec 'C', Maxon 'C' and StormC */
+    #elif defined(AZTEC_C) || defined(__MAXON__) || defined(__STORM__)
+        #include <pragma/exec_lib.h>
+    /* vbcc only */
+    #elif defined(__VBCC__)
+        #include <inline/exec_protos.h>
+    /* GNU 'C' compiler only */
+    #elif defined(__GNUC__)
+        #include <inline/exec.h>
+    #endif
+
+With this approach you can write software which should build with almost
+every supported Amiga 'C' compiler (unless workarounds are needed to cover
+specific compiler requirements).
+
+Now imagine, if you will, having to do this for every single library and
+device which your software makes us of. This really ought to be simpler.
+
+The AmigaOS 3.5 NDK brought back the "proto" drawer originally introduced
+with Lattice 'C' version 4. Each header file in that drawer will provide both
+the correct function prototypes for the respective library/device as well as
+the interface descriptions.
+
+This feature was brought back for the AmigaOS NDK 3.2, but it now covers all
+the supported 'C' compilers, including the GNU 'C' compiler and also vbcc.
+
+Hence, all you need to do is to include the proper header file from the
+"proto" drawer and you will be all set. Here is how this would look like for
+the exec.library functions:
+
+    #include <proto/exec.h>
+
+And that is all there is to it.
+
+
+2.2. Options for using the "proto" interface header files
+
+The "proto" interface header files which are part of the AmigaOS NDK 3.2 are
+not limited to including the right set of "clib", "pragmas"/"pragma"/"inline"
+header files for a specific library or device.
+
+You can change what library bases are declared, how compiler-specific code
+generation options are used or restrict the effect of the "proto" header file
+to what the equivalent function prototype definitions in the corresponding
+"clib" header file would have accomplished.
+
+2.2.1. Library/device base declarations
+
+Because the "pragmas"/"pragma"/"inline" header files need a library or device
+base address to work, there is an optional declaration of the correct base
+pointer type using the correct name of that base pointer. For example, for
+the dos.library the type of the library base pointer is "struct DosLibrary"
+and the name of the library base variable is "DOSBase". Here is how this look
+like in "proto/dos.h":
+
+    #ifndef __NOLIBBASE__
+
+    #ifndef DOS_DOSEXTENS_H
+    #include <dos/dosextens.h>
+    #endif /* DOS_DOSEXTENS_H */
+
+    extern struct DosLibrary * DOSBase;
+    #endif /* __NOLIBBASE__ */
+
+These library base pointer declarations are part of each interface header
+file in the "proto" drawer.
+
+Note that these declarations are optional. If you do not want to use them,
+use "#define __NOLIBBASE__" in your source code, like so:
+
+    #define __NOLIBBASE__
+    #include <proto/dos.h>
+
+Caution: Unless you disable this feature, the library base variable and
+         its pointer type are only declared and never defined. The
+         declaration tells the compiler only that the variable exists and
+         which type it uses.
+
+         Once you access the library base, such as when making a function
+         call, the compiler will have to know the actual definition of the
+         variable. Most compilers define and initialize the global SysBase
+         and DOSBase library base variables as part of their runtime library
+         so these two bases are always available and the libraries need not
+         be opened by you.
+
+         But if you are using other libraries, such as intuition.library and
+         its IntuitionBase library base pointer, then you need to define the
+         library base in your code and open the library to make use of it.
+         (Do not forget to close the library before your program exits!)
+
+
+2.2.2. Use SysBase or AbsExecBase for Lattice 'C' versions 4/5 and SAS/C 6
+
+Almost all the interface header files in the "proto" drawer will make use of
+the designated global variable name and pointer type for the respective
+library. The "proto/exec.h" header file is an exception if you use the
+Lattice 'C' versions 4/5 and SAS/C 5/6 compilers.
+
+For these compilers it will not use the global variable "SysBase" and its
+pointer type "struct ExecBase". Instead, it will make exec.library function
+calls using the operating system's exec.library base pointer in address 4.
+This is called the "AbsExecBase" address.
+
+The use of the AbsExecBase address has an advantage of creating shorter code
+in many cases, which is why it is used by default. The drawback in generating
+the shorter code is that accessing the AbsExecBase address, which resides in
+Amiga chip memory, comes with a measurable performance penalty.
+
+This is why you can change this behaviour to use the global SysBase variable
+instead, by using "#define __USE_SYSBASE" in your source code, like so:
+
+    #define __USE_SYSBASE
+    #include <proto/exec.h>
+
+
+2.2.3. Calling ciaa.resource/ciab.resource functions via stub code
+
+The programming interface for the ciaa.resource/ciab.resource is unique among
+the Amiga operating system functions. As documented in the
+"<clib/cia_protos.h>" header file, the library base pointer is passed as the
+first parameter of each function instead of getting retrieved from a global
+library base.
+
+This unique interface design is likely the result of there being two identical
+CIA chips with their respective different uses, yet sharing the same
+fundamental interrupt control mechanism. You could have opened both
+ciaa.resource and ciab.resource at the same time and would want to call their
+respective functions as needed. Yet there is no global CIAABase or CIABBase
+variable for calling them, just a single set of functions which expect the
+respective library base as their first parameter each.
+
+Note that this interface design only exists for the 'C' programming language.
+Using assembly language you would call the ciaa.resource/ciab.resource
+functions as you would any other library's functions.
+
+Ready-made AddICRVector(), RemICRVector(), AbleICR() and SetICR() functions
+are provided by amiga.lib. They expect their parameters to be passed via the
+stack, which is not always an option for Amiga 'C' code. This is why the
+interface header files "<pragmas/cia_pragmas.h>" and "<pragma/cia_lib.h>"
+contain special support code and macros which makes these functions callable
+using the Lattice and SAS/C "#pragma libcall" command as well as the Aztec 'C'
+"#pragma amicall" command, respectively.
+
+In order to make use of the special support code and macros you need to enable
+it by using "#define __USE_CIA_STUBS" in your source code, like so:
+
+    #define __USE_CIA_STUBS
+    #include <proto/cia.h>
+
+Please note that these workarounds are not needed for the GNU 'C' compiler and
+vbcc support. The "#define __USE_CIA_STUBS" will have no effect for them.
+
+
+2.2.4. Just retain the function prototype declarations
+
+If you use a text editor or development environment which assists you by
+checking the source code in real time, offering corrections or completing the
+names of variables and structure members, you may find that it struggles with
+the interface header files in the "pragmas"/"pragma"/"inline" drawers.
+
+You can prevent the "proto" header files from including these interface
+header files altogether by using "#define _NO_INLINE" in your source code or
+defining this preprocessor symbol in your text editor/development
+environment's coding assistance settings.
+
+For example, by using "#define _NO_INLINE" (or an equivalent setting in your
+editor/development environment's coding assistance settings) you will reduce,
+for example, "#include <proto/exec.h>" to what "#include
+<clib/exec_protos.h>" provides. You can still build your code with "#include
+<proto/exec.h>" present, but the text editor/development environment will not
+be tripped up by the associated "pragmas"/"pragma"/"inline" header files.
+
+
+3. Appendix: fd files and what replaced them
+
+This article already mentioned the use of the "fd" files and the purpose of
+the amiga.lib, which have been part of all Amiga software development kits
+since the early days.
+
+During the 1990'ies the software development kits made available to compiler
+vendors would include function prototype header files in the "clib" drawer,
+such as "clib/exec_protos.h". The vendors were still responsible for creating
+the header files in the "pragmas" and "pragma" drawers.
+
+You may not know it, but the "fd" files, the header files in the "clib"
+drawer, the stub code in amiga.lib (and more) were all created by an in-house
+tool by Commodore which went by the name of "sfd". What "sfd" stands for is
+hard to say. A plausible explanation might be that "sfd" files are a
+"superset of fd" files.
+
+You can find the "sfd" files in the NDK 3.2 and a closer look suggests that
+they are indeed a combination of the function descriptions in the "fd" files
+and the function prototypes you would find in the "clib" drawer. Here is an
+excerpt from the "sfd/exec_lib.sfd" file:
+
+    ==id $VER: exec_lib.sfd 47.5 (30.11.2021)
+    * "exec.library"
+    ==base _SysBase
+    ==basetype struct ExecBase *
+    ==libname exec.library
+    ==bias 30
+    ==public
+    ==include <exec/execbase.h>
+    ==include <exec/tasks.h>
+    ==include <exec/memory.h>
+    ==include <exec/ports.h>
+    ==include <exec/devices.h>
+    ==include <exec/io.h>
+    ==include <exec/semaphores.h>
+    ==include <exec/resident.h>
+    ==include <exec/interrupts.h>
+    *------ misc ---------------------------------------------------------
+    ULONG Supervisor( ULONG (*userFunction)() ) (a5)
+    ...
+    APTR AllocMem( ULONG byteSize, ULONG requirements ) (d0,d1)
+    ...
+    ==end
+
+The keywords which begin with "==" mostly match what you would find in an
+"fd" file. What is new are the lines which define the list of 'C' header
+files which would become "#include" commands in the "clib/exec_protos.h"
+header file, for example:
+
+    #ifndef CLIB_EXEC_PROTOS_H
+    #define CLIB_EXEC_PROTOS_H
+
+    /*
+    **	$VER: exec_protos.h 47.5 (30.11.2021)
+    **
+    **	'C' prototypes. For use with 32 bit integers only.
+    **
+    **	Copyright (C) 2019-2022 Hyperion Entertainment CVBA.
+    **	    Developed under license.
+    */
+
+    #ifdef __cplusplus
+    extern "C" {
+    #endif /* __cplusplus */
+
+    #ifndef  EXEC_EXECBASE_H
+    #include <exec/execbase.h>
+    #endif
+    #ifndef  EXEC_TASKS_H
+    #include <exec/tasks.h>
+    #endif
+    #ifndef  EXEC_MEMORY_H
+    #include <exec/memory.h>
+    #endif
+    #ifndef  EXEC_PORTS_H
+    #include <exec/ports.h>
+    #endif
+    #ifndef  EXEC_DEVICES_H
+    #include <exec/devices.h>
+    #endif
+    #ifndef  EXEC_IO_H
+    #include <exec/io.h>
+    #endif
+    #ifndef  EXEC_SEMAPHORES_H
+    #include <exec/semaphores.h>
+    #endif
+    #ifndef  EXEC_RESIDENT_H
+    #include <exec/resident.h>
+    #endif
+    #ifndef  EXEC_INTERRUPTS_H
+    #include <exec/interrupts.h>
+    #endif
+    /*------ misc ---------------------------------------------------------*/
+    ULONG Supervisor( ULONG (*userFunction)() );
+    ...
+    APTR AllocMem( ULONG byteSize, ULONG requirements );
+    ...
+    #ifdef __cplusplus
+    }
+    #endif /* __cplusplus */
+
+    #endif /* CLIB_EXEC_PROTOS_H */
+
+The function prototype declarations use 'C' syntax and are followed by the
+register specification. This is indeed an augmented "fd" file, if you will.
+
+Note: The sfd files are processed by a lexer (generated by the Unix "lex"
+      command in the Commodore version, but the GNU "flex" command is fine,
+      too).
+
+      If you are writing your own sfd file processing tool, you are
+      well-advised not to rely upon regular expression matching alone.
+      For example, do not assume that the register specification will
+      never contain any blank spaces. The function prototypes follow the
+      'C' grammar and blank spaces are token separators. The same applies
+      to the associated register specification.
+
+Commodore's in-house tool was not limited to producing fd files, function
+prototype header files and stub code. It could also produce the SAS/C
+versions 5/6 format interface header files which would go into the "pragmas"
+drawer. Commodore just never released these files and would rely upon the
+compiler vendors to supply their own respective interface header file sets.
+
+
+4. Acknowledgements
+
+Frank Wille contributed the section which details the vbcc Amiga history
+and its technical aspects. Thank you very much!

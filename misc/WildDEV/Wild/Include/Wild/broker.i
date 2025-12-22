@@ -1,0 +1,10 @@
+
+	IFND	WILDBROKER
+WILDBROKER	SET	1
+
+		STRUCTURE	WildBrokerModuleBASE,wm_SIZEOF
+			LABEL	wbm_SIZEOF
+
+_LVOBRKBreakOut		EQU	-60		; A0:WApp,A1:Array of bspentries
+
+	ENDC

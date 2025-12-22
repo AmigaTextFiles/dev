@@ -1,0 +1,212 @@
+/* Scheme In One Define.
+ 
+The garbage collector, the name and other parts of this program are
+
+ *                     COPYRIGHT (c) 1989 BY                              *
+ *      PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+
+Conversion  to  full scheme standard, characters, vectors, ports, complex &
+rational numbers, and other major enhancments by
+
+ *      Scaglione Ermanno, v. Pirinoli 16 IMPERIA P.M. 18100 ITALY        * 
+
+Permission  to use, copy, modify, distribute and sell this software and its
+documentation  for  any purpose and without fee is hereby granted, provided
+that  the  above  copyright  notice appear in all copies and that both that
+copyright   notice   and   this  permission  notice  appear  in  supporting
+documentation,  and that the name of Paradigm Associates Inc not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.
+
+PARADIGM  DISCLAIMS  ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL  IMPLIED  WARRANTIES  OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+PARADIGM  BE  LIABLE  FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <math.h>
+
+#include "siod.h"
+
+void gc_for_newcell(void)
+{long flag;
+ if (errjmp_ok == 0) err("Cannot do a GC",NIL,ERR_MEM);;
+ flag = no_interrupt(1);
+ errjmp_ok = 0;
+ gc_mark_and_sweep();
+ errjmp_ok = 1;
+ no_interrupt(flag);
+ if NULLP(freelist) err("ran out of storage",NIL,ERR_MEM);}
+
+void gc_mark_and_sweep(void)
+{LISP stack_end;
+ gc_ms_stats_start();
+ /* This assumes that all registers are saved into the jmp_buff */
+ setjmp(save_regs_gc_mark);
+ mark_locations((LISP *) save_regs_gc_mark,
+		(LISP *) ((char *) save_regs_gc_mark) + sizeof(save_regs_gc_mark));
+ mark_protected_registers();
+ mark_locations((LISP *) stack_start_ptr,
+		(LISP *) &stack_end);
+ gc_sweep_array();
+ gc_sweep();
+ gc_ms_stats_end();}
+
+void gc_ms_stats_start(void)
+{gc_rt = myruntime();
+ gc_cells_collected = 0;
+ if (VCELL(sym_gc_mode)==truth)
+   put_st("\n[starting GC]\n");}
+
+void gc_ms_stats_end(void)
+{gc_rt = myruntime() - gc_rt;
+ gc_time_taken = gc_time_taken + gc_rt;
+ if (VCELL(sym_gc_mode)==truth)
+   {sprintf(tkbuffer,"[GC took %g cpu milliseconds, %ld cells collected]\n",
+	  gc_rt,
+	  gc_cells_collected);
+   put_st(tkbuffer);}}
+
+void gc_mark(LISP ptr)
+{int i,size;
+ gc_mark_loop:
+ if NULLP(ptr) return;
+ if ((*ptr).gc_mark) return;
+ (*ptr).gc_mark = 1;
+ switch ((*ptr).type)
+   {case tc_flonum:
+    case tc_intnum:
+    case tc_ratnum:
+    case tc_compnum:
+      break;
+    case tc_char:
+      break;
+    case tc_closure:
+    case tc_fluidclosure:
+    case tc_rec:
+    case tc_environment:
+    case tc_cons:
+      gc_mark(CAR(ptr));
+      ptr = CDR(ptr);
+      goto gc_mark_loop;
+    case tc_macro:
+    case tc_symbol:
+      ptr = TCELL(ptr);
+      goto gc_mark_loop;
+    case tc_vector:
+      size = VECSIZE(ptr);
+      for(i=0;i<size;i++)
+         gc_mark(VECTOR(ptr)[i]); 
+    case tc_subr_0:
+    case tc_subr_1:
+    case tc_subr_2:
+    case tc_subr_3:
+    case tc_lsubr:
+    case tc_fsubr:
+    case tc_msubr:
+    case tc_string:
+    case tc_port:
+      return;
+    default:
+      err("BUG IN GARBAGE COLLECTOR gc_mark",ptr,ERR_GEN);}}
+
+void mark_protected_registers(void)
+{struct gc_protected *reg;
+ LISP *location;
+ long j,n;
+ for(reg = protected_registers; reg; reg = (*reg).next)
+   {location = (*reg).location;
+    n = (*reg).length;
+    for(j=0;j<n;++j)
+      gc_mark(location[j]);}}
+
+void mark_locations(LISP *start,LISP *end)
+{LISP *tmp;
+ long n;
+ if (start > end)
+   {tmp = start;
+    start = end;
+    end = tmp;}
+ n = end - start;
+ mark_locations_array(start,n);}
+
+void mark_locations_array(LISP x[],long n)
+{int j;
+ LISP p;
+ for(j=0;j<n;++j)
+   {p = x[j];
+    if ((p >= heap_org) &&
+	(p < heap_end) &&
+	(((((char *)p) - ((char *)heap_org)) % sizeof(struct obj)) == 0) &&
+	NTYPEP(p,tc_free_cell))
+      gc_mark(p);}}
+
+void gc_sweep_array(void)
+{LISP *ptr,*end,*z,l;
+ end = fixarray+fixarray_dim;
+ for(ptr = fixarray; ptr < end; ptr++)
+     for(l=*ptr,z = ptr;CONSP(l);l = CDR(l))
+        {if(((*CAR(l)).gc_mark) == 0)
+           *z = CDR(l);
+         else
+           {(*l).gc_mark=1;
+            z = &CDR(*z);}}
+ end = chararray+256;
+ for(ptr = chararray; ptr < end; ptr++)
+   if(NNULLP(*ptr))
+     if ((**ptr).gc_mark == 0)
+       *ptr=NIL;}
+
+void gc_sweep(void)
+{LISP ptr,end,nfreelist;
+ long n;
+ end = heap_end;
+ n = 0;
+ nfreelist = freelist;
+ for(ptr=heap_org; ptr < end; ++ptr)
+   if ((*ptr).gc_mark == 0)
+        switch((*ptr).type)
+         {case tc_free_cell:
+	    break;
+          case tc_symbol:
+          case tc_string:
+            if(SNAME(ptr)!=SSMALL(ptr))
+               free(SNAME(ptr));
+	    ++n;
+	    (*ptr).type = tc_free_cell;
+	    CDR(ptr) = nfreelist;
+	    nfreelist = ptr;
+	    break;
+          case tc_port:
+            fclose(PORTPTR(ptr));
+	    ++n;
+	    (*ptr).type = tc_free_cell;
+	    CDR(ptr) = nfreelist;
+	    nfreelist = ptr;
+	    break;
+          case tc_vector:
+            free(VECTOR(ptr));
+	    ++n;
+	    (*ptr).type = tc_free_cell;
+	    CDR(ptr) = nfreelist;
+	    nfreelist = ptr;
+	    break;
+  	default:
+	    ++n;
+	    (*ptr).type = tc_free_cell;
+	    CDR(ptr) = nfreelist;
+	    nfreelist = ptr;
+	    break;}
+   else
+     (*ptr).gc_mark = 0;
+ gc_cells_collected = n;
+ freelist = nfreelist;}
+

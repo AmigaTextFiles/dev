@@ -1,0 +1,138 @@
+
+; SFplay  sndfile.library demo by Lorence Lombardo.
+
+; Date commenced:- 5-4-10
+; Last modified:-  7-4-10
+; Date format:- D-M-Y
+
+; NB: I could not work out how handle 8bit samples with SF_ReadShort_
+;     But does this matter ? Since I could not produce any compressed
+;     8bit samples with "sndfile-convert". Do they exist for AIFF/WAV/AU ?
+;     So for 8bit samples I just simply used SF_ReadRaw_.
+;     Also the 8bit kuldge routine in "sfplay.c" made no sense to me.
+
+; NB: All supported compressed formats decompress to 16bit
+
+; NB: I could not work out how handle 24bit samples with SF_ReadInt_
+;     But I could do it with SF_ReadShort_ as long as it is in Motorolla
+;     format. Intel format for some reason go's bung. So 24bit samples
+;     are written as 16bit. If you can work out how to write 24bit
+;     samples as 32bit with SF_ReadInt_ then please let me know.
+;     Perhaps the 8bit kuldge routine in "sfplay.c" might help ?
+;     If you know how to fix the 24bit intel issue then please le me know.
+
+; NB: NIST does not appear to be working.
+
+
+optimize 5
+
+
+NEWTYPE .SF_INFO
+
+   samplerate.l
+   samples.l
+   channels.l
+   pcmbitwidth.l
+   form.l
+   sections.l
+   seekable.l
+
+End NEWTYPE
+
+
+DEFTYPE .SF_INFO rfinfo
+
+
+Dim ftype$(8) : l$=Chr$(10) : np=NumPars
+ftype$(1)="WAV": ftype$(2)="AIFF": ftype$(3)="Sun/NeXT AU": ftype$(4)="DEC AU"
+ftype$(5)="RAW": ftype$(6)="PARIS": ftype$(7)="SVX": ftype$(8)="NIST"
+
+If np>0 Then f$=Par$(1)
+
+If np=0 OR f$="?"
+   NPrint l$+" SFplay demo by Lorence Lombardo  5/4/10"+l$+l$+" Usage:-"
+   NPrint " SFplay <sound_file> [out_file]"+l$
+   NPrint " eg. SFplay test.wav"+l$
+   End
+EndIf
+
+infile.l = SF_OpenRead_(&f$, rfinfo)
+
+If infile=0 Then NPrint l$+" File not found or recognised."+l$: End
+
+USEPATH rfinfo
+
+typ$=StripLead$(Hex$(\form),48)
+
+type1=Vallong(Left$(typ$,1)) : type2=Vallong(Right$(typ$,1))
+
+If type1=7 Then NPrint l$+" Warning...!!! sndfile lib sees SV stereo as mono."
+
+If \pcmbitwidth=24 AND (\form=$10001 OR \form=$60008 OR \form=$40001)
+   NPrint l$+" OOPS:- 24bit intel does not appear to be converting properly."
+EndIf
+
+chan$="Mono": If \channels>1 Then chan$="Stereo"
+
+Print l$+" "+ftype$(type1)+" ",\samplerate,"Hz ",\pcmbitwidth,"bit "+chan$
+
+sec.l = \samples / \samplerate : mint=0
+If sec>59 Then mint=Int(sec/60) : sec-(mint*60)
+
+NPrint " (",mint,":",sec,") $"+typ$+l$
+
+If \pcmbitwidth=8 AND type2<>1
+   NPrint l$+typ$+":- File type is not supported."+l$
+   SF_Close_(infile) : End
+EndIf
+
+If \pcmbitwidth=12 OR \pcmbitwidth=24 Then \pcmbitwidth=16
+
+out$="AUDIO:B/"+Str$(\pcmbitwidth)+"/C/"+Str$(\channels)+"/F/"+Str$(\samplerate)
+
+sam_sz.b=\pcmbitwidth/8 : If np>1 Then out$=Par$(2)
+
+outfile.l = Open_(&out$, #MODE_NEWFILE)
+If outfile=0 Then NPrint l$+" Unable to create output."+l$ : SF_Close_(infile) : End
+
+
+BUFFER_LEN.w = 3072  :  rlen.w=BUFFER_LEN/sam_sz
+dat.l= AllocMem_(BUFFER_LEN, #MEMF_ANY)
+
+
+Print " Writing `"+f$+"' to `"+out$+"'..."
+
+
+Repeat
+
+   If \pcmbitwidth=8
+      readcount.w = SF_ReadRaw_ (infile, dat, BUFFER_LEN)
+      If \form=$10001  ; <- its a wav, so we need to convert it signed format
+         For x.w=0 To readcount-1
+            byte.b = Peek.b(dat+x) - 128 : Poke.b (dat+x), byte
+         Next x
+      EndIf
+   EndIf
+
+   If \pcmbitwidth=16 Then readcount.w = SF_ReadShort_ (infile, dat, rlen)
+
+   If \pcmbitwidth=32 Then readcount.w = SF_ReadInt_ (infile, dat, rlen)
+
+   If readcount>0 Then Write_ outfile, dat, readcount * sam_sz
+
+   br=CtrlC
+
+Until readcount<1 OR br<>0
+
+
+If br<>0 Then NPrint l$+" Break...!!!"+l$ Else NPrint " done."+l$
+
+
+FreeMem_ dat, BUFFER_LEN
+
+SF_Close_(infile) : Close_(outfile)
+
+End
+
+
+

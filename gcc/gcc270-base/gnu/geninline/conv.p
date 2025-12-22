@@ -1,0 +1,493 @@
+#!/c/perl
+# convert pair of clib/proto header and fd file into an inline header
+#
+# (C) 1992 by Markus Wild
+# <wild@nessie.cs.id.ethz.ch> or <wild@amiga.physik.unizh.ch>
+#
+# this tool requires PERL.
+#
+# 1.1   92-jun-04	now handles double arguments
+# 1.2   92-jul-02	generates stdarg and alias macros. 
+# 1.3   92-jul-08	makes use of 2.2.2's new "memory" clobbering, and no longer
+#			emits those *(char*)a0=*(char*)a0 hacks.
+#       94-sep-21	updated for AmigaOS 3.1 (G.Nikl)
+#
+# TODO: handle full ANSI declarations, 
+#       eg. void qsort (void *, size_t, size_t, int (*)(const void *, const void *));
+#       Currently omit the declaration of the arguments of the function pointers,
+#       ie. in this example, use
+#       void qsort (void *, size_t, size_t, int (*)());
+#
+#       perform register allocation in those cases where a4 or a5 is used
+#       automatically.
+#
+
+$#ARGV == 1 || die "Usage: $0 proto-file fd-file\n";
+
+open(PROTO_F, $ARGV[0]) || die "Can't open $ARGV[0], $!";
+open(FD_F, $ARGV[1]) || die "Can't open $ARGV[1], $!";
+
+# set the input record separator to ; to be able to parse multiline 
+# declarations. This could get us into troubles with comments.. we will see
+$/=";";
+
+p_line: while (<PROTO_F>) {
+#print "0: ",$_,"\n";
+
+  # skip proprocessor statements and comments
+  s/\n+/\n/g;
+#print "01: ", $_, "\n";
+  s/(#.*\n)+//g;
+#print "02: ", $_, "\n";
+  s/\/\*([^\*]*\*+)*\///g;
+#print "03: ", $_, "\n";
+  s/^([^\n\(]+\n)+//g;
+  
+  next if $_ eq "";
+  next unless /\(/;
+  
+  # suppose this is a function declaration
+  # this `little' pattern filters out the return type and the argument
+  # line. The return type is quite tricky, since it can be a multi word
+  # type (like struct foo *), and we shouldn't overwrite the function
+  # name by matching against the return type... this seems to work, although
+  # I'm not completly sure it does in all cases.
+
+#print "1: ",$_;
+  s/\(\s*\*/\(\*/g;
+#print "2: ",$_;
+  s/\s+(\([^\*])/\(\1/g;
+#print "3: ",$_;
+  /((\w+\s)*\w+\W+)(\w+)\((([^,\(\)]+|\([^\)]*\)|,|\s)*)\)([^;]*);/;
+
+  # %result_tab contains the type part written before the function name
+  $result_tab{$3} = $1;
+  # %result_tab_end contains the type part written after the closing parenthesis
+  chop $6;
+  $result_tab_end{$3} = $6;
+  # %arg_type_tab contains (later only) the type information for the arguments
+  $arg_type_tab{$3} = $4;
+  
+  # compress the types, throw out not needed whitespace as much as we can
+  $result_tab{$3} =~ s/\s+/ /g;
+  $result_tab_end{$3} =~ s/\s+/ /g;
+  $result_tab_end{$3} =~ s/(\s+$)|(^\s+)//g;
+  $arg_type_tab{$3} =~ s/\s+/ /g;
+  $arg_type_tab{$3} =~ s/\s*,\s*/,/g;
+  $arg_type_tab{$3} =~ s/(\s+$)|(^\s+)//g;
+}
+
+# now parse the given fd file
+
+# reset input record separator to newline for fd file
+$/="\n";
+$bias = 0;
+$private = 0;
+($ARGV[0] =~ /([^:\/]*[:\/])*(\w+)\.h/) && ($lib_base_name = "${2}Base");
+$lib_base_name[0] =~ tr/[a-z]/[A-Z]/;
+
+f_line: while (<FD_F>) {
+  # strip terminating new line
+  chop;
+
+  # get rid of comments
+  /^\*/ && next f_line;
+
+  # parse commands
+  /^##base _(\w+)/	&& ($lib_base_name = $1) && next f_line;
+  /^##bias (\d+)/	&& ($bias = $1)		 && next f_line;
+  /^##public/		&& (($private = 0), 1)	 && next f_line;
+  /^##private/		&& ($private = 1)	 && next f_line;
+  last if /^##end/;
+
+  # parse function
+  /^(\w+)\(([^\)]*)\)\s*\(([^\)]*)\)/;
+  
+  $reg_tab{$1} = $3;
+  $arg_name_tab{$1} = $2;
+  $bias_tab{$1} = $bias;
+
+  $bias += 6;
+}
+
+%base_types = (
+  'AmigaGuideBase',	'struct Library *',
+  'AslBase',		'struct Library *',
+  'BattClockBase',	'struct Node *',
+  'BattMemBase',	'struct Node *',
+  'BulletBase',		'struct Library *',
+  'ColorWheelBase',	'struct Library *',
+  'CardResource',	'struct Node *',
+  'CxBase',		'struct Library *',
+  'ConsoleDevice',	'struct Device *',
+  'DataTypesBase',	'struct Library *',
+  'DiskBase',		'struct Node *',
+  'DiskfontBase',	'struct Library *',
+  'DOSBase',		'struct DosLibrary *',
+  'DTClassBase',	'struct Library *',
+  'SysBase',		'struct ExecBase *',
+  'GadToolsBase',	'struct Library *',
+  'IconBase',		'struct Library *',
+  'IFFParseBase',	'struct Library *',
+  'InputBase',		'struct Device *',
+  'KeymapBase',		'struct Library *',
+  'LayersBase',		'struct Library *',
+  'LowLevelBase',	'struct Library *',
+  'MathBase',		'struct Library *',
+  'MathIeeeDoubBasBase'	,'struct MathIEEEBase *',
+  'MathIeeeDoubTransBase','struct MathIEEEBase *',
+  'MathIeeeSingBasBase'	,'struct MathIEEEBase *',
+  'MathIeeeSingTransBase','struct MathIEEEBase *',
+  'MathTransBase',	'struct Library *',
+  'MiscBase',		'struct Node *',
+  'NVBase',		'struct Library *',
+  'PotgoBase',		'struct Node *',
+  'RamdriveDevice',	'struct Device *',
+  'RexxSysBase',	'struct Library *',
+  'TimerBase',		'struct Device *',
+  'TranslatorBase',	'struct Library *',
+  'WorkbenchBase',	'struct Library *',
+
+  'XpkBase',		'struct Library *',
+  'XpkSubBase',		'struct Library *',
+  'SocketBase',		'struct Library *',
+);
+
+($lib_base_type = $base_types{$lib_base_name}) || 
+  ($lib_base_type = "struct " . $lib_base_name . " *");
+
+# convert arg_name_tab and arg_type_tab into arg_tab. This is rather tricky...
+
+foreach $func (sort keys(%arg_name_tab)) {
+  $_=$arg_name_tab{$func};
+  if ($_ eq "" || /^\s*void\s*/i)
+    {
+      # no arguments given, or just void or VOID
+      $arg_tab{$func} = "";
+      next;
+    }
+  else
+    {
+      # unpack arguments into array @names
+      @names = split(/,/, $arg_name_tab{$func});
+      # NOTE: this trick fails if someone specifies full prototypes for
+      #       function pointers, ie. (.., (*func)(int, int, int), ...).
+      #       Currently just one function in graphics.h does this, so it's
+      #       not worth the hassle to do it `right'.
+      @types = split(/,/, $arg_type_tab{$func});
+      # @types may still contain argument names, if they were specified
+      # in the proto file. This is a tricky task, separate the optional
+      # argument name...
+      foreach $i (0 .. $#types) {
+        @words = split(/ /,$types[$i]);
+        $wi=$#words;
+	word_loop: while ($wi > 0)
+	  {
+            if ($words[$wi] =~ /[\(\)]/ && !($words[$wi - 1] =~ /[\(\)]/))
+              {
+		last word_loop;
+	      }
+	    elsif (!($words[$wi] =~ /[\(\)]/))
+	      {
+	        last word_loop;
+	      }
+	    $wi--;
+	  }
+	# here come heuristics... (do we have a name to write over or 
+	# do we have to append a new element?)
+	if ($words[$wi] eq "int" ||
+	    $words[$wi] eq "long" ||
+	    $words[$wi] eq "short" ||
+	    $words[$wi] eq "char" ||
+	    $words[$wi] eq "*")
+	  {
+	    $wi++;
+	  }
+	($words[$wi] =~ s/(\W*)(\w+)(.*)/\1$names[$i]\3/) ||
+	  ($words[$wi] = $names[$i]);
+	$types[$i] = "@words";
+      }
+      $arg_tab{$func} = join("|", @types);
+    }
+}
+
+# this table maps functions that have an alternate stdarg-companion
+# it would probably be better (and more generic) to do this mapping with
+# some rather weird regular expressions. However, since almost every header
+# file chose a different set of naming `rules' how to deduce the stdarg-name
+# from the plain name, it would probably not be much better for the future,
+# there's no sign that this deliberate creativity in inventing new naming
+# conventions should stop....
+
+%stdarg_names = (
+  # amigaguide.library
+  'OpenAmigaGuideA',		'OpenAmigaGuide',
+  'OpenAmigaGuideAsyncA',	'OpenAmigaGuideAsync',
+  'SetAmigaGuideContextA',	'SetAmigaGuideContext',
+  'SendAmigaGuideContextA',	'SendAmigaGuideContext',
+  'SendAmigaGuideCmdA',		'SendAmigaGuideCmd',
+  'SetAmigaGuideAttrsA',	'SetAmigaGuideAttrs',
+  'AddAmigaGuideHostA',		'AddAmigaGuideHost',
+  'RemoveAmigaGuideHostA',	'RemoveAmigaGuideHost',
+  # asl.library
+  'AllocAslRequest',		'AllocAslRequestTags',
+  'AslRequest',			'AslRequestTags',
+  # bullet.library
+  'SetInfoA',			'SetInfo',
+  'ObtainInfoA',		'ObtainInfo',
+  'ReleaseInfoA',		'ReleaseInfo',
+  # datatypes.library
+  'ObtainDataTypeA',		'ObtainDataType',
+  'NewDTObjectA',		'NewDTObject',
+  'SetDTAttrsA',		'SetDTAttrs',
+  'GetDTAttrsA',		'GetDTAttrs',
+  'RefreshDTObjectsA',		'RefreshDTObjects',
+  'DoDTMethodA',		'DoDTMethod',
+  'PrintDTObjectA',		'PrintDTObject',
+  # dos.library
+  'AllocDosObject',		'AllocDosObjectTags',
+  'VFWritef',			'FWritef',
+  'VFPrintf',			'FPrintf',
+  'CreateNewProc',		'CreateNewProcTags',
+  'SystemTagList',		'SystemTags',
+  'NewLoadSeg',			'NewLoadSegTags',
+  'VPrintf',			'Printf',
+  # gadtools.library
+  'CreateGadgetA',		'CreateGadget',
+  'GT_SetGadgetAttrsA',		'GT_SetGadgetAttrs',
+  'CreateMenusA',		'CreateMenus',
+  'LayoutMenuItemsA',		'LayoutMenuItems',
+  'LayoutMenusA',		'LayoutMenus',
+  'DrawBevelBoxA',		'DrawBevelBox',
+  'GetVisualInfoA',		'GetVisualInfo',
+  'GT_GetGadgetAttrsA',		'GT_GetGadgetAttrs',
+  # graphics.library
+  'VideoControl',		'VideoControlTags',	# own creation ;-)
+  'WeighTAMatch',		'WeighTAMatchTags',	# own creation ;-)
+  'ExtendFont',			'ExtendFontTags',	# own creation ;-)
+  'ObtainBestPenA',		'ObtainBestPen',
+  'GetExtSpriteA',		'GetExtSprite',
+  'AllocSpriteDataA',		'AllocSpriteData',
+  'ChangeExtSpriteA',		'ChangeExtSprite',
+  'SetRPAttrsA',		'SetRPAttrs',
+  'GetRPAttrsA',		'GetRPAttrs',
+  'BestModeIDA',		'BestModeID',
+  # intuition.library
+  'EasyRequestArgs',		'EasyRequest',
+  'BuildEasyRequestArgs',	'BuildEasyRequest',
+  'OpenWindowTagList',		'OpenWindowTags',
+  'OpenScreenTagList',		'OpenScreenTags',
+  'NewObjectA',			'NewObject',
+  'SetAttrsA',			'SetAttrs',
+  'SetGadgetAttrsA',		'SetGadgetAttrs',
+  'DoGadgetMethodA',		'DoGadgetMethod',
+  'SetWindowPointerA',		'SetWindowPointer',
+  # locale.library
+  'OpenCatalogA',		'OpenCatalog',
+  # lowlevel.library
+  'SystemControlA',		'SystemControl',
+  'SetJoyPortAttrsA',		'SetJoyPortAttrs',
+  # realtime.library
+  'CreatePlayerA',		'CreatePlayer',
+  'SetPlayerAttrsA',		'SetPlayerAttrs',
+  'GetPlayerAttrsA',		'GetPlayerAttrs',
+  # utility.library
+  'AllocNamedObjectA',		'AllocNamedObject',
+  # workbench.library
+  'AddAppWindowA',		'AddAppWindow',
+  'AddAppIconA',		'AddAppIcon',
+  'AddAppMenuItemA',		'AddAppMenuItem',
+);
+
+
+# these are aliases for some functions, that for what reason ever got two
+# names for the same entry point. This is a dos.library pecularity..
+# the list is symmetric, since it's random which of the two names actually
+# appears in the fd file, and is thus generated inline...
+%aliased_names = (
+  'AllocDosObjectTagList',	'AllocDosObject',
+  'AllocDosObject',		'AllocDosObjectTagList',
+  'CreateNewProcTagList',	'CreateNewProc',
+  'CreateNewProc',		'CreateNewProcTagList',
+  'SystemTagList',		'System',
+  'System',			'SystemTagList',
+  'NewLoadSegTagList',		'NewLoadSeg',
+  'NewLoadSeg',			'NewLoadSegTagList',
+);
+
+# now output the real file
+
+($ARGV[0] =~ /([^:\/]*[:\/])*(\w+)\.h/) && ($def = $2 . "_H");
+$def =~ s/_protos//;
+$def =~ tr/[a-z]/[A-Z]/;
+
+print "#ifndef _INLINE_$def\n#define _INLINE_$def\n\n";
+
+print "#include <sys/cdefs.h>\n";
+print "#include <inline/stubs.h>\n";
+
+# this is for C++ support, it does `extern "C" {' if __cplusplus is defined
+print "\n__BEGIN_DECLS\n\n";
+
+print "#ifndef BASE_EXT_DECL\n";
+print "#define BASE_EXT_DECL\n";
+print "#define BASE_EXT_DECL0 extern $lib_base_type $lib_base_name;\n";
+print "#endif\n";
+
+print "#ifndef BASE_PAR_DECL\n";
+print "#define BASE_PAR_DECL\n";
+print "#define BASE_PAR_DECL0 void\n";
+print "#endif\n";
+
+print "#ifndef BASE_NAME\n";
+print "#define BASE_NAME $lib_base_name\n";
+print "#endif\n\n";
+
+print "BASE_EXT_DECL0\n\n";
+
+foreach $func (sort keys(%result_tab)) {
+  # this happens if the clib/ file defines functions that only exist in amiga.lib
+  next if $bias_tab{$func} == 0;
+
+  print "extern __inline ",$result_tab{$func},"\n";
+
+  if ($arg_tab{$func} eq "")
+    {
+      print $func," (BASE_PAR_DECL0)\n{\n";
+    }
+  else
+    {
+      print $func," (BASE_PAR_DECL ",join(",", split(/\|/, $arg_tab{$func})),")\n{\n";
+    }
+  print "  BASE_EXT_DECL\n";
+  if (!($result_tab{$func} =~ /^\s*void\s*$/i))
+    {
+      print "  register $result_tab{$func} _res $result_tab_end{$func} __asm(\"d0\");\n";
+    }
+  print "  register ${lib_base_type}a6 __asm(\"a6\") = BASE_NAME;\n";
+  @args = split(/\|/, $arg_tab{$func});
+  @names = split(/,/, $arg_name_tab{$func});
+  @regs = split(/[\/,]/, $reg_tab{$func});
+  $warn_a4a5 = 0;
+  $owe_nl = 0;
+
+  if ($#args >= 0)
+    {
+      # map the fd given register list to the arguments. If there wasn't 
+      # DOUBLE/double, then this mapping would be 1:1, but a double variable
+      # is specified as taking d0/d1 in the fd file, while gcc only wants to
+      # see the d0.
+
+      $i = 0;
+      $ri = 0;
+      @reg_args = ();
+      while ($i <= $#args)
+        {
+          $reg_args[$i] = $regs[$ri];
+	  # double, but not double pointers, skip one register
+	  if ($args[$i] =~ /double[^\*]*$/i)
+	    {
+	      $ri+=2;
+	    }
+	  else
+	    {
+	      $ri++;
+	    }
+	  $decl = $args[$i];
+	  $decl =~ s/(\W)$names[$i](\W?)/\1$reg_args[$i]\2/;
+          print "  register $decl __asm(\"$reg_args[$i]\") = $names[$i];\n";
+          $i++;
+        }
+    }
+  printf "  __asm __volatile (\"jsr a6@(-0x%x)\"\n", $bias_tab{$func};
+  if ($result_tab{$func} =~ /^\s*void\s*$/i)
+    {
+      print "  : /* no output */\n";
+    }
+  else
+    {
+      print "  : \"=r\" (_res)\n";
+    }
+  if ($#args == -1)
+    {
+      print "  : \"r\" (a6)\n";
+    }
+  else
+    {
+      print "  : \"r\" (a6)";
+      foreach $r (@reg_args) {
+        print ", \"r\" ($r)";
+      }
+      print "\n";
+    }
+
+  @clobb=("d0", "d1", "a0", "a1");
+  push (@clobb, @regs);
+  @clobb = sort(@clobb);
+  print "  : ";
+  # specify "memory" in each call, since each call is a subroutine call to some
+  # space which may do things we don't know ;-) Besides, this shouldn't hurt
+  # performance, and if it does, I'd need specific information HOW it hurts,
+  # so "memory" could be disabled in just those cases.
+  foreach $i (0 .. $#clobb) {
+    (($clobb[$i] ne $clobb[$i+1]) && ($i != $#clobb) && (print "\"$clobb[$i]\",")) ||
+    ($i == $#clobb && (print "\"$clobb[$i]\", \"memory\");\n"));
+  }
+
+# no longer necessary, since gcc now supports `register' "memory" to denote
+# that memory is clobbered by indirection on registers
+#
+#  # hack.. for all arguments addressed via address registers, fake a value change
+  foreach $i (0 .. $#regs) {
+#    ($regs[$i] =~ /a[0-5]/) && 
+#     (print "  *(char *)$regs[$i] = *(char *)$regs[$i];") && ($owe_nl= 1);
+    ($regs[$i] =~ /a[45]/) && ($warn_a4a5 = 1);
+  }
+  print STDERR "Warning: $func uses a4 or a5, add code to save/restore them!\n"
+    if $warn_a4a5;
+
+  print "\n" if ($owe_nl);
+  print "  return _res;\n" if (!($result_tab{$func} =~ /^\s*void\s*$/i));
+  print "}\n";
+  
+  if ($stdarg_names{$func})
+    {
+      print "#ifndef NO_INLINE_STDARG\n";
+      print "#define $stdarg_names{$func}(";
+      foreach $i (0 .. $#args-1) {
+	print "a$i, ";
+      }
+      print "tags...) \\\n";
+      print "  ({ struct TagItem _tags[] = { tags }; $func (";
+      foreach $i (0 .. $#args-1) {
+	print "(a$i), ";
+      }
+      print "_tags); })\n";
+      print "#endif /* not NO_INLINE_STDARG */\n";
+    }
+  
+  if ($aliased_names{$func})
+    {
+      # provide arguments to the macro, should reduce expansion of the macro
+      # at the wrong place..
+      print "#define $aliased_names{$func}(";
+      foreach $i (0 .. $#args-1) {
+	print "a$i, ";
+      }
+      print "a$#args) $func (";
+      foreach $i (0 .. $#args-1) {
+	print "(a$i), ";
+      }
+      print "(a$#args))\n";
+    }
+}
+
+print "\n#undef BASE_EXT_DECL\n";
+print "#undef BASE_EXT_DECL0\n";
+print "#undef BASE_PAR_DECL\n";
+print "#undef BASE_PAR_DECL0\n";
+print "#undef BASE_NAME\n";
+
+print "\n__END_DECLS\n\n";
+
+print "#endif /* _INLINE_$def */\n";

@@ -1,0 +1,404 @@
+CLEAR ,35000&
+DIM Basic$(1000) 'maximun number of BASIC lines
+DIM Number%(100) 'maximum number of jump addresses
+DIM Col%(200)    'for multiple commands on lines
+WIDTH 80
+
+Main:
+  FirstTime = 0
+  GOSUB Hello
+  GOSUB GetData
+  PRINT  "Checking for simple errors..."
+  GOSUB ErrorCheck
+  PRINT  "Checking for multiple statements on a line..."
+  GOSUB FindCol
+  PRINT  "Isolating jump labels..."
+  FOR j = 1 TO count  'find key words
+    GOSUB Isolate
+  NEXT
+  PRINT  "Sorting jump labels..."
+  GOSUB Sort
+  PRINT  "Making"; NumCount; "headers..."
+  GOSUB MakeHeader
+  PRINT  "Deleting line numbers..."
+  GOSUB DeleteLN
+  PRINT  "Changing jump labels...
+  GOSUB Change
+  PRINT  "Indenting loops..."
+  GOSUB Indent
+  PRINT  "Saving file to disk..."
+  GOSUB Savit
+  PRINT  "Done"
+END
+
+GetData:  'read program into array
+INPUT "What file do you want to strip"; FileName$
+  IF FileName$ = "" THEN GetData
+  Newfile$ = FileName$ + ".S"
+  PRINT  "The revised program will be saved as "; Newfile$
+  PRINT 
+  INPUT "Do you want a hardcopy of the jump table to help in debugging"; Hard$
+  Hard$ = UCASE$(Hard$)
+  C$ = LEFT$(Hard$,1)
+  IF C$ = "Y" THEN Hard = 1
+OPEN FileName$ FOR INPUT AS #1
+  WHILE EOF(1) = 0
+    count = count + 1
+    LINE INPUT #1, Basic$(count)
+  WEND
+  CLOSE 1
+  PRINT  "  Read"; count; "lines..."
+  RETURN
+  
+Isolate: 'find key words  
+  Gt = Gs = Og = Th = Rm = Rs = 0
+  Gt = INSTR(Basic$(j),"GOTO")
+  Gs = INSTR(Basic$(j),"GOSUB")
+  Th = INSTR(Basic$(j),"THEN")
+  Rm = INSTR(Basic$(j),"RESUME")
+  Rs = INSTR(Basic$(j),"RESTORE")
+  IF Gt > 0 THEN  'for GOTO
+    Where = Gt + 4
+    GOSUB AddNumber
+  END IF
+  IF Gs > 0 THEN ' for GOSUB
+    Where = Gs + 5
+    GOSUB AddNumber
+  END IF
+  IF Th > 0 AND Gt = 0 AND Gs = 0 THEN 'for THEN
+    Where = Th + 4
+    GOSUB AddNumber
+  END IF
+  IF Rm > 0 THEN  'for GOTO
+    Where = Rm + 6
+    GOSUB AddNumber
+  END IF
+  IF Rs > 0 THEN  'for GOTO
+    Where = Rs + 7
+    GOSUB AddNumber
+  END IF
+RETURN
+
+AddNumber: 'isolate jump labels
+  M$ = "1"
+  Add$ = ""
+  Long = LEN(Basic$(j))
+  WHILE M$ <= "9" AND Where <= Long
+    M$ = MID$(Basic$(j),Where,1)
+    IF M$ = ":" THEN M$ = "Z"  'break out of loop
+    IF M$ = "," THEN           'on goto-gosub reset
+      IF FirstTime = 0 THEN GOSUB FillArray ELSE RETURN
+      Add$ = ""
+    END IF
+    IF M$ >= "0" AND M$ <= "9" THEN Add$ = Add$ + M$
+    Where = Where + 1
+  WEND
+  IF FirstTime = 0 THEN GOSUB FillArray
+  RETURN
+
+FillArray: 'keep track of jump labels
+  IF NumCount = 0 THEN
+    NumCount = 1
+    Number%(NumCount) = VAL(Add$)
+    RETURN
+  END IF
+  V = VAL(Add$)
+  NumFlag = 0
+  FOR k = 1 TO NumCount
+    IF V = Number%(k) THEN NumFlag = 1 'found a duplicate
+  NEXT
+  IF NumFlag = 0 THEN
+    NumCount = NumCount + 1
+    Number%(NumCount) = V
+  END IF
+  RETURN
+  
+Sort: 'sort labels by Shell-Metzner method
+    Divisor = INT(NumCount/2 + 1)
+
+DoShell:
+  Divisor = INT(Divisor/2)
+  IF Divisor < 1 THEN RETURN
+  FOR j = 1 TO NumCount - Divisor
+    FOR k = j TO 1 STEP - Divisor
+      IF Number%(k + Divisor) > Number%(k) THEN GOTO EndLoop
+      SWAP Number%(k), Number%(k + Divisor)
+    NEXT k
+
+  EndLoop:
+  NEXT j
+  GOTO DoShell
+
+Metzner:
+  Divisor = NumCount
+
+SetLoop:
+  Divisor = INT(Divisor/2)
+  IF Divisor < 1 THEN RETURN
+  Pointer2 = Number - Divisor
+  Pointer1 = 1
+
+  SetExamine:
+    Examine = Pointer1
+
+    DoMetzner:
+      Pass = Examine + Divisor
+      IF w(Examine) > w(Pass) THEN
+        SWAP Number%(Examine), Number%(Pass)
+        Examine = Examine - Divisor
+        IF Examine >= 0 THEN GOTO DoMetzner
+      END IF
+      Pointer1 = Pointer1 + 1
+      IF Pointer1 > Pointer2 THEN GOTO SetLoop
+      GOTO SetExamine
+
+MakeHeader: 'substitite labels for line numbers
+  WHILE Number%(1) = 0  'kludge fix
+    FOR j = 2 TO NumCount
+      SWAP Number%(j-1), Number%(j)
+    NEXT
+    NumCount = NumCount - 1  
+  WEND
+  IF Hard = 1 THEN
+    FOR j = 1 TO NumCount
+      LPRINT "Jump"; j; " = "; Number%(j)
+    NEXT
+  END IF
+  FOR j = NumCount TO 1 STEP - 1
+  IF j/10 = INT(j/10) THEN PRINT j;
+    Label$ = STR$(j)
+    Label$ = "Jump" + RIGHT$(Label$,LEN(Label$)-1) + ":"
+    l$ = STR$(Number%(j))
+    l$ = RIGHT$(l$,LEN(l$)-1)
+    FOR k = count TO 1 STEP -1  'scan lines
+      IF LEFT$(Basic$(k),LEN(l$)) = l$ THEN
+        count = count + 2
+        FOR S = count TO k+2 STEP -1 'open a hole
+          SWAP Basic$(S), Basic$(S - 2)
+        NEXT
+        Basic$(k) = " "
+        Basic$(k + 1) = Label$ 
+      END IF
+    NEXT
+  NEXT
+  IF NumCount > 9 THEN PRINT 
+  RETURN
+
+DeleteLN: 'delete line numbers
+  FOR j = 1 TO count
+    IF VAL(Basic$(j)) = 0 THEN GOTO skip
+    A = 50
+    WHILE A > 47 AND A < 58
+      A = ASC(Basic$(j))
+      Basic$(j) = RIGHT$(Basic$(j),LEN(Basic$(j)) - 1)
+    WEND
+    Basic$(j) = "  " + Basic$(j)
+    skip:
+  NEXT
+  RETURN
+
+
+Change: 'change numbers in lines to jump labels 
+  FirstTime = 1
+  FOR k = NumCount TO 1 STEP - 1
+    Label$ = STR$(k)
+    Label$ = "Jump" + RIGHT$(Label$,LEN(Label$)-1)
+    Test$ = STR$(Number%(k))
+    Test$ = LEFT$(Test$,LEN(Test$)-1)
+    FOR j = 1 TO count
+      Pointer = INSTR(Basic$(j),Test$)
+      IF Pointer <> 0 THEN
+        Test1 = INSTR(Basic$(j),"GO")  'protect harmless numbers  \
+        Test2 = INSTR(Basic$(j),"THEN") + Test1                    '|
+        Test2 = INSTR(Basic$(j),"RES") + Test2                     '|
+        IF Test2 > 0 AND Test2 < Pointer THEN                      '/
+          M$ = MID$(Basic$(j),Pointer, 1)
+          IF INSTR(", BO",M$) <> 0 THEN
+            First$ = LEFT$(Basic$(j),Pointer)
+            Last$ = RIGHT$(Basic$(j), LEN(Basic$(j)) - Pointer + 1)
+              A = 32
+              WHILE A = 32 OR (A > 47 AND A < 57) 'eat old jump number
+                Last$ = RIGHT$(Last$,LEN(Last$) - 1)
+                A = ASC(Last$ + CHR$(0))
+              WEND
+              Basic$(j) = First$ + Label$ + Last$
+          END IF
+        END IF
+      END IF 
+    NEXT
+  NEXT
+  RETURN
+
+FindCol: 'look for :s in lines
+  FOR j = 1 TO count
+    V = INSTR(Basic$(j),":")
+    IF V > 0 THEN  ' check for blank place keeper lines
+      IF LEN(Basic$(j)) < 10 THEN
+        Basic$(j) = " "
+        V = 0
+      END IF
+    END IF
+    IF V > 0 THEN
+      V = INSTR(Basic$(j),"':")    'check for :s in REM statements
+      V1 = INSTR(Basic$(j),"REM")
+      V = V + V1
+      IF V = 0 OR V > 10 THEN
+        ColCount = ColCount + 1
+        Col%(ColCount) = j
+      END IF
+    END IF
+  NEXT
+  PRINT  "  Found"; ColCount; "lines..."
+  IF ColCount = 0 THEN RETURN
+  FOR jj = 1 TO ColCount
+    j = Col%(jj)
+    GOSUB EatCol
+  IF jj/10 = INT(jj/10) THEN PRINT  jj;
+  NEXT
+  IF jj > 9 THEN PRINT 
+  RETURN
+  
+EatCol: 'make multiple lines from :-type lines
+  Temp$(0) = Basic$(j)
+  TempCount = 1
+  FOR Cl = 1 TO 10  'clear holding array
+    Temp$(Cl) = ""
+  NEXT
+
+  Eater:
+  M$ = "A"
+  WHILE M$ <> ":" AND Temp$(0) <> ""
+    M$ = LEFT$(Temp$(0),1)
+    Temp$(TempCount) = Temp$(TempCount) + M$
+    Temp$(0) = RIGHT$(Temp$(0),LEN(Temp$(0))-1)
+  WEND  
+  IF RIGHT$(Temp$(TempCount),1) = ":" THEN
+    Temp$(TempCount) = LEFT$(Temp$(TempCount),LEN(Temp$(TempCount))-1)
+  END IF
+  IF Temp$(0) <> "" THEN
+    TempCount = TempCount + 1
+    GOTO Eater
+  END IF
+
+  IfCount = 0  'check for IF statements
+  FOR E = 1 TO TempCount
+    V = INSTR(Temp$(E),"IF")
+    IF V <> 0 THEN IfCount = IfCount + 1
+  NEXT
+  IF IfCount > 0 THEN
+    FOR E = 1 TO IfCount
+      TempCount = TempCount + 1
+      Temp$(TempCount) = "END IF"
+    NEXT
+  END IF
+  IF IfCount > 0 THEN 'split off THEN X statements
+    FOR E = 1 TO TempCount
+      V = INSTR(Temp$(E),"THEN")
+      IF V > 0 THEN
+        Hold$(1) = LEFT$(Temp$(E),V+3)
+        Hold$(2) = RIGHT$(Temp$(E),LEN(Temp$(E)) - V - 3)
+        TempCount = TempCount + 1  'expand array
+        FOR S = TempCount TO E + 1 STEP -1 'open a hole in it
+          SWAP Temp$(S), Temp$(S - 1)
+        NEXT
+        Temp$(E) = Hold$(1)
+        Temp$(E + 1) = Hold$(2)
+      END IF
+    NEXT
+  END IF
+
+  FOR E = 1 TO TempCount   'eat leading spaces
+    IF LEFT$(Temp$(E),1) = " " THEN
+      Temp$(E) = RIGHT$(Temp$(E),LEN(Temp$(E))-1)
+    END IF
+  NEXT
+  FOR E = 1 TO TempCount  ' add padding spaces
+    IF VAL(Temp$(E)) = 0 THEN
+      Temp$(E) = "  " + Temp$(E)
+    END IF
+  NEXT
+  count = count + TempCount - 1 'expand array
+  FOR A = 1 TO ColCount 'update pointers
+    IF A > jj THEN Col%(A) = Col%(A) + TempCount - 1
+  NEXT
+  FOR S = count TO j + TempCount STEP -1 'open a hole in it
+    SWAP Basic$(S), Basic$(S - TempCount + 1)
+  NEXT
+  FOR E = 1 TO TempCount  'fill the hole
+    Basic$(j + E - 1) = Temp$(E)
+  NEXT
+  RETURN     
+
+
+Indent:  'pretty thing up
+  Add$ = ""
+  FOR j = 1 TO count            'indent loops
+    Basic$(j) = Add$ + Basic$(j)
+    F = INSTR(Basic$(j),"FOR")
+    N = INSTR(Basic$(j),"NEXT")
+    IF F > 0 AND N = 0 THEN GOSUB Push
+    IF F = 0 AND N > 0 THEN GOSUB Pull
+    T = INSTR(Basic$(j),"THEN")
+    E = INSTR(Basic$(j),"END IF")
+    IF T > 0 AND (LEN(Basic$(j)) - T < 7) THEN GOSUB Push
+    IF E > 0 THEN GOSUB Pull
+  NEXT
+  RETURN
+
+Push: 'indent by two spaces
+  Add$ = Add$ + "  "
+  RETURN  
+
+Pull: 'deindent by two spaces
+  IF LEN(Add$) > 2 THEN Add$ = LEFT$(Add$,LEN(Add$) - 2)
+  Basic$(j) = RIGHT$(Basic$(j),LEN(Basic$(j)) - 2)
+  RETURN
+
+
+Savit: 'save file to disk
+OPEN Newfile$ FOR OUTPUT AS #1
+  FOR j = 1 TO count
+    PRINT #1, Basic$(j)
+  NEXT
+  CLOSE 1
+  RETURN
+  
+ErrorCheck:  'look for simple errors
+  EndFlag = 0
+  FOR j = 1 TO count
+    V = INSTR(Basic$(j),"IF")
+    V1 = INSTR(Basic$(j),"THEN")
+    IF (V = 0 AND V1 > 1) OR (V1 = 0 AND V > 0) THEN
+      BEEP
+      PRINT 
+      PRINT  "IF ... THEN Error in line"; VAL(Basic$(j))
+      PRINT  Basic$(j)
+      EndFlag = 1
+    END IF
+  NEXT
+  IF EndFlag = 1 THEN END
+  RETURN 
+
+Hello: 'intro text
+LOCATE 2,1
+PRINT  SPACE$(33)"CONVERT BASIC"
+PRINT 
+PRINT  " This is a shareware program copyright 1987 to George Trepal.  It's OK to"
+PRINT  " give it to friends but wrong to sell it.  If you find it useful please"
+PRINT  " send a contribution to George Trepal, 2650 Alturas Rd.,  Bartow, Florida"
+PRINT  " 33830& USA.  (Thank you!)"
+PRINT  
+PRINT  "    This program helps to convert Basic programs from other computers to"
+PRINT  " AmigaBasic."
+PRINT  "    This program removes line numbers and inserts jump labels into Basic"
+PRINT  " programs.  It can only use ASCII files with command words in uppercase"
+PRINT  " letters.  Load the program into AmigaBASIC to capitalize the command words"
+PRINT  " then save it by SAVE ''filename'',a to generate an ASCII file."
+PRINT 
+PRINT 
+PRINT  "   Be sure to include a path (df0:filename rather than just filename)"
+RETURN
+
+
+
+            

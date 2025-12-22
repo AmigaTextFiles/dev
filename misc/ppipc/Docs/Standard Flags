@@ -1,0 +1,225 @@
+                IPC Message and Item Standard Flags
+                ===================================
+
+                          -- May 1989 --
+
+
+Each IPCMessage, and each IPCItem contained within it, has a 32-bit Flags
+field used by Client and Server to inform their counterpart process of
+various requirements and occurrences.  The upper sixteen bits of the
+longword are reserved for system-wide flags, and the lower sixteen are
+available for designer-specified uses associated with particular message
+IDs.
+
+Typical of the sort of thing that must be signalled: a message item may
+refer to a block of data created by the original client, and the Server
+must know whether it can assume responsiblity for this data (disposing
+of it when done) or whether the Client wants it back with the reply.
+(This is distinct from who can change the data in the block.  In general,
+data can be changed by whichever process "owns" the associated message
+at the time; in other words the server -- and only the server -- can
+write to a data block passed to it in a message UNTIL it replies the
+message; from that point on the server must NOT touch it, or even assume
+it still exists.)
+
+If a Server does not recognize the message ID, or cannot handle an Item,
+it has to report this in the reply, so flags are reserved for this.
+Depending on other bits, not handling an item may or may not be fatal to
+handling the message as a whole, and the server should respond suitably.
+
+Each flag bit has the same meaning -- or as close as possible to it --
+for both ipc_Flags (Message) and ii_Flags (Item) usage; most of the flags
+are suitable for both.  Some of them will usually be set by the client and
+interpreted by the server; others may work in either direction.  In most
+cases only a subset of the flags will be needed for a particular Server.
+
+The remainder of this document describes the actual system flags currently
+assigned.  Refer to IPC.h for the actual bit assignments.  The reader must
+realize that at this stage some of these flags have not yet seen actual
+use, and there are undoubtedly hazy regions, even outright fatal omissions.
+Please resist the temptation to use any of the assigned bits for other than
+the exactly specified purpose.  If you need another flag, use one of the
+lower sixteen bits if possible; if you think it should be a system flag
+please contact the author so that it can be added to the set (but remember
+that there are currently only six free spaces!).  And do the same of course
+if you notice any other horrors or necessary features.
+
+
+
+Flags normally set only by Client:
+---------------------------------
+
+IPC_TRANSFER
+
+    in Item:
+       Ownership of this Data block may be transferred to receiver.
+       If set by Client, the Server may or may NOT choose to assume
+       responsibility for the block.  If it does take it over, it MUST
+       clear ii_Ptr AND this bit before reply.  If it does not take it
+       over, it should leave the bit set, so the Client will know it has to
+       dispose of the data.  The Server does NOT have to set this bit if
+       the Client never set it, of course; unless this bit was initially
+       set -- or IPC_SERVER_OWNED is a possibility -- the client will
+       assume it owns ALL data in a returned message.
+
+       (In certain situations -- which would have to be specified in the
+       definition of the Message/Item IDs -- there are some other possible
+       responses to this flag.  It might be specified that the Server could
+       REPLACE the pointer before replying -- disposing of the old data and
+       supplying new.  Here the IPC_MODIFIED bit would need to be used.
+       Alternatively, the Server might just possibly set the
+       IPC_SERVER_OWNED bit and return the pointer unchanged, though this
+       option is really intended for other things; it could only apply
+       where the Client needs to access the block, but will return it once
+       again to the Server at a later time.)
+
+    in Message:
+       Ownership of all Items in the message may be transferred.
+       May be used where appropriate instead of flagging all the Items
+       individually; the server should then accept either all the items or
+       none (clearing or retaining this bit, but nulling all the individual
+       ii_Ptrs if it takes them over).
+       In particular, this flag should ALWAYS be set in those cases where
+       no ReplyPort is supplied.  (It is standard practice for a Server
+       to reply a message, but there are oocasions where, for instance,
+       the Client may not be able to remain around for a reply.  To prevent
+       catastrophe, such situations must be clearly flagged!)  In this
+       situation, the Server has no choice but to accept responsibility,
+       so the user must be very sure it is capable of this before he sends
+       it such a message.
+
+
+IPC_NETWORK
+
+    in Item or Message:
+       The data in this block or message may be transmitted to another
+       machine.  In other words the data referenced is meaningful outside
+       the current machine environment.  It may be anything from a text
+       block to a bit image, but it is NOT a file handle, message port,
+       or other internal-use-only object.
+
+
+IPC_INMESSAGE
+
+    in Item:
+       The data block referenced by this Item is included in the message
+       block itself, in a user data area specified when CreateIPCMsg() was
+       called.  This is only really useful for a message with no ReplyPort,
+       so the Server will know not to delete this block twice; if the
+       message IS replied, the Server will not be able to take the block
+       over anyway (because it is within the replied structure), so the
+       flag is superfluous and need not be set -- just don't set
+       IPC_TRANSFER.
+
+    in Message:
+       As for Item, but referring to all Items.
+       A situation where this flag would be appropriate is where one
+       message Item's contents is itself an IPCMessage structure (as a
+       template for generating other messages, say); setting the flag in
+       this SECONDARY structure's ipc_Flags would indicate to the Server
+       that it could safely duplicate -- and possibly modify -- the
+       original.
+
+
+IPC_NONSTANDARD
+
+    in Item or Message:
+       The data in this block or message does NOT conform to the standard
+       pointer-to-single-data-block protocol (it might be a list structure,
+       for instance).  The Server must NOT delete or modify this UNLESS it
+       knows how to handle it.  NOTE: ANY ID used with this flag MUST have
+       common meaning to ALL programs (if they recognize it); in other
+       words, if you design a message that needs it, make sure that the
+       IDs you use are unique, and get them disseminated as fast as
+       possible so that they don't get used for something else.
+
+
+IPC_VITAL
+
+    in Item:
+       This Item ID MUST be recognized, otherwise the whole message must
+       be replied unprocessed (with IPC_REJECT set).  Servers should be
+       prepared to look for this bit BEFORE they do anything irreversible
+       to any Item they do recognize.
+
+    in Message:
+       All Items in the message must be understood by the Server.
+
+
+
+Flags normally set only by server on reply:
+------------------------------------------
+
+IPC_REJECT
+       (this bit was originally designated IPC_NOTKNOWN, but the current
+        name seems better suited.  The old definition is still in IPC.h
+        but should not be used in new programs.)
+
+    in Item:
+       The server could not handle this Item either because it did not
+       understand the ID or because it was unable to process it.  If it
+       did recognize the ID but for some reason failed in its assignment,
+       it should also set IPC_FAILED.  (Note that IPC_REJECT is specifically
+       assigned to the sign bit of the Flags longword, to allow quick
+       checking if desired, so it should always be set in ADDITION to
+       IPC_FAILED.)
+
+    in Message:
+       Either the Message ID itself was not recognized, or some problem
+       occurred while processing Items that was judged fatal (possibly
+       IPC_VITAL was encountered on an unrecognized item, or an expected
+       Item was not found).  If a particular Item caused the problem,
+       the IPC_CHECKITEM bit should be set as well, and the appropriate
+       flags (including IPC_REJECT) set in the offending Item.  IPC_FAILED
+       can of course also be used if relevant.
+
+
+IPC_FAILED
+
+    in Item or Message:
+       The IPC_REJECT flag was set because the Server failed to handle an
+       ID that it is designed to (rather than just not recognizing the
+       block).  Useful only as secondary information to the Client; in
+       some cases it might be helpful to assign some of the user definable
+       bits as indications of more specific reasons.
+
+
+IPC_MODIFIED
+
+    in Item:
+       The server modified the data, either within the supplied data block
+       or -- if permitted -- by replacing the block pointer.  Changing the
+       pointer is only permitted if a) this particular Item ID is defined
+       to allow it, and b) if IPC_TRANSFER is set; on reply both
+       IPC_TRANSFER and IPC_MODIFIED should be set.
+       This flag should also be used (for consistency at least) where
+       the Item from the Client had a null pointer field that is filled
+       in by the server with a created data block; it might be combined
+       with other relevant bits (IPC_SERVER_OWNED in particular).
+
+    in Message:
+       Usefulness unclear -- one of those hazy areas...
+
+
+IPC_SERVER_OWNED
+
+    in Item only:
+       The server owns this data Item.  Normally it will have created it,
+       and for some reason is not able to pass ownership to the Client --
+       usually because it or other processes are sharing it.  The Client
+       MUST at some later point send the Item back (in another message)
+       with both IPC_SERVER_OWNED and IPC_TRANSFER set, to indicate that
+       it has finished with it; the Server will of course then null ii_PTR
+       and clear the bits in the reply.
+
+
+IPC_CHECKITEM
+
+    in Message only:
+       Associated with IPC_REJECT -- which must be set also -- to indicate
+       that one or more particular items caused the message to be rejected.
+       Appropriate flags should be set in these items as well.
+
+
+                              % % % % % %
+

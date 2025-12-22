@@ -1,0 +1,324 @@
+; Description:  Extracts library information from the separate library files
+;               and displays it. Not everything done yet, but read the file
+;               explain.txt to find out the structure of the libraries
+;
+; Type:         SYSTEM
+;
+; Author:       David McMinn
+;
+; Requires:     amigalibs.res
+;
+; Last updated: 16th January 2002 - Silly mistake in parsing Nullsubs correctly
+;
+; To do:        Work out how to convert libnums and token numbers to the hex that is saved
+;
+;               Curt has used:
+;  this is right    libnum = (tok AND 127) * 2 + (cmd>127)
+;  this is right    cmdnum = (cmd AND 127)
+;
+;
+;  when saving, blitz does          byte1 = ((libnum)) lsr 1) or 128 # doesn't matter if this is or or xor, result will be same
+;                                   byte2 = tokenum xor ((libnum and 1) lsl 7)
+;
+;  and to convert back from saved   libnum = (byte1 and 127) lsl 1 + ((byte2 and 128) lsr 7)
+;                                   tokenum = (byte2 and 127)
+;
+;
+; these last two are basically the same as Curt's way, but in a more ASM
+; friendly manner, just because Blitz 2 was written in ASM.
+
+
+
+; Snakeay newtype which allows us to use a section of
+; memory as if it were an array (of any size too :)
+NEWTYPE.fake
+    b.b[0]
+End NEWTYPE
+
+
+; Define global variables
+DEFTYPE.s       filename        ; Name of the file to scan, as passed by the first CLI argument
+DEFTYPE.b       *ptr            ; Pointer to buffer for file once read in
+DEFTYPE.l       bufsize         ; size of the buffer pointer to by *ptr
+
+
+; Procedures
+Statement AnalyseLibrary{*buf.fake}
+    DEFTYPE.l   offset              ; Used when moving around in file
+    DEFTYPE.w   end_of_lib          ; Flag to show when to stop scanning file
+
+    ; Now some variables for the library info
+    DEFTYPE.w   libnum
+    DEFTYPE.w   cmdtype
+    DEFTYPE.w   tokenum
+    Dim List    command$(300)       ; Probably only needsto be 256 (or maybe 128) but Mildred is a naughty library
+
+    libnum = Peek.w(&*buf\b[36])
+    NPrint "Library number = ",libnum
+
+    end_of_lib = 0
+    offset = 80
+    tokenum = 0
+    While NOT(end_of_lib)
+        If SetSignal_(0,#SIGBREAKF_CTRL_C)&#SIGBREAKF_CTRL_C Then end_of_lib=-1
+
+        ;Stop
+        cmdtype = Peek.w(&*buf\b[offset])
+
+        Select cmdtype
+            Case -1     ; End of command definitions
+                end_of_lib = -1
+
+            Case 0      ; ??? (!nullsub macro)
+                ; We won't print anything for this, just skip past it
+                NPrint "Nullsub"
+                ; OK, I lied
+
+                ; find the word value of 0 that terminates the list of libs
+                offset = offset + 6
+                While(Peek.w(&*buf\b[offset]) <> 0)
+                    offset = offset + 4
+                Wend
+
+                ; Skip to end of nullsub
+                offset = offset + 14
+
+            Case 6      ; System shared library (e.g. graphics.library)
+                tokenum = tokenum + 1
+                Print "System library, token ",tokenum,": "
+
+                ; find end of parameter list
+                offset = offset + 10
+                While(*buf\b[offset] <> -1)
+                    offset = offset + 1
+                Wend
+                offset = offset + 1 ; skip -1
+
+                ; correct for misalignment
+                If(offset AND 1) Then offset = offset + 1
+
+                ; jump to start of command name
+                offset = offset + 6
+
+                ; print it
+                Print Peek$(&*buf\b[offset])
+
+                ; find the start of the help string
+                While(*buf\b[offset] <> 0)
+                    offset = offset + 1
+                Wend
+                offset = offset + 1
+
+                ; print it
+                NPrint Peek$(&*buf\b[offset])
+
+                ; find the end of the help string
+                While(*buf\b[offset] <> 0)
+                    offset = offset + 1
+                Wend
+                offset = offset + 1
+
+                ; add on one if required
+                If(offset AND 1) Then offset = offset + 1
+
+            Case 8      ; Dummy token (!dumtoke macro)
+                ; Got to start of Dummy token name
+                offset = offset + 12
+
+                ; print it
+                Print "Dummy token : ",Peek$(&*buf\b[offset])," "
+
+                ; find the start of the help string
+                While(*buf\b[offset] <> 0)
+                    offset = offset + 1
+                Wend
+                offset = offset + 1
+
+                ; print it
+                NPrint Peek$(&*buf\b[offset])
+
+                ; find the end of the help string
+                While(*buf\b[offset] <> 0)
+                    offset = offset + 1
+                Wend
+                offset = offset + 1
+
+                ; add on one if required
+                If(offset AND 1) Then offset = offset + 1
+
+            Default
+                Stop
+                ; An actual command. You could probably do something to detect what
+                ; type of command it was and what kind of parameter it returned
+                ; (all the info you need is in the explain.txt file) but I'm just lazy
+
+                ;NPrint "OK, tokens start with: ",Right$(Hex$(libnum+102),2)
+                tokenum = tokenum + 1
+
+                ; jump to start of arguments
+                ;cmdtype.w = Peek.w(&*buf\b[offset])
+                offset = offset + 6
+
+                Repeat
+                    ; move past them to the start of the libraries
+                    ;offset = offset + 2 + Peek.w(&*buf\b[offset])
+                    numargs.w = Peek.w(&*buf\b[offset])&$FF
+                    offset = offset + 2
+
+                    For i.w=0 To numargs-1
+                      Select Peek.b(&*buf\b[offset])
+                        Case 0:Print "usesize "
+                        Case 1:Print "byte "
+                        Case 2:Print "word "
+                        Case 3:Print "long "
+                        Case 4:Print "quick "
+                        Case 5:Print "float "
+                        Case 7:Print "string "
+                        Case 8:Print "unknown "
+                        Case 16:Print "arrayend "
+                        Case 32:Print "array "
+                        Case 64:Print "push "
+                        Case -128:Print "varptr "
+                        Default:Print "quoi? "
+                      End Select
+                      offset = offset + 1
+                    Next
+                    ; correct for misalignment
+                    If(offset AND 1) Then offset = offset + 1
+                    NPrint ""
+
+                    ; move past libraries
+                    While(Peek.w(&*buf\b[offset]) <> 0)
+                        ;Print Right$(Hex$(Peek.w(&*buf\b[offset])),4)," "
+                        ; print library number
+                        Print Peek.w(&*buf\b[offset]),"/"
+                        offset = offset + 2
+                        ; print parameter type
+                        partype.w=Peek.w(&*buf\b[offset])
+                        If (partype&$ff00)=$ff00
+                          Print "push"
+                        Else
+                          If partype&$1000 Then Print "a" Else Print "d"
+                          Print (partype&$700) LSR 8
+                          If partype&$80 Then Print "(item",partype&7,")"
+                          If (partype&3)=3 Then Print "(max)"
+                          If (partpe&1)=1 Then Print "(base)"
+                          If (partype&2)=2 Then Print "(used)"
+                        End If
+                        offset = offset + 2
+                        Print "  "
+                    Wend
+                    offset = offset + 2
+
+                    ; move past subs
+                    ;offset = offset + 12
+                    offset = offset + 4
+                    Print Peek.l(&*buf\b[offset])
+                    offset = offset + 8
+                    NPrint ""
+                Until Peek.w(&*buf\b[offset])=-1
+
+                ; Move to start of command name
+                offset = offset + 8
+
+                ; print it
+                Print tokenum,": "
+                If cmdtype&3=3 Then Print "["
+                If cmdtype&2=2
+                  Select (cmdtype LSR 8)
+                    Case 0:Print "usesize="
+                    Case 1:Print "byte="
+                    Case 2:Print "word="
+                    Case 3:Print "long="
+                    Case 4:Print "quick="
+                    Case 5:Print "float="
+                    Case 7:Print "string="
+                    Case 8:Print "unknown="
+                    Case 16:Print "arrayend="
+                    Case 32:Print "array="
+                    Case 64:Print "push="
+                    Case -128:Print "varptr="
+                    Default:Print "quoi?="
+                  End Select
+                End If
+                If cmdtype&3=3 Then Print "]"
+                Print Peek$(&*buf\b[offset])," "
+                If cmdtype&3=3 Then Print "["
+                If cmdtype&2=2 Then Print "("
+                If cmdtype&3=3 Then Print "]"
+
+                ; find the start of the help string
+                While(*buf\b[offset] <> 0)
+                    offset = offset + 1
+                Wend
+                offset = offset + 1
+
+                ; print it
+                Print Peek$(&*buf\b[offset])
+                If cmdtype&3=3 Then Print "["
+                If cmdtype&2=2 Then Print ")"
+                If cmdtype&3=3 Then Print "]"
+                NPrint ""
+
+
+                ; find the end of the help string
+                While(*buf\b[offset] <> 0)
+                    offset = offset + 1
+                Wend
+                offset = offset + 1
+
+                ; add on one if required
+                If(offset AND 1) Then offset = offset + 1
+
+        End Select
+        NPrint ""
+    Wend
+End Statement
+
+
+; You need to run this from the CLI, but we don't want
+; it to crash from the WB
+WBStartup
+If FromCLI=0 Then End
+
+
+; We want a filename in the first argument
+If NumPars=0
+    NPrint "Usage:"
+    NPrint "    libinfo <library filename>"
+    End
+End If
+filename=Par$(1)
+Stop
+
+; Try to read the specified filename
+If ReadFile(0,filename)
+    FileInput 0
+
+    ; Try to allocate enough memory to read it into a buffer
+    bufsize=Lof(0)
+    *ptr = AllocMem(bufsize,#MEMF_CLEAR|#MEMF_ANY)
+    If *ptr
+        ReadMem 0,*ptr,bufsize
+    End If
+    CloseFile 0
+End If
+
+
+; Check if we got the file in memory
+If *ptr=0
+    NPrint "Either I could not read the file, or there"
+    NPrint "is not enough free memory to read it all in."
+    End
+End If
+
+
+; If we did, then its on with the show
+NPrint "Analysing file: ",filename
+AnalyseLibrary{*ptr}
+
+
+; Free the buffer
+FreeMem *ptr,bufsize
+End
+

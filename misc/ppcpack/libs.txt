@@ -1,0 +1,332 @@
+E) PPC Shared Libraries
+=======================
+
+This article handles:
+
+1) Using PPC Shared Libraries
+2) Creating PPC Shared Libraries
+
+It assumes you already read c.txt and mixed.txt.
+
+1) Using PPC Shared Libraries
+-----------------------------
+
+Well, basically it is the same like using a 68k Shared Libraries.
+Internally WarpOS Shared Libraries have exactly the same format
+like 68k Shared Libraries. Only that some entries on the jumptable
+point to PPC Code. Basically they are all Mixed Binary. At least
+the Library-Init and -Expunge are done in 68k.
+
+There are three types of PPC Shared Libraries:
+
+A) 68k/PPC Mixed-Libs
+B) 68k/PPC Mixed-Fat-Libs
+C) PPC-Only Libs
+
+An 68k/PPC Mixed-Lib is a library that has every of it's functions
+available for both 68k. Some (or all) of the functions are also available
+as special PPC Versions. The PPC-Versions have different offsets than the
+68k-Versions. Only a PPC-System can use the PPC-Functions, but the library
+can also be used on a 68k System, if only the 68k functions are used.
+rtgmaster.library is an example of Type A).
+
++ no Contextswitches needed
++ only one Lib for both 68k and PPC functions
+- to compile 68k+PPC Versions of a program constructs like
+
+#ifdef __PPC__
+CopyRtgBlitPPC(...);
+#else
+CopyRtgBlit(...);
+#endif
+
+have to be used.
+
+A 68k/PPC Mixed-Fat-Lib implements every function only once. All functions
+use a 68k Header. This header finds out, if a PPC is present. If yes,
+it uses the PPC-optimized version, else the 68k version.
+
++ only one Lib for both 68k and PPC functions
++ no complicated constructs needed
+- Every function uses two Contextswitches (one from PPC to 68k to
+  run the header, one from 68k to PPC to run the optimized function).
+
+This type should only be used (if used at all !!!) for functions that
+take VERY long (for a MPEG Lib or such...)
+
+PPC-Only Libs run only on PPC-Systems. There might exist an 68k version
+of the library with a different name.
+
++ no complicated constructs needed
++ no Contextswitches needed
+- two libraries, one for PPC, one for 68k
+
+To use a PPC Library you would do:
+
+- include the clib-include-file
+- Call the function
+
+For libraries not included in ppcamiga.lib (all OS Libs and rtgmaster
+are included there) you have additionally to create a PPC-Stub-File,
+like described in c.txt, and link together with this. You only need
+the PPC-Stub-File for 68k functions in the Library (if it is a
+PPC-Only-Lib you do not need it). You don't include any pragmas.
+
+That is ALL about this theme.
+
+2) Creating PPC-Shared-Libraries
+
+Principially you have to do like described in mixed.txt, creating a Mixed
+Binary (Even a PPC-Only Lib is a mixed Binary, as the Library Init is always 68k).
+
+You specify the Library-Init like this:
+
+void INIT_0_InitTheLib(register __a6 struct MyLibBase *base)
+{
+ MyLibBase=base;
+ // Rest of the Init
+}
+
+You specify the Library-Expunge like:
+
+void EXIT_0_ExitTheLib(register __a6 struct MyLibBase *base)
+{
+ base=MyLibBase;
+}
+
+The structure MyLibBase has to be defined before, of course. After the includes
+you have to specify:
+
+struct MyLibBase
+{
+ struct Library mlb_MyLibBase;
+ // Rest of data you want to store
+};
+
+struct MyLibBase *MyLibBase;
+
+#pragma libbase MyLibBase
+
+If you want your library also to work on a plain 68k system, you add:
+
+struct Library *PowerPCBase;
+
+void INIT_0_PowerPCBase(void)
+{
+ PowerPCBase=OpenLibrary("powerpc.library",7);
+}
+
+void EXIT_0_PowerPCBase(void)
+{
+ if (PowerPCBase) CloseLibrary(PowerPCBase);
+}
+
+Now you can check the variable PowerPCBase in your functions to find out, if
+this is a PPC or a 68k system. (if the variable is 0, it is a 68k System).
+
+Note: If you would open powerpc.library inside the Libinit of your library,
+your library would fail to open if powerpc.library fails to open. Because of
+this, we had to do it in the init of powerpc.library itselves...
+
+Take this also a general rule: if stuff in the LibInit fails to open => the
+library fails to open.
+
+Principially the rest of the Library is just defining the Library functions, but
+i will explain it a bit more detailed:
+
+You have to define the following files:
+
+MyLib_protos.h
+MyLib_lib.fd
+MyLib.c
+MyLib_PPC.c
+
+All works after the rules for Mixed Binaries.
+
+- MyLib.c contains the LibInit and the 68k functions of your library (if it has any).
+- MyLib_PPC.c contains the PPC functions of your library
+- MyLib_lib.fd contains the FD Stuff for the library
+- MyLib_protos.h contains the Prototypes for the library
+
+MyLib_protos.h
+--------------
+
+A Proto-File for a PPC Shared library looks like (Example) :
+
+#ifndef MYLIB_PROTOS_H
+#define MYLIB_PROTOS_H
+
+#ifndef __PPC__
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+void test68k(int bla);
+int  foo68k(int bar);
+
+#ifdef __cplusplus
+};
+#endif
+
+#else
+
+extern "AmigaLib" MyLibBase
+{
+ // The numbers are the function offsets in the jumptable !!!
+ void testPPC_(struct Library *,int)=-42;
+ int  fooPPC_(struct Library *,int)=-48;
+}
+
+__inline void testPPC(int bla)
+{
+ extern struct Library *MyLibBase;
+ testPPC_(MyLibBase,bla);
+}
+
+__inline int fooPPC(int bar)
+{
+ extern struct Library *MyLibBase;
+ return fooPPC_(MyLibBase,bar);
+}
+
+#endif
+#endif
+
+Note, that you have to create a PPC-Stub, like explained in c.txt, if you
+want to use the 68k functions inside a PPC Source (inside a 68k source
+this is not needed, of course).
+
+MyLib_lib.fd:
+-------------
+
+FDs for PPC Shared Libraries are defined exactly like FDs for 68k-Libraries.
+The only difference is, that NO PARAMETERS ARE GIVEN FOR PPC FUNCTIONS, EVEN
+IF THEY HAVE SOME.
+
+Example (no complete FD File, only two example lines of a FD File...)
+
+; ...
+testfunc68k(bla)(d0)
+testfuncPPC()()
+; ...
+
+Both functions have one parameter, but the parameter of the PPC Function is not
+specified in the FD-File.
+
+MyLib.c
+-------
+
+Example:
+
+#include <clib/exec_protos.h>
+#include <pragma/exec_lib.h>
+#include <exec/libraries.h>
+
+struct MyLibBase
+{
+ struct Library mlb_MyLibBase;
+ // Rest of data you want to store
+};
+
+struct MyLibBase *MyLibBase;
+
+#pragma libbase MyLibBase
+
+void INIT_0_InitTheLib(register __a6 struct MyLibBase *base)
+{
+ MyLibBase=base;
+ // Rest of the Init
+}
+
+You specify the Library-Expunge like:
+
+void EXIT_0_ExitTheLib(register __a6 struct MyLibBase *base)
+{
+ base=MyLibBase;
+}
+
+If you want your library also to work on a plain 68k system, you add:
+
+struct Library *PowerPCBase;
+
+void INIT_0_PowerPCBase(void)
+{
+ PowerPCBase=OpenLibrary("powerpc.library",7);
+}
+
+void EXIT_0_PowerPCBase(void)
+{
+ if (PowerPCBase) CloseLibrary(PowerPCBase);
+}
+
+void test68k(register __d0 int bla)
+{
+}
+
+int foo68k(register __d0 int bar)
+{
+ return 0;
+}
+
+MyLib_PPC.c
+-----------
+
+The most important additional thing to usual Mixed Binary Sources is, that all
+Library functions have to be specified with __saveds.
+
+Example:
+
+void __saveds testPPC(int bla)
+{
+}
+
+int __saveds fooPPC(int bar)
+{
+ return 0;
+}
+
+As you see, my example-library is a Type A) Library (PPC-Mixed...). You should now
+be able to create Libraries of all three types yourselves.
+
+Note: After you compiled your library, you have to manually remove all PPC-Functions from
+the automatically generated MyLib_lib.h. This pragma-File has been generated
+from the FD-File, but pragma-Files are only for 68k. If you do not do this, you
+will get errors when using the Library.
+
+Possible Problems:
+
+- "I get illegal 24 Bit Relocation all the time"
+
+Possible Reasons for this one:
+
+- you forgot to set "Debuggable Code" for the first Compilation. Please change
+  the compiler options to Debugging Code and compile once more.
+
+- You tried to call a 68k Assembler Function from the PPC Part. This can only
+  be done using a manual Context-Swtich. The Automatic Contextswitch only
+  handles functions written in C.
+
+- you tried to call a function of MyLib.c that is specified with register
+  parameters. To fix this, simply define (Example):
+
+In PPC Code:
+
+//...
+test68k_Stack(bla);
+//...
+
+In 68k Code:
+
+void test68k_Stack(int bla)
+{
+ test68k(int bla);
+}
+
+void test68k(register __d0 int bla)
+{
+}
+
+This the automatic Contextswitch can handle. If you do not like this solution,
+use the manual Contextswitch or implement the 68k function in PPC Code.
+

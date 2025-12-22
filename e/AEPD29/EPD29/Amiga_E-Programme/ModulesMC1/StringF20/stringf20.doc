@@ -1,0 +1,193 @@
+/* an early version of stringf20.e, written mostly in E  */
+OPT MODULE
+
+SET PAD,LEFT,BIN,FIELD
+
+EXPORT PROC writef(format,streamptr=NIL:PTR TO LONG)
+DEF s[240]:STRING
+PutStr(stringf(s,format,streamptr))
+ENDPROC
+
+EXPORT PROC stringf(str:PTR TO CHAR,format:PTR TO CHAR,dataptr=NIL:PTR TO LONG)
+DEF tempstr[80]:STRING, savestr, savetempstr, templen,
+    streamstring:PTR TO CHAR,
+    ch,padch, number,i,flag=0,left=0,right=0
+
+  savestr:=str
+  REPEAT
+    str[]++ := format[]
+
+nextformat:
+    i:=0; flag:=0; right:=0; left:=0
+    ch:=format[]
+    IF ch="%"
+nextch:
+      i++
+      ch:=format[i]
+      SELECT  ch
+	CASE "l"; JUMP gotlong
+	CASE "s"; JUMP gotstring
+	CASE "-"; flag:=flag OR LEFT; JUMP nextch
+	CASE "0"; flag:=flag OR PAD; JUMP nextch
+	DEFAULT; IF (ch>"0") AND (ch<="9")
+		    flag:=flag OR FIELD; JUMP field
+		 ELSE
+		   str[]++ := format[]++; JUMP nextformat
+		 ENDIF
+      ENDSELECT
+    ENDIF
+endloop:
+    format++
+  UNTIL str[-1]=0
+  str:=str-savestr
+  MOVE.L str,D1
+JUMP endstringf
+
+gotstring:
+  format:=format+i
+  str--
+  streamstring:=dataptr[]++
+  IF flag AND  FIELD
+    savetempstr:=tempstr
+    templen:=0
+    REPEAT
+      savetempstr[]++ := streamstring[]++
+      templen++
+    UNTIL streamstring[-1]=0
+    savetempstr:=tempstr
+    templen--
+    IF templen>right THEN templen:=right
+    BSR dopad
+    NOP
+  ELSE
+    REPEAT
+      str[]++ := streamstring[]++
+    UNTIL streamstring[-1]=0
+    str--
+  ENDIF
+  JUMP endloop
+
+gotlong:
+  format:=format+i+1
+  str--
+  ch:=format[]
+  SELECT ch
+    CASE "d"; savetempstr:=tempstr; number:=dataptr[]++;
+	      MOVE.L tempstr,A0
+	      MOVE.L number,D0
+	      SUBA.W  #14,A7
+	      MOVEA.L A7,A3
+	      MOVE.L D0,D2
+	      BGE.S repeat
+	      NEG.L D0
+	      repeat:
+	      MOVEQ  #0,D1
+	      LONG $4C7C0401,$A   /* DIVU.L #10,D1:D0	   */
+	      ADDI.B #"0",D1
+	      MOVE.B D1,(A3)+
+	      TST.L D0
+	      BGT.S repeat
+	      TST.L D2
+	      BGE.S notneg
+	      MOVE.B #"-",(A3)+
+	      notneg:
+	      MOVE.B  -(A3),(A0)+
+	      CMPA.L  A3,A7
+	      BLT.S notneg
+	      ADDA.W #14,A7
+	      MOVE.L A0,D0
+	      SUB.L  savetempstr,D0
+	      MOVE.L D0,templen
+	      BSR dopad
+
+    CASE "x"; savetempstr:=tempstr; number:=dataptr[]++;
+	      MOVE.L number,D0
+	      MOVEA.L savetempstr,A0
+	      MOVEA.L A7,A3
+	      SUBA.W  #14,A3
+	      MOVEQ #-1,D2
+	      nextltr:
+	      MOVE.B D0,D1
+	      ANDI.B #$0F,D1
+	      ADDI.B #48,D1
+	      CMPI.B #57,D1
+	      BLE.S around
+	      ADDQ.B #7,D1
+	      around:
+	      MOVE.B D1,(A3)+
+	      LSR.L #4,D0
+	      DBEQ D2,nextltr
+	      NOT.L D2
+	      MOVE.L D2,D0
+	      ADDQ.L #1,D0
+	      loadstr:
+	      MOVE.B -(A3),(A0)+    /* reverse buffer  */
+	      DBF D2,loadstr
+	      MOVE.L D0,templen
+	      BSR dopad
+    CASE "c"; str[]++:=dataptr[]++
+
+    CASE "b"; savetempstr:=tempstr; number:=dataptr[]++;
+	      MOVEA.L savetempstr,A0
+	      MOVE.L number,D0
+	      BEQ.S binzero
+	      MOVEQ #31,D1
+	      next0:
+	      BTST  D1,D0
+	      DBNE D1,next0
+	      nextbit:
+	      BTST D1,D0
+	      BEQ.S bit0
+	      MOVE.B #"1",(A0)+
+	      BRA.S bit1
+	      bit0:
+	      MOVE.B #"0",(A0)+
+	      bit1:
+	     DBRA D1,nextbit
+	     BRA.S endbin
+	     binzero:
+	     MOVE.B #"0",(A0)+
+	     endbin:
+	     SUBA.L savetempstr,A0
+	     MOVE.L A0,templen
+	     BSR.S dopad
+
+    DEFAULT; str[]++ := "%"; str[]++ :="l"; str[]++ := ch
+  ENDSELECT
+  JUMP endloop
+
+dopad:
+  IF templen>=left
+    FOR i:=1 TO templen DO str[]++ := savetempstr[]++
+  ELSE
+    padch:=IF flag AND PAD THEN "0" ELSE " "
+    IF flag AND LEFT
+      FOR i:=1 TO templen DO str[]++ := savetempstr[]++
+      FOR i:=1 TO left-templen DO str[]++:=padch
+    ELSE
+      FOR i:=1 TO left-templen DO str[]++:=padch
+      FOR i:=1 TO templen DO str[]++ := savetempstr[]++
+    ENDIF
+  ENDIF
+  RTS
+
+field:
+  left:=ch-"0"
+  WHILE ((ch:=format[i+1])<>".")
+    i++
+    left:=10*left+ch-"0"
+  ENDWHILE
+  i:=i+2
+  ch:=format[i]
+  right:=ch-"0"
+/*  WHILE (ch:=format[i+1]>="0") AND (ch<="9") */   /* doesn't work  */
+  WHILE (format[i+1]>="0") AND (format[i+1]<="9")
+    i++
+    ch:=format[i]
+    right:=10*right+ch-"0"
+  ENDWHILE
+  JUMP nextch
+
+endstringf:
+ENDPROC savestr
+

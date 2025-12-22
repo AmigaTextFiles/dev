@@ -1,0 +1,12 @@
+OPT MODULE
+EXPORT PROC isInterval(val,x1,x2)
+MOVEQ   #FALSE,D0
+MOVE.L  val,D1
+CMP.L   x1,D1
+BMI.S   quit
+ADDQ.L  #1,D1
+CMP.L   x2,D1
+BPL.S   quit
+MOVEQ   #TRUE,D0
+quit:
+ENDPROC D0

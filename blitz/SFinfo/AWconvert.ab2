@@ -1,0 +1,177 @@
+
+; AWconvert  sndfile.library demo by Lorence Lombardo  1/3/07
+
+
+NEWTYPE .SF_INFO
+
+   samplerate.l
+   samples.l
+   channels.l
+   pcmbitwidth.l
+   form.l
+   sections.l
+   seekable.l
+
+End NEWTYPE
+
+
+DEFTYPE .SF_INFO rfinfo
+DEFTYPE .SF_INFO wfinfo
+
+Dim ftype$(8): l$=Chr$(10): np=NumPars
+ftype$(1)="WAV": ftype$(2)="AIFF": ftype$(3)="Sun/NeXT AU": ftype$(4)="DEC AU"
+ftype$(5)="RAW": ftype$(6)="PARIS": ftype$(7)="8SVX": ftype$(8)="NIST"
+
+If np>0 Then f$=Par$(1)
+
+If np=0 OR f$="?"
+   NPrint l$+" AWconvert demo by Lorence Lombardo  1/3/07"+l$+l$+" Usage:-"
+   NPrint " AWconvert <AIFF/WAV_sound_file> <outfile>"+l$
+   NPrint " eg. AWconvert test.wav"+l$
+   End
+EndIf
+
+infile.l = SF_OpenRead_(&f$, rfinfo)
+
+If infile<1 Then NPrint l$+" File not found."+l$: End
+
+USEPATH rfinfo
+
+typ$=StripLead$(Hex$(\form),48)
+
+type1=Val(Left$(typ$,1)): type2=Val(Right$(typ$,1))
+
+chan$="Mono": If \channels>1 Then chan$="Stereo"
+
+Print l$+" "+ftype$(type1)+" ",\samplerate,"Hz ",\pcmbitwidth,"bit "+chan$
+
+sec.l = \samples / \samplerate: mint=0
+If sec>59 Then mint=Int(sec/60): sec-(mint*60)
+
+NPrint " (",mint,":",sec,")"+l$
+
+If \form<>$20001 AND \form<>$10001
+   NPrint " File type is not supported."+l$
+   res = SF_Close_(infile): End
+EndIf
+
+
+If \pcmbitwidth<>16 AND \pcmbitwidth<>8 AND \pcmbitwidth<>24 AND \pcmbitwidth<>32 AND \pcmbitwidth<>12
+   NPrint " Bit width is currently not supported."+l$
+   res = SF_Close_(infile): End
+EndIf
+
+
+If \form=$20001 Then wfinfo\form=$10001: out_ex$=".wav": in_ex$=".aiff"
+If \form=$10001 Then wfinfo\form=$20001: out_ex$=".aiff": in_ex$=".wav"
+
+
+If np<2
+   CaseSense Off
+      out$=Replace$(f$,in_ex$,"")+out_ex$
+   CaseSense On
+Else
+   out$=Par$(2)
+EndIf
+
+
+wfinfo\samplerate = \samplerate
+wfinfo\channels = \channels
+wfinfo\pcmbitwidth = \pcmbitwidth
+
+
+If \pcmbitwidth=8
+   If type1=1 Then bf=128   ; in file is wav
+   If type1=2 Then bf=-128  ; in file is aiff
+EndIf
+
+
+outfile.l = SF_OpenWrite_(&out$, wfinfo)
+If outfile<1
+   NPrint l$+" Unable to create output."+l$
+   res = SF_Close_(infile): End
+EndIf
+
+
+BUFFER_LEN = 3072
+dat.l= AllocMem_(BUFFER_LEN, #MEMF_ANY)
+
+
+Print " Converting `"+f$+"' to `"+out$+"'..."
+
+
+Repeat
+
+   readcount.l = SF_ReadRaw_ (infile, dat, BUFFER_LEN)
+
+   If readcount>0
+
+      If \pcmbitwidth=16 OR \pcmbitwidth=12 Then Gosub intel
+
+      If \pcmbitwidth=32 Then Gosub intel2
+
+      If \pcmbitwidth=24 Then Gosub intel3
+
+      If \pcmbitwidth=8 Then Gosub sign_con
+
+      bla.l = SF_WriteRaw_(outfile, dat, readcount)
+
+   EndIf
+
+   br=CtrlC
+
+Until readcount<1 OR br<>0
+
+
+If br<>0 Then NPrint l$+" Break...!!!"+l$ Else NPrint " done."+l$
+
+
+FreeMem_ dat, BUFFER_LEN
+
+success = SF_Close_(infile)
+success = SF_Close_(outfile)
+
+End
+
+
+; SUB routines
+
+intel:   ;16 bit  ; may be 12 bit too :)
+; convert intel to motorola format and vice versa :)
+For x.l=0 To readcount-2 Step 2  ; step 2 because words are 2 bytes long
+   bword.w=FPeekW(dat+x)  ; Lotan peek word with a flip is very handy :)
+   Poke.w(dat+x), bword   ; It can also be done using standard "Peek.b" and
+Next x                    ; "Poke.b", but you need 2 peeks and 2 pokes.
+Return
+
+
+sign_con:
+; convert unsigned data to signed data and vice versa
+; bf = 128, to convert unsigned data to signed data
+; bf = -128, to convert signed data to unsigned data ; it probably makes no difference :)
+For x.l=0 To readcount-1
+   byte.b = Peek.b(dat+x) + bf
+   Poke.b (dat+x), byte
+Next x
+Return
+
+
+intel2:   ;32bit
+For x.l=0 To readcount-4 Step 4
+   blong.l=FPeekL(dat+x)
+   Poke.l(dat+x), blong
+Next x
+Return
+
+
+intel3:   ;24bit
+For x.l=0 To readcount-3 Step 3
+   b1.b = Peek.b(dat+x) : b3.b = Peek.b(dat+x+2)
+   Poke.b(dat+x), b3: Poke.b(dat+x+2), b1
+Next x
+Return
+
+
+
+
+

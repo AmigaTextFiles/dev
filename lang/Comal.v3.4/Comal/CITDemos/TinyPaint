@@ -1,0 +1,302 @@
+// Tiny paint with special 8 color screen
+
+USE CITScreen
+USE CITWindow
+USE CITGadgets
+USE CITText
+USE CITRequesters
+USE CITWorkbench
+USE RastPort
+USE TempRas
+USE IntuitionWindow
+USE GraphicsLibrary
+
+// Initialization variables
+DIM Error OF SHORT
+DIM GadTopEdge OF SHORT
+DIM GadHeight OF SHORT
+
+// Working variables
+DIM RP OF POINTER TO RastPort
+DIM ButtonDown OF SHORT
+DIM CURVE OF SHORT
+DIM LINE OF SHORT
+DIM CIRCLE OF SHORT
+DIM FILL OF SHORT
+DIM MODE OF SHORT
+DIM MouseX OF SHORT
+DIM MouseY OF SHORT
+DIM DownX OF SHORT
+DIM DownY OF SHORT
+
+CURVE:=0
+LINE:=1
+CIRCLE:=2
+FILL:=3
+XYratio:=1.9
+
+DIM PaintScreen OF CITScreen
+PaintScreen.Label("New Paint Screen")
+PaintScreen.Depth(3)
+CITWorkbench.InsObject(PaintScreen,Error)
+
+DIM PaintWd OF CITWindow
+PaintWd.Position(0,10)
+PaintWd.Size(640,256)     // Height will be maximal
+PaintWd.DragBar
+PaintWd.DepthGadget
+PaintWd.Activate
+PaintWd.SelectEventHandler(Button(,,))
+PaintWd.PointerEventHandler(MouseMove(,))
+PaintScreen.InsObject(PaintWd,Error)
+IF Error THEN
+  STOP "Could'nt open the window"
+ENDIF
+RP:=PaintWd.Window@.RPort
+IF NOT AllocTmpRas(RP@,640,256) THEN
+  STOP "No memory"
+ENDIF
+
+SetAPen(RP,1)
+
+GadHeight:=PaintWd.Window@.Height/13
+
+DIM Requester OF CITRequester
+PaintWd.InsObject(Requester,Error)
+
+DIM StopGad OF ButtonGadget
+StopGad.Size(80,2*GadHeight)
+StopGad.Position(-80,GadTopEdge)
+StopGad.Label("Stop",INSIDE)
+PaintWd.InsObject(StopGad,Error)
+GadTopEdge:+2*GadHeight
+
+DIM ClearGad OF ButtonGadget
+ClearGad.Size(80,GadHeight)
+ClearGad.Position(-80,GadTopEdge)
+ClearGad.Label("Clear",INSIDE)
+ClearGad.EventHandler(ClearEvent())
+PaintWd.InsObject(ClearGad,Error)
+GadTopEdge:+GadHeight
+
+DIM CurveGad OF ButtonGadget
+CurveGad.Size(80,GadHeight)
+CurveGad.Position(-80,GadTopEdge)
+CurveGad.Label("Curve",INSIDE)
+CurveGad.Disable
+CurveGad.EventHandler(CurveEvent())
+PaintWd.InsObject(CurveGad,Error)
+GadTopEdge:+GadHeight
+
+DIM LineGad OF ButtonGadget
+LineGad.Size(80,GadHeight)
+LineGad.Position(-80,GadTopEdge)
+LineGad.Label("Line",INSIDE)
+LineGad.EventHandler(LineEvent())
+PaintWd.InsObject(LineGad,Error)
+GadTopEdge:+GadHeight
+
+DIM CircleGad OF ButtonGadget
+CircleGad.Size(80,GadHeight)
+CircleGad.Position(-80,GadTopEdge)
+CircleGad.Label("Circle",INSIDE)
+CircleGad.EventHandler(CircleEvent())
+PaintWd.InsObject(CircleGad,Error)
+GadTopEdge:+GadHeight
+
+DIM FillGad OF ButtonGadget
+FillGad.Size(80,GadHeight)
+FillGad.Position(-80,GadTopEdge)
+FillGad.Label("Fill",INSIDE)
+FillGad.EventHandler(FillEvent())
+PaintWd.InsObject(FillGad,Error)
+GadTopEdge:+GadHeight
+
+DIM Palette OF PaletteGadget
+Palette.Size(80,PaintWd.Window@.Height-7*GadHeight-14)
+Palette.Position(-80,-(PaintWd.Window@.Height-7*GadHeight-15))
+Palette.IndicatorHeight(12)
+Palette.Color(1)
+Palette.Depth(3)
+Palette.EventHandler(PaletteEvent())
+PaintWd.InsObject(Palette,Error)
+
+DIM TextObj OF CITText
+TextObj.BackColor(3)
+PaintWd.InsObject(TextObj,Error)
+
+PaintWd.MouseMove(TRUE)
+
+IF Error THEN
+  STOP "Some of the objects could not be created."
+ELSE
+  WHILE NOT (StopGad.Pressed AND Requester.Request("Stop program?","Yes|No")) DO WAIT
+ENDIF
+
+FreeTmpRas
+CITWorkbench.RemObject(PaintScreen)
+
+// ********* end of main program ***************
+
+PROC ClearEvent(dummy OF USHORT)
+  IF Requester.Request("Clear all?","Yes|No") THEN
+    SetAPen(RP,0)
+    RectFill(RP,4,11,555,PaintWd.Window@.Height-3)
+    SetAPen(RP,Palette.Value)
+  ENDIF
+ENDPROC ClearEvent
+
+PROC CurveEvent(dummy OF USHORT)
+  CurveGad.Disable
+  LineGad.Enable
+  CircleGad.Enable
+  FillGad.Enable
+  MODE:=CURVE
+ENDPROC CurveEvent
+
+PROC LineEvent(dummy OF USHORT)
+  CurveGad.Enable
+  LineGad.Disable
+  CircleGad.Enable
+  FillGad.Enable
+  MODE:=LINE
+ENDPROC LineEvent
+
+PROC CircleEvent(dummy OF USHORT)
+  CurveGad.Enable
+  LineGad.Enable
+  CircleGad.Disable
+  FillGad.Enable
+  MODE:=CIRCLE
+ENDPROC CircleEvent
+
+PROC FillEvent(dummy OF USHORT)
+  CurveGad.Enable
+  LineGad.Enable
+  CircleGad.Enable
+  FillGad.Disable
+  MODE:=FILL
+ENDPROC FillEvent
+
+PROC PaletteEvent(dummy OF USHORT)
+  SetAPen(RP,Palette.Value)
+ENDPROC PaletteEvent
+
+PROC Button(Down OF BYTE,x OF FLOAT,y OF FLOAT)
+  LOCAL dx OF LONG
+  LOCAL dy OF LONG
+
+  ButtonDown:=Down
+  CASE MODE OF
+  WHEN LINE
+    IF Down THEN
+      PaintWd.Coordinates(DownX,DownY)
+      PaintWd.Coordinates(MouseX,MouseY)
+      SetDrMd(RP,2)  // DrawMode=COMPLEMENT
+    ELSE
+      Move(RP,DownX,DownY)
+      Draw(RP,MouseX,MouseY)
+      PaintWd.Coordinates(MouseX,MouseY)
+      SetDrMd(RP,0)  // DrawMode=JAM1
+      Move(RP,DownX,DownY)
+      Draw(RP,MouseX,MouseY)
+    ENDIF
+  WHEN CIRCLE
+    IF Down THEN
+      PaintWd.Coordinates(DownX,DownY)
+      PaintWd.Coordinates(MouseX,MouseY)
+      SetDrMd(RP,2)  // DrawMode=COMPLEMENT
+      WritePixel(RP,DownX,DownY)
+    ELIF DownX<>x AND DownY<>y THEN
+      dx:=(MouseX-DownX)/2; dy:=(MouseY-DownY)/2
+      r:=SQR(dx*dx+dy*dy*XYratio*XYratio)
+      DrawEllipse(RP,DownX+dx,DownY+dy,r,r/XYratio)
+      PaintWd.Coordinates(MouseX,MouseY)
+      SetDrMd(RP,0)  // DrawMode=JAM1
+      dx:=(MouseX-DownX)/2; dy:=(MouseY-DownY)/2
+      r:=SQR(dx*dx+dy*dy*XYratio*XYratio)
+      DrawEllipse(RP,DownX+dx,DownY+dy,r,r/XYratio)
+    ENDIF
+  WHEN FILL
+    IF Down THEN
+      PaintWd.Coordinates(MouseX,MouseY)
+      dummy:=Flood(RP,1,MouseX,MouseY)
+    ENDIF
+  OTHERWISE
+    PaintWd.Coordinates(MouseX,MouseY)  
+  ENDCASE
+ENDPROC Button
+
+PROC MouseMove(x OF FLOAT,y OF FLOAT)
+  LOCAL dx OF LONG
+  LOCAL dy OF LONG
+  LOCAL r OF LONG
+
+  TextObj.Print(400,2-11,"x ="+STR$("-###",x))
+  TextObj.Print(470,2-11,"y ="+STR$("-###",y))
+  IF ButtonDown THEN
+    CASE MODE OF
+    WHEN CURVE
+      Move(RP,MouseX,MouseY)
+      PaintWd.Coordinates(MouseX,MouseY)
+      Draw(RP,MouseX,MouseY)
+    WHEN LINE
+      Move(RP,DownX,DownY)
+      Draw(RP,MouseX,MouseY)
+      PaintWd.Coordinates(MouseX,MouseY)
+      Move(RP,DownX,DownY)
+      Draw(RP,MouseX,MouseY)
+    WHEN CIRCLE
+      IF DownX<>x AND DownY<>y THEN
+        dx:=(MouseX-DownX)/2; dy:=(MouseY-DownY)/2
+        r:=SQR(dx*dx+dy*dy*XYratio*XYratio)
+        DrawEllipse(RP,DownX+dx,DownY+dy,r,r/XYratio)
+        PaintWd.Coordinates(MouseX,MouseY)
+        dx:=(MouseX-DownX)/2; dy:=(MouseY-DownY)/2
+        r:=SQR(dx*dx+dy*dy*XYratio*XYratio)
+        DrawEllipse(RP,DownX+dx,DownY+dy,r,r/XYratio)
+      ENDIF
+    OTHERWISE
+      // No action
+    ENDCASE
+  ENDIF
+ENDPROC MouseMove
+
+MODULE TempRas
+  USE System
+  USE RastPort
+  USE GraphicsLibrary
+
+  EXPORT AllocTmpRas,FreeTmpRas
+
+  DIM TBuf OF POINTER TO UBYTE   // Plane pointer
+  DIM TRas OF TmpRas
+  DIM TmpRasW OF SHORT, TmpRasH OF SHORT
+
+  FUNC AllocTmpRas(REF RP OF RastPort,w OF SHORT,h OF SHORT) OF SHORT
+    TBuf:=AllocRaster(w,h)
+    IF TBuf=0 THEN
+      RETURN FALSE
+    ENDIF
+    RP.TmpRas:=InitTmpRas(ADR(TRas),TBuf,RASSIZE(w,h))
+    TmpRasW:=w; TmpRasH:=h
+    RETURN TRUE
+  ENDFUNC AllocTmpRas
+
+  PROC FreeTmpRas
+    IF TBuf THEN
+      FreeRaster(TBuf,TmpRasW,TmpRasH)
+      TBuf:=0
+    ENDIF
+  ENDPROC FreeTmpRas
+
+  PROC TmpSignal(s OF LONG) SIGNAL
+    CASE s OF
+    WHEN SIG_CLOSE,SIG_DISCARD,SIG_CLEAR,SIG_END
+      FreeTmpRas
+    OTHERWISE
+      // No action
+    ENDCASE
+  ENDPROC TmpSignal
+
+ENDMODULE TempRas

@@ -1,0 +1,471 @@
+/*****************************************************************************
+ * Title:   GLBoing
+ * Desc:    Tribute to Amiga Boing.
+ * Author:  Jim Brooks  <gfx@jimbrooks.org>
+ *          Original Amiga authors were R.J. Mical and Dale Luck.
+ *          Hollywood port by Andreas Falkenhahn
+ * Notes:   - 360' = 2*PI [radian]
+ *
+ *          - Distances between objects are created by doing a relative
+ *            Z translations.
+ *
+ *          - Although OpenGL enticingly supports alpha-blending,
+ *            the shadow of the original Boing didn't affect the color
+ *            of the grid.
+ *
+ *          - [Marcus] Changed timing scheme from interval driven to frame-
+ *            time based animation steps (which results in much smoother
+ *            movement)
+ *
+ * History of Amiga Boing:
+ *
+ * Boing was demonstrated on the prototype Amiga (codenamed "Lorraine") in
+ * 1985. According to legend, it was written ad-hoc in one night by
+ * R. J. Mical and Dale Luck. Because the bouncing ball animation was so fast
+ * and smooth, attendees did not believe the Amiga prototype was really doing
+ * the rendering. Suspecting a trick, they began looking around the booth for
+ * a hidden computer or VCR.
+ *****************************************************************************/
+
+@VERSION 6,0
+
+@REQUIRE "glgalore"
+
+@DISPLAY {Width = 400, Height = 400, Title = "Boing (classic Amiga demo)", Sizeable = True}
+
+Const #RADIUS           = 70
+Const #STEP_LONGITUDE   = 22.5                   /* 22.5 makes 8 bands like original Boing */
+Const #STEP_LATITUDE    = 22.5
+
+Const #DIST_BALL       = (#RADIUS * 2 + #RADIUS * 0.1)
+
+Const #VIEW_SCENE_DIST = (#DIST_BALL * 3 + 200)   /* distance from viewer to middle of boing area */
+Const #GRID_SIZE       = (#RADIUS * 4.5)          /* length (width) of grid */
+Const #BOUNCE_HEIGHT   = (#RADIUS * 2.1)
+Const #BOUNCE_WIDTH    = (#RADIUS * 2.1)
+
+Const #SHADOW_OFFSET_X = -20
+Const #SHADOW_OFFSET_Y = 10
+Const #SHADOW_OFFSET_Z =  0
+
+Const #WALL_L_OFFSET  = 0
+Const #WALL_R_OFFSET  = 5
+
+/* Animation speed (50.0 mimics the original GLUT demo speed) */
+Const #ANIMATION_SPEED = 50
+
+/* Maximum allowed delta time per physics iteration */
+Const #MAX_DELTA_T = 0.02
+
+/* Draw ball, or its shadow */
+Const #DRAW_BALL = 0
+Const #DRAW_BALL_SHADOW = 1
+Const #DRAW_BALL_ENUM = 2
+
+/* Global vars */
+deg_rot_y       = 0
+deg_rot_y_inc   = 2
+ball_x          = -#RADIUS
+ball_y          = -#RADIUS
+ball_x_inc      = 1
+ball_y_inc      = 2
+drawBallHow = #DRAW_BALL
+t = 0
+t_old = 0
+dt = 0
+
+
+/*****************************************************************************
+ * Truncate a degree.
+ *****************************************************************************/
+Function p_TruncateDeg(d)
+	If d >= 360 Then Return(d - 360) Else Return(d)
+EndFunction
+
+
+/*****************************************************************************
+ * Convert a degree (360-based) into a radian.
+ * 360' = 2 * PI
+ *****************************************************************************/
+Function deg2rad(d)
+	Return(d / 360 * (2 * #PI))
+EndFunction
+
+
+/*****************************************************************************
+ * 360' sin().
+ *****************************************************************************/
+Function sin_deg(d)
+	Return(sin(deg2rad(d)))
+EndFunction
+
+
+/*****************************************************************************
+ * 360' cos().
+ *****************************************************************************/
+Function cos_deg(d)
+	Return(cos(deg2rad(d)))
+EndFunction
+
+
+/*****************************************************************************
+ * Compute a cross product (for a normal vector).
+ *
+ * c = a x b
+ *****************************************************************************/
+Function p_CrossProduct(a, b, c, n)
+
+	Local u1 = b.x - a.x
+  	Local u2 = b.y - a.y
+   	Local u3 = b.y - a.z
+
+   	Local v1 = c.x - a.x
+   	Local v2 = c.y - a.y
+   	Local v3 = c.z - a.z
+
+	n.x = u2 * v3 - v2 * v3
+   	n.y = u3 * v1 - v3 * u1
+   	n.z = u1 * v2 - v1 * u2
+
+EndFunction
+
+
+/*****************************************************************************
+ * Calculate the angle to be passed to gluPerspective() so that a scene
+ * is visible.  This function originates from the OpenGL Red Book.
+ *
+ * Parms   : size
+ *           The size of the segment when the angle is intersected at "dist"
+ *           (ie at the outermost edge of the angle of vision).
+ *
+ *           dist
+ *           Distance from viewpoint to scene.
+ *****************************************************************************/
+Function p_PerspectiveAngle(size, dist)
+
+	Local radTheta = 2 * ATan2(size / 2, dist)
+   	Local degTheta = (180 * radTheta) / #PI
+
+	Return(degTheta)
+
+EndFunction
+
+
+/*****************************************************************************
+ * display()
+ *****************************************************************************/
+Function p_Display()
+
+	gl.Clear(#GL_COLOR_BUFFER_BIT|#GL_DEPTH_BUFFER_BIT)
+	gl.PushMatrix()
+
+   	drawBallHow = #DRAW_BALL_SHADOW
+   	p_DrawBoingBall()
+
+   	p_DrawGrid()
+
+   	drawBallHow = #DRAW_BALL
+   	p_DrawBoingBall()
+
+	gl.PopMatrix()
+   	gl.Flush()
+
+EndFunction
+
+
+/*****************************************************************************
+ * Reshape()
+ *****************************************************************************/
+Function p_Reshape(msg)
+
+	gl.Viewport(0, 0, msg.width, msg.height)
+
+	gl.MatrixMode(#GL_PROJECTION)
+   	gl.LoadIdentity()
+
+	glu.Perspective(p_PerspectiveAngle(#RADIUS * 2, 200), msg.width / msg.height, 1.0, #VIEW_SCENE_DIST)
+
+   	gl.MatrixMode(#GL_MODELVIEW)
+   	gl.LoadIdentity()
+
+	glu.LookAt(0.0, 0.0, #VIEW_SCENE_DIST, /* eye */
+		0.0, 0.0, 0.0,            /* center of vision */
+	      	0.0, -1.0, 0.0)         /* up vector */
+
+	If msg.action = "ModeSwitch"
+		; Clear background
+		gl.ClearColor(0.55, 0.55, 0.55, 0)
+		gl.ShadeModel(#GL_FLAT)
+	EndIf
+
+EndFunction
+
+
+/*****************************************************************************
+ * Draw the Boing ball.
+ *
+ * The Boing ball is sphere in which each facet is a rectangle.
+ * Facet colors alternate between red and white.
+ * The ball is built by stacking latitudinal circles.  Each circle is composed
+ * of a widely-separated set of points, so that each facet is noticably large.
+ *****************************************************************************/
+Function p_DrawBoingBall()
+
+	Local lon_deg = 0     /* degree of longitude */
+   	Local dt_total, dt2
+
+	gl.PushMatrix()
+   	gl.MatrixMode(#GL_MODELVIEW)
+
+  	; Another relative Z translation to separate objects.
+   	gl.Translate(0.0, 0.0, #DIST_BALL)
+
+	; Update ball position and rotation (iterate if necessary)
+	dt_total = dt
+   	While dt_total > 0.0
+       		dt2 = IIf(dt_total > #MAX_DELTA_T, #MAX_DELTA_T, dt_total)
+       		dt_total = dt_total - dt2
+       		p_BounceBall(dt2)
+       		deg_rot_y = p_TruncateDeg(deg_rot_y + deg_rot_y_inc*(dt2*#ANIMATION_SPEED))
+	Wend
+
+	; Set ball position
+	gl.Translate(ball_x, ball_y, 0.0)
+
+  	; Offset the shadow.
+	If drawBallHow = #DRAW_BALL_SHADOW Then gl.Translate(#SHADOW_OFFSET_X, #SHADOW_OFFSET_Y, #SHADOW_OFFSET_Z)
+   
+	; Tilt the ball.
+	gl.Rotate(-20.0, 0.0, 0.0, 1.0)
+
+	; Continually rotate ball around Y axis.
+	gl.Rotate(deg_rot_y, 0.0, 1.0, 0.0)
+
+	; Set OpenGL state for Boing ball.
+	gl.CullFace(#GL_FRONT)
+   	gl.Enable(#GL_CULL_FACE)
+   	gl.Enable(#GL_NORMALIZE)
+
+  	; Build a faceted latitude slice of the Boing ball,
+   	; stepping same-sized vertical bands of the sphere.
+    	While lon_deg < 180
+
+		; Draw a latitude circle at this longitude.
+      		p_DrawBoingBallBand(lon_deg, lon_deg + #STEP_LONGITUDE)
+		lon_deg = lon_deg + #STEP_LONGITUDE
+ 	Wend
+
+	gl.PopMatrix()
+
+EndFunction
+
+
+/*****************************************************************************
+ * Bounce the ball.
+ *****************************************************************************/
+Function p_BounceBall(delta_t)
+
+	Local sign
+   	Local d
+
+   	; Bounce on walls
+   	If ball_x > (#BOUNCE_WIDTH/2 + #WALL_R_OFFSET)
+   		ball_x_inc = -0.5 - 0.75 * RndF()
+      		deg_rot_y_inc = -deg_rot_y_inc
+   	EndIf
+   	
+	If ball_x < -(#BOUNCE_HEIGHT/2 + #WALL_L_OFFSET)
+		ball_x_inc =  0.5 + 0.75 * RndF()
+      		deg_rot_y_inc = -deg_rot_y_inc
+   	EndIf
+
+	; Bounce on floor / roof
+	If ball_y >  #BOUNCE_HEIGHT/2 Then ball_y_inc = -0.75 - 1 * RndF()
+	If ball_y < -#BOUNCE_HEIGHT/2*0.85 Then ball_y_inc =  0.75 + 1 * RndF()
+		
+	; Update ball position
+	ball_x = ball_x + ball_x_inc * (delta_t * #ANIMATION_SPEED)
+   	ball_y = ball_y + ball_y_inc * (delta_t * #ANIMATION_SPEED)
+
+	; Simulate the effects of gravity on Y movement.
+   	If ball_y_inc < 0 Then sign = -1.0 Else sign = 1.0
+
+	d = (ball_y + #BOUNCE_HEIGHT/2) * 90 / #BOUNCE_HEIGHT
+	If d > 80 Then d = 80
+	If d < 10 Then d = 10
+
+	ball_y_inc = sign * 4 * sin_deg(d)
+
+EndFunction
+
+
+/*****************************************************************************
+ * Draw a faceted latitude band of the Boing ball.
+ *
+ * Parms:   long_lo, long_hi
+ *          Low and high longitudes of slice, resp.
+ *****************************************************************************/
+Function p_DrawBoingBallBand(long_lo, long_hi)
+
+   	Local vert_ne = {}          ; "ne" means south-east, so on
+   	Local vert_nw = {}
+   	Local vert_sw = {}
+   	Local vert_se = {}
+   	Local vert_norm = {}
+   	Local lat_deg = 0
+
+	; Iterate thru the points of a latitude circle.
+	; A latitude circle is a 2D set of X,Z points.
+   
+   	While lat_deg <= (360 - #STEP_LATITUDE)
+
+		; Color this polygon with red or white.
+		If colorToggle Then gl.Color(0.8, 0.1, 0.1) Else gl.Color(0.95, 0.95, 0.95)
+
+		colorToggle = Not colorToggle
+
+     		; Change color if drawing shadow.
+      		If drawBallHow = #DRAW_BALL_SHADOW Then gl.Color(0.35, 0.35, 0.35)
+
+		; Assign each Y.
+      		vert_nw.y = cos_deg(long_hi) * #RADIUS
+      		vert_ne.y = vert_nw.y
+      		vert_se.y = cos_deg(long_lo) * #RADIUS
+      		vert_sw.y = vert_se.y
+      		
+		; Assign each X,Z with sin,cos values scaled by latitude radius indexed by longitude.
+      		; Eg, long=0 and long=180 are at the poles, so zero scale is sin(longitude),
+      		; while long=90 (sin(90)=1) is at equator.
+      		vert_ne.x = cos_deg(lat_deg                ) * (#RADIUS * sin_deg(long_lo + #STEP_LONGITUDE))
+      		vert_se.x = cos_deg(lat_deg                ) * (#RADIUS * sin_deg(long_lo                 ))
+      		vert_nw.x = cos_deg(lat_deg + #STEP_LATITUDE) * (#RADIUS * sin_deg(long_lo + #STEP_LONGITUDE))
+      		vert_sw.x = cos_deg(lat_deg + #STEP_LATITUDE) * (#RADIUS * sin_deg(long_lo                 ))
+
+      		vert_ne.z = sin_deg(lat_deg                ) * (#RADIUS * sin_deg(long_lo + #STEP_LONGITUDE))
+      		vert_se.z = sin_deg(lat_deg                ) * (#RADIUS * sin_deg(long_lo                 ))
+      		vert_nw.z = sin_deg(lat_deg + #STEP_LATITUDE) * (#RADIUS * sin_deg(long_lo + #STEP_LONGITUDE))
+     		vert_sw.z = sin_deg(lat_deg + #STEP_LATITUDE) * (#RADIUS * sin_deg(long_lo                 ))
+
+		; Draw the facet.
+      		gl.Begin(#GL_POLYGON)
+
+      		p_CrossProduct(vert_ne, vert_nw, vert_sw, vert_norm)
+      		gl.Normal(vert_norm.x, vert_norm.y, vert_norm.z)
+
+      		gl.Vertex(vert_ne.x, vert_ne.y, vert_ne.z)
+      		gl.Vertex(vert_nw.x, vert_nw.y, vert_nw.z)
+      		gl.Vertex(vert_sw.x, vert_sw.y, vert_sw.z)
+      		gl.Vertex(vert_se.x, vert_se.y, vert_se.z)
+
+      		gl.End()
+
+      		lat_deg = lat_deg + #STEP_LATITUDE
+   	
+   	Wend
+
+	; Toggle color so that next band will opposite red/white colors than this one.
+	colorToggle = Not colorToggle
+
+EndFunction
+
+
+/*****************************************************************************
+ * Draw the purple grid of lines, behind the Boing ball.
+ * When the Workbench is dropped to the bottom, Boing shows 12 rows.
+ *****************************************************************************/
+Function p_DrawGrid()
+
+	Local row, col
+   	Local rowTotal    = 12                   ; must be divisible by 2
+   	Local colTotal    = rowTotal             ; must be same as rowTotal
+   	Local widthLine   = 2.0                  ; should be divisible by 2
+   	Local sizeCell    = #GRID_SIZE / rowTotal
+   	Local z_offset    = -40.0
+   	Local xl, xr
+   	Local yt, yb
+
+   	gl.PushMatrix()
+   	gl.Disable(#GL_CULL_FACE)
+
+	; Another relative Z translation to separate objects.
+   	gl.Translate(0.0, 0.0, #DIST_BALL)
+
+	; Draw vertical lines (as skinny 3D rectangles).
+ 	For Local col = 0 To colTotal
+
+		; Compute co-ords of line.
+      		xl = -#GRID_SIZE / 2 + col * sizeCell
+      		xr = xl + widthLine
+
+      		yt =  #GRID_SIZE / 2
+      		yb = -#GRID_SIZE / 2 - widthLine
+
+      		gl.Begin(#GL_POLYGON)
+
+      		gl.Color(0.6, 0.1, 0.6)           ; purple
+
+      		gl.Vertex(xr, yt, z_offset)       ; NE
+      		gl.Vertex(xl, yt, z_offset)       ; NW
+      		gl.Vertex(xl, yb, z_offset)       ; SW
+      		gl.Vertex(xr, yb, z_offset)       ; SE
+
+      		gl.End()
+   	Next
+   	
+	; Draw horizontal lines (as skinny 3D rectangles).
+   	For Local row = 0 To rowTotal
+
+		; Compute co-ords of line.
+      		yt = #GRID_SIZE / 2 - row * sizeCell
+      		yb = yt - widthLine
+
+      		xl = -#GRID_SIZE / 2
+      		xr =  #GRID_SIZE / 2 + widthLine
+
+      		gl.Begin(#GL_POLYGON)
+
+      		gl.Color(0.6, 0.1, 0.6)           ; purple
+
+      		gl.Vertex(xr, yt, z_offset)       ; NE
+      		gl.Vertex(xl, yt, z_offset)       ; NW
+      		gl.Vertex(xl, yb, z_offset)       ; SW
+      		gl.Vertex(xr, yb, z_offset)       ; SE
+
+      		gl.End()
+   	Next
+
+	gl.PopMatrix()
+
+EndFunction
+
+EscapeQuit(True)
+
+p_Reshape({Width = 400, Height = 400, Action = "ModeSwitch"})
+
+InstallEventHandler({SizeWindow = Function(msg) p_Reshape(msg) EndFunction, ModeSwitch = Function(msg) p_Reshape(msg) EndFunction})
+
+StartTimer(1)
+
+; Setup a hardware doublebuffer managed by GL Galore	
+BeginDoubleBuffer(True)
+
+Repeat
+	DisableLineHook()
+	
+	; Timing
+	t = GetTimer(1) / 1000
+	dt = t - t_old
+       	t_old = t
+
+       	; Draw one frame
+	p_Display()
+
+	EnableLineHook()
+
+	; Swap buffers
+	Flip
+	
+	CheckEvent
+Forever
+
+

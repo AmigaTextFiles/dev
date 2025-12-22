@@ -1,0 +1,175 @@
+;****************************************
+;* SOUNDFUNCS 1.1 (c) Fredrik Wikstrom  *
+;* RESIDENTS:                           *
+;*  amigalibs.res                       *
+;*  bb2objtypes.res                     *
+;* USAGE:                               *
+;*  success.b=Load8SVX{#Sound,FileName} *
+;*  success.b=Save8SVX{#Sound,FileName} *
+;****************************************
+
+#FORM_ID=$464F524D
+
+#ESVX_ID=$38535658
+#VHDR_ID=$56484452
+#CHAN_ID=$4348414E
+#BODY_ID=$424F4459
+
+NEWTYPE .FormHeader
+  formID.l:formSize:formType
+End NEWTYPE
+
+NEWTYPE .ChunkHeader
+  chunkID.l:chunkSize
+End NEWTYPE
+
+Function.l Load8SVX{snd.w,name.s}
+  succ.l=0
+  error.l=0
+  vhdr_done.l=0
+
+  *snd.sound=Addr Sound(snd)
+  If *snd\_data
+    Free Sound snd
+  EndIf
+  fh.l=Open_(name,#MODE_OLDFILE)
+  If fh
+
+    ;NPrint "File 4",name,"4 opened... OK"
+
+    DEFTYPE .FormHeader form
+    stat.l=Read_(fh,&form,SizeOf .FormHeader)
+    If stat<>SizeOf .FormHeader
+      ;NPrint "Unexpected EOF"
+      error=1
+    Else
+      If form\formID<>#FORM_ID OR form\formType<>#ESVX_ID
+        error=1
+      ;Else
+        ;NPrint "FORM header recognised..."
+      EndIf
+    EndIf
+
+    DEFTYPE .ChunkHeader ch
+    DEFTYPE .VoiceHeader vhdr
+
+    While succ=0 AND error=0
+
+      stat.l=Read_(fh,&ch,SizeOf .ChunkHeader)
+      If stat<>(SizeOf .ChunkHeader) Then error=1
+
+      If (error=0)
+
+        Select ch\chunkID
+          Case #VHDR_ID:
+            stat=Read_(fh,&vhdr,SizeOf .VoiceHeader)
+            If stat<>(SizeOf .VoiceHeader) Then error=1
+
+            *snd\_period=3579440 / vhdr\vh_SamplesPerSec
+            *snd\_pad[0]=vhdr\vh_Volume LSR 10 ;store volume
+
+            If vhdr\vh_Compression>2 Then error=1
+
+            If error=0 Then vhdr_done=1;
+
+          Case #BODY_ID:
+            If (vhdr_done)
+              frms.l=0
+              If (vhdr\vh_Compression=0)
+                ;NPrint "File is uncompressed"
+                frms=(ch\chunkSize+1)&$7FFFFFFE
+              Else
+                ;NPrint "File is compressed"
+                frms=(ch\chunkSize-2) LSL 1
+              EndIf
+
+              *mem=AllocMem(frms,#MEMF_CHIP)
+              If (*mem)
+                *snd\_length=frms LSR 1
+                If (vhdr\vh_Compression=0)
+                  stat=Read_(fh,*mem,frms)
+                  ;If stat<>frms error=1 ;removed
+                Else
+                  *dst=*mem
+                  *src=*dst+frms-(ch\chunkSize-2)
+                  *tab=?buf + (vhdr\vh_Compression LSL 4)
+                  Seek_ fh,2,OFFSET_CURRENT ;skip first two bytes
+                  Read_ fh,*src,ch\chunkSize-2
+                  samp.b=0
+                  For i.l=0 To (*snd\_length-1)
+                    t.w=Peek.b(*src)&255:*src+1
+                    samp+Peek.b(*tab + (t LSR 4))
+                    Poke.b *dst,samp:*dst+1
+                    samp+Peek.b(*tab + (t & 15))
+                    Poke.b *dst,samp:*dst+1
+                  Next
+                EndIf
+                *snd\_data=*mem
+                succ=1
+              EndIf
+            EndIf
+
+          Default:
+            Seek_ fh,(ch\chunkSize+1)&$7FFFFFFE,OFFSET_CURRENT ;skip unknown data chunk
+
+        End Select
+
+      EndIf
+
+    Wend
+
+  EndIf
+  Function Return succ
+  buf: Dcb.b 20,0
+  comptab: Dc.b -34,-21,-13,-8,-5,-3,-2,-1,0,1,2,3,5,8,13,21
+           Dc.b -128,-64,-32,-16,-8,-4,-2,-1,0,1,2,4,8,16,32,64
+End Function
+
+Function.b Save8SVX{snd.w,name.s}
+  *snd.sound=Addr Sound(snd)
+  succ.b=0
+  If *snd\_data
+    fh.l=Open_(&name,#MODE_NEWFILE)
+    If fh
+      succ.b=-1
+      slen.l=*snd\_length*2
+      Poke.l ?form+4,slen+40
+      Poke.l ?vhdr,*snd\_loop-*snd\_data
+      tmp.l=*snd\_looplength*2
+      Poke.l ?vhdr+4,tmp
+      Poke.l ?vhdr+8,tmp
+      Poke.w ?vhdr+12,3579440/*snd\_period
+      Poke.b ?vhdr+14,1
+      ;Poke.b ?vhdr+15,0 ;compression
+      Poke.l ?vhdr+16,*snd\_pad[0] LSL 10  ;volume
+      Poke.l ?body+4,slen
+      Write_ fh,?form,48
+      Write_ fh,*snd\_data,slen
+      Close_ fh
+    EndIf
+  EndIf
+  Function Return succ
+  form: Dc.l "FORM",0,"8SVX","VHDR",20
+  vhdr: Dcb.b 20,0
+  body: Dc.l "BODY",0
+End Function
+
+;****************
+;* EXAMPLE CODE *
+;****************
+;
+;MaxLen f$=200
+;MaxLen p$=200:p$="Work:Temp/Sounds"
+;fil.s=ASLFileRequest$("IFF 8SVX...",p$,f$)
+;test.b=Load8SVX{0,fil}
+;If test
+;  *snd.sound=Addr Sound(0)
+;  Sound 0,3,*snd\_pad[0],*snd\_pad[0]
+;  MouseWait
+;Else
+;  NPrint "Load8SVX{} failed..."
+;  MouseWait
+;EndIf
+;t.b=Save8SVX{0,"RAM:test.8svx"}
+;If (t=0) Then NPrint "Save8SVX{} failed..."
+;End

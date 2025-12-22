@@ -1,0 +1,260 @@
+
+TEKLIB MULTITASKING
+------------------------------------------------------------
+
+making an application user-friendly and snappy often
+requires that different jobs are distributed over multiple
+threads; that means, a program's flow of execution is
+splitted into several paths, running simultaneously.
+
+preemptive multitasking means that the operating system
+decides when your current thread of execution will be
+interrupted and the control is being handed over to another
+thread.  threads normally execute consecutively only for a
+short period of time, usually in the range of milli- or
+microseconds.
+
+you, the programmer of a multithreaded application, don't
+have much control over this scheduling procedure, and you
+must take care that your application does not run into
+so-called race conditions.
+
+a race condition is when one thread of execution inside your
+application depends on the results from another thread, but
+you did not take precautions for the case that the results
+from that other thread may not have arrived in time, when
+you expect them.  the less likely that case, the bigger the
+problem.
+
+race conditions are hard to track down.  your code may work
+in 99,99% of all cases, and crash your application
+otherwise.  or even worse, it may work in 100% of all cases
+on your computer, and never on another computer (or another
+operating system).
+
+means to avoid race conditions are called synchronization
+mechanisms.  synchronization is crucial for most
+multithreaded applications, because there will almost for
+sure be a point in your program where the results from
+different threads need to be merged together.
+
+synchronization is even more important inside of TEKlib.
+you don't have access to any of the kernel's scheduling
+parameters (such as priorities, nice-values and alike), and
+the behavior of the underlying kernel may vary drastically
+across different platforms.
+
+TEKlib greatly supports you in creating multithreaded
+designs.  even better, it makes it easier than most other
+operating systems and programming environments do.  use its
+well-defined mechanisms right, and your multithreaded
+applications will be stable, fast, and fault-tolerant as
+well.
+
+let's have a look on a multithreaded program.  our first job
+is to setup a common TEKlib environment.  this is achieved
+as follows:
+
+
+#include <tek/exec.h>
+
+void main(void)
+{
+	TAPTR basetask = TCreateTask(TNULL, TNULL, TNULL);
+	if (basetask)
+	{
+		/* ... party goes here ... */
+
+		TDestroy(basetask);
+	}
+}
+
+
+most TEKlib applications have a program startup like this.
+the function TCreateTask(TNULL, TNULL, TNULL) will setup a
+lot of internal magic, but most obviously, it returns a task
+handle.  that task handle is called the basetask or base
+context.  most TEKlib functions relate to a context handle,
+we don't have one when the application is entered, and so we
+have to create it first.
+
+a potential point of confusion may be that TCreateTask() is
+the same function as for creating child tasks.  that's not
+the case here; with the three TNULL arguments, TCreateTask()
+will return only a base context handle for the newly entered
+application, but it does not create a new thread of
+execution.
+
+please note that we check for the return value of
+TCreateTask().  let it be extremely unlikely that this
+function fails; but when it fails, your application will
+crash miserably if you don't check it.  it would be nonsense
+to demonstrate synchronization mechanisms for avoiding race
+conditions, when we didn't catch the obvious reasons for
+failure before.  all demonstrations in this manual will
+always check for successful completion of all functions, and
+may it be nauseating routine.  that's the C language, you
+must deal with it.
+
+let's continue with the multitasking example.  now that we
+have a base task, we can actually create a sub (or child)
+task.  this example does not only setup a child task, it
+also demonstrates the first of a variety of synchronization
+mechanisms.
+
+
+#include <tek/exec.h>
+
+TVOID childfunc(TAPTR task)
+{
+	TWait(task, TTASK_SIG_ABORT);
+}
+
+void main(void)
+{
+	TAPTR basetask = TCreateTask(TNULL, TNULL, TNULL);
+	if (basetask)
+	{
+		TAPTR childtask = TCreateTask(basetask, childfunc, TNULL);
+		if (childtask)
+		{
+			TTimeDelayF(basetask, 3.5f);
+			TSignal(childtask, TTASK_SIG_ABORT);
+			TDestroy(childtask);
+		}
+		TDestroy(basetask);
+	}
+}
+
+
+this time we pass the basetask handle and a child task
+function entry to TCreateTask(), thus letting it actually
+create a new thread of execution.
+
+the next function in the parent's thread of execution,
+TTimeDelayF(), causes the program to wait for 3.5 seconds.
+note that the function TTimeDelayF() depends on a task (as
+many TEKlib functions do), and that the postponed 'F'
+indicates that you may pass a float value as an argument.
+TTimeDelayF() is actually a convenience macro for the more
+complicated underlying function TTimeDelay().
+
+meanwhile, the child task has probably entered its function,
+and reached the function TWait().  this function causes the
+current context (or task, or thread of execution) to go to
+sleep, and to no longer consume any CPU time.  arguments to
+TWait() are the context it is currently running in, and a
+set of so-called 'signals' to wait for.
+
+in the end, a signal is a synchronization mechanism.  but
+first of all, it's just a bit in a task's context, with a
+reserved meaning.  upon a task's creation, its set of
+signals is clear.  one or more of these signals (each with a
+reserved meaning) may be submitted from another task, and
+these signal bits will remain set until a function is called
+that clears it.
+
+TWait() causes its context to got to sleep, waiting for the
+specified set of signals.  when any of the signals being
+waited for arrive, they will be cleared from the task's
+current set of signals, and TWait() returns.
+
+TEKlib predefines the signal bit TASK_SIG_ABORT with the
+reserved meaning "abort this task", because task abortion is
+required quite often.  so
+
+			TSignal(childtask, TTASK_SIG_ABORT);
+
+will obviously submit that signal to the child task, the
+child task wakes up, clears the signal TTASK_SIG_ABORT from
+its context, and continues execution.  since that was the
+last and only operation in its function, it will leave
+through the function exit, and go into a zombie-like state -
+i.e.  "probably dead, but may still be there".
+
+although the child task MAY have finished execution
+(remember the race-conditions?), there is still that child
+task handle in the parent context, and you MUST destroy that
+handle.  that will not only free the task's internal
+buffers, but also ensures that the underlying thread is
+actually gone before TDestroy() returns.
+
+on the other hand, TEKlib does in no way allow you to 'kill'
+a task with brute force.  TDestroy() won't actually destroy
+the task's thread of execution, it can only destroy the
+task's handle once the underlying thread of execution has
+concluded.  if your task is caught in some kind of endless
+loop, doesn't react to signals or timeouts, then your
+application is broken.  tasks must always leave gently
+through their function exit.
+
+this example will block, and never return:
+
+
+#include <tek/exec.h>
+
+TVOID childfunc(TAPTR task)
+{
+	TWait(task, TTASK_SIG_ABORT);
+}
+
+void main(void)
+{
+	TAPTR basetask = TCreateTask(TNULL, TNULL, TNULL);
+	if (basetask)
+	{
+		TAPTR childtask = TCreateTask(basetask, childfunc, TNULL);
+		if (childtask)
+		{
+			TDestroy(childtask);
+		}
+		TDestroy(basetask);
+	}
+}
+
+
+since the abortion signal is never sent, never caught,
+TWait() never returns, and TDestroy() will hang forever.
+you may, however, limit the timespan for the child task to
+wait for a signal:
+
+
+#include <tek/exec.h>
+
+TVOID childfunc(TAPTR task)
+{
+	TTIME timeout;
+	TFTOTIME(3.5f, &timeout);
+
+	if (TTimedWait(task, TTASK_SIG_ABORT, &timeout) == 0)
+	{
+		printf("timeout expired.\n");
+	}
+	else
+	{
+		printf("caught signal.\n");
+	}
+}
+
+void main(void)
+{
+	TAPTR basetask = TCreateTask(TNULL, TNULL, TNULL);
+	if (basetask)
+	{
+		TAPTR childtask = TCreateTask(basetask, childfunc, TNULL);
+		if (childtask)
+		{
+			TDestroy(childtask);
+		}
+		TDestroy(basetask);
+	}
+}
+
+
+in this example, we use the timed version of TWait().
+please note that you must supply a TTIME structure.  there
+is no convenience macro like TTimeDelayF() in that case,
+sorry, but a timeout structure may be initialized with
+another float support macro, TFTOTIME().
+
+to be continued...

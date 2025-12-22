@@ -1,0 +1,96 @@
+*** IMPORTANT ***
+Remove all openssl headers in SDK (also check include_h).
+Remove all openssl libraries in SDK.
+*****************
+
+Edit configure script,
+
+my $BSDthreads (remove -pthread)
+Add -DB_ENDIAN to BSD-generic32 and remove -DTERMIOS
+
+Shared version:
+sh Configure --openssldir=DEVS:AmiSSL no-hw no-dso no-engine shared BSD-generic32
+
+Static version:
+sh Configure --openssldir=DEVS:AmiSSL no-hw no-dso no-engine BSD-generic32
+
+
+Edit opensslconf.h, c_rehash and Makefile,
+fix DEVS:AmiSSL/DEVS:AmiSSL path
+
+crypto/rand/rand_unix.c (see bottom of this document)
+crypto/rand/rand_egd.c (define NO_SYS_UN_H)
+crypto/pkcs7/bio_pk7.c (remove memory.h)
+crypto/ui/ui_openssl.c (remove/undefine TERMIOS and TTY_STRUCT)
+crypto/bio/bss_log.c (define NO_SYSLOG)
+apps/speed.c (undefine SIGALRM, define NO_FORK)
+
+make depend
+make
+
+
+Rinse and repeat for static version (better to re-compile
+again for static version to remove fPIC).
+
+
+--- For clib ---
+
+Add -mcrt=clib2 after gcc (before B_ENDIAN) and define NO_SYS_PARAM_H in e_os.h.
+Comment sys/times.h from rand_unix.c (if alternate code was used), and sys/file.h
+from apps/ca.c, use app_tminterval from NETWARE in apps/apps.c
+
+Change "makedepend" to "gcc" for MAKEDEPPROG in root (only) Makefile
+
+
+
+
+## rand_unix.c replacements ##
+
+   1) Recommended: Take rand_amiga.c from AmiSSL source, rename to rand_unix.c
+      and define __USE_INLINE__
+
+OR 
+
+   2) Alternative: Remove existing code and use the following function:
+
+int RAND_poll(void) /* For AmigaOS */
+{
+	unsigned char buf[ENTROPY_NEEDED];
+	pid_t curr_pid;
+	uid_t curr_uid;
+	static int first=1;
+	int i;
+	long rnd = 0;
+	struct timeval tv;
+	unsigned seed;
+
+/* 1481765933 is the initial value on OS4 SDK rand()
+   1103527590 for OS3 geekgadgets */
+
+	if (first) {
+		first = 0;
+		rnd = rand ();
+#ifdef __amigaos4__
+		if (rnd == 1481765933) {
+#else
+		if (rnd == 1103527590) {
+#endif
+			gettimeofday(&tv, NULL);
+			curr_pid = getpid();
+			curr_uid = getuid();
+			seed = tv.tv_sec ^ (tv.tv_usec * 1000) ^ curr_pid ^ curr_uid;
+			srand (seed);
+		}
+	}
+
+	for (i = 0; i < sizeof(buf); i++) {
+		if (i % 4 == 0)
+			rnd = rand();
+		buf[i] = rnd;
+		rnd >>= 8;
+	}
+	RAND_add(buf, sizeof(buf), ENTROPY_NEEDED);
+	memset(buf, 0, sizeof(buf));
+
+	return 1;
+}

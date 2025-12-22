@@ -1,0 +1,14 @@
+OPT MODULE
+OPT EXPORT
+
+CONST SEGSIZE=512
+
+ENUM RRQ=1, WRQ, DATA, ACK, ERROR
+
+OBJECT tftphdr
+  opcode:INT
+  block:INT  -> Unioned with code:INT and stuff[1]:ARRAY
+  data[1]:ARRAY  -> Needs size fiddling
+ENDOBJECT
+
+ENUM EUNDEF, ENOTFOUND, EACCESS, ENOSPACE, EBADOP, EBADID, EEXISTS, ENOUSER

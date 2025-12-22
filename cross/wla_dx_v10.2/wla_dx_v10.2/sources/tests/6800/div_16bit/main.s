@@ -1,0 +1,23 @@
+.MEMORYMAP
+    DEFAULTSLOT 0
+    SLOTSIZE $100
+    SLOT 0 $100
+.ENDME
+
+.ROMBANKSIZE 100
+.ROMBANKS 1
+
+.BANK 0
+.ORG 0
+
+; @BT linked.rom
+
+.db "01>"   ; @BT TEST-01 01 START
+LDX $2A     ; @BT DE 2A
+LDX $2A     ; @BT DE 2A
+
+.16BIT
+
+LDX $2A     ; @BT FE 00 2A
+LDX $2A     ; @BT FE 00 2A
+.db "<01"   ; @BT END

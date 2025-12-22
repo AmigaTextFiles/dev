@@ -1,0 +1,16 @@
+	.set	LVOMiamiBPFInit,-30
+	.global	LVOMiamiBPFInit
+	.set	LVOMiamiBPFOpen,-36
+	.global	LVOMiamiBPFOpen
+	.set	LVOMiamiBPFClose,-42
+	.global	LVOMiamiBPFClose
+	.set	LVOMiamiBPFRead,-48
+	.global	LVOMiamiBPFRead
+	.set	LVOMiamiBPFSignalmask,-54
+	.global	LVOMiamiBPFSignalmask
+	.set	LVOMiamiBPFIoctl,-60
+	.global	LVOMiamiBPFIoctl
+	.set	LVOMiamiBPFSetAbortmask,-66
+	.global	LVOMiamiBPFSetAbortmask
+	.set	LVOMiamiBPFFilter,-72
+	.global	LVOMiamiBPFFilter

@@ -1,0 +1,12 @@
+#pragma libcall CDPlayerBase CDEject 1e D01
+#pragma libcall CDPlayerBase CDPlay 24 D9803
+#pragma libcall CDPlayerBase CDResume 2a D802
+#pragma libcall CDPlayerBase CDStop 30 D01
+#pragma libcall CDPlayerBase CDJump 36 D802
+#pragma libcall CDPlayerBase CDActive 3c D01
+#pragma libcall CDPlayerBase CDCurrentTitle 42 D01
+#pragma libcall CDPlayerBase CDTitleTime 48 D802
+#pragma libcall CDPlayerBase CDGetVolume 4e D802
+#pragma libcall CDPlayerBase CDSetVolume 54 D802
+#pragma libcall CDPlayerBase CDReadTOC 5a D802
+#pragma libcall CDPlayerBase CDInfo 60 D802

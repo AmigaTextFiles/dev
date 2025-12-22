@@ -1,0 +1,190 @@
+
+TEKLIB MULTITASKING, USING SIGNALS
+------------------------------------------------------------
+
+let's get back to the fractal example from the last chapter. we came
+across that polling sucks, and this time we are going to synchronize
+the display properly, using signals.
+
+we learned in the first chapter that signals are just signal bits in a
+task's context, with a reserved meaning. the only signal we used so
+far was TTASK_SIG_ABORT, a signal bit with the predefined meaning
+"abort this task". we used it for telling a child context to go away.
+the particular meaning of a signal (including TTASK_SIG_ABORT) depends
+on how you react to it, of course. TTASK_SIG_ABORT is just a proposal.
+
+
+so the next step would be to define what we want to synchronize on,
+and to define a signal for it. let's start with a signal to wakeup the
+parent task. this is how we reserve and deal with a custom signal in
+the parent context:
+
+
+	TUINT sig_parent;
+
+	sig_parent = TAllocSignal(parenttask, 0);
+
+	if (sig_parent)
+	{
+		/* okay, we can use the signal here */
+		
+		..
+		
+		TFreeSignal(parenttask, sig_parent);
+	}
+	else
+	{
+		/* no more free signals */
+	}
+
+
+the 0 argument tells TAllocSignal() that we're happy with any free
+single signal. alternatively, we can allocate a preferred signal this
+way:
+
+
+	#define SIG_PARENT		0x80000000
+	
+	if (TAllocSignal(parenttask, SIG_PARENT))
+	{
+		/* okay, we can use the signal here */
+		
+		..
+		
+		TFreeSignal(parenttask, SIG_PARENT);
+	}
+	else
+	{
+		/* signal 0x80000000 was not available */
+	}
+
+
+note that the second example may be a bit more risky. if 0x80000000
+was already in use for any reason, TAllocSignal() will fail. the first
+example will try to allocate any from a task's pool of free signals,
+and is therefore less likely to fail. we'll stick to the first
+example, and put everything together:
+
+	
+struct fractaldata
+{
+	TFLOAT x1, y1, x2, y2;
+	TINT iterations;
+	TAPTR destbuffer;
+	TINT width, height;
+
+	TINT line_rendered;
+	TBOOL finished;
+
+	TAPTR sig_task;
+	TUINT sig_parent;
+};
+
+void main(void)
+{
+	..
+
+	userdata.finished = TFALSE;	
+	userdata.line_rendered = 0;
+
+	userdata.sig_task = basetask;
+	userdata.sig_parent = TAllocSignal(basetask, 0);
+
+	if (userdata.sig_parent)
+	{
+		TTAGITEM tasktags[2];
+
+		TInitTags(tasktags);
+		TAddTag(tasktags, TTask_UserData, &userdata);
+
+		fractaltask = TCreateTask(basetask, fractalfunc, tasktags);
+		if (fractaltask)
+		{
+			TINT lastline = 0;
+			
+			do
+			{
+				TWait(basetask, userdata.sig_parent);
+
+				if (userdata.line_rendered != lastline)
+				{
+					lastline = userdata.line_rendered;
+					drawline(screen, gfxbuffer, lastline - 1);
+				}
+
+			} while (!userdata.finished);
+	
+			TDestroy(fractaltask);
+		}
+
+		TFreeSignal(userdata.sig_parent);
+	}
+	..
+}
+
+TVOID fractalfunc(TAPTR task)
+{
+	struct fractaldata *userdata = TTaskGetData(task);
+
+	while (userdata->height-- > 0)
+	{
+		/* calculate a new line here */
+	
+		userdata->line_rendered++;
+		TTaskSignal(userdata->sig_task, userdata->sig_parent);
+	}
+	
+	userdata->finished = TTRUE;
+	TTaskSignal(userdata->sig_task, userdata->sig_parent);
+}
+
+
+whenever the fractal task completed a line, it submits the parent
+sig_parent. this causes TWait() to return, the parent has the
+opportunity to check the shared data fields, and to display a new line
+if appropriate.
+
+this example is still far from being perfect, and it demonstrates some
+not-so-obvious race conditions. it's neither likely to occur nor will
+it be harmful. but try to imagine what happens if, for some reason,
+the operating system decides to serve the child task for that long
+that it may have rendered more than one line before the task scheduler
+switches back to the parent task.
+
+in that case, when the flow of execution is finally getting back to
+the parent task, the child task may have increased line_rendered and
+submitted sig_parent twice in the meantime. but signals are not
+getting queued; either a signal bit is clear, or it is set. what will
+happen? the parent wakes up and finds line_rendered in a modified
+state. it will draw the last line to the display, but it will never
+recognize that it forgot to draw the line before. there will be one
+line missing on the screen!
+
+of course, there is an easy solution to that problem. we might modify
+the drawline() function to draw multiple lines at once, and call it as
+follows:
+
+	TUINT newline;
+
+	TWait(basetask, userdata.sig_parent);
+
+	newline = userdata.line_rendered;
+	if (newline != lastline)
+	{
+		drawline(screen, gfxbuffer, lastline, newline - lastline);
+		lastline = newline;
+	}
+
+but that's not all. things are getting even worse. what if the parent
+task woke up and started drawing the penultimate line to the screen,
+and while it's at that, the last line is being finished by the child
+task? the parent task would stumble over the while() condition and
+exit the loop, and the last line would be forgotten on the screen.
+
+this is all feeling shaky. you can see that, while we're having two
+tasks accessing it simultaneously, the userdata structure may be
+getting inconsistent at any time, and a signal alone may not be a
+sufficient means to handle it.
+
+to be continued...
+

@@ -1,0 +1,311 @@
+
+***	CODE		INTERLEAVED_BLIT
+***	CODER		MARC.B
+***	DATE		13th JUNE `92
+
+		
+;THIS BLITS A GRAPHIC INTO THE DISPLAY USING INTERLEAVED BLITS
+;THE GRAPHIC IS DRAWN ONE LINE AT A TIME EVEN LINES STARTING
+;AT THE TOP OF THE DISPLAY AND ODD LINES AT THE BOTTOM
+	   
+
+
+***	constants	***
+
+chip		equ	2
+clear		equ	$10000
+Plane_Size	equ	320/8*256
+
+
+
+*********************************************
+*		INCLUDE FILES		    *
+*********************************************
+
+	incdir		sys:include/
+	include		source:include/hardware.i
+	include		exec/exec.i
+	include		exec/exec_lib.i
+
+	lea		$dff000,a5		custom base address
+	
+
+**********************************************************
+*	OPEN GFX LIBRARY AND SAVE SYSTEM COPPER		 *
+**********************************************************
+
+	
+	move.l		#gfxname,a1
+	moveq		#0,d0
+	CALLEXEC	OpenLibrary
+	tst		d0			
+	beq		the_end			
+	move.l		d0,gfxbase		
+	move.l		d0,a0			;put gfxbase in a0 
+	move.l		38(a0),systemcopper	;save the copper address 
+
+
+
+****************************************************
+*	ALLOCATE MEMORY FOR BIT PLANES		   *
+****************************************************
+
+	
+	move.l		#Plane_Size*5,d0	;memory for 1 bitplanes
+	move.l		#chip+clear,d1		;chip memory and wipe it 
+	CALLEXEC	AllocMem
+	tst		d0			
+	beq		exit			
+	move.l		d0,bitbase		;save pointer
+
+
+*****************************************************************
+*	LOAD BITPLANE AND SPRITE POINTERS INTO COPPER LIST      *
+*****************************************************************
+
+
+	move.l		bitbase,d0		set up interleaved
+	lea		copper,a0		bitplanes
+	move.w		d0,6(a0)	
+	swap		d0
+	move.w		d0,2(a0)
+	swap		d0
+	add.l		#40,d0
+	move.w		d0,14(a0)
+	swap		d0
+	move.w		d0,10(a0)
+	swap		d0
+	add.l		#40,d0
+	move.w		d0,22(a0)
+	swap		d0
+	move.w		d0,18(a0)
+	swap		d0
+	add.l		#40,d0
+	move.w		d0,30(a0)
+	swap		d0
+	move.w		d0,26(a0)
+	swap		d0
+	add.l		#40,d0
+	move.w		d0,38(a0)
+	swap		d0
+	move.w		d0,34(a0)
+	swap		d0
+	
+	
+
+************************************************************
+*		START CUSTOM COPPER LIST		   *
+************************************************************	
+
+	move.l		#copper,COP1LCH(a5)
+	move.l		#0,COPJMP1(a5)
+	CALLEXEC	Forbid
+
+************************************************************
+*		    MAIN CODE LOOP    			   *
+************************************************************
+
+	clr.l		offset
+	move.l		#51000,offset1
+	move.b		#0,finished
+
+	
+	
+wait
+	move.l		VPOSR(a5),d0		;read current beam position
+	and.l		#$0001ff00,d0		;mask all but the vertical pos
+	lsr.l		#8,d0		
+	cmp.w		#$0106,d0		;wait for end of display
+	bne		wait
+	btst		#6,CIAAPRA		;check left mouse button
+	beq		clean_up		;end if pressed
+	cmp.b		#$ff,finished
+	bne		blit_down
+	bra		wait
+
+**********************************************************
+*		   BLITTER ROUTINES			 *
+**********************************************************
+
+;this routine sets up the blits that form the display
+;blit_down handles the lines from top to bottom
+;by adding an offset to the bob and bitplane base address's
+;then increasing the offset by two lines which is equal
+;to 5*40*2
+;   5 lines because its interleaved
+;   40 bytes per line
+;   2 lines needed to increase
+;
+;blit_up works in the same way except the offset starts off
+;equal to the total bob size minus one line the offset is then
+;decremented by two lines each pass , when the offset1 =0
+;the operation is complete and the finished flag is set
+;in order to prevent these routines being called again
+
+
+blit_down
+
+	lea		bob,a2
+	move.l		bitbase,a3
+	add.l		offset,a2
+	add.l		offset,a3
+	add.l		#400,offset
+	bsr		blitter
+	
+blit_up
+	
+	lea		bob,a2
+	move.l		bitbase,a3
+	add.l		offset1,a2
+	add.l		offset1,a3
+	sub.l		#400,offset1
+	bsr		blitter
+	cmp.l		#0,offset1
+	ble		end_blit
+	bra		wait
+
+end_blit
+	move.b		#$ff,finished
+	bra		wait
+	
+	
+
+**********************************************************
+*			RESTORE SYSTEM 			 *
+**********************************************************
+
+clean_up
+
+	move.l		systemcopper,COP1LCH(a5)
+	move.l		#0,COPJMP1(a5)
+	CALLEXEC	Permit
+	
+
+exit1
+	
+	move.l		#Plane_Size*5,d0	free allocated memory
+	move.l		bitbase,a1
+	CALLEXEC	FreeMem
+
+exit
+	move.l		gfxbase,a1		close the graphics library
+	CALLEXEC	CloseLibrary
+	
+the_end
+	rts					;exit from program
+
+
+***********************************************************
+*		BLITTER OPERATION			  *
+***********************************************************
+
+
+
+
+blitter
+	bsr		blitter_busy		;check blitter status
+	move.l		a2,BLTAPTH(a5)		;DMA a pointer (bob)
+	move.l		a3,BLTDPTH(a5)		;DMA d pointer (screen)
+	move.w		#0,BLTAMOD(a5)		
+	move.w		#0,BLTDMOD(a5)		
+	move.w		#0,BLTCON1(a5)
+	move.w		#$ffff,BLTAFWM(a5)	
+	move.w		#$ffff,BLTALWM(a5)
+	move.w		#$09f0,BLTCON0(a5)	
+	move.w		#(5*64)+(320/16),BLTSIZE(a5)	
+	rts
+
+blitter_busy
+	btst		#14,DMACONR(a5)		;blitter working ?
+	bne		blitter_busy		;yes then wait......
+	rts					
+
+
+
+***********************************************************
+*		   CUSTOM COPPER LIST			  *
+***********************************************************
+
+
+	SECTION		copper.list,CODE_C
+
+copper
+	dc.w	BPL1PTH,0000		;next 4 blank words
+	dc.w	BPL1PTL,0000		;are where we load
+	dc.w	BPL2PTH,0000		;the bitplane pointers
+	dc.w	BPL2PTL,0000
+	dc.w	BPL3PTH,0000
+	dc.w	BPL3PTL,0000
+	dc.w	BPL4PTH,0000
+	dc.w	BPL4PTL,0000
+	dc.w	BPL5PTH,0000
+	dc.w	BPL5PTL,0000
+	dc.w	SPR0PTH,0000
+	dc.w	SPR0PTL,0000		;sprite 0 pointer
+	dc.w	SPR1PTH,0000
+	dc.w	SPR1PTL,0000		;sprite 1 pointer
+	dc.w	SPR2PTH,0000
+	dc.w	SPR2PTL,0000		;sprite 2 pointer
+	dc.w	SPR3PTH,0000
+	dc.w	SPR3PTL,0000		;sprite 3 pointer
+	dc.w	SPR4PTH,0000
+	dc.w	SPR4PTL,0000		;sprite 4 pointer
+	dc.w	SPR5PTH,0000
+	dc.w	SPR5PTL,0000		;sprite 5 pointer
+	dc.w	SPR6PTH,0000
+	dc.w	SPR6PTL,0000		;sprite 6 pointer
+	dc.w	SPR7PTH,0000
+	dc.w	SPR7PTL,0000		;sprite 7 pointer
+	dc.l 	$2b01fffe		
+	dc.w	DIWSTRT,$2c81		
+	dc.w	DIWSTOP,$2cc1		
+	dc.w	BPLCON0,$5200		
+	dc.w	BPLCON2,$0024		
+	dc.w	DDFSTRT,$0038		
+
+	dc.w	DDFSTOP,$00d0		
+	dc.w	BPLCON1,$0000
+	dc.w	BPL1MOD,0160		bitplane modulos	
+	dc.w	BPL2MOD,0160		
+
+color_map
+		dc.w	$180,$000,$182,$fff,$184,$0f0,$186,$026
+		dc.w	$188,$038,$18a,$139,$18c,$24b,$18e,$04d
+		dc.w	$190,$0f0,$192,$ddd,$194,$bbb,$196,$999
+		dc.w	$198,$777,$19a,$555,$19c,$0f0,$19e,$0f0
+		dc.w	$1a0,$0f0,$1a2,$0f0,$1a4,$0f0,$1a6,$0f0
+		dc.w	$1a8,$0f0,$1aa,$0f0,$1ac,$222,$1ae,$333
+		dc.w	$1b0,$444,$1b2,$555,$1b4,$666,$1b6,$777
+		dc.w	$1b8,$888,$1ba,$999,$1bc,$0f2,$1be,$0f0
+			
+
+	
+	dc.l	$fffffffe		;wait for the impossible
+endcopper
+
+copperlen	equ	endcopper-copper
+
+
+	
+
+	
+************************************************************
+*			VARIABLES	 		   *
+************************************************************
+
+
+gfxbase		dc.l 0
+bitbase		dc.l 0
+systemcopper	dc.l 0
+offset		dc.l 0
+offset1		dc.l 0
+finished	dc.b 0
+
+
+
+gfxname		dc.b 'graphics.library',0
+
+bob	incbin 	source:m.bateson/graphics/mts_inter
+
+end
+	

@@ -1,0 +1,152 @@
+/***********************************************************************
+ * $VER: findmemloss.cpr 1.0 (26.12.95)                                *
+ * © by Clemens Resanka, Freeware                                      *
+ *                                                                     *
+ * FindMemLoss is an Arexx-script for cpr (CodeProbe © by SAS)         *
+ * which tells you exactly in which source-line your program loses     *
+ * memory. It works in conjunction with Mungwall and Munglist.         *
+ *                                                                     *
+ * See also FindMemLoss.guide!                                         *
+ *                                                                     *
+ * V1.0 (26.12.95) ClR  * Initial release *                            *
+ *                                                                     *
+ ***********************************************************************/
+
+i=0
+SIGNAL ON ERROR
+OPTIONS RESULTS
+
+SAY "-=> FindMemLoss.cpr © by Clemens Resanka in 1995, Freeware <=-"
+SAY
+
+PARSE ARG Function
+IF Function = "" THEN DO
+    SAY "FindMemLoss Function/A"
+    EXIT
+END
+
+IF ~Show('p', "Mungwall") THEN DO
+    SAY "Mungwall has to be started first!"
+    EXIT
+END
+
+IF ~Show('p', "SC_CPR") THEN DO
+    SAY "CodeProbe © by SAS has to be started first!"
+    EXIT
+END
+
+/***********************************************************************/
+
+ADDRESS "SC_CPR"
+
+'break' Function
+
+'opt task'
+PARSE VAR RESULT "Current Task........"OurTaskName "at" OurTaskAddress
+OurTaskAddress = UPPER("$" || Left(Strip(OurTaskAddress),8))
+
+'Where'
+PARSE VAR RESULT . "In routine" OurTaskName":\"."\"CurrentFunction AllocLine .
+DO WHILE CurrentFunction ~= Function
+    'GO'
+    IF Pos("Program exited", RESULT) > 0 THEN DO
+        say "You have to take care that the function is really called!"
+        Exit
+    END
+    PARSE VAR RESULT .":\"."\"CurrentFunction AllocLine .
+END
+NextAllocLine = Left(AllocLine, Length(AllocLine)-1)
+AllocLine = NextAllocLine - 1
+
+Call Open MUNGER, "t:CallMung.tmp", 'w'
+Call WriteLn MUNGER, "failat 10000"
+Call WriteLn MUNGER, "MungList >t:Mung.tmp <NIL: Only" OurTaskName "Since Mark"
+Call Close MUNGER
+
+
+/***********************************************************************/
+
+Address Command "Munglist <>NIL: MARK"
+OurTaskAddress = UPPER(OurTaskAddress)
+
+DO WHILE CurrentFunction = Function
+    CALL ReadMung
+    AllocLine = NextAllocLine
+    ADDRESS "SC_CPR" 'proceed'
+    PARSE VAR RESULT .":\"."\"CurrentFunction NextAllocLine
+    NextAllocLine = Left(NextAllocLine, Length(NextAllocLine)-1)
+END
+'GO'
+
+/***********************************************************************/
+
+say "Now I´ll look if I know the alloc-line of some lost memory-packets...!"
+ADDRESS Command
+Call Open MUNGER, "t:CallMung.tmp", 'w'
+Call WriteLn MUNGER, "failat 10000"
+Call WriteLn MUNGER, "MungList >t:Mung.tmp <NIL: Only" OurTaskName
+Call Close MUNGER
+
+CALL EXMUNG
+CALL Open MungOutput, "t:Mung.tmp"
+DO WHILE ~EOF(MungOutPut)
+    MungLine = ReadLn(MungOutPut)
+    PARSE VAR MungLine MemAddress "size="MemSize . . "Task="TaskAddress .
+    IF UPPER(TaskAddress) = OurTaskAddress THEN DO
+        ThisMemBlock = X2D(Right(Strip(MemAddress), 8))
+        FoundIt = FALSE
+        DO j=0 TO i-1
+            IF TaskArray.j = ThisMemBlock THEN DO
+                say "memblock $"D2X(TaskArray.j) "sized" MemSize "was allocated in line" LineArray.j
+                FoundIt = TRUE
+            END
+        END
+        IF FoundIt = FALSE THEN say "I don´t know when memblock $"D2X(ThisMemBlock) "sized" MemSize "was allocated!"
+    END
+END
+CALL Close MungOutput
+address command
+'delete >NIL: t:CallMung.tmp'
+'delete >NIL: t:Mung.tmp'
+exit
+
+/***********************************************************************/
+
+ReadMung:
+ADDRESS Command
+CALL EXMUNG
+"Munglist <>NIL: MARK"
+CALL Open MungOutput, "t:Mung.tmp"
+
+DO WHILE ~EOF(MungOutPut)
+    MungLine = ReadLn(MungOutPut)
+    if Pos("size=$", MungLine) > 0 THEN DO
+        PARSE VAR MungLine MemAddress .
+        ThisMemBlock = X2D(Right(MemAddress, 8))
+        FoundIt = FALSE
+        DO j=0 TO i-1
+            IF TaskArray.j = ThisMemBlock THEN FoundIt = TRUE
+        END
+        IF FoundIt = FALSE THEN DO
+            TaskArray.i = ThisMemBlock
+            LineArray.i = AllocLine
+            i=i+1
+        END
+    END
+END
+CALL Close MungOutput
+
+RETURN 0
+
+/***********************************************************************/
+
+ERROR:
+IF SIGL = 45 THEN DO
+    SAY "Sorry, the function" Function "is not known."
+    Exit
+END
+RETURN 0
+
+EXMUNG:
+"execute T:CallMung.tmp"
+

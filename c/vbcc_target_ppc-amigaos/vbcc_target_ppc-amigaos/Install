@@ -1,0 +1,148 @@
+; vbcc target installer
+; written by Frank Wille <frank@phoenix.owl.de>
+
+(set #incdir "vincludeos4")
+(set #libdir "vlibos4")
+
+
+(if (< (/ @installer-version 65536) 43)
+  (abort "You are running an old version of Installer.\n\n"
+         "Please update to at least version 43, available on Aminet.")
+)
+
+(message "You may need the header files from the OS4 SDK. Please make sure they are already installed before proceeding.")
+(welcome)
+
+(if (exists "vbcc:" (noreq))
+  (
+    (set @default-dest "vbcc:")
+    (set #targets (tackon @default-dest "targets"))
+    (set #targetname (substr @app-name 5))
+    (set #vbccinc (tackon (tackon #targets #targetname) "include"))
+    (set #vbcclib (tackon (tackon #targets #targetname) "lib"))
+
+    (if (not (exists #targets)) (makedir #targets))
+
+    (copyfiles
+      (prompt "Copying config files.")
+      (help @copyfiles-help)
+      (source "config")
+      (dest (tackon @default-dest "config"))
+      (optional "force")
+      (all)
+    )
+
+    (copyfiles
+      (prompt ("Copying include files and libraries for target %s." #targetname))
+      (help @copyfiles-help)
+      (source (tackon "targets" #targetname))
+      (dest (tackon #targets #targetname))
+      (optional "force")
+      (all)
+    )
+
+    (set #stdhdr
+      (askdir
+        (prompt "Please locate the system headers directory.")
+        (help "This directory will be added to vbcc's "
+              "standard include path.")
+        (default "SDK:Include/Include_h")
+        (disk)
+      )
+    )
+
+    (set #newlibpath
+      (askdir
+        (prompt "Please locate the newlib directory, containing headers "
+                "(include) and libraries (lib).")
+        (help "The path is needed to build the 'newlib' configuration file.")
+        (default "SDK:newlib")
+        (disk)
+      )
+    )
+
+    (copyfiles
+      (prompt "Patching vbcc-related bugs in the Newlib header files.")
+      (help "The toupper() and tolower() inline functions in ctype.h "
+            "do not work. So we overwrite this file with a fixed version.")
+      (source "newlib_header_fix")
+      (dest (tackon #newlibpath "include"))
+      (optional "force")
+      (all)
+    )
+
+    (set #newlibconf (tackon @default-dest "config/newlib"))
+    (if (exists #newlibconf)
+      (delete #newlibconf
+        (prompt "Deleting old 'newlib' configuration file.")
+        (help "The old newlib config has to be deleted to create "
+              "a new one included the selected paths from scratch.")
+        (optional "force")
+      )
+    )
+
+    (textfile
+      (prompt "Creating 'newlib' configuration file.")
+      (help "Write configuration using the selected path to your "
+            "newlib installation.")
+      (dest #newlibconf)
+      (append
+        (cat "-elf\n-no-regnames\n-no-multiple-ccs\n-madd\n"
+             "-c99\n-setccs\n-use-commons\n"
+             "-cc=vbccppc -quiet %s -o= %s %s -O=%ld -D__amigaos4__ -D__NEWLIB__ -I"
+             (tackon #newlibpath "include") " -I" #stdhdr "\n"
+             "-ccv=vbccppc %s -o= %s %s -O=%ld -D__amigaos4__ -D__NEWLIB__ -I"
+             (tackon #newlibpath "include") " -I" #stdhdr "\n"
+             "-as=vasmppc_std -quiet -Felf -opt-branch -no-regnames -nowarn=62 %s -o %s\n"
+             "-asv=vasmppc_std -Felf -opt-branch -no-regnames -nowarn=62 %s -o %s\n"
+             "-isc=vscppc -quiet %s %s\n-iscv=vscppc %s %s\n"
+             "-rm=delete quiet %s\n-rmv=delete %s\n"
+             "-ld=vlink -belf32amigaos -q -n -Cvbccelf -P_start -nostdlib"
+             " -fixunnamed -interp \"vbcc 0.9\" -Tvlibos4:script "
+             (tackon #newlibpath "lib/startup.o") " %s %s -L"
+             (tackon #newlibpath "lib") " -Lvlibos4: -LSObjs: "
+             "-lvbcc -lc -o %s\n"
+             "-l2=vlink -belf32amigaos -q -n -Cvbccelf -P_start -nostdlib"
+             " -fixunnamed -interp \"vbcc 0.9\" -Tvlibos4:script %s %s -L"
+             (tackon #newlibpath "lib") " -Lvlibos4: -LSObjs: -o %s\n"
+             "-ldv=vlink -belf32amigaos -t -q -n -Cvbccelf -P_start -nostdlib"
+             " -fixunnamed -interp \"vbcc 0.9\" -Tvlibos4:script "
+             (tackon #newlibpath "lib/startup.o") " %s %s -L"
+             (tackon #newlibpath "lib") " -Lvlibos4: -LSObjs: "
+             "-lvbcc -lc -o %s\n"
+             "-l2v=vlink -belf32amigaos -t -q -n -Cvbccelf -P_start -nostdlib"
+             " -fixunnamed -interp \"vbcc 0.9\" -Tvlibos4:script %s %s -L"
+             (tackon #newlibpath "lib") " -Lvlibos4: -LSObjs: -o %s\n"
+             "-ldnodb=-s -x\n-ldstatic=-Bstatic\n"
+             "-ul=-l%s\n-cf=-F%s\n-ml=500\n"
+        )
+      )
+    )
+
+    (startup @app-name
+      (prompt "Performing changes to User-Startup.")
+      (help
+        (cat
+          "The following commands will be added to your "
+          "SYS:S/User-Startup file:\n"
+          "1. An assignment " #incdir ":.\n"
+          "2. An assignment " #libdir ":.\n"
+        )
+      )
+      (confirm)
+      (command (cat "assign >NIL: " #incdir ": " #vbccinc "\n"))
+      (command (cat "assign >NIL: " #incdir ": \"" #stdhdr "\" add\n"))
+      (command (cat "assign >NIL: " #libdir ": " #vbcclib "\n"))
+    )
+
+    (if (not (exists #incdir (noreq)))
+      (
+        (makeassign #incdir #vbccinc)
+        (run (cat "assign >NIL: " #incdir ": \"" #stdhdr "\" add"))
+      )
+    )
+    (if (not (exists #libdir (noreq))) (makeassign #libdir #vbcclib))
+  )
+
+  (exit "Please install a vbcc-binary archive first!" (quiet))
+)

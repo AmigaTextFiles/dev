@@ -1,0 +1,1255 @@
+with Text_IO; use Text_IO;
+with Interfaces.C.Strings; use Interfaces.C.Strings;
+with dos_dos; use dos_dos;
+
+with Linked_List;
+with VString;
+
+procedure GenCodeAda is
+
+package VString_Pak is new VString(Character,"<",String); use Vstring_Pak;
+--subtype VString is VString_Pak.String;
+
+package Linked_List_Pak is new Linked_List(VString_Pak.String,VString_Pak.Copy,Vstring_Pak.Free,Vstring_Pak.Is_Equal); use Linked_List_Pak;
+subtype Linked_List is Linked_List_Pak.List;
+
+package Int_IO is new Integer_IO(Integer); use Int_IO;
+
+function Fix_Back_Slash_String( str : in String ) return String is
+
+temp_string : String(1..400);
+offset : integer := 0;
+i :integer := str'First;
+
+begin
+
+while i <= str'Last loop
+   if str(i) /= Character'VAL(92) then
+      temp_string(i+ offset) := str(i);
+   else
+      if i + 1 <= str'Last and then str(i+1) = 'n' then
+         temp_string(i+offset..i+offset+ 26) := '"' & "& Character'VAL(8#012#) &" & '"';
+         i := i + 1;
+         offset := offset + 25;
+      elsif i + 3 <= str'Last and then str(i+1..i+3) = "033" then
+         temp_string(i+offset..i+offset+ 8) := '"' & "& ESC &" & '"';
+         i := i + 3;
+         offset := offset + 5;
+      else
+         temp_string(i+offset..i+offset+ 26) := '"' & "& Character'VAL(8#" & str(i+1..i+3)  & "#) &" & '"';
+         i := i + 3;
+         offset := offset + 23;
+      end if;
+   end if;
+   i := i+1;
+end loop;
+
+return temp_string(1..i+offset-1);
+end Fix_Back_Slash_String;
+
+function Fix_Back_Slash( str : in VString_Pak.String ) return String is
+
+temp_string : String(1..Length_of(str)) := Substring_of(str);
+
+begin
+   return Fix_Back_Slash_String(temp_string);
+end Fix_Back_Slash;
+
+Procedure Seperate_Path( Full_Name : in VString_Pak.String; Path, Short_Name : in out VString_Pak.String ) is
+
+i : Integer := Length_of(Full_Name);
+
+begin
+   while i>0 and then Item_of(Full_Name,i) /= ':' and then Item_of(Full_Name,i) /= '/'  loop
+         i := i -1;
+   end loop;
+   VString_Pak.Copy(SubString_of(Full_Name,i+1,Length_of(Full_Name)),Short_Name);
+   if i > 0 then
+      VString_Pak.Copy(SubString_of(Full_Name,1,i),Path);
+   end if;
+end Seperate_Path;
+
+procedure Put_Initial(Variable_Names, Variable_Values : in Linked_List;  spec_file, body_file : in File_Type ; Num_of_UnNamed_Variable : in Integer; Package_Name : in String; Use_Locale : Boolean; Locale_Function_Name : VString_Pak.String; Short_Name : VString_Pak.String) is
+
+procedure Put_Object_Names(Variable_Names : in Linked_List; spec_file : File_Type ) is
+
+temp_list : Linked_List := Variable_Names;
+
+begin
+
+while NOT Is_Null(temp_list) loop
+   if Item_of(Head_of(temp_list),1) = Character'Val(5) then
+      Put_Line(spec_file, SubString_of(Head_of(temp_list),2,Length_of(Head_of(temp_list))) & " : Object_Ptr;");
+   end if;
+   temp_list := Tail_of(temp_list);
+end loop;
+end Put_Object_Names;
+
+procedure Put_Variable_Values(Variable_Names,Variable_Values : in Linked_List; spec_file : File_Type; Use_Locale : Boolean; Locale_Function_Name : VString_Pak.String) is
+
+temp_list : Linked_List := Variable_Names;
+temp_list2 : Linked_List := Variable_Values;
+
+temp_string : VString_Pak.String;
+
+i,j : Integer;
+
+begin
+
+Put_Line(spec_file,"type Chars_Ptr_Array is array ( Positive range <> ) of Chars_Ptr;");
+
+i := 0;
+while NOT Is_Null(temp_list) loop
+   i := i + 1;
+   if Item_of(Head_of(temp_list),1) = Character'Val(3) then
+      Put_Line(spec_file,SubString_of(Head_of(temp_list),2,Length_of(Head_of(temp_list))) & " : Chars_Ptr;");
+   end if;
+
+   if Item_of(Head_of(temp_list),1) = Character'Val(4) then
+      Put(spec_file, SubString_of(Head_of(temp_list),2,Length_of(Head_of(temp_list))) & " :  Chars_Ptr_Array(1..");
+      VString_Pak.Copy(NTH_Member(Variable_Values,i),temp_string);
+      j := 1;
+      while Item_of(temp_string,1) /= Character'Val(0) loop
+         i := i + 1;
+         j := j + 1;
+         VString_Pak.Copy(NTH_Member(Variable_Values,i),temp_string);
+      end loop;
+      Put(spec_file,j);
+      Put_Line(spec_file,");");
+   end if;
+
+   temp_list := Tail_of(temp_list);
+end loop;
+
+temp_list := Variable_Names;
+i := 0;
+Put_Line(body_file,"procedure Init_Strings is");
+Put_Line(body_file,"begin");
+while NOT Is_Null(temp_list) loop
+   i := i + 1;
+   if Item_of(Head_of(temp_list),1) = Character'Val(3) then
+      VString_Pak.Copy(NTH_Member(temp_list2,i),temp_string);
+      if Item_of(temp_string,1) /= Character'VAL(0) then
+         if Use_Locale then
+            Put_Line(body_file,SubString_of(Head_of(temp_list),2,Length_of(Head_of(temp_list))) & " := Allocate_String(Fix_Back_Slash_String(" & Substring_of(Locale_Function_Name) & "(" & Substring_of(temp_string) & ")));");
+         else
+            Put_Line(body_file,SubString_of(Head_of(temp_list),2,Length_of(Head_of(temp_list))) & " := Allocate_String(" & '"' & Fix_Back_Slash(temp_string) & '"' & ");");
+         end if;
+      else
+         Put_Line(body_file,SubString_of(Head_of(temp_list),2,Length_of(Head_of(temp_list))) & " := Null_Ptr;");
+      end if;
+   end if;
+
+   if Item_of(Head_of(temp_list),1) = Character'Val(4) then
+      VString_Pak.Copy(NTH_Member(Variable_Values,i),temp_string);
+      j := 1;
+      while Item_of(temp_string,1) /= Character'Val(0) loop
+         Put(body_file, SubString_of(Head_of(temp_list),2,Length_of(Head_of(temp_list))) & '(' & Integer'Image(j) & ')' & " := ");
+         j := j + 1;
+         if Use_Locale then
+            Put_Line(body_file,"Allocate_String(Fix_Back_Slash_String(" & Substring_of(Locale_Function_Name) & "(" & Substring_of(temp_string) & ")));" );
+         else
+            Put_Line(body_file,"Allocate_String(" & '"' & Fix_Back_Slash(temp_string) & '"' & ");" );
+         end if;
+         i := i + 1;
+         VString_Pak.Copy(NTH_Member(Variable_Values, i ),temp_string);
+      end loop;
+
+      Put_Line(body_file, SubString_of(Head_of(temp_list),2,Length_of(Head_of(temp_list))) & '(' & Integer'Image(j) & ')' & " := Null_Ptr;");
+   
+   end if;
+   temp_list := Tail_of(temp_list);
+end loop;
+
+Put_Line(body_file,"end Init_Strings;");
+New_Line(body_file);
+
+end Put_Variable_Values;
+
+
+begin
+
+Put_Line(spec_file,"with System; use System;");
+Put_Line(body_file,"with System; use System;");
+Put_Line(spec_file,"with Interfaces; use Interfaces;");
+Put_Line(body_file,"with Interfaces; use Interfaces;");
+Put_Line(spec_file,"with Interfaces.C.Strings; use Interfaces.C.Strings;");
+Put_Line(body_file,"with Interfaces.C; use Interfaces.C;");
+Put_Line(body_file,"with Interfaces.C.Strings; use Interfaces.C.Strings;");
+Put_Line(spec_file,"with Text_IO; use Text_IO;");
+Put_Line(body_file,"with Text_IO; use Text_IO;");
+New_Line(spec_file);
+New_Line(body_file);
+Put_Line(spec_file,"with amiga; use amiga;");
+Put_Line(body_file,"with amiga; use amiga;");
+Put_Line(spec_file,"with amiga_lib; use amiga_lib;");
+Put_Line(body_file,"with amiga_lib; use amiga_lib;");
+Put_Line(spec_file,"with utility_TagItem; use utility_TagItem; ");
+Put_Line(body_file,"with utility_TagItem; use utility_TagItem; ");
+Put_Line(spec_file,"with exec_exec; use exec_exec;");
+Put_Line(body_file,"with exec_exec; use exec_exec;");
+Put_Line(spec_file,"with intuition_classusr; use intuition_classusr;");
+Put_Line(body_file,"with intuition_classusr; use intuition_classusr;");
+Put_Line(spec_file,"with intuition_Intuition; use intuition_Intuition;");
+Put_Line(body_file,"with intuition_Intuition; use intuition_Intuition;");
+Put_Line(spec_file,"with Incomplete_Type; use Incomplete_Type;");
+Put_Line(body_file,"with Incomplete_Type; use Incomplete_Type;");
+New_Line(spec_file);
+New_Line(body_file);
+
+Put_Line(spec_file,"with mui; use mui;");
+Put_Line(body_file,"with mui; use mui;");
+New_Line(spec_file);
+New_Line(body_file);
+
+if Use_Locale then
+   Put_Line(spec_file,"with Locale; use Locale;");
+   Put_Line(body_file,"with Locale; use Locale;");
+   Put_Line(spec_file,"with " & Substring_of(Short_Name) & "_Locale; use " &  Substring_of(Short_Name) & "_Locale;");
+   Put_Line(body_file,"with " & Substring_of(Short_Name) & "_Locale; use " &  Substring_of(Short_Name) & "_Locale;");
+   New_Line(spec_file);
+   New_Line(body_file);
+end if;
+
+Put_Line(body_file,"package body " & package_name & " is");
+
+  Put_Line(body_file,"function MAKE_ID(a,b,c,d : Character) return Unsigned_32 is");
+  Put_Line(body_file,"begin");
+  Put_Line(body_file,"   return Character'Pos(a)* 2**24 +Character'Pos(b)* 2**16 +Character'Pos(c)* 2**8+Character'Pos(d);");
+  Put_Line(body_file,"end MAKE_ID;");
+  New_Line(body_file,2);
+  
+if Use_Locale then
+put_line(body_file,"function Fix_Back_Slash_String( str : in String ) return String is");
+New_Line(body_file);
+put_line(body_file,"function Octal_Str_to_Integer(str : in String) return integer is");
+put_line(body_file,"begin");
+put_line(body_file,"   return (Character'POS(str(str'First)) - Character'POS('0')) * 64 +");
+put_line(body_file,"          (Character'POS(str(str'First + 1)) - Character'POS('0')) * 8  +");
+put_line(body_file,"          (Character'POS(str(str'First + 2)) - Character'POS('0'));");
+put_line(body_file,"end Octal_Str_to_Integer;");
+New_Line(body_file);
+put_line(body_file,"temp_string : String(1..400);");
+put_line(body_file,"offset : integer := 0;");
+put_line(body_file,"i :integer := str'First;");
+New_Line(body_file);
+put_line(body_file,"begin");
+put_line(body_file,"while i <= str'Last loop");
+put_line(body_file,"   if str(i) /= Character'VAL(92) then");
+put_line(body_file,"      temp_string(i+ offset) := str(i);");
+put_line(body_file,"   else");
+put_line(body_file,"      if i + 1 <= str'Last and then str(i+1) = 'n' then");
+put_line(body_file,"         temp_string(i+offset) := Character'VAL(8#012#);");
+put_line(body_file,"         i := i + 1;");
+put_line(body_file,"         offset := offset -1;");
+put_line(body_file,"      elsif i + 3 <= str'Last then");
+put_line(body_file,"         temp_string(i+offset) := Character'VAL(Octal_Str_to_Integer(str(i+1..i+3)));");
+put_line(body_file,"         i := i + 3;");
+put_line(body_file,"         offset := offset - 3;");
+put_line(body_file,"      end if;");
+put_line(body_file,"   end if;");
+put_line(body_file,"   i := i+1;");
+put_line(body_file,"end loop;");
+New_Line(body_file);
+put_line(body_file,"return temp_string(1..i+offset-1);");
+put_line(body_file,"end Fix_Back_Slash_String;");
+new_line(body_file);
+end if;
+
+Put_Line(body_file,"function String_Value( Item : in Chars_Ptr ) return String is");
+Put_Line(body_file,"begin");
+Put_Line(body_file,"   return Value(Item);");
+Put_Line(body_file,"end String_Value;");
+New_Line(body_file);
+
+Put_Line(body_file,"function Char_Array_Value( Item : in Chars_Ptr ) return Char_Array is");
+Put_Line(body_file,"begin");
+Put_Line(body_file,"   return Value(Item);");
+Put_Line(body_file,"end Char_Array_Value;");
+New_Line(body_file);
+
+Put_Line(body_file,"temp_Msg : Msg := NewMsg;");
+Put_Line(body_file,"temp_TagList : TagListType := NewTagList;");
+
+New_Line(spec_file);
+Put_Line(spec_file,"package " & package_name & " is");
+New_Line(spec_file);
+Put_Line(spec_file,"ESC : constant Character := Character'VAL(8#033#);");
+New_Line(spec_file);
+Put_Object_Names(Variable_Names,spec_file);
+New_Line(spec_file);
+Put_Variable_Values(Variable_Names,Variable_Values,spec_file,Use_Locale,Locale_Function_Name);
+New_Line(spec_file);
+
+Put_Line(spec_file,"function Create_" & package_name & " return Object_Ptr;");
+Put_Line(spec_file,"procedure Dispose_" & package_name & ";");
+New_Line(spec_file);
+Put_Line(spec_file,"private");
+New_line(spec_file);
+Put_Line(spec_file,"temp_Object : array (Positive range 1.." & Integer'Image(Num_of_UnNamed_Variable) & ") of Object_Ptr;");
+New_line(spec_file);
+Put_Line(spec_file,"end " & package_name & ";");
+
+Put_Line(body_file,"function Create_" & package_name & " return Object_Ptr is");
+Put_Line(body_file,"begin");
+
+Put_Line(body_file,"Init_Strings;");
+
+New_line(body_file);
+end Put_Initial;
+
+procedure Put_Main_Loop( Variable_Names : in Linked_List; ProcedureName : in VString_Pak.String; loop_file : File_Type; Package_Name : in String ) is
+
+temp_list : Linked_List := Variable_Names;
+Application_String : VString_Pak.String;
+Window_String : VString_Pak.String;
+begin
+
+VString_Pak.Copy(NTH_Member(temp_list,1),Application_String);
+VString_Pak.Copy(NTH_Member(temp_list,2),Window_String);
+
+Put_Line(loop_file,"with System; use System;");
+Put_Line(loop_file,"with Interfaces; use Interfaces;");
+Put_Line(loop_file,"with Interfaces.C.Strings; use Interfaces.C.Strings;");
+Put_Line(loop_file,"with Text_IO; use Text_IO;");
+New_Line(loop_file);
+Put_Line(loop_file,"with amiga; use amiga;");
+Put_Line(loop_file,"with amiga_lib; use amiga_lib;");
+Put_Line(loop_file,"with utility_TagItem; use utility_TagItem; ");
+Put_Line(loop_file,"with exec_exec; use exec_exec;");
+Put_Line(loop_file,"with intuition_classusr; use intuition_classusr;");
+Put_Line(loop_file,"with intuition_Intuition; use intuition_Intuition;");
+Put_Line(loop_file,"with Incomplete_Type; use Incomplete_Type;");
+New_Line(loop_file);
+Put_Line(loop_file,"with mui; use mui;");
+New_Line(loop_file);
+Put_Line(loop_file,"with " & Package_Name & "; use " & Package_Name & ";");
+
+New_Line(Loop_file);
+Put_Line(Loop_file, "procedure " & SubString_of(ProcedureName) & " is");
+
+Put_Line(loop_file,"package Int_IO is new Integer_IO(Integer); use Int_IO;");
+New_line(Loop_file);
+
+Put_Line(Loop_file,"running : Boolean := True;");
+Put_Line(Loop_file,"Window_Opened : Integer;");
+New_Line(loop_file);
+
+Put_Line(Loop_file,"signals : Unsigned_32;");
+Put_Line(Loop_file,"wait_mask : Unsigned_32;");
+Put_Line(Loop_file,"Method_Result : Unsigned_32;");
+Put_Line(Loop_file,"SetAttrs_Result : Integer;");
+New_Line(Loop_file);
+Put_Line(loop_file,"temp_Msg : Msg := NewMsg;");
+Put_Line(loop_file,"temp_TagList : TagListType := NewTagList;");
+
+New_Line(loop_file);
+
+Put_Line(loop_file,SubString_of(Application_String,2,Length_of(Application_String)) & " : Object_Ptr;");
+New_Line(Loop_file);
+
+Put_Line(loop_file,"begin");
+New_Line(Loop_file);
+
+Put_Line(loop_file,"if NOT OpenIntuitionLibrary(0) then");
+Put_Line(loop_file,"   Put_Line(" & '"' & "Failed to open Intuition.library" & '"' & ");");
+Put_Line(loop_file,"   return;");
+Put_Line(loop_file,"end if;");
+New_Line(Loop_file);
+
+Put_Line(loop_file,"if NOT OpenMUILibrary(0) then");
+Put_Line(loop_file,"   Put_Line(" & '"' & "Failed to open MUIMaster.library" & '"' & ");");
+Put_Line(loop_file,"   return;");
+Put_Line(loop_file,"end if;");
+
+New_Line(Loop_file);
+
+Put_Line(loop_file,SubString_of(Application_String,2,Length_of(Application_String)) & " := Create_" & package_name & ";");
+
+Put_Line(loop_file,"if " & SubString_of(Application_String,2,Length_of(Application_String)) & " = NULL then");
+Put_Line(loop_file,"   Put_Line(" & '"' & "Failed to create Application." & '"' & ");");
+Put_Line(loop_file,"   return;");
+Put_Line(loop_file,"end if;");
+New_Line(loop_file);
+
+Put_Line(loop_file,"ClearMsg(temp_Msg);");
+Put_Line(loop_file,"AddMsg(temp_Msg,MUIM_Notify);");
+Put_Line(loop_file,"AddMsg(temp_Msg,MUIA_Window_CloseRequest);");
+Put_Line(loop_file,"AddMsg(temp_Msg,True);");
+Put_Line(loop_file,"AddMsg(temp_Msg," & SubString_of(Application_String,2,Length_of(Application_String)) & ");");
+Put_Line(loop_file,"AddMsg(temp_Msg,Unsigned_32(2));");
+Put_Line(loop_file,"AddMsg(temp_Msg,MUIM_Application_ReturnID);");
+Put_Line(loop_file,"AddMsg(temp_Msg,MUIV_Application_ReturnID_Quit);");
+New_Line(loop_file);
+
+Put_Line(loop_file,"Method_Result := DoMethodA(" & SubString_of(Window_String,2,Length_of(Window_String)) & ",temp_Msg);");
+New_Line(loop_file);
+
+Put_Line(loop_file,"ClearTagList(temp_TagList);");
+Put_Line(loop_file,"AddTag(temp_TagList, MUIA_Window_Open, True);");
+New_Line(loop_file);
+
+Put_Line(loop_file,"SetAttrs_Result := SetAttrsA(" & SubString_of(Window_String,2,Length_of(Window_String)) & ",temp_TagList);");
+New_Line(loop_file);
+
+Put_Line(loop_file,"SetAttrs_Result := GetAttr(MUIA_Window_Open," & SubString_of(Window_String,2,Length_of(Window_String)) & ",Window_Opened'Address);");
+New_Line(loop_file);
+
+Put_Line(loop_file,"if Window_Opened /= 0 then");
+Put_Line(loop_file,"   while running loop");
+Put_Line(loop_file,"           ClearMsg(temp_Msg);");
+Put_Line(loop_file,"           AddMsg(temp_Msg,MUIM_Application_Input);");
+Put_Line(loop_file,"           AddMsg(temp_Msg,signals'Address);");
+New_Line(loop_file);
+
+Put_Line(loop_file,"           Method_Result := DoMethodA(" & SubString_of(Application_String,2,Length_of(Application_String)) & ",temp_Msg);");
+Put_Line(loop_file,"          case  Method_Result is");
+Put_Line(loop_file,"             when Unsigned_32(MUIV_Application_ReturnID_Quit) =>");
+Put_Line(loop_file,"                 running := FALSE;");
+Put_Line(loop_file,"              when others =>");
+Put_Line(loop_file,"                 Null;");
+Put_Line(loop_file,"           end case;");
+New_Line(loop_file);
+
+Put_Line(loop_file,"           if running and signals /= 0 then");
+Put_Line(loop_file,"              wait_mask := Wait(signals);");
+Put_Line(loop_file,"           end if;");
+Put_Line(loop_file,"   end loop;");
+New_Line(loop_file);
+
+Put_Line(loop_file,"   ClearTagList(temp_TagList);");
+Put_Line(loop_file,"   AddTag(temp_TagList,MUIA_Window_Open, False );");
+New_Line(loop_file);
+
+Put_Line(loop_file,"   SetAttrs_Result := SetAttrsA(" & SubString_of(Window_String,2,Length_of(Window_String)) & ",temp_TagList);");
+New_Line(loop_file);
+Put_Line(loop_file,"else");
+Put_Line(loop_file,"   Put(" & '"' & "Failed to open main window!!, MUI_Error #" & '"' & ");");
+Put_Line(loop_file,"   Put(MUI_Error);");
+Put_Line(loop_file,"   New_Line;");
+Put_Line(loop_file,"end if;");
+New_Line(loop_file);
+
+Put_Line(loop_file, "Dispose_" & package_name & ";");
+
+New_Line(loop_file);
+Put_Line(loop_file,"CloseIntuitionLibrary;");
+Put_Line(loop_file,"CloseMUILibrary;");
+New_Line(loop_file);
+
+Put_Line(loop_file,"return;");
+
+Put_Line(loop_file,"end " & SubString_of(ProcedureName) & ';');
+end Put_Main_Loop;
+
+
+procedure insert( prev : in out Linked_List; item : VString_Pak.String) is
+
+temp_list : Linked_List := Tail_of(prev);
+
+begin
+   construct_head(item, temp_list );
+   swap_tail(prev, temp_list);
+end insert;
+
+procedure put_linked_list( List : Linked_List; body_file : File_Type ) is
+temp : Linked_List := List;
+
+begin
+while NOT Is_Null(temp) loop
+   put_line(body_file,SubString_of(Head_of(temp)));
+   temp := Tail_Of(temp);
+end loop;
+end put_linked_list;
+
+function ReadLine_String(input_file : File_Type) return String is
+
+char : Character := 'A';
+temp_String : String(1..500);
+i : integer := 0;
+
+begin
+
+--if End_of_File then
+--   temp_String(1) := Ascii.Nul;
+--   VString_Pak.Copy(temp_String(1..1),return_VString);
+--   return return_VString;
+--end if;
+--
+--if End_of_Page then                   -- does not work , why ?????
+--   Put_Line("Found End of Page");
+--   Skip_Page;
+--   temp_String(1) := Ascii.FF;
+--   i := 1;
+--   while char /= Ascii.Nul loop
+--      i := i + 1;
+--      temp_String(i) := char;
+--      GET(char);
+--   end loop;
+--
+--   VString_Pak.Copy(temp_String(1..i), return_VString );
+--   return return_VString;
+--end if;
+--
+if End_of_Line(input_file) then
+   Skip_Line(input_file);
+   temp_String(1) := Ascii.LF;
+   return temp_String(1..1);
+end if;
+
+--GET_Immediate(char);
+GET(input_file,char);
+if char = Ascii.Nul then
+   temp_String(1) := char;
+   return temp_String(1..1);
+else
+   while char /= Ascii.Nul and then NOT End_of_Line(input_file) loop
+      i := i + 1;
+      temp_String(i) := char;
+--      GET_Immediate(char);
+      GET(input_file,char);
+   end loop;
+
+   if End_of_Line(input_file) then
+      if char /= Ascii.Nul then
+         i := i + 1;
+         temp_string(i) := char;
+         if NOT End_of_File(input_file) then
+            Skip_Line(input_file);
+         end if;
+      end if;
+   end if;
+
+   return temp_String(1..i);
+end if;
+
+end ReadLine_String;
+
+function ReadLine(input_file : File_Type ) return VString_Pak.String is 
+temp_string : VString_Pak.String;
+begin
+   Copy(ReadLine_String(input_file),temp_string);
+   return temp_string;
+end ReadLine;
+
+procedure ReadLine( line : in out VString_Pak.String; input_file : File_Type ) is
+begin
+   VString_Pak.Copy(ReadLine_String(input_file),line);
+end ReadLine;
+
+function String_To_Integer( str : String ) return Integer is
+
+return_Int : Integer := 0;
+
+begin
+for i in str'First .. str'First+str'Length-1 loop
+   return_Int := return_Int * 10 + Character'POS(str(i))- Character'POS('0');
+end loop;
+
+return return_Int;
+end String_To_Integer;
+function VString_To_Integer( str : VString_Pak.String ) return Integer is
+
+begin
+
+return String_To_Integer(SubString_of(str));
+
+end VString_To_Integer;
+
+procedure Inline_To_Prefix_And_Print(Line_List : in out Linked_List ; body_file : File_Type) is
+
+temp_list : Linked_List := Line_List;
+temp_list2 : Linked_List;
+temp_list3 : Linked_List;
+
+temp_string : VString_Pak.String;
+temp_string2 : VString_Pak.String;
+temp_int : Integer;
+Continue : Boolean;
+Continue2 : Boolean;
+variable_name : VString_Pak.String;
+Command : VString_Pak.String;
+
+begin
+
+   VString_Pak.Copy(Head_of(temp_list),Variable_Name);
+   VString_Pak.Copy(Head_of(Tail_of(temp_list)),temp_string);
+
+   if Length_of(temp_string) >=13 and then SubString_of(temp_string,1,13) = "MUI_NewObject" then
+      VString_Pak.Copy("ClearTagList(temp_TagList);",temp_string2);
+      Construct_Tail(temp_string2, temp_list2);
+
+      VString_Pak.Copy(SubString_of(Variable_Name) & " := " & SubString_of(temp_string) & ',' & "temp_TagList );", Command);
+      temp_list := Tail_of(Tail_of(temp_list));
+      VString_Pak.Copy(Head_of(temp_list),temp_string);
+      VString_Pak.Copy(Head_of(Tail_of(temp_list)),temp_string2);
+
+      if (Length_of(temp_string2) >= 14 and then
+         SubString_of(temp_string2,1,14) = "MUI_MakeObject") or else
+         (Length_of(temp_string2) >= 13 and then
+         SubString_of(temp_string2,1,13) = "MUI_NewObject" ) then
+--            put_line("recursing 0");
+            Inline_To_Prefix_And_Print( temp_list, body_file );
+--            put_line("coming out of recursion 0" & SubString_of(Head_of(temp_list)));
+      end if;
+
+      if Length_of(temp_string) >= 8 then
+         Continue := SubString_of(temp_string,1,8 ) /= "TAG_DONE";
+      end if;
+      while Continue loop
+--         Put_Line("AddTag(temp_TagList," & Substring_of(temp_string) & ',' & SubString_Of(temp_string2) & ");");
+         VString_Pak.Copy("AddTag(temp_TagList," & Substring_of(temp_string) & ',' & SubString_Of(temp_string2) & ");",temp_string2);
+         Construct_Tail(temp_string2, temp_list2);
+         temp_list3 := Tail_of(temp_list);
+         temp_list := Tail_of(temp_list3);
+         VString_Pak.Copy(Head_of(temp_list),temp_string);
+         VString_Pak.Copy(Head_of(Tail_of(temp_list)),temp_string2);
+
+         if (Length_of(temp_string) >= 14 and then
+            SubString_of(temp_string,1,14) = "MUI_MakeObject") or else
+            (Length_of(temp_string) >= 13 and then
+            SubString_of(temp_string,1,13) = "MUI_NewObject" ) then
+--               put_line("recursing 2");
+               continue2 := True;
+               while continue2 loop
+                  Inline_To_Prefix_And_Print( temp_list3, body_file );
+                  temp_list := temp_list3;
+                  VString_Pak.Copy(Head_of(temp_list),temp_string);
+                  if NOT Is_Null(Tail_of(temp_list)) then
+                     VString_Pak.Copy(Head_of(Tail_of(temp_list)),temp_string2);
+--                     put_line("coming out of recursion 2 "& SubString_of(temp_string) & " " & SubString_of(temp_string2));
+                     if (Length_of(temp_string2) >= 14 and then
+                        SubString_of(temp_string2,1,14) = "MUI_MakeObject") or else
+                        (Length_of(temp_string2) >= 13 and then
+                        SubString_of(temp_string2,1,13) = "MUI_NewObject" ) then
+                           continue2 := true;
+                     else
+                           continue2 := false;
+                     end if;
+                  else
+                     VString_Pak.Copy(temp_string,temp_string2);
+                     continue2 := False;
+--                     put_line("coming out of recursion 2 "& SubString_of(temp_string) & " at the end of the list");
+                  end if;
+               end loop;
+         end if;
+
+         if Length_of(temp_string) >= 8 then
+            Continue := SubString_of(temp_string,1,8 ) /= "TAG_DONE";
+         end if;
+      end loop;
+      Construct_Tail(Command, temp_list2);
+      temp_list := Tail_of(temp_list);
+
+--put_line("I am outa here");
+
+   else
+--if Length_of(temp_string) >=14 and then SubString_of(temp_string,1,14) = "MUI_MakeObject" then
+--put_line("I am here");
+      VString_Pak.Copy("ClearMsg(temp_Msg);",temp_string2);
+      Construct_Tail(temp_string2, temp_list2);
+      VString_Pak.Copy(SubString_of(Variable_Name) & " := " & SubString_of(temp_string) & ',' & "temp_Msg );", Command);
+      temp_list := Tail_of(Tail_of(temp_list));
+      VString_Pak.Copy(Head_of(temp_list),temp_string);
+
+      if (Length_of(temp_string) >= 14 and then
+         SubString_of(temp_string,1,14) = "MUI_MakeObject") or else
+         (Length_of(temp_string) >= 13 and then
+         SubString_of(temp_string,1,13) = "MUI_NewObject" ) then
+--            put_line("recursing 1");
+            Inline_To_Prefix_And_Print( temp_list, body_file );
+--            put_line("coming out of recursion 1" & SubString_of(Head_of(temp_list)));
+      end if;
+
+      if Length_of(temp_string) >= 14 then
+         Continue := SubString_of(temp_string,1,14 ) /= "Unsigned_32(0)";
+      end if;
+      while Continue loop
+--         put_line("AddMsg(temp_Msg," & Substring_of(temp_string) & ");");
+         VString_Pak.Copy("AddMsg(temp_Msg," & Substring_of(temp_string) & ");",temp_string2);
+         Construct_Tail(temp_string2, temp_list2);
+         temp_list3 := temp_list;
+         temp_list := Tail_of(temp_list);
+         VString_Pak.Copy(Head_of(temp_list),temp_string);
+
+         if (Length_of(temp_string) >= 14 and then
+            SubString_of(temp_string,1,14) = "MUI_MakeObject") or else
+            (Length_of(temp_string) >= 13 and then
+            SubString_of(temp_string,1,13) = "MUI_NewObject" ) then
+--               put_line("recursing 3");
+               continue2 := True;
+               while continue2 loop
+                  Inline_To_Prefix_And_Print( temp_list3, body_file);
+                  temp_list := temp_list3;
+
+                  if NOT Is_Null(temp_list) then
+--                     put_line("coming out of recursion 3" & SubString_of(Head_of(temp_list)));
+                     VString_Pak.Copy(Head_of(temp_list),temp_string);
+                     if (Length_of(temp_string) >= 14 and then
+                        SubString_of(temp_string,1,14) = "MUI_MakeObject") or else
+                        (Length_of(temp_string) >= 13 and then
+                        SubString_of(temp_string,1,13) = "MUI_NewObject" ) then
+                          continue2 := true;
+                     else
+                          continue2 := false;
+                     end if;
+                  else
+                      continue2 := False;
+                  end if;
+               end loop;
+         end if;
+         if Length_of(temp_string) >= 14 then
+            Continue := SubString_of(temp_string,1,14 ) /= "Unsigned_32(0)";
+         end if;
+      end loop;
+
+      if NOT Is_Null(temp_list) then
+         temp_list := Tail_of(temp_list);
+      end if;
+
+      Construct_Tail(Command, temp_list2);
+
+   end if;
+
+--put_Line(" an object ");
+   New_Line(body_file);
+   put_Linked_list(temp_list2,body_file);
+   Clear(temp_list2);
+     
+   if NOT Is_Null(temp_list) then
+      Line_List := temp_list;
+   end if;
+
+end Inline_To_Prefix_And_Print;
+
+procedure ReadVariables_Names(Variable_Names : in out Linked_List; Num_of_Var : in Integer; input_file : File_Type ) is
+
+a_line : VString_Pak.String;
+
+begin
+
+for i in 1 .. Num_of_Var loop
+--   VString_Pak.Copy(ReadLine(input_file), a_line );
+--   Construct_Tail(a_line, Variable_Names);
+   Construct_Tail(ReadLine(input_file), Variable_Names);
+end loop;
+end ReadVariables_Names;
+
+procedure ReadVariables_Values(Variable_Values : in out Linked_List; Num_of_Var : in out Integer; Next_Line : out VString_Pak.String ; input_file : File_Type) is
+
+count : Integer := 0;
+a_line : VString_Pak.String;
+--char : character := 'A';
+--EOL : boolean;
+
+begin
+ReadLine(a_line, input_file);
+while Item_of(a_line,1) /= Character'VAL(8) loop
+--   ReadLine(a_line);
+   Construct_Tail(a_line, Variable_Values);
+   Count := Count + 1;
+--   if Item_Of(a_line,1) = Ascii.Nul then
+--      count := count + 1;
+--   else
+--      while Item_of(a_line,1) /= Ascii.Nul loop
+--         ReadLine(a_line);
+--         Construct_Tail(a_line, Variable_Values);
+--      end loop;
+--      count := Count + 1;
+--   end if;
+   ReadLine(a_line,input_file);
+--   Look_Ahead(char,EOL);
+end loop;
+
+VString_Pak.Copy(a_line,Next_Line);
+Num_of_Var := Count;
+
+end ReadVariables_Values;
+
+procedure ReadFile( Line_List : in out Linked_List; input_file : File_Type ) is
+
+Unshortcut_list : Linked_List;
+
+
+procedure init_Unshortcut is
+
+unshortcut_file : File_Type;
+
+begin
+Open(unshortcut_file,IN_FILE,"UnshortCutList");
+while NOT End_of_File(unshortcut_file) loop
+   Construct_Tail(Allocate_VString(ReadLine_String(unshortcut_file)), Unshortcut_List);
+end loop;
+Close(unshortcut_file);
+
+end init_Unshortcut;
+	
+function Unshortcut( index : in String ) return String is
+
+temp_string : VString_Pak.String;
+i : integer;
+
+temp_list : Linked_List := Unshortcut_list;
+
+begin
+
+--i := Unshortcut_Array'First;
+--while i <= Unshortcut_Array'Last loop
+while NOT Is_Null(temp_list) loop
+   if Is_Equal(index(2..index'Last),Head_of(temp_List)) then
+--      put_line( Substring_of(Head_of(temp_List)) & " = " & index(2..index'Last));
+      return index(1) & Substring_of(Head_of(Tail_of(temp_List)));
+   end if;
+   temp_list := Tail_of(temp_list);
+   if NOT Is_Null(temp_list) then
+      temp_list := Tail_of(temp_list);
+   end if;
+end loop;
+return index;
+
+end Unshortcut;
+
+begin
+Init_Unshortcut;
+while NOT End_of_File(input_file) loop
+   Construct_Tail(Allocate_VString(Unshortcut(ReadLine_String(input_file))), Line_List);
+end loop;
+end ReadFile;
+
+procedure Substitute_Control_K(Line_List : in out Linked_List) is
+
+temp_list : Linked_List := Line_List;
+temp_string : VString_Pak.String;
+begin
+
+while NOT Is_Null(temp_list) loop
+   VString_Pak.Copy(Head_of(temp_list),temp_string);
+   if Item_of(temp_string,1) = Character'Val(11) then
+      if Item_of(temp_string,2) = '0' then
+         VString_Pak.Copy("FALSE",temp_string);
+         Set_Head(temp_list,temp_string);
+      else
+         VString_Pak.Copy("TRUE",temp_string);
+         Set_Head(temp_list,temp_string);
+      end if;
+   end if;
+
+   temp_list := Tail_of(temp_list);
+end loop;
+
+end Substitute_Control_K;
+
+procedure Substitute_Control_F(Line_List : in out Linked_List) is
+
+temp_list : Linked_List := Line_List;
+temp_string : VString_Pak.String;
+begin
+
+while NOT Is_Null(temp_list) loop
+   VString_Pak.Copy(Head_of(temp_list),temp_string);
+   if Item_of(temp_string,1) = Character'Val(6) then
+      VString_Pak.Copy("Unsigned_32(" & SubString_of(temp_string,2,Length_of(temp_string)) & ")",temp_string);
+      Set_Head(temp_list,temp_string);
+   end if;
+
+   temp_list := Tail_of(temp_list);
+end loop;
+
+end Substitute_Control_F;
+
+procedure Substitute_Control_HI(Line_List : in out Linked_List; Name_List : in Linked_List) is
+
+temp_list : Linked_List := Line_List;
+temp_string : VString_Pak.String;
+temp_string2 : VString_Pak.String;
+temp_int : Integer;
+
+begin
+
+while NOT Is_Null(temp_list) loop
+   VString_Pak.Copy(Head_of(temp_list),temp_string);
+   if  Item_of(temp_string,1) = Character'Val(9) or Item_of(temp_string,1) = Character'Val(8) then
+      temp_int := String_To_Integer(SubString_Of(temp_string,2,length_of(temp_string)))+1;
+      VString_Pak.Copy(NTH_Member(Name_List,temp_int),temp_string2);
+      if Item_of(temp_string,1) = Character'Val(9) and then
+         Item_Of(temp_string2,1) /= Character'Val(3) then
+            VString_Pak.Copy(SubString_of(temp_string2) & "'Address", temp_string2);
+      end if;
+      VString_Pak.Copy(Character'Val(8) & SubString_of(temp_string2,2,length_of(temp_string2)),temp_string2);
+      Set_Head(temp_list,temp_string2);
+   end if;
+
+   temp_list := Tail_of(temp_list);
+end loop;
+
+end Substitute_Control_HI;
+
+procedure Substitute_Control_G(Line_List : in out Linked_List) is
+
+temp_list : Linked_List := Line_List;
+temp_string : VString_Pak.String;
+begin
+
+while NOT Is_Null(temp_list) loop
+   VString_Pak.Copy(Head_of(temp_list),temp_string);
+   if Item_of(temp_string,1) = Character'Val(7) then
+      VString_Pak.Copy("'" & Item_of(temp_string,2) & "'", temp_string);
+      Set_Head(temp_list,temp_string);
+   end if;
+
+   temp_list := Tail_of(temp_list);
+end loop;
+
+end Substitute_Control_G;
+
+procedure Substitute_Control_EN(Line_List : in out Linked_List; Locale_Function_Name : VString_Pak.String) is
+
+temp_list : Linked_List := Line_List;
+temp_string : VString_Pak.String;
+begin
+
+while NOT Is_Null(temp_list) loop
+   VString_Pak.Copy(Head_of(temp_list),temp_string);
+   if Item_of(temp_string,1) = Character'Val(5) then
+      VString_Pak.Copy(SubString_of(temp_string,2,Length_of(temp_string)),temp_string);
+      VString_Pak.Copy("Allocate_String(" & '"' & Fix_Back_Slash(temp_string) & '"' &")",temp_string);
+      Set_Head(temp_list,temp_string);
+   elsif Item_of(temp_string,1) = Character'Val(14) then
+      VString_Pak.Copy(SubString_of(temp_string,2,Length_of(temp_string)),temp_string);
+      VString_Pak.Copy("Allocate_String(Fix_Back_Slash_String(" & Substring_of(Locale_Function_Name) & "(" & Substring_of(temp_string) & ")))",temp_string);
+--      VString_Pak.Copy(Substring_of(Locale_Function_Name) & "(" & Substring_of(temp_string) & ")",temp_string);
+      Set_Head(temp_list,temp_string);
+   end if;
+
+   temp_list := Tail_of(temp_list);
+end loop;
+
+end Substitute_Control_EN;
+
+procedure Substitute_Control_DM(Line_List : in out Linked_List) is
+
+temp_list : Linked_List := Line_List;
+temp_list2 : Linked_List;
+temp_list3 : Linked_List;
+temp_string : VString_Pak.String;
+temp_string2 : string(1..1000);
+temp_string3 : VString_Pak.String;
+temp_int : integer;
+temp_char : character;
+i : integer;
+
+begin
+
+while NOT Is_Null(temp_list) loop
+   VString_Pak.Copy(Head_of(temp_list),temp_string);
+   if Item_of(temp_string,1) = Character'Val(4) or Item_of(temp_string,1) = Character'Val(13) then
+      temp_int := 0;
+      temp_list2 := temp_list;
+      temp_list := Tail_Of(temp_list);
+      temp_list3 := temp_list;
+
+      temp_char := Item_of(Head_of(temp_list),1);
+      while Character'POS(temp_char) /= 10 loop
+         temp_list := Tail_of(temp_list);
+         temp_char := Item_of(Head_of(temp_list),1);
+      end loop;
+
+      temp_list := Tail_of(temp_list);
+      Swap_Tail(temp_list2,temp_list);
+
+      temp_int := 0;
+      i := 1;
+      while i <= Length_of(temp_string) loop
+         if i+2 <= Length_of(temp_string) and then
+            Item_of(temp_string,i) = '_' and then 
+            Item_of(temp_string,i+1) in '1' .. '9' and then
+            Item_of(temp_string,i+2) = '_' then
+               VString_Pak.Copy(NTH_Member(Temp_List3,Character'POS(Item_of(temp_string,i+1))-Character'POS('0')),temp_string3);
+               temp_string2(i+temp_int..i+temp_int +Length_of(temp_string3)) := SubString_Of(temp_string3);
+               temp_int := temp_int + Length_of(temp_string3) - 3;
+               i := i + 2;
+         else
+            temp_string2(i+temp_int) := Item_of(temp_string,i);
+         end if;
+         i := i+ 1;
+      end loop;
+
+      VString_Pak.Copy(temp_string2(1..i+temp_int-1), temp_string);
+      Set_Head(temp_list2,temp_string);
+   end if;
+
+   temp_list := Tail_of(temp_list);
+end loop;
+
+end Substitute_Control_DM;
+
+procedure Name_UnNamed_Objects(Line_List : in out Linked_List; num_of_var  : out Integer) is
+
+temp_list : Linked_List := Line_List;
+temp_string : VString_Pak.String;
+temp_string2 : String(1..50);
+i : integer := 0;
+
+begin
+
+while NOT Is_Null(Tail_of(temp_list)) loop 
+   if  Length_of(Head_of(Tail_of(temp_list))) >= 15 then 
+      temp_string2 := SubString_of(Head_of(Tail_of(temp_list)),2,15);
+      if temp_string2(1..14) = "MUI_MakeObject" or else
+         temp_string2(1..13) = "MUI_NewObject" then
+            VString_Pak.Copy(Head_of(temp_list),temp_string);
+            if Item_of(temp_string,1) /= Character'Val(8) then
+               VString_Pak.Copy( Character'Val(8) & "temp_Object(" & Integer'Image(i+1) & ')', temp_string);
+               i := i+1;
+               insert( temp_list, temp_string);
+            end if;
+      end if;
+   end if;
+   temp_list := Tail_of(temp_list);
+end loop;
+
+num_of_var := i;
+
+end Name_UnNamed_Objects;
+
+procedure BreakUp_CompoundStatements(Line_List : in out Linked_List) is
+
+temp_list : Linked_List := Line_List;
+temp_string : VString_Pak.String;
+temp_string2 : VString_Pak.String;
+i,j : integer;
+
+begin
+
+while NOT Is_Null(temp_list) loop
+  VString_Pak.Copy(Head_of(temp_list),temp_string);
+   if (Item_of(temp_string,1) = Character'Val(4) or else
+      Item_of(temp_string,1) = Character'Val(26) or else
+      Character'POS(Item_of(temp_string,1)) = 12 or else
+      Item_of(temp_string,1) = Character'Val(13)) and then
+      Length_of(temp_string) >= 8 and then
+      SubString_of( temp_string, 2, 8) /= "Make_Id" then 
+      i := 1;
+      j := 1;
+         while i <= Length_of(temp_string) loop
+            if Item_of(temp_string,i) = ',' then
+               VString_Pak.Copy(SubString_Of(temp_string,j,i-1),temp_string2);
+               j := i+1;
+               Set_Head(temp_list,temp_string2);
+               Insert(temp_list, temp_string2);
+               temp_list := Tail_of(temp_list);
+            end if;
+            i := i + 1;
+         end loop;
+   VString_Pak.Copy(SubString_Of(temp_string,j,i-1),temp_string2);
+   Set_Head(temp_list,temp_string2);
+
+   end if;
+
+   temp_list := Tail_of(temp_list);
+end loop;
+
+end BreakUp_CompoundStatements;
+
+procedure remove_control_characters(Line_List : in out Linked_List) is
+
+temp_list : Linked_List := Line_List;
+temp_string : VString_Pak.String;
+temp_int : Integer;
+
+begin
+
+while NOT Is_Null(temp_list) loop
+   VString_Pak.Copy(Head_of(temp_list),temp_string);
+   if Item_of(temp_string,1) in  Character'Val(0) .. Character'Val(32) then
+      Set_Head(temp_list,Allocate_VString(SubString_of(temp_string,2,Length_of(temp_string))));
+   end if;
+   temp_list := Tail_of(temp_list);
+end loop;
+end remove_control_characters;
+
+
+Num_of_Named_Variable : Integer;
+Num_of_UnNamed_Variable : Integer;
+Variable_Names : Linked_List;
+Variable_Values : Linked_List;
+Line_List : Linked_List;
+FileName : VString_Pak.String;
+Path : VString_Pak.String;
+Short_FileName : VString_Pak.String;
+PackageName : VString_Pak.String;
+
+temp : VString_Pak.String;
+
+temp_String : String(1..400);
+
+Locale_Function_Name : VString_Pak.String;
+Catalog_Name : VString_Pak.String;
+Next_Line : VString_Pak.String;
+debug_file, input_file, spec_file, body_file, loop_file : File_Type;
+
+
+Use_Locale : Boolean := False;
+
+i : Integer;
+
+begin
+
+if NOT Execute(Allocate_String("tr -c " & '"' & "[:print:][:cntrl:]" & '"' & " " & '"' & "[?*]" & '"' & " <t:MUIBuilder.tmp >t:MUIBuilder_ada1.tmp"),Null,Null) then
+   Put_Line("Failed to execute first 'tr ...");
+   return;
+end if;
+
+if NOT Execute(Allocate_String("tr '\014' '\032' <t:MUIBuilder_ada1.tmp >t:MUIBuilder_ada2.tmp"),Null,Null) then
+   Put_Line("Failed to execute second 'tr ...");
+   return;
+end if;
+--
+--if NOT Execute(Allocate_String("tr ' \031 <t:MUIBuilder_ada2.tmp >t:MUIBuilder_ada3.tmp"),Null,Null) then
+--   Put_Line("Failed to execute second 'tr ...");
+--   return;
+--end if;
+--
+--if NOT Execute(Allocate_String("cpp -P -imacros MUI_UnShortcut.h t:MUIBuilder_ada3.tmp <nil: >t:MUIBuilder_ada4.tmp"),Null,Null) then
+--   Put_Line("Failed to execute cpp -P...");
+--   return;
+--end if;
+--
+--if NOT Execute(Allocate_String("tr \031 ' <t:MUIBuilder_ada4.tmp >t:MUIBuilder_ada5.tmp"),Null,Null) then
+--   Put_Line("Failed to execute second 'tr ...");
+--   return;
+--end if;
+
+Open(input_file, IN_FILE, "/t/MUIBuilder_ada2.tmp");
+Open(debug_file, OUT_FILE, "/ram/gencodeada.debug");
+
+ReadLine(FileName, input_file);
+while Length_of(FileName ) < 2 loop
+   ReadLine(FileName,input_file);
+end loop;
+i := 1;
+while Item_of(FileName,i) in Character'VAL(0) .. Character'VAL(32) loop
+   i := i + 1;
+end loop;
+
+VString_Pak.Copy(Substring_of(FileName,i,Length_of(FileName)),FileName);
+
+ReadLine(Locale_Function_Name,input_file); -- overwritten, never used
+ReadLine(Catalog_Name,input_file);
+ReadLine(temp,input_file);
+
+Seperate_Path(FileName,Path,Short_FileName);
+Copy("Get" & Substring_of(Short_FileName) & "String",Locale_Function_Name);
+
+if Item_of(temp,4) = '1' then
+   Use_Locale := True;
+end if;
+
+Num_of_Named_Variable := VString_To_Integer(ReadLine(input_file));
+put(debug_file,"num var ->");put(debug_file,Num_of_Named_Variable);
+ReadVariables_Names(Variable_Names,Num_of_Named_Variable,input_file);
+put_line(debug_file,"Variables Names **********************");
+put_linked_list(Variable_Names,debug_file);
+ReadVariables_Values(Variable_Values,Num_of_Named_Variable,Next_Line,input_file);
+put_line(debug_file,"Variables Values **********************");
+put_linked_list(Variable_Values,debug_file);
+
+Construct_Head(Next_Line,Line_List);
+
+ReadFile(Line_List,input_file);
+
+Close(input_file);
+
+put_line(debug_file,"Original Line List**********************");
+put_linked_list(Line_List,debug_file);
+Substitute_Control_K(Line_List);
+put_line(debug_file,"k Line List**********************");
+put_linked_list(Line_List,debug_file);
+Substitute_Control_F(Line_List);
+put_line(debug_file,"f Line List**********************");
+put_linked_list(Line_List,debug_file);
+Substitute_Control_HI(Line_List,Variable_Names);
+put_line(debug_file,"hi Line List**********************");
+put_linked_list(Line_List,debug_file);
+Substitute_Control_G(Line_List);
+put_line(debug_file,"g Line List**********************");
+put_linked_list(Line_List,debug_file);
+Substitute_Control_EN(Line_List, Locale_Function_Name);
+put_line(debug_file,"en Line List**********************");
+put_linked_list(Line_List,debug_file);
+Substitute_Control_DM(Line_List);
+put_line(debug_file,"dm Line List**********************");
+put_linked_list(Line_List,debug_file);
+Name_UnNamed_Objects(Line_List, Num_of_UnNamed_Variable);
+put_line(debug_file,"named Line List**********************");
+put_linked_list(Line_List,debug_file);
+BreakUp_CompoundStatements(Line_List);
+put_line(debug_file,"broken Line List**********************");
+put_linked_list(Line_List,debug_file);
+remove_control_characters(Line_List);
+put_line(debug_file,"removed contorl Line List**********************");
+put_linked_list(Line_List,debug_file);
+
+Close(debug_file);
+
+temp_string(1..Length_of(NTH_Member(Variable_Names,1))-1) := SubString_of(NTH_Member(Variable_Names,1),2,Length_of(NTH_Member(Variable_Names,1)));
+VString_Pak.Copy(Substring_of(Short_FileName) & '_' & temp_string(1..Length_of(NTH_Member(Variable_Names,1))-1), PackageName );
+
+if Use_Locale then
+   if NOT Execute(Allocate_String("flexcat " & '"' & Substring_of(Catalog_Name) & '"' & " " & '"' & Substring_of(Path) & Substring_of(Short_FileName) & "_Locale.ads=Ada_ads.sd" & '"'),Null,Null) then
+      Put_Line("Failed to execute first 'flexcat ...");
+      return;
+   end if;
+   if NOT Execute(Allocate_String("flexcat " & '"' & Substring_of(Catalog_Name) & '"' & " " & '"' & Substring_of(Path) & Substring_of(Short_FileName) & "_Locale.adb=Ada_adb.sd" & '"'),Null,Null) then
+      Put_Line("Failed to execute first 'flexcat ...");
+      return;
+   end if;
+end if;
+
+Open( spec_file, Out_File, SubString_of(Path) & SubString_of(PackageName) & ".ads");
+Open( body_file, Out_File, SubString_of(Path) & SubString_of(PackageName) & ".adb");
+Open( loop_file, Out_File, SubString_of(FileName) & ".adb");
+
+Put_Initial(Variable_Names, Variable_Values, spec_file, body_file , Num_of_UnNamed_Variable,SubString_of(PackageName),Use_Locale,Locale_Function_Name,Short_FileName);
+
+Close(spec_file);
+
+Inline_To_Prefix_And_Print(Line_List, body_file);
+
+Put_Line(body_file,"return " & SubString_Of(NTH_Member(Variable_Names,1),2,Length_of(NTH_Member(Variable_Names,1))) & ";");
+Put_Line(body_file,"end Create_" & SubString_of(PackageName) & ";");
+New_Line(body_file);
+Put_Line(body_file,"procedure Dispose_" &  SubString_of(PackageName) & " is");
+Put_Line(body_file,"begin");
+Put_Line(body_file,"MUI_DisposeObject(" & SubString_Of(NTH_Member(Variable_Names,1),2,Length_of(NTH_Member(Variable_Names,1))) & ");");
+Put_Line(body_file,"end Dispose_" &  SubString_of(PackageName) & ";");
+New_Line(body_file);
+Put_Line(body_file,"end " &  SubString_of(PackageName) & ";");
+
+Close(body_file);
+
+Put_Main_Loop(Variable_Names, Short_FileName , loop_file,  SubString_of(PackageName));
+
+Close(loop_file);
+
+exception
+
+when Status_Error => Put_Line("Raised Status_Error");
+when Mode_Error => Put_Line("Raised Mode_Error");
+when Name_Error => Put_Line("Raised Name_Error");
+when Use_Error => Put_Line("Raised Use_Error");
+when Device_Error => Put_Line("Raised Device_Error");
+when End_Error => Put_Line("Raised End_Error");
+when Data_Error => Put_Line("Raised Data_Error");
+when Layout_Error => Put_Line("Raised Layout_Error");
+when Constraint_Error => Put_Line("Raised Constraint_Error");
+when Numeric_Error => Put_Line("Raised Numeric_Error");
+when Program_Error => Put_Line("Raised Program_Error");
+when Storage_Error => Put_Line("Raised Storage_Error");
+when Tasking_Error => Put_Line("Raised Tasking_Error");
+when Position_Error => Put_Line("Raised Position_Error");
+when VString_Pak.Overflow => Put_Line("Raised VString Overflow");
+when Linked_List_Pak.Overflow => Put_Line("Raised Linked List Overflow");
+when List_is_Null => Put_Line("Raised List is Null");
+
+end GenCodeAda;

@@ -1,0 +1,2 @@
+IMPLEMENTATION MODULE Resources ;
+END Resources.

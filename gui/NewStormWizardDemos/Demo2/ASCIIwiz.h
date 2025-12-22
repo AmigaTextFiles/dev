@@ -1,0 +1,13 @@
+#define REQ_ABOUT 0x1
+#define REQ_ENDE 0x2
+#define WINDOW_MAIN 0x1
+#define WINDOW_MAIN_GADGETS 0xD
+#define HELLO 0x2
+#define BESCHRIFTUNG 0x4
+#define STI_ZEICHEN 0x7
+#define STI_ASCII 0x8
+#define TB_CLEAR 0xA
+#define TB_CONVERT 0xC
+#define MN_DATEI 0xFFE0
+#define SMN_DATEI_ABOUT 0xF800
+#define SMN_DATEI_ENDE 0xF820

@@ -1,0 +1,803 @@
+/****h *SysAssigns [1.0] **********************************************
+**
+** NAME
+**    SysAssigns
+**
+** DESCRIPTION
+**    Display the logical assignments known to the OS.
+**
+**  GUI Designed by : Jim Steichen
+***********************************************************************
+*/
+
+#include <string.h>
+
+#include <exec/types.h>
+#include <exec/memory.h>
+
+#include <AmigaDOSErrs.h>
+
+#include <dos/dosextens.h>
+
+#include <intuition/intuition.h>
+#include <intuition/classes.h>
+#include <intuition/classusr.h>
+#include <intuition/gadgetclass.h>
+
+#include <libraries/gadtools.h>
+
+#include <graphics/displayinfo.h>
+#include <graphics/gfxbase.h>
+
+#include <clib/exec_protos.h>
+#include <clib/intuition_protos.h>
+#include <clib/gadtools_protos.h>
+#include <clib/graphics_protos.h>
+#include <clib/utility_protos.h>
+#include <clib/diskfont_protos.h>
+#include <clib/dos_protos.h>
+
+#include "CPGM:GlobalObjects/CommonFuncs.h"
+
+#include "SysLists.h"
+
+#define ALV      0
+#define Update   1
+#define Cancel   2
+#define AddBt    3
+#define RemoveBt 4
+
+#define Asgn_CNT 5
+
+PRIVATE char ver[] = "$VER: SysAssigns 1.0 (12/20/1999) by J.T. Steichen";
+
+typedef struct {
+
+   LONG   Address;
+   STRPTR Name;
+   STRPTR Path;
+
+} Assign;
+
+PRIVATE Assign *Assignments = NULL;
+
+PRIVATE char can[256] = { 0, }, *CurrentAssignName = &can[0];
+
+PRIVATE struct TextFont     *AsgnFont  = NULL;
+PRIVATE struct Window       *AsgnWnd   = NULL;
+PRIVATE struct Gadget       *AsgnGList = NULL;
+PRIVATE struct IntuiMessage  AsgnMsg;
+PRIVATE struct Gadget       *AsgnGadgets[ Asgn_CNT ];
+
+PRIVATE UWORD  AsgnLeft   = 0;
+PRIVATE UWORD  AsgnTop    = 16;
+PRIVATE UWORD  AsgnWidth  = 635;
+PRIVATE UWORD  AsgnHeight = 230;
+PRIVATE UBYTE *AsgnWdt    = (UBYTE *) "System Assigns Info:";
+
+// -------------------------------------------------------------------
+
+#define STRLENGTH 80
+
+PRIVATE char ltitle[] = "Address  Assign               Path";
+PRIVATE char fmt[]    = "%08LX %-20.20s %-40.40s";
+
+PRIVATE struct MinList ALVList  = { 0, };
+
+PRIVATE struct Node    ALVNode  = { 0, };
+PRIVATE struct Node   *ALVNodes = NULL;
+
+PRIVATE UBYTE         *NodeStrs = NULL;
+
+// -------------------------------------------------------------------
+
+PRIVATE UWORD AsgnGTypes[] = {
+
+   LISTVIEW_KIND, BUTTON_KIND, BUTTON_KIND, 
+   BUTTON_KIND,   BUTTON_KIND
+};
+
+PRIVATE int ALVClicked(      int whichitem );
+PRIVATE int UpdateClicked(   int dummy     );
+PRIVATE int CancelClicked(   int dummy     );
+PRIVATE int AddBtClicked(    int dummy     );
+PRIVATE int RemoveBtClicked( int dummy     );
+
+PRIVATE struct NewGadget AsgnNGad[] = {
+
+     2,   3, 627, 200,                NULL, NULL, ALV,    0, 
+   NULL, (APTR) ALVClicked,
+
+     4, 205,  71,  17, (UBYTE *) "_Update", NULL, Update, PLACETEXT_IN, 
+   NULL, (APTR) UpdateClicked,
+
+   554, 205,  72,  17, (UBYTE *) "_Cancel", NULL, Cancel, PLACETEXT_IN, 
+   NULL, (APTR) CancelClicked,
+
+    80, 205,  71,  17, (UBYTE *) "_Add",    NULL, AddBt, PLACETEXT_IN, 
+   NULL, (APTR) AddBtClicked,
+
+   160, 205,  71,  17, (UBYTE *) "Remove",  NULL, RemoveBt, PLACETEXT_IN, 
+   NULL, (APTR) RemoveBtClicked,
+};
+
+PRIVATE ULONG AsgnGTags[] = {
+
+   GTLV_ShowSelected, 0, LAYOUTA_Spacing, 2, TAG_DONE,
+
+   GT_Underscore, '_', TAG_DONE,
+   GT_Underscore, '_', TAG_DONE,
+   GT_Underscore, '_', TAG_DONE,
+   GT_Underscore, '_', TAG_DONE
+};
+
+// --------------------------------------------------------------------
+
+PRIVATE int AssignmentCount = 0;
+
+PRIVATE int CountAssignments( void )
+{
+   struct DosList *dl   = NULL;
+   int             rval = 0;
+
+   dl = LockDosList( LDF_ASSIGNS | LDF_READ );
+
+   while ((dl = NextDosEntry( dl, LDF_ASSIGNS )) != NULL)
+      rval++;
+
+   UnLockDosList( LDF_ASSIGNS | LDF_READ );
+
+   return( rval );
+}
+
+PRIVATE STRPTR MakeSTRPTR( BSTR s )
+{
+   STRPTR ris;
+   STRPTR eq;
+	
+   if (s == NULL)
+      return( NULL );
+
+   eq = (STRPTR) BADDR( s );
+
+   if (eq[0] == NULL)
+      return( NULL );
+
+   ris = (STRPTR) malloc( eq[0] + 2 );
+
+   memcpy( ris, eq + 1, eq[0] );
+
+   ris[ eq[0] ] = 0;
+
+   strcat( ris, ":" ); // Add a Colon to indicate Logical Assignment.
+
+   return( ris );
+}
+
+PRIVATE char strtmp[256] = "";
+
+PRIVATE int GetAssignmentList( void )
+{
+   struct DosList *dl = NULL;
+   int             i;
+   
+   AssignmentCount = CountAssignments();
+   
+   Assignments = (Assign *) malloc( AssignmentCount * sizeof( Assign ) );
+
+   if (Assignments == NULL)
+      {
+      return( -1 );
+      }
+      
+   dl = LockDosList( LDF_ASSIGNS | LDF_READ );
+   i  = 0;
+
+   while ((dl = NextDosEntry( dl, LDF_ASSIGNS )) != NULL)
+      {
+      NameFromLock( dl->dol_Lock, strtmp, 255 );
+
+      Assignments[i].Address = dl;
+      Assignments[i].Name    = MakeSTRPTR( dl->dol_Name );
+      Assignments[i].Path    = strdup( strtmp );
+
+      i++;
+      }
+
+   UnLockDosList( LDF_ASSIGNS | LDF_READ );
+   return( 0 );
+}
+
+PRIVATE void FreeDosList( void )
+{
+   int i;
+
+   for (i = 0; i < AssignmentCount; i++)
+      {
+      free( Assignments[i].Name ); // malloc in MakeSTRPTR().
+      free( Assignments[i].Path ); // alloc'd by strdup() function.
+      }
+
+   free( Assignments );
+
+   Assignments     = NULL;
+   AssignmentCount = 0;
+
+   return;
+}
+
+PRIVATE int MakeAssignList( void )
+{
+   int i = 1; // Skip the titles in NodeStrs[0].
+
+   for (i = 1; i <= AssignmentCount; i++)
+      {
+      sprintf( &NodeStrs[ i * STRLENGTH ], fmt,
+
+               Assignments[ i - 1 ].Address,
+               Assignments[ i - 1 ].Name,
+               Assignments[ i - 1 ].Path
+             );
+      }
+
+   return( 0 );
+}
+
+PRIVATE void CloseAsgnWindow( void )
+{
+   if (AsgnWnd != NULL)
+      {
+      CloseWindow( AsgnWnd );
+      AsgnWnd = NULL;
+      }
+
+   if (AsgnGList != NULL)
+      {
+      FreeGadgets( AsgnGList );
+      AsgnGList = NULL;
+      }
+
+   if (AsgnFont != NULL)
+      {
+      CloseFont( AsgnFont );
+      AsgnFont = NULL;
+      }
+
+   return;
+}
+
+PRIVATE int AsgnCloseWindow( void )
+{
+   CloseAsgnWindow();
+   return( (int) FALSE );
+}
+
+PRIVATE int CancelClicked( int dummy )
+{
+   return( AsgnCloseWindow() );
+}
+
+PRIVATE int ALVClicked( int whichitem )
+{
+   if (whichitem == 0)
+      {
+      strcpy( CurrentAssignName, "" );
+
+      SetWindowTitles( AsgnWnd, AsgnWdt, (UBYTE *) 0xFFFFFFFF );
+      return( (int) TRUE );
+      }
+   else
+      {
+      char t[32], *tmp = &t[0];
+      
+      strncpy( tmp, 
+               (char const *) Assignments[ whichitem - 1 ].Name, 
+               31
+             );
+
+      strcpy( CurrentAssignName, 
+              (char const *) Assignments[ whichitem - 1 ].Name
+            );
+      
+      SetWindowTitles( AsgnWnd, tmp, (UBYTE *) 0xFFFFFFFF );
+      }
+
+   return( (int) TRUE );
+}
+
+PRIVATE int UpdateClicked( int dummy )
+{
+   int i;
+
+   SetWindowTitles( AsgnWnd, AsgnWdt, (UBYTE *) 0xFFFFFFFF );
+
+   HideListFromView( AsgnGadgets[ ALV ], AsgnWnd );   
+
+   // See if the list of assignments has grown bigger:
+
+   if ((i = CountAssignments()) > AssignmentCount)
+      {
+      // Deallocate old data in memory, we need a bigger list:
+      FreeDosList();
+      FreeMem( NodeStrs, STRLENGTH * (AssignmentCount + 1) );
+      FreeMem( ALVNodes, (AssignmentCount + 1) * sizeof( struct Node ) );
+      NodeStrs = NULL;
+      ALVNodes = NULL;
+
+      // Allocate a new area in memory for the data:
+
+      if (GetAssignmentList() < 0)  // Recalculate AssignmentCount also.
+         {
+         SetReqButtons( "Aaarrrggghhh!!" );
+
+         sprintf( ErrMsg, "Out of memory space, Aborting!!" );
+
+         (void) Handle_Problem( ErrMsg, "System Problem:", NULL );
+
+         return( FALSE );
+         }
+
+      if ((ALVNodes = (struct Node *) 
+                       AllocMem( sizeof( struct Node ) 
+                                         * (AssignmentCount + 1),
+                                 MEMF_CLEAR 
+                               )
+         ) == NULL)
+         {
+         int ans = 0;
+
+         sprintf( ErrMsg, "Out of memory space, Abort?" );
+         ans = Handle_Problem( ErrMsg, "System Problem:", NULL );
+
+         if (ans == 0)
+            return( TRUE );
+         else
+            return( FALSE );
+         }
+
+      if ((NodeStrs = (char *) 
+                       AllocMem( STRLENGTH * (AssignmentCount + 1),
+                                 MEMF_CLEAR 
+                               )
+         ) == NULL)
+         {
+         int ans = 0;
+
+         FreeMem( ALVNodes, (AssignmentCount + 1) * sizeof( struct Node));
+
+         sprintf( ErrMsg, "Out of memory space, Abort?" );
+         ans = Handle_Problem( ErrMsg, "System Problem:", NULL );
+
+         if (ans == 0)
+            return( TRUE );
+         else
+            return( FALSE );
+         }
+
+      // Copy the title into the top node of the list view:
+      strcpy( &NodeStrs[0], ltitle );
+
+      CopyMem( (char *) &ALVNode, (char *) ALVNodes, 
+               (long) sizeof( struct Node )
+             );
+
+      for (i = 1; i <= AssignmentCount; i++)
+         {
+         ALVNodes[i].ln_Name = &NodeStrs[ i * STRLENGTH ];
+         ALVNodes[i].ln_Pri  = AssignmentCount - i;
+         }
+
+      NewList( (struct List *) &ALVList ); // might not be needed.
+
+      for (i = 0; i < AssignmentCount; i++)
+         Enqueue( (struct List *) &ALVList, &ALVNodes[ i ] );
+      } 
+
+   for (i = 1; i <= AssignmentCount; i++)
+       NodeStrs[ i * STRLENGTH ] = '\0'; // Kill old ListView strings.
+
+   // Make the list:
+   (void) MakeAssignList();
+
+   ModifyListView( AsgnGadgets[ ALV ], AsgnWnd, &ALVList, NULL );
+
+   GT_RefreshWindow( AsgnWnd, NULL );
+   return( (int) TRUE );
+}
+
+PRIVATE int AddBtClicked( int dummy )
+{
+   IMPORT char *assignname;
+   IMPORT char *pathname;
+ 
+   int rval = AddAssignment();
+      
+   if (rval < 0)
+      {
+      sprintf( ErrMsg, "Couldn't open an Add Assignment Requester!" );
+      
+      SetReqButtons( "OKAY" );
+      (void) Handle_Problem( ErrMsg, "Program Problem:", NULL );
+      SetReqButtons( "CONTINUE|ABORT!" );
+      }
+   else if (rval == FALSE)
+      {
+      return( (int) TRUE ); // User pressed the CANCEL button.
+      }
+   else if (rval > 1)
+      {
+      char cmd[256] = "";
+
+      if (strlen( assignname ) < 1)
+         {
+         SetReqButtons( "Aaarrgghh!!" );
+
+         Handle_Problem( "You didn't supply a name for the assignemnt!",
+                         "User ERROR:", NULL
+                       );
+
+         SetReqButtons( "CONTINUE|ABORT!" );
+         return( (int) TRUE );
+         }      
+
+      if (strlen( pathname ) < 1)
+         {
+         SetReqButtons( "Aaarrgghh!!" );
+
+         Handle_Problem( "You didn't supply a pathname for the assignemnt!",
+                         "User ERROR:", NULL
+                       );
+
+         SetReqButtons( "CONTINUE|ABORT!" );
+         return( (int) TRUE );
+         }      
+
+      if (strstr( assignname, ":" ) == NULL)
+         strcat( assignname, ":" ); // User didn't supply the colon!
+         
+      sprintf( &cmd[0], "Assign %s %s", assignname, pathname );      
+
+      if (System( &cmd[0], TAG_DONE ) < 0)
+         {
+         sprintf( ErrMsg,
+                  "'%s'\ncouldn't be run by the System,"
+                  "\ncheck your spelling!",
+                  cmd
+                );
+
+         (void) Handle_Problem( ErrMsg, "Invalid Command Path?", NULL );
+         return( (int) TRUE );
+         }
+
+      Delay( 30 );
+      (void) UpdateClicked( 0 );
+      }      
+
+   return( (int) TRUE );
+}
+
+PRIVATE int RemoveBtClicked( int dummy )
+{
+   char cmd[256] = "";
+   int  ans = 0;
+   
+   if (strlen( CurrentAssignName ) < 1)
+      {
+      SetReqButtons( "Aaarrgghh!!" );
+
+      Handle_Problem( "Click on an Assignment in the List View first!",
+                      "User ERROR:", NULL
+                    );
+
+      SetReqButtons( "CONTINUE|ABORT!" );
+      return( (int) TRUE );
+      }
+
+   // -------------------------------------------------------
+   SetReqButtons( "I'm SURE!|No Way!" );
+
+   sprintf( ErrMsg, "Are you sure you want to remove %s?", 
+            CurrentAssignName
+          );
+   
+   ans = Handle_Problem( ErrMsg, "Sanity Check:", NULL ); 
+
+   SetReqButtons( "CONTINUE|ABORT!" );
+
+   if (ans != 0)
+      return( (int) TRUE );
+   // -------------------------------------------------------
+      
+   sprintf( &cmd[0], "Assign %s REMOVE", CurrentAssignName );
+
+   if (System( &cmd[0], TAG_DONE ) < 0)
+      {
+      sprintf( ErrMsg,
+               "'%s'\ncouldn't be run by the System,"
+               "\ncheck your spelling!",
+               cmd
+             );
+
+      (void) Handle_Problem( ErrMsg, "Invalid Command Path?", NULL );
+      return( (int) TRUE );
+      }
+
+   Delay( 30 );
+   (void) UpdateClicked( 0 );
+
+   return( (int) TRUE );
+}
+
+
+PRIVATE int AsgnVanillaKey( int whichkey )
+{
+   int rval = TRUE;
+   
+   switch (whichkey)
+      {
+      case 'a':
+      case 'A':
+         rval = AddBtClicked( 0 );
+         break;
+
+      case 'u':
+      case 'U':
+         rval = UpdateClicked( 0 );
+         break;
+      
+      case 'c':
+      case 'C':
+      case 'q':
+      case 'Q':
+      case 'x':
+      case 'X':
+         rval = CancelClicked( 0 );
+      
+      default:
+         break;
+      }
+       
+   return( rval );
+}
+
+PRIVATE int HandleAsgnIDCMP( void )
+{
+   struct IntuiMessage *m = NULL;
+   int                (*func)( int code );
+   BOOL                 running = TRUE;
+
+   while (running == TRUE)
+      {
+      if ((m = GT_GetIMsg( AsgnWnd->UserPort )) == NULL)
+         {
+         (void) Wait( 1L << AsgnWnd->UserPort->mp_SigBit );
+         continue;
+         }
+
+      CopyMem( (char *) m, (char *) &AsgnMsg, 
+               (long) sizeof( struct IntuiMessage )
+             );
+
+      GT_ReplyIMsg( m );
+
+      switch ( AsgnMsg.Class )
+         {
+         case IDCMP_REFRESHWINDOW:
+            GT_BeginRefresh( AsgnWnd );
+            GT_EndRefresh( AsgnWnd, TRUE );
+            break;
+
+         case IDCMP_CLOSEWINDOW:
+            running = AsgnCloseWindow();
+            break;
+
+         case IDCMP_VANILLAKEY:
+            running = AsgnVanillaKey( (int) AsgnMsg.Code );
+            break;
+
+         case IDCMP_GADGETUP:
+         case IDCMP_GADGETDOWN:
+            func = (void *)((struct Gadget *) AsgnMsg.IAddress)->UserData;
+
+            if (func != NULL)
+               running = func( (int) AsgnMsg.Code );
+   
+            break;
+         }
+      }
+
+   return( running );
+}
+
+PRIVATE int OpenAsgnWindow( void )
+{
+   struct NewGadget  ng;
+   struct Gadget    *g;
+   UWORD             lc, tc;
+   UWORD             wleft = AsgnLeft, wtop = AsgnTop, ww, wh;
+
+   ComputeFont( Scr, Font, &CFont, AsgnWidth, AsgnHeight );
+
+   ww = ComputeX( CFont.FontX, AsgnWidth );
+   wh = ComputeY( CFont.FontY, AsgnHeight );
+
+   if ((wleft + ww + CFont.OffX + Scr->WBorRight) > Scr->Width)
+      wleft = Scr->Width - ww;
+
+   if ((wtop + wh + CFont.OffY + Scr->WBorBottom) > Scr->Height)
+      wtop = Scr->Height - wh;
+
+   if ((AsgnFont = OpenDiskFont( Font )) == NULL)
+      return( -5 );
+
+   if ((g = CreateContext( &AsgnGList )) == NULL)
+      return( -1 );
+
+   for (lc = 0, tc = 0; lc < Asgn_CNT; lc++)
+      {
+      CopyMem( (char *) &AsgnNGad[lc], (char *) &ng, 
+               (long) sizeof( struct NewGadget )
+             );
+
+      ng.ng_VisualInfo = VisualInfo;
+      ng.ng_TextAttr   = Font;
+
+      ng.ng_LeftEdge   = CFont.OffX + ComputeX( CFont.FontX, 
+                                                ng.ng_LeftEdge
+                                              );
+
+      ng.ng_TopEdge    = CFont.OffY + ComputeY( CFont.FontY, 
+                                                ng.ng_TopEdge
+                                              );
+
+      ng.ng_Width      = ComputeX( CFont.FontX, ng.ng_Width );
+      ng.ng_Height     = ComputeY( CFont.FontY, ng.ng_Height );
+
+      AsgnGadgets[lc] = g = CreateGadgetA( (ULONG) AsgnGTypes[lc], 
+                              g, 
+                              &ng, 
+                              (struct TagItem *) &AsgnGTags[tc] );
+
+      while (AsgnGTags[tc] != NULL)
+         tc += 2;
+
+      tc++;
+
+      if (g == NULL)
+         return( -2 );
+      }
+
+   if ((AsgnWnd = OpenWindowTags( NULL,
+
+                    WA_Left,        wleft,
+                    WA_Top,         wtop,
+                    WA_Width,       ww + CFont.OffX + Scr->WBorRight,
+                    WA_Height,      wh + CFont.OffY + Scr->WBorBottom,
+
+                    WA_IDCMP,       LISTVIEWIDCMP | BUTTONIDCMP 
+                      | IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW 
+                      | IDCMP_VANILLAKEY,
+
+                    WA_Flags,       WFLG_DRAGBAR | WFLG_DEPTHGADGET 
+                      | WFLG_CLOSEGADGET | WFLG_SMART_REFRESH 
+                      | WFLG_ACTIVATE | WFLG_RMBTRAP,
+
+                    WA_Gadgets,     AsgnGList,
+                    WA_Title,       AsgnWdt,
+                    WA_ScreenTitle, ScrTitle,
+                    TAG_DONE )
+      ) == NULL)
+      return( -4 );
+
+   GT_RefreshWindow( AsgnWnd, NULL );
+
+   return( 0 );
+}
+
+PUBLIC int main( void )
+{
+   int i = 0;
+
+   if (SetupSystemList( &OpenAsgnWindow ) < 0)
+      {
+      fprintf( stderr, "Couldn't open a System ListViewer!\n" );
+      return( RETURN_FAIL );
+      }
+   
+   SetNotifyWindow( AsgnWnd );
+
+   AssignmentCount = CountAssignments();
+
+   ALVNode.ln_Succ = (struct Node *) ALVList.mlh_Tail;
+   ALVNode.ln_Pred = (struct Node *) ALVList.mlh_Head;
+   ALVNode.ln_Type = 0;
+   ALVNode.ln_Pri  = AssignmentCount;
+   ALVNode.ln_Name = ltitle;
+
+   if ((ALVNodes = (struct Node *) 
+                    AllocMem( sizeof( struct Node ) 
+                                      * (AssignmentCount + 1),
+                              MEMF_CLEAR 
+                            )
+      ) == NULL)
+      {
+      sprintf( ErrMsg, "Out of memory space, Abort?" );
+      
+      SetReqButtons( "Aaargrggghhhh!" );
+      (void) Handle_Problem( ErrMsg, "System Problem:", NULL );
+
+      ShutdownSystemList();
+      return( ERROR_NO_FREE_STORE );
+      }
+
+   if ((NodeStrs = (char *) 
+                    AllocMem( STRLENGTH * (AssignmentCount + 1),
+                              MEMF_CLEAR 
+                            )
+      ) == NULL)
+      {
+      FreeMem( ALVNodes, (AssignmentCount + 1) * sizeof( struct Node ) );
+
+      sprintf( ErrMsg, "Out of memory space, Abort?" );
+
+      SetReqButtons( "Aaargrggghhhh!" );
+      (void) Handle_Problem( ErrMsg, "System Problem:", NULL );
+
+      ShutdownSystemList();
+      return( ERROR_NO_FREE_STORE );
+      }
+
+   strcpy( &NodeStrs[0], ltitle );
+
+   CopyMem( (char *) &ALVNode, (char *) ALVNodes, 
+            (long) sizeof( struct Node )
+          );
+
+   for (i = 1; i <= AssignmentCount; i++)
+      {
+      ALVNodes[i].ln_Name = &NodeStrs[ i * STRLENGTH ];
+      ALVNodes[i].ln_Pri  = AssignmentCount - i;
+      }
+
+   NewList( (struct List *) &ALVList );      
+
+   for (i = 0; i < AssignmentCount; i++)
+      Enqueue( (struct List *) &ALVList, &ALVNodes[ i ] );
+
+   if (GetAssignmentList() < 0)
+      {
+      sprintf( ErrMsg, "Out of memory space, Abort?" );
+
+      FreeMem( NodeStrs, (AssignmentCount + 1) * STRLENGTH );
+      FreeMem( ALVNodes, (AssignmentCount + 1) * sizeof( struct Node ) );
+
+      SetReqButtons( "Aaargrggghhhh!" );
+      (void) Handle_Problem( ErrMsg, "System Problem:", NULL );
+
+      ShutdownSystemList();
+      return( ERROR_NO_FREE_STORE );
+      }
+      
+   // Make the list:
+   (void) MakeAssignList();   
+
+   ModifyListView( AsgnGadgets[ ALV ], AsgnWnd, 
+                   (struct List *) &ALVList, NULL
+                 );
+
+   GT_RefreshWindow( AsgnWnd, NULL );
+
+   (void) HandleAsgnIDCMP();
+   
+   ShutdownSystemList();
+
+   FreeMem( NodeStrs, (AssignmentCount + 1) * STRLENGTH );
+   FreeMem( ALVNodes, (AssignmentCount + 1) * sizeof( struct Node ) );
+
+   if (Assignments != NULL)
+      FreeDosList();
+      
+   return( RETURN_OK );
+}
+
+/* --------------------- END of SysAssigns.c file! -------------- */

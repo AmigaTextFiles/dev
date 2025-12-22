@@ -1,0 +1,5 @@
+/* quit FASTCREF */
+
+ADDRESS FASTCREF
+
+QUIT

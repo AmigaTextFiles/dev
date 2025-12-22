@@ -1,0 +1,4 @@
+SayHello()
+{
+  puts("Hello");
+}

@@ -1,0 +1,30 @@
+@DataBase
+@Node Main ModuleInformation
+@TOC ModuleMain.guide/main
+@Index Module.index/main
+ShowModule v1.10 (c) 1992 $#%!
+@{fg shine}now 
+showing: "intuition/pointerclass.m"@{fg text}
+
+NOTE: don't use this output in your code, use the module instead.
+
+CONST POINTERA_DUMMY=$80039000,
+      POINTERYRESN_SCREENRESASPECT=5,
+      POINTERYRESN_HIGHASPECT=3,
+      POINTERXRESN_70NS=2,
+      POINTERYRESN_SCREENRES=4,
+      POINTERXRESN_SCREENRES=4,
+      POINTERA_YRESOLUTION=$80039006,
+      POINTERA_XRESOLUTION=$80039005,
+      POINTERYRESN_DEFAULT=0,
+      POINTERXRESN_DEFAULT=0,
+      POINTERYRESN_HIGH=2,
+      POINTERXRESN_35NS=3,
+      POINTERXRESN_LORES=5,
+      POINTERA_YOFFSET=$80039003,
+      POINTERA_XOFFSET=$80039002,
+      POINTERXRESN_HIRES=6,
+      POINTERA_WORDWIDTH=$80039004,
+      POINTERA_BITMAP=$80039001,
+      POINTERXRESN_140NS=1
+@endnode

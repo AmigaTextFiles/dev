@@ -1,0 +1,6 @@
+
+LIB    = ../../LEDA.high/libL.a -lm
+
+DOSLIB = ..\..\libl.lib
+
+include ../Make.pro.amiga.high

@@ -1,0 +1,4 @@
+
+//struct Image alfred001 =
+//{
+//};

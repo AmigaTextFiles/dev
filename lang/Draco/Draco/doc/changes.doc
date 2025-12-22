@@ -1,0 +1,431 @@
+		Changes in V1.2 of the Amiga Draco System	Jan 28,1989
+
+
+I. Language Changes
+
+
+    1. Floating Point
+
+    The Draco compiler now supports a floating point type. This type,
+    called 'float', is the Amiga's IEEE double precision floating point
+    package, as available in V1.3 of the Amiga Operating System. The older
+    V1.2 library can be used, but it is slower, does not provide the
+    trancendental functions, and does not support a math coprocessor. See
+    the accompanying writeup, 'float.doc' for a detailed description of
+    Draco's floating point support.
+
+
+    2. New Types
+
+    Two new built-in types have been added to the language. They are
+    'arbptr' and 'boid'. The first is similar in nature to ANSI C's
+    'void *' type, in that it is compatible with all pointer types. In the
+    new include files, all memory allocation/deallocation/copying routines,
+    along with the DOS routines 'Read' and 'Write' have been declared to
+    use 'arbptr' parameters/results. For example, Exec's memory allocation
+    and deallocation functions are declared as:
+
+	extern AllocMem(ulong length, flags)arbptr;
+	extern FreeMem(arbptr region; ulong length)void;
+
+    This allows usage such as this:
+
+	proc test()void:
+	    *char charBuffer;
+	    *ulong longBuffer;
+	    *externType xBuffer;
+
+	    charBuffer := AllocMem(200, 0);
+	    longBuffer := AllocMem(100 * sizeof(ulong), MEMF_PUBLIC);
+	    xBuffer := AllocMem(sizeof(externType) * 2, MEMF_CLEAR);
+
+	    ...
+
+	    FreeMem(xBuffer, sizeof(externType) * 2);
+	    FreeMem(longBuffer, 100 * sizeof(ulong));
+	    FreeMem(charBuffer, 200);
+	corp;
+
+    In the old Draco, all 6 calls would have required a 'pretend'.
+
+    Type 'boid' can only be used as the result type of a procedure. This
+    type indicates that the procedure returns a boolean result, but that it
+    is OK to ignore the result. This is merely making available to the
+    programmer what the compiler already handled internally as the type
+    returned by the I/O statements ('read', 'readln', 'write', 'writeln').
+    A good example of this is the DOS function 'DeleteFile', which now
+    returns a 'boid'. The actual result is 'false' if the file didn't
+    exists, or couldn't be destroyed for some other reason. Many
+    programmers are happy to ignore that result. Without the use of 'boid',
+    it would have been necessary to 'pretend' the result to 'void'.
+
+
+    3. New Construct
+
+    A new construct has been added to the compiler. This is the 'ignore'
+    statement. This statement consists of the reserved word 'ignore'
+    followed by an expression. The expression is evaluated as normal, and
+    the result is then discarded. This is entirely equivalent to
+    'pretend'ing something to 'void', but is much less ugly. A common
+    example is that of ignoring the result of 'Write', e.g.
+
+	ignore Write(Output(), "Help! I'm dying!!\n", 18);
+
+
+    4. Register Variables
+
+    The concept of user declared variables that live in machine registers
+    (a concept used in most 'C' compilers) has been added to Draco. This is
+    a way for a simple compiler (such as Draco sort-of is) to produce
+    significantly better machine code than is otherwise possible. The
+    syntax in Draco is simple - merely add the reserved word 'register' to
+    the front of a declaration - all variables declared in that declaration
+    will be allocated registers, if possible. The only types that Draco
+    will put in registers are 'byte', integral types, enumeration types and
+    pointer types. It is an error to attempt to put any other type into a
+    register. If there are not enough machine registers for all of the
+    variables declared as 'register', some will be allocated to storage
+    instead of to registers. The current compiler allocates registers in
+    the order that the variables are encountered, but I'm not sure if I
+    should make that part of the language specification. Note that
+    procedure parameters can be placed in registers as well as local
+    variables. See the discussion below on code generation for an example
+    of the effect of register variables.
+
+
+II. Library Changes
+
+
+    1. Compatibility
+
+    Except for changes discussed here, the new Draco libraries are source
+    level compatible with the old libraries. This means that a program
+    which compiled and ran with the old Draco system should compile and run
+    with the new Draco system. The ENTIRE program should be recompiled and
+    linked, however. All of the internal library routine names have been
+    changed to begin with '_d_'. This was done to ease porting of the Draco
+    system to a UNIX machine, where some runtime system routine names
+    clashed with standard UNIX system and library routine names. When
+    switching to the new Draco system, make sure you replace all of the
+    library files (in 'drlib:') when you replace the compiler.
+
+
+    2. New Functions
+
+    My memory may be off here, but I think the new functions added since
+    the previous release are:
+
+	ConvTime - convert a second counter to a string
+	GetCurrentTime - return a second counter of the current time/date
+	LineFlush - flush the standard output buffer (useful when printing
+	    things like dots to show progress). This routine is called
+	    internally whenever a read from standard input is done.
+
+
+    3. Changed Functions
+
+    The following functions have been renamed:
+
+	BlockMove => BlockCopy
+	BlockMoveB => BlockCopyB
+
+    These names are more descriptive, especially to those unfamiliar with
+    how computers work.
+
+
+    4. Use With Pipes
+
+    The pipe: device supplied with AmigaDOS V1.3 is a bit finicky about the
+    modes in which it is opened, whereas the rest of the system doesn't
+    much care. To allow pipe: access to work properly inside the Draco I/O
+    library, the following is done:
+
+	if the file name starts with "pipe:" (case significant), then
+	    if the open is for read, use MODE_OLDFILE
+	    else use MODE_NEWFILE
+	else
+	    use MODE_READWRITE
+
+    This seems to do what is desired, but is sort of kludgy.
+
+
+    5. Include Files
+
+    There have been a few minor changes to the include files, some
+    mentioned above. There are also one or two new ones.
+
+    The include files supplied with this release are minimally compressed.
+    This is done using 'Ded', the accompanying Draco editor. The scheme
+    simply encodes sequences of blanks as a single byte with the high order
+    bit set and the low order 7 bits encoding the blank count. They can be
+    viewed normally using 'Ded', or you can write a simple program to
+    expand them.
+
+
+III. Compiler Changes
+
+    1. Optimization
+
+    Much improved code generation is the most significant feature of this
+    new compiler. Generated code is now roughly on par with that generated
+    by Lattice C V4.0 . The major improvements are:
+
+	register variables - saves code space in that no 16 bit offset is
+	    needed to access the variable. Speed is gained by saving two or
+	    more memory cycles on the access. The current compiler can
+	    allocate 3 address registers and 4 data registers for register
+	    variables. I will close my eyes here and mention a kludge that
+	    you can do to sort-of get more register variables:
+
+		register *char p, q, r;
+		register *uint up @ p, uq @ q, ur @ r;
+
+	    Don't blame me if you use this and your program breaks because
+	    you are trying to store two values in one register!
+
+	register tracking - this technique consists of keeping track of
+	    what values are in all of the non-allocated registers, and not
+	    reloading a value if it is already in a register. In the
+	    current compiler, this is not perfect, but it does gain quite a
+	    bit, especially for heavily used pointer variables. For
+	    example, the source
+
+		*struct {int f1, f2, f3; long f4, f5; bool f6} p;
+
+		p*.f1 := 0;
+		p*.f2 := 8;
+		p*.f3 := 200;
+		p*.f4 := 0x12345678;
+		p*.f5 := 1;
+		p*.f6 := true;
+
+	    would generate something like:
+
+		MOVE.L	xx(A6),A5
+		CLR.W	(A5)
+		MOVE.W	#8,2(A5)
+		MOVE.W	#200,4(A5)
+		MOVE.L	#0x12345678,6(A5)
+		MOVEW	#1,D7
+		MOVE.L	D7,10(A5)
+		MOVE.B	#1,14(A5)
+
+	    Six loads of 'p' into a register, a total of 24 bytes of code,
+	    have been saved. Declaring 'p' as a register variable would
+	    save an additional 4 bytes (the first MOVE). Note also that
+	    special casing has used a MOVEQ/MOVE.L pair to store '-1' into
+	    field 'f5'. This is shorter by 2 bytes and slightly faster.
+	    Unfortunately, it also illustrates one of the pitfalls of
+	    trying to optimize without full knowledge of the entire
+	    function - it uses register D7, which must therefore be saved
+	    and restored in the entry/exit sequences; thus if the above
+	    code is the entire content of a function, the total code
+	    generated is actually increased by the 'optimization' of using
+	    the MOVEQ! (It just occurred to me that this is a prime
+	    candidate for the peephole optimizer - make the pair use D0,
+	    which is scratch, instead of D7. - done!)
+
+	peephole optimizer - this optimizer is so named because it looks at
+	    the generated code though a small peephole - any short
+	    (typically two or three instructions) code sequence that can
+	    better be done some other way is re-arranged to that better
+	    way. This is done without any global knowledge of what is going
+	    on, so it must preserve the full meaning of the sequence. An
+	    exception to the full meaning preservation is that a value in a
+	    temporary register need not be preserved, so long as the global
+	    information of what is in all of the temporary registers is
+	    updated. Typical 'peepholes' are:
+
+		MOVE.W	A,Dx
+		ADDQ.W	#y,Dx	=>  ADDQ.W  #y,A
+		MOVE.W	Dx,A
+
+		MOVE.B	(A5),D7 =>  MOVE.B (A5),(A4)
+		MOVE.B	D7,(A4)
+		MOVE.L	A5,A3
+		ADDQ.L	#1,A3	=>  ADDQ.L #1,A5    => MOVE.B (A5)+,(A4)+
+		MOVE.L	A3,A5
+		MOVE.L	A4,A3
+		ADDQ.L	#1,A3	=>  ADDQ.L #1,A4
+		MOVE.L	A3,A4
+
+		MOVE.L	X,Y	=>  MOVE.L X,Dz
+		MOVE.L	X,Dz	    MOVE.L Dz,Y
+
+	    Note that the second is actually a combination of 4 peepholes,
+	    yielding a dramatic improvement. Also, the third doesn't
+	    actually reduce the number of instructions, but it saves 2 or 4
+	    bytes (depending on whether X is local or global) and saves 1
+	    or 2 memory references.
+
+	improved entry/exit sequences - the compiler no longer saves and
+	    restores all registers for each procedure - it only saves and
+	    restores those that are actually used in the procedure. The
+	    ultimate of this is no save/restore at all. This saves
+	    execution time and execution stack space.
+
+	improved code sequences in a number of places - the most notable
+	    here is the code for the 'for' loop, which, in the best of
+	    cases, can turn into a single 'DBF' instruction. This happens
+	    for a 16 bit variable counting down by 1 to 0.
+
+	branch shortening - the 68000 family of processors have two lengths
+	    of conditional and unconditional PC-relative branch
+	    instructions. The short ones are 16 bits long and can branch
+	    plus or minus 127 bytes from the current position. The long
+	    ones are 32 bits and can branch plus or minus 32K bytes. It is
+	    desireable to use the short forms wherever possible. The Draco
+	    compiler has always done this for backwards branches, but it is
+	    considerably harder for forward ones, since when the branch is
+	    generated, the target location is not known. The new compiler
+	    will use short branches in many cases, by the laborious method
+	    of keeping track of them all, and shuffling code around as
+	    necessary. This also requires fixing up the tables of
+	    relocation entries, external references, and constant uses.
+
+    These optimizations, especially peepholing and branch shortening, can
+    be quite time consuming to perform. The compiler, being written in
+    itself however, gains speed from the very optimizations that slow it
+    down. I haven't kept track of the actual changes in compile time, but
+    the compiler can still trot along at a couple of thousand lines per
+    minute, and compiles considerably faster than Lattice C V4.0 .
+
+    Even though the compiler is now much better at generating code for
+    whatever source you give it, there is still lots of opportunities for
+    the programmer to "hand-optimize" his source for even better
+    performance. A good knowledge of the 68000 architecture comes in handy
+    here. Also handy is an understanding of how Draco's code generation
+    works. This is a bit hard to come by, but some insights can be obtained
+    by trying various things and examining the generated code. As an
+    example, try the two variants of the "Sieve of Eratosthenes" program
+    which are included on this disk.
+
+
+    2. Frame Pointer
+
+    Code generated by the new Draco compiler now references all local
+    variables and parameters via an offset from A6, the frame pointer. The
+    previous compiler went directly from A7, the stack pointer, and thus
+    had A6 available for other use. This change was made for two reasons.
+    One is that it allowed the above-mentioned improvements in entry/exit
+    sequences. The second is that it makes using a debugger quite a bit
+    easier. The unfortunate aspect is that of decreasing by 1 the number of
+    address registers available for other use. This was partially
+    compensated for by the use of A1, which is not normally possible
+    because it is a scratch register and is not saved through a function
+    call. This was fixed by having the calling function save and restore it
+    around the call if it is in use.
+
+
+    3. Operator Types
+
+    Operator types are now fully implemented in the Amiga Draco compiler.
+    For a complete example of using them, see the files 'complex.g',
+    'complex.d', and 'complexTest.d' on this disk.
+
+    4. Other
+
+    There are three command-line flags that are now supported by the
+    compiler. None are of great significance to most people. '-v' turns on
+    some verbose output that shows how the optimizations are going on a
+    function-by-function basis. '-s' produces a summary of this information
+    at the end of each source file. '-d' tells the compiler to emit minimal
+    symbolic information for use with a debugger. All that is currently
+    emitted is a chunk naming the procedures. This is useful with the
+    Metascope debugger, but is equivalent to what their 'Def' program does.
+
+    The compiler can now be interrupted using CONTROL-C. It will exit
+    cleanly, closing all files it has open. The check is made only when I/O
+    is done, so you may have to wait a second or two. Do NOT try to
+    interrupt the supplied version of 'Blink' this way, since it tends to
+    crash your machine when you do that.
+
+    Some internal coding changes, coupled with the entry/exit improvements
+    mentioned previously, make the compiler require considerably less stack
+    space than before. I haven't done any experiments, but I suspect that
+    10K of stack is enough to compile most programs.
+
+    Considerable effort has gone into making the compiler robust. This
+    means that it is very unlikely to get into an infinite loop or crash
+    your machine. There are still a few ways in which you can confuse it,
+    however, most having to do with register handling. The compiler now has
+    some internal consistency checks which should catch these and abort
+    cleanly. Please let me know, sending an example source file, if the
+    compiler ever aborts without first producing at least one error
+    message. At one point I was trying to get the compiler to never trigger
+    any of the consistency checks, but it soon became clear that doing so
+    would add greatly to the code bulk of the compiler, and probably slow
+    it down, so there are still a few error recovery situations where it
+    will get confused and abort.
+
+
+IV. Things Still To Do
+
+    A compiler is never really completed. There are always more things that
+    can be done to it, not the least of which is totally rewriting it. The
+    Draco compiler most definitely needs a total rewrite, but it is more
+    likely to be replaced by a totally new compiler. There are still many
+    lesser changes that would be nice to do. Some of them are:
+
+    - more peephole optimizations - there are always more of these that can
+	be done - a perusal of any reasonable sized program will always
+	find code sequences that could be done better. They payoff of doing
+	more would be very slim, however, and each such addition adds to
+	the size of the compiler and slows it down a little. The point
+	where an optimization could pay for itself by improving the
+	compiler's own code has long since been passed.
+
+    - better register tracking - the compiler currently forgets the values
+	of all temporary registers on any branch or merge point. This is
+	overkill, and a more intelligent merging scheme could gain
+	considerable efficiency in non-registerized programs. Doing this is
+	a fair amount of work, however. A simple form of common
+	subexpression evaluation could also be obtained by remembering
+	slightly more about what is in the registers.
+
+    - some changes in the rules for I/O would be nice. E.g.
+	- allow a length specification on input through character pointers,
+	    so that no overflowing of the buffer can occur
+	- allow output of pointers and floating point values in hexadecimal
+	- allow 'e', 'f', and 'g' formats for operator types - this would
+	    allow better control of complex number output
+
+    - redo the I/O library internals so that '\e' and '\(0xff)' can be
+	passed through on text I/O through channels (this involves having
+	the bottom-level character-at-a-time routines return a 'uint' with
+	a couple of special values, rather than a 'char' with a couple of
+	special values)
+
+    - add library functions to allow explicit setting of the standard input
+	and output channels
+
+    - take the branch tables produced for the 'case' construct out of line.
+	They are currently in-line and can confuse disassemblers and
+	debuggers. Constant displays have already been taken out of line in
+	the new compiler
+
+    - allow fully nested constant displays. Currently a constant display
+	can directly contain another constant display, but cannot contain a
+	pointer to another one. The most useful form would be pointers to
+	strings.
+
+    - support > 32767 bytes of local variables. The internal code for
+	accessing such variables already exists; what is lacking is the
+	proper special-cases of entry/exit code, combined with the
+	optimizations that are done on entry/exit code.
+
+    - some mechanism to allow Draco code to access external symbols defined
+	by other languages (e.g. C or assembler) would be useful. This
+	would probabably be a declaration followed or preceeded by a
+	keyword and an external-name string.
+
+    - global variables initialized at compile time would be useful. These
+	would normally be file-level variables which are shared by several
+	routines and consist of tables of strings, numbers, etc.
+
+    - the peephole optimizations are quite bulky in the way they test for
+	applicability. Some scheme for simplifying the tests would be nice.
+	If nothing else can be done, some re-arranging of the code can get
+	rid of some duplication. I don't want to do this until I'm fairly
+	sure the peepholer is stable, since doing so would impair its
+	readability.

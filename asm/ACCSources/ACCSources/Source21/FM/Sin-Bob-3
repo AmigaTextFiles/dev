@@ -1,0 +1,542 @@
+	SECTION		Chipmemory,data_c	
+							;BY BLAINE EVANS
+							;1 ERITH WAY
+							;PONTYBODKIN
+							;NR MOLD
+							;CLWYD
+							;CH7 4TR
+							;TEL O352-771673
+		Opt	C-,D+
+
+***************************************************************************
+*		The Equates for Screen And Bobs 			  *
+***************************************************************************
+
+Height			Equ	256
+Width			Equ	40
+Depth			Equ	3
+
+ScreenSize		Equ	Height*Width
+
+MemoryRequired_1	Equ	ScreenSize*Depth
+MemoryRequired_2	Equ	ScreenSize*Depth
+
+BobHeight		Equ	16
+BobWidth		Equ	2
+BobDepth		Equ	3
+
+BobSize			Equ	BobHeight*(BobWidth*2)
+
+NumberBobs		Equ	150
+BufferMemory		Equ	BobSize*BobDepth*NumberBobs
+
+****************************************************************************
+
+		Incdir	Sys:Include/
+		Include	Source:Include/hardware.i
+
+	Move.l	4.w,a6			;FIND EXEC BASE
+	Lea	Gfxlib(pc),a1		;LOAD GRAPHICS LIBRARY IN A1
+	Moveq.l	#$00,d0			;VERSION 0
+	Jsr	-552(a6)		;OPEN LIBRARY
+	Move.l	d0,_Gfxbase		;STORE D0 (GFX ADDRESS )
+	Beq	NoLib_Exit		;ELSE EXIT
+
+	Move.l	4.w,a6
+	Move.l	#MemoryRequired_1,d0	; Amount of memory
+	Move.l	#$10002,d1		; Clear+Chip memory
+	Jsr	-198(a6)		; Allocate memory
+	Move.l	d0,DisplayScreen	; Save area of memory
+	Beq	NoMem_Exit_1		; Error-End
+
+	Move.l	4.w,a6
+	Move.l	#MemoryRequired_2,d0	; Amount of memory
+	Move.l	#$10002,d1		; Clear+Chip memory
+	Jsr	-198(a6)		; Allocate memory
+	Move.l	d0,WorkScreen		; Save area of memory
+	Beq	NoMem_Exit_2		; Error-End
+
+	Move.l	4.w,a6
+	Move.l	#BufferMemory,d0	; Amount of memory
+	Move.l	#$10002,d1		; Clear+Chip memory
+	Jsr	-198(a6)		; Allocate memory
+	Move.l	d0,DisplayBuffer	; Save area of memory
+	Beq	NoBuff1Mem_Exit		; Error-End
+
+	Move.l	4.w,a6
+	Move.l	#BufferMemory,d0	; Amount of memory
+	Move.l	#$10002,d1		; Clear+Chip memory
+	Jsr	-198(a6)		; Allocate memory
+	Move.l	d0,WorkBuffer		; Save area of memory
+	Beq	NoBuff2Mem_Exit		; Error-End
+
+	Move.l	4.w,a6
+	Jsr	-132(a6)		; Forbid
+
+	Move.l	DisplayScreen,d0	; Start of Screen Memory
+	Bsr	Plane_Addresses		
+	Bsr	Clear_Display
+	Bsr	Init
+
+	Bsr	FirstBobs
+	Bsr	FirstBobs_2
+
+	Move.l	_Gfxbase,a0		;LOAD ADDRESS OF GRAPHICS LIB IN A0
+	Move.l	50(a0),Oldcop		;STORE CURRENT COPPER,ETC TO RETRIEVE LATER
+S
+	Move.l	#Newcop,50(a0)		;POINT TO OUR COPPERLIST
+
+Wait					;WAIT LOOP
+	Cmp.b	#0,Vhposr(a6)		;VERTICAL BLANKING GAP 
+	Bne.s	Wait			;
+;	Move.w	#$fff,$180(a6)		;REMove TO MEASURE RASTER TIME
+
+	Bsr	DoubleBuffer
+	Bsr	SwapSinePointer
+	Bsr	ReplaceBob
+	Bsr	Sine_calc
+	Bsr	SaveBobs
+	Bsr	PlotBobs
+
+;	Move.w	#$000,$180(a6)		;REMove TO MEASURE RASTER TIME
+	Btst	#$6,$bfe001		;QUIT LEFT MOUSE PRESSED
+	Bne.s	Wait
+Ended					;ELSE LOOP TO WAIT
+	Move.l	_Gfxbase,a0		;LOAD GRAPHICS LIB ADDRESS IN A0
+	Move.l	Oldcop,50(a0)		;RESTORE OLD COPPER TO RETURN TO EDITTER
+	Move.l	4.w,a6
+	Jsr	-138(a6)		; Permit
+	
+NoBuff2Mem_Exit	
+	Move.l	4.w,a6
+	Move.l	DisplayBuffer,a1	; Address to release from
+	Move.l	#BufferMemory,d0	; Size to release
+	Jsr	-210(a6)		; Free memory
+NoBuff1Mem_Exit
+	Move.l	4.w,a6
+	Move.l	WorkBuffer,a1		; Address to release from
+	Move.l	#BufferMemory,d0	; Size to release
+	Jsr	-210(a6)		; Free memory
+NoMem_Exit_2
+	Move.l	4.w,a6
+	Move.l	DisplayScreen,a1	; Address to release from
+	Move.l	#MemoryRequired_1,d0	; Size to release
+	Jsr	-210(a6)		; Free memory
+NoMem_Exit_1
+	Move.l	4.w,a6
+	Move.l	WorkScreen,a1		; Address to release from
+	Move.l	#MemoryRequired_2,d0	; Size to release
+	Jsr	-210(a6)		; Free memory
+NoLib_Exit
+	Move.l	4.w,a6			;FIND EXEC BASE
+	Move.l	_Gfxbase,a1		;LOAD GRAPHICS BASE IN A1
+	Jsr	-414(a6)		;CLOSE LIBRARY
+Exit
+	Rts				;RETURN TO EDITER
+
+Plane_Addresses	
+	Lea	Planes,a0		; BitPlane Control Words
+	Moveq.l	#(Depth)-1,d1		; Number of Planes-1
+PlaneLoop
+	Move.w	d0,6(a0)		; Low Word of Bit-Plane 
+	Swap	d0				
+	Move.w	d0,2(a0)		; High Word of Bit-Plane
+	Swap	d0
+	Add.l	#Width,d0		; Interleaved Bit-Planes
+	Add.l	#8,a0			; Increment to Next Control Word
+	DBra	d1,PlaneLoop
+	Rts
+
+Init
+	Lea	$dff000,a6			* Custom Base
+	Move.w	#$8400,Dmacon(a6)	; Give Blitter Priority
+	Rts
+
+Clear_Display
+	Move.l	DisplayScreen,a0		; Start of Screen1 memory
+	Move.l	#(MemoryRequired_1/4)-1,d0	; Number of long words 
+Clear
+	Move.l	#$ff00ff00,(a0)+		; Transfer Data
+	DBra	d0,Clear			; Loop till 0
+	Move.l	WorkScreen,a0			; Start of Screen2 memory
+	Move.l	#(MemoryRequired_2/4)-1,d0	; Number of long words 
+Clear_2
+	Move.l	#$ff00ff00,(a0)+		; Transfer Data
+	DBra	d0,Clear_2			; Loop till 0
+	Rts
+
+FirstBobs
+	Move.w	#(NumberBobs-1)*2,d7	* Number of Bobs-1 * Word Width
+	Move.l	Xa(pc),a3		* X Co-ordinates
+	Move.l	Ya(pc),a4		* Y Co-ordinates
+First_bobs
+	Moveq.l	#0,d0			* Clear Work Register
+	Moveq.l	#0,d1			* Clear Work Register
+	Move.w	(a3,d7),d0		* Find Co-odinates Location  
+	Move.w	(a4,d7),d1		* in List
+	Move.l	WorkScreen,d4		* Base address
+	Bsr	CalcPosition	
+	Bsr	SaveBob
+	Subq	#2,d7			* Next Bob( -1 Word )
+	Bpl.s	First_bobs
+	Rts
+
+FirstBobs_2
+	Move.l	WorkBuffer,a0		* Swap Buffer Area's
+	Move.l	DisplayBuffer,WorkBuffer
+	Move.l	a0,DisplayBuffer
+
+	Move.w	#(NumberBobs-1)*2,d7	* Number of Bobs-1 * Word Width
+	Move.l	Xb(pc),a3		* X Co-ordinates
+	Move.l	Yb(pc),a4		* Y Co-ordinates
+First_bobs_2
+	Moveq.l	#0,d0			* Clear Work Register
+	Moveq.l	#0,d1			* Clear Work Register
+	Move.w	(a3,d7),d0		* Find Co-odinates Location  
+	Move.w	(a4,d7),d1		* in List
+	Move.l	DisplayScreen,d4	* Base address
+	Bsr	CalcPosition	
+	Bsr	SaveBob
+	Subq	#2,d7			* Next Bob( -1 Word )
+	Bpl.s	First_bobs_2
+	Rts
+
+DoubleBuffer
+	Move.l	WorkBuffer,a0
+	Move.l	DisplayBuffer,WorkBuffer
+	Move.l	a0,DisplayBuffer
+
+	Move.l	WorkScreen(pc),a0		* a0 = Work Screen
+	Move.l	DisplayScreen(pc),WorkScreen	* Switch Screens
+	Move.l	a0,DisplayScreen		* Display Work Screen
+
+	Move.l	a0,d0				* Load Bit-Planes
+	Bsr	Plane_Addresses
+	Rts
+
+SwapSinePointer				* Xa=Current X,Xb=Last X,Same for Y
+	Move.l	Xb(pc),d0		* Swap the sine pointer
+	Move.l	Xc(pc),Xb		* tables so Last X becomes Current X
+	Move.l	d0,Xc			* And Vice Versa,Same for Y
+	Move.l	Yb(pc),d0		* A Bit Like Double Buffering a Screen
+	Move.l	Yc(pc),Yb
+	Move.l	d0,Yc
+	Rts
+
+ReplaceBob
+	Move.w	#(NumberBobs-1)*2,d7	* Number of Bobs-1 * Word Width
+	Move.l	Xb(pc),a3		* X Co-ordinates
+	Move.l	Yb(pc),a4		* Y Co-ordinates
+Rep_Bobs
+	Moveq.l	#0,d0			* Clear Work Register
+	Moveq.l	#0,d1			* Clear Work Register
+	Move.w	(a3,d7),d0		* Find Co-ordinates Location  
+	Move.w	(a4,d7),d1		* in List
+	Move.l	WorkScreen,d4		* Base address
+	Bsr	CalcPosition	
+	Bsr	Replace_Bob
+	Subq	#2,d7			* Next Bob( -1 Word )
+	Bpl.s	Rep_Bobs
+	Rts
+
+SaveBobs
+	Move.w	#(NumberBobs-1)*2,d7	* Number of Bobs-1 * Word Width
+	Move.l	Xa(pc),a3		* X Co-ordinates
+	Move.l	Ya(pc),a4		* Y Co-ordinates
+	Move.l	Xb(pc),a1		* LastX Co-ordinates
+	Move.l	Yb(pc),a2		* LastY Co-ordinates
+Save_bobs
+	Moveq.l	#0,d0			* Clear Work Register
+	Moveq.l	#0,d1			* Clear Work Register
+	Move.w	(a3,d7),d0		* Find Co-odinates Location  
+	Move.w	(a4,d7),d1		* in List
+	Move.w	d0,(a1,d7)		* Last X
+	Move.w	d1,(a2,d7)		* Last Y
+	Move.l	WorkScreen,d4		* Base address
+	Movem.l	d0-d7/a0-a6,-(sp)	* Save Registers
+	Bsr	CalcPosition	
+	Bsr	SaveBob
+	Movem.l	(sp)+,d0-d7/a0-a6	* Restore Registers
+	Subq	#2,d7			* Next Bob( -1 Word )
+	Bpl.s	Save_bobs
+	Rts
+
+PlotBobs
+	Move.w	#(NumberBobs-1)*2,d7	* Number of Bobs-1 * Word Width
+	Move.l	Xa(pc),a3		* X Co-ordinates
+	Move.l	Ya(pc),a4		* Y Co-ordinates
+Draw_bobs
+	Moveq.l	#0,d0			* Clear Work Register
+	Moveq.l	#0,d1			* Clear Work Register
+	Move.w	(a3,d7),d0		* Find Co-odinates Location  
+	Move.w	(a4,d7),d1		* in List
+	Move.l	WorkScreen,d4		* Base address
+	Movem.l	d0-d7/a0-a6,-(sp)	* Save Registers
+	Bsr	CalcPosition	
+	Bsr	Bob_draw
+	Movem.l	(sp)+,d0-d7/a0-a6	* Restore Registers
+	Subq	#2,d7			* Next Bob( -1 Word )
+	Bpl.s	Draw_bobs
+	Rts
+
+X_vel1		Equ	6
+X_vel2		Equ 	8
+Y_vel1		Equ	6
+Y_vel2		Equ	4
+
+X_add1		Equ	5
+X_add2		Equ	2
+Y_add1		Equ	7
+Y_add2		Equ	5
+
+Sine_calc
+	Lea	Sintable(pc),a0		* Start Address of Sine Table
+	Move.l	Xa(pc),a3		* Current X Co-ordinates
+	Move.l	Ya(pc),a4		* Current Y Co-ordinates
+
+	Move.w	X_pt1(pc),d0		* Update the Sine-Pointers
+	Add.w	#X_vel1*2,d0
+	And.w	#$1fe,d0
+	Move.w	d0,X_pt1
+
+	Move.w	X_pt2(pc),d1
+	Add.w	#X_vel2*2,d1
+	And.w	#$1fe,d1
+	Move.w	d1,X_pt2
+
+	Move.w	Y_pt1(pc),d2
+	Add.w	#Y_vel1*2,d2
+	And.w	#$1fe,d2
+	Move.w	d2,Y_pt1
+
+	Move.w	Y_pt2(pc),d3
+	Add.w	#Y_vel2*2,d3
+	And.w	#$1fe,d3
+	Move.w	d3,Y_pt2
+
+	Move.w	#(NumberBobs)-1,d7	* Number of Bobs-1
+Calc_loop
+	Move.w	(a0,d0),d5		* The Sine-Table Ranges from 
+	Move.w	(a0,d1),d6		* -32768  to  32767
+	Asr.w	#1,d5			* Divide By 2
+	Asr.w	#1,d6			* Divide By 2
+	Add.w	d5,d6			* Add Together
+	Muls	#(Width*8)-(BobWidth*2)*8),d6
+	Swap	d6
+	Add.w	#((Width*8)/2-(BobWidth*2)*4),d6
+	Move.w	d6,(a3)+		* Save X Co-ordinate
+
+	Move.w	(a0,d2),d5		* Next X Sine Value
+	Move.w	(a0,d3),d6		* Next Y Sine Value
+	Asr.w	#1,d5			* Divide By 2
+	Asr.w	#1,d6			* Divide By 2
+	Add.w	d5,d6			* Add Together
+	Muls	#((Height-56)-BobHeight),d6
+	Swap	d6
+	Add.w	#(((Height-56)/2)-BobHeight/2),d6
+	Move.w	d6,(a4)+		* Save Y Co-ordinate
+
+	Add.w	#X_add1*2,d0		* Update the Sine-Pointers
+	And.w	#$1fe,d0		* For the next bob
+	Add.w	#X_add2*2,d1
+	And.w	#$1fe,d1
+	Add.w	#Y_add1*2,d2
+	And.w	#$1fe,d2
+	Add.w	#Y_add2*2,d3
+	And.w	#$1fe,d3
+	Dbf	d7,Calc_loop		* Loop Till 0
+	Rts
+CalcPosition	
+	Divu	#16,d0			* This gives no of words in lower
+					* Word and remainder is shift value
+					* In higher word
+	Move.w	d0,d2
+	Asl.w	#1,d2
+	Mulu.w	#Width*Depth,d1		* Find screen address
+	Add.l	d2,d1			* Add X to Y
+	Add.l	d1,d4			* Add to base address
+	Move.l	d4,BobAddress		* New Address of Bob
+	Asl.l	#8,d0			* Put Shift in Correct Place
+	Asl.l	#4,d0			* Shift Left 12 Times
+	And.l	#$f0000000,d0		* Clear Unwanted Bits
+	Move.l	d0,Bltcon		* Save Result
+	Rts
+
+Bob_draw
+	Lea	$dff000,a6				* Custom base
+	Move.l	Bltcon,d0
+	Move.l	d0,d1					* for Bltcon1
+	Or.l	#$0fca0000,d0
+	Move.l	#Mask,a0				* A
+	Move.l	#BobGraphics,a1				* B
+	Move.l	BobAddress,a2				* C
+	Move.l	a2,a5					* D
+Or_Bob					* LOAD BLITTER WITH VALUES
+	Bsr	Wfblit
+	Move.l	a0,Bltapth(a6)				* Mask
+	Move.l	a1,Bltbpth(a6)   			* Source	
+	Move.l	a2,Bltcpth(a6)				* Background
+	Move.l	a5,Bltdpth(a6)				* Designation
+	Move.w	#-2,Bltamod(a6)				* Mask Modula
+	Move.w	#-2,Bltbmod(a6)				* Source Modula
+	Move.w	#Width-(BobWidth*2),Bltcmod(a6)		* Designation Modula
+	Move.w	#Width-(BobWidth*2),Bltdmod(a6)  	* Designation Modula
+	Move.l	d0,Bltcon0(a6)				* Bplcon0
+	Move.l	d1,Bltcon1(a6)				* Bplcon1
+	Move.w	#$ffff,Bltafwm(a6)			* First word mask
+	Move.w	#$0000,Bltalwm(a6)  			* Last word mask
+	Move.w	#((BobHeight*BobDepth)*64)+(BobWidth),Bltsize(a6)  * Blitsize
+	Rts
+
+Wfblit
+	Btst	#14,Dmaconr(a6)				* Dmaconr
+	Bne.s	Wfblit					* Test Blitter State
+	Rts	
+
+
+Replace_Bob
+	Move.l	WorkBuffer,a0			* A
+	Move.l	d7,d6
+	Asr.w	#1,d6				* Divide By 2
+	Mulu.w	#BobSize*BobDepth,d6		* Find Start Address of 
+	Lea	(a0,d6),a0			* Saved Bob Data
+	Move.l	BobAddress,a1			* D
+	Bsr	Wfblit
+	Move.l	a0,Bltapth(a6)		   	* Source
+	Move.l	a1,Bltdpth(a6)		   	* Designation
+	Move.w	#0,Bltamod(a6)			* Source Modula
+	Move.w	#Width-(BobWidth*2),Bltdmod(a6) * Designation Modula
+	Move.l	#$09f00000,Bltcon0(a6)		* Bplcon0
+	Move.l	#00,Bltcon1(a6)			* Bplcon1
+	Move.w	#$ffff,Bltafwm(a6)		* First word mask
+	Move.w	#$ffff,Bltalwm(a6)		* Last word mask
+	Move.w	#((BobHeight*BobDepth)*64)+(BobWidth),Bltsize(a6)  * Blitsize
+	Rts
+
+SaveBob
+	Move.l	BobAddress,a0			* A
+	Move.l	WorkBuffer,a1			* D
+	Move.l	d7,d6
+	Asr.w	#1,d6				* Divide By 2
+	Mulu.w	#BobSize*BobDepth,d6		* Find Start Address of 
+	Lea	(a1,d6),a1			* Saved Bob Data
+	Bsr	Wfblit
+	Move.l	a0,Bltapth(a6)		   	* Source
+	Move.l	a1,Bltdpth(a6)		   	* Designation
+	Move.w	#Width-(BobWidth*2),Bltamod(a6)	* Source Modula
+	Move.w	#0,Bltdmod(a6) 			* Designation Modula
+	Move.l	#$09f00000,Bltcon0(a6)		* Bplcon0
+	Move.l	#00,Bltcon1(a6)			* Bplcon1
+	Move.w	#$ffff,Bltafwm(a6)		* First word mask
+	Move.w	#$ffff,Bltalwm(a6)		* Last word mask
+	Move.w	#((BobHeight*BobDepth)*64)+(BobWidth),Bltsize(a6)  * Blitsize
+	Rts
+
+Gfxlib	Dc.b	"graphics.library",0	
+	Even
+_Gfxbase	Dc.l	0			;LONG WORD TO STORE GFX ADDRESS
+Oldcop		Dc.l	0			;OLD COPPERLIST ADDRESS
+DisplayScreen	Dc.l	0
+WorkScreen	Dc.l	0
+DisplayBuffer	Dc.l	0
+WorkBuffer	Dc.l	0
+BobAddress	Dc.l	0
+Bltcon		Dc.l	0
+
+
+X_pt1		Dc.w 0
+X_pt2		Dc.w 0
+Y_pt1		Dc.w 0
+Y_pt2		Dc.w 0
+
+Xa		Dc.l Xs1
+Xb		Dc.l Xs2
+Xc		Dc.l Xs3
+
+Ya		Dc.l Ys1
+Yb		Dc.l Ys2
+Yc		Dc.l Ys3
+
+Xs1		Dcb.w NumberBobs,0
+Ys1		Dcb.w NumberBobs,0
+
+Xs2		Dcb.w NumberBobs,0
+Ys2		Dcb.w NumberBobs,0
+
+Xs3		Dcb.w NumberBobs,0
+Ys3		Dcb.w NumberBobs,0
+
+
+	Even
+
+Newcop
+	Dc.w	BplCon0,%0011001000000000
+	Dc.w	BplCon1,$0000			; SCROLL VALUE
+	Dc.w	BplCon2,%0000000000000001	; PRIORITIES
+	Dc.w	Bpl1Mod,Width*(Depth-1)		; Modula1
+	Dc.w	Bpl2Mod,Width*(Depth-1)		; Modula2
+	Dc.w	DdfStrt,$0038
+	Dc.w	DdfStop,$00d0		
+	Dc.w	DiwStrt,$2c81
+	Dc.w	DiwStop,$2cc1		
+						
+Planes
+	Dc.w	Bpl1pth
+	Dc.w	$0000,Bpl1ptl
+	Dc.w	$0000,Bpl2pth
+	Dc.w	$0000,Bpl2ptl
+	Dc.w	$0000,Bpl3pth
+	Dc.w	$0000,Bpl3ptl
+	Dc.w	$0000,Bpl4pth
+	Dc.w	$0000,Bpl4ptl
+	Dc.w	$0000,Bpl5pth
+	Dc.w	$0000,Bpl5ptl
+	Dc.w	$0000,Bpl6pth
+	Dc.w	$0000,Bpl6ptl
+	Dc.w	$0000
+
+Sprites						;SPRITES
+	Dc.w	Spr0pth
+	Dc.w	$0000,Spr0ptl
+	Dc.w	$0000,Spr1pth
+	Dc.w	$0000,Spr1ptl
+	Dc.w	$0000,Spr2pth
+	Dc.w	$0000,Spr2ptl
+	Dc.w	$0000,Spr3pth
+	Dc.w	$0000,Spr3ptl
+	Dc.w	$0000,Spr4pth
+	Dc.w	$0000,Spr4ptl
+	Dc.w	$0000,Spr5pth
+	Dc.w	$0000,Spr5ptl
+	Dc.w	$0000,Spr6pth
+	Dc.w	$0000,Spr6ptl
+	Dc.w	$0000,Spr7pth
+	Dc.w	$0000,Spr7ptl
+	Dc.w	$0000
+
+	Dc.w	Color00,$0000,Color01,$0ffa
+	Dc.w	Color02,$0ab0,Color03,$0a80
+	Dc.w	Color04,$0960,Color05,$0730
+	Dc.w	Color06,$0610,Color07,$0500
+
+	Dc.w	Color08,$0000,Color09,$0283
+	Dc.w	Color10,$08f4,Color11,$0095
+	Dc.w	Color12,$0243,Color13,$00ff
+	Dc.w	Color14,$0ff0,Color15,$0f0f
+
+	Dc.w	Color16,$0f00,Color17,$0b00
+	Dc.w	Color18,$0600,Color19,$0F40
+	Dc.w	Color20,$0F80,Color21,$0Fa0
+	Dc.w	Color22,$0Ff0,Color23,$000f
+	Dc.w	Color24,$004f,Color25,$008f
+	Dc.w	Color26,$00ff,Color27,$00f0
+	Dc.w	Color28,$0283,Color29,$0ff0
+	Dc.w	Color30,$0456,Color31,$0f00
+
+	Dc.w	$ffff,$fffe			;END OF COPPERLIST
+
+
+Mask		IncBin	Balls.IntMask-2
+BobGraphics	IncBin	Balls.IntRaw-2
+Sintable	Incbin	Sin
+

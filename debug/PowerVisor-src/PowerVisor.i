@@ -1,0 +1,14 @@
+VERSION		EQU	37
+REVISION	EQU	1782
+DATE	MACRO
+		dc.b	'25.1.93'
+	ENDM
+VERS	MACRO
+		dc.b	'PowerVisor 37.1782'
+	ENDM
+VSTRING	MACRO
+		dc.b	'PowerVisor 37.1782 (25.1.93)',13,10,0
+	ENDM
+VERSTAG	MACRO
+		dc.b	0,'$VER: PowerVisor 37.1782 (25.1.93)',0
+	ENDM

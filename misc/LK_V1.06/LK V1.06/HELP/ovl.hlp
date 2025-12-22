@@ -1,0 +1,198 @@
+[LANGUAGE english; PARENT index; PAGE 15]
+[C;6;B]		The overlays
+[J;1;N]
+  Only the commercial version will have this instruction fully \
+supported. Registred people will receive that version.
+
+  The purpose of overlays is to have really big programs not \
+entirely in memory at a time. The overlay manager will take \
+care of memory allocations and dispositions.
+  To make the main code the smaller than posible, all library \
+hunks which are used only by a specific overlaid unit will \
+be linked into that unit. This will save execution time and \
+space.
+
+  To correctly show you the difference between an overlay \
+hunk and an overlay unit there is a diagram:
+
+  let's say that we have a WITH file which contains:
+
+[B]        OVERLAY
+[B]          palette.o
+          stencil.o
+          brushmodes.o
+[B]        END
+[B]
+  knowing that each object file contains a hunk of code \
+and a hunk of DATA or BSS, the following diagram show \
+you how each file is saved inside the final overlaid \
+executable:
+
+  +-----------------+   Unit 1 (palette.c)
+  |                 |
+  | +-------------+ |     Hunk n
+  | |  HUNK_CODE  | |
+  | +-------------+ |
+  |                 |
+  | +-------------+ |     Hunk n+1
+  | |  HUNK_DATA  | |
+  | +-------------+ |
+  |                 |
+  +-----------------+
+
+  +-----------------+   Unit 2 (stencil.c)
+  |                 |
+  | +-------------+ |     Hunk n+2
+  | |  HUNK_CODE  | |
+  | +-------------+ |
+  |                 |
+  | +-------------+ |     Hunk n+3
+  | |  HUNK_BSS   | |
+  | +-------------+ |
+  |                 |
+  +-----------------+
+
+  +-----------------+   Unit 3 (brushmodes.c)
+  |                 |
+  | +-------------+ |     Hunk n+4
+  | |  HUNK_CODE  | |
+  | +-------------+ |
+  |                 |
+  +-----------------+
+[INDENT 6]
+  (*) where n is the number of hunk is the root part.
+[INDENT]
+  Of course, each hunk of CODE, DATA and BSS may have some \
+attached hunks of DEBUG, SYMBOL and RELOCation. If you \
+need to refer a hunk in overlay, you just need its unit \
+number.
+
+  The overlay section of lk does not follow the way it was \
+designed by Commodore. No tree has to be respected, every unit \
+can call every other unit, lk will take care of that. Calls to an \
+external module can be done with a JSR/JMP and BSR/BRA \
+instructions as well. lk will automatically generates the overlay \
+tables needed to permit those calls (If you used BSR/BRA \
+assembly instructions, you will probably need the use of the ALV \
+command.)
+  Note that calls from an overlaid hunk to any of the root hunks \
+is just part of the relocation informations. Only calls from the \
+root to the overlaid units or calls from overlaid units to other \
+overlaid units generate overlay tables.
+  An overlay call is very long and you MUST avoid them in loops. \
+It actually includes around 20 assembly instructions. To ensure \
+faster calls, you should use the SMALLCODE command. This will \
+avoid the research of the CODE hunk to call.
+  An overlay unit may consist of DATA only. In that case, \
+an access will be granted only after a call to the overlay \
+handler loader.
+  After a call returns from an external function, the called \
+funtion is no longer residing in memory. No direct access can \
+be realised (Even if that function is keept in memory by the \
+default overlay handler.) This means no pointer on static \
+data can be returned from an overlaid hunk. Note that \
+the special NODATAOVERLAID command can be used to enable this \
+kind of programming. Have a look to the instruction \
+NODATAOVERLAID to see some examples.
+  You may force all overlaid hunks to be loaded at a time \
+with a call to the 'ovl_load' function.
+
+  If you are linking C objects which access their data in an \
+unknown way, you may take the risk to have problems with \
+those data because they are no more available after the \
+last return from an overlaid function. To prevent that \
+problem the NODATAOVERLAID instruction will move all \
+DATA and BSS hunks into the main program.
+  Note: this is required if you use a small memory model (?!?) \
+But lk will automatically handle the data displacement and \
+NODATAOVERLAID use not necessary.
+
+  When loaded with the default overlay handler, hunks \
+are NOT linked like they are with LoadSeg() of AmigaDOS. The \
+segments have height bytes at the beginning with the size \
+and the 68000 pointer to the next segment.
+  Each unit is a new linked list (Units are never linked \
+together.)
+
+  The available functions from the default overlay handler are \
+listed and explained below. Those are available into the \
+'overlay.h' header.
+[5]
+    hunk_pointer _ovl_load(unit_number)
+
+    void *ovl_load(long);
+[INDENT 4; 1]
+      The parameter is the number of the unit to be loaded. \
+This call will increase the access counter by one. This \
+function might be called to ensure the physical presence \
+of a unit in memory, especially if that unit is only \
+composed of data.
+      The returned pointer is the startup to the first hunk of \
+that overlay unit. This is a normal 68000 pointer, not a BCPL.
+      If you call this function with -1, all units will be loaded \
+in memory and then available at any time. In this case this \
+function returns DOSTRUE when no error occured, otherwise \
+DOSFALSE. To know a unit pointer you will have to call \
+'ovl_load' again with a specific unit number. A call to \
+'ovl_release' enable the system to suppress the lock.
+[INDENT; 5]
+    success _ovl_release(unit_number)
+
+    long ovl_release(long);
+[INDENT 4; 1]
+      Release the specified unit from its lock. This function reduce \
+the access counter by one, but does not free the corresponding units \
+memory, even the counter drop to zero. The free is realised with the \
+'ovl_dispatch' function.
+      If you need a data hunk temporary in memory, you may call the \
+'ovl_load' function and then the 'ovl_release' and 'ovl_dispatch' \
+to free it when you do not need it any longer.
+[INDENT; 5]
+    success _ovl_dispatch(unit_number)
+
+    long ovl_dispatch(long);
+[INDENT 4; 1]
+      Try to free the specified unit from memory. It only works \
+when the access counter is null. You might pass -1 as parameter \
+to discard all units which can actually be freed.
+[INDENT; 5]
+    success _ovl_freehook(free_func)
+
+    long ovl_freehook(void (*)(long));
+[INDENT 4; 1]
+      When the overlay handler needs to load a new hunk, it may \
+fails with the memory allocation. Then it will free all memory \
+buffers reserved for other unused units. If the allocation \
+fails again a call to a user function is processed.
+      If that function is able to free some memory, it will return \
+and the overlay handler will try again to load the needed unit. \
+If it does not work a second call will be processed to the \
+user function... and so on. Each new call to the user function \
+will be done with an incremented parameter starting from null. \
+On zero the user should free unused data, on one it should free \
+every thing it can and on 2 it should quit on an 'out of memory' \
+error (except if the unit is not necessary...)
+      The overlay handler will call that function with -1 if it \
+has a problem loading the unit (AmigaDOS error.)
+      If no user function is defined and the new hunk can not be \
+loaded, the function 'ovl_call' will return with all registers \
+unchanged (including CCR) giving the impression of an empty call.
+
+      Note: the parameter is given in D0 and on the stack.
+[INDENT]
+
+  The overlay handler program is given with this product \
+to enable programmers to make mofications and eventually \
+transform it completly. See also the instruction OVERLAYOBJECT \
+for more informations.
+[INDENT]
+  See also:
+[L;3][LINK alv]			    ALV
+[LINK autooverlay]		    AUTOOVERLAY
+[LINK filename]			    <filename>
+[LINK nodataoverlaid]		    NODATAOVERLAID
+[LINK nospecialdebug]		    NOOVLDEBUG
+[LINK overlay]			    OVERLAY
+[LINK overlayobject]		    OVERLAYOBJECT
+[LINK shortreloc]		    SHORTRELOCOVERLAY
+[5; LINK about; GOTO address]	    Become Registred

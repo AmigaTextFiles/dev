@@ -1,0 +1,135 @@
+# XLIST
+XList is a tool to read and analyze AmigaDOS binary files (only object and 
+library modules, no load modules). It lists external definitions 
+and references.
+
+XList can only be started from the Shell or CLI. The output is sent to 
+standard output.
+
+XList can be used during the development of AmigaOS applications: It does not 
+change any of the specified files.
+
+The format of every output format is described in the EXAMPLE.
+
+## FORMAT
+[NOHEAD] [NOVERSION] [NODUMPDATE] [NOFILEDATE] [NODATES][LIST \<list_file\>] [{\<object_file\>}... ]
+
+## TEMPLATE
+NOHEAD/S,NOVERSION/S,NODUMPDATE/S,NOFILEDATE/S,NODATES/S,LIST=/K,FILES/M
+
+**NOHEAD** is a switch that suppresses the complete header information at the 
+beginning of the output. 
+
+**NOVERSION** switches off the version numner and the date after the application 
+name in the header. NOVERSION has no meaning if set together with NOHEAD.
+
+**NODUMPDATE** is a switch that suppresses the dump date from the header 
+information at the beginning of the output. NODUMPDATE has no meaning if 
+set together with NOHEAD.
+
+**NOFILEDATE** is a switch similar to NODUMPDATE, but suppresses the file date in 
+the output header. NOFILEDATE has no meaning if set together with NOHEAD.
+
+**NODATES** is a switch that combines NODUMPDATE and NOFILEDATE. NODATES has no 
+meaning if set together with NOHEAD.
+
+The files to be analyzed can be specified by to methods:
++ using a file with a list of all files, the name of the list file must be 
+specified by the keyword **LIST**
++ specifying all files in the command line
+
+A combination of both methods in one call is allowed.
+
+***NOTE:*** The sequence of the files will influence the result. If both 
+methods are used the files in the list_file will be analyzed first, than the 
+files in the command line will follow.
+
+***NOTE:*** If any file specification is preceeded by a '-' (minus sign) only 
+the external definitions of the file will found in the output and - if not 
+used with parameter NOHEAD - the file wil be marked with a (DEFONLY ).
+
+## EXAMPLE:
+Execute a XList consisting of two modules: 
++ xdate.o assembled from an assembler source 'xdate.asm' and 
++ getdate.o as a compilation of the 'getdate.c' source.
+
+Both object modules together build a small application called 'xdate'. 
+The program itself does not need any startup code, 'xdate.o' also creates the 
+runtime environment: the required _DOSBase is put into a BSS hunk. The entry point of 'xdate.o' is exported as '_start' and is found automatically. 
+
+<pre>
+1> XLIST obj/xdate.o obj/getdate.o nodumpdate
+Program : xlist 1.0 (8.12.2023)
+Files   : (  TYPE  ) |  SIZE  |       DATE         | NAME
+          -----------+--------+--------------------+-----------
+          (COMPLETE) |    800 | 08-Dec-23 13:32:43 | obj/xdate.o
+          (COMPLETE) |  13952 | 08-Dec-23 13:31:46 | obj/getdate.o
+
+=================================================================
+FILE:     size  =$000000C8 #units=        1            obj/xdate.o
+-----------------------------------------------------------------
+  UNIT:                    #hunks=        3            xdate.asm
+    CODE: start =$00000028 size  =$0000001C ---------- text
+          count =        1                  EXT_REF16  _getDate
+          offset=$00000000 pos   =$00000028 EXT_DEF    _start
+    DATA: start =$00000260 size  =$00000004 ---------- __MERGED
+    BSS : start =$000002C4 size  =$00000001 ---------- __MERGED
+          offset=$00000000 pos   =$000002C4 EXT_DEF    _DOSBase
+=================================================================
+FILE:     size  =$00000DA0 #units=        1            obj/getdate.o
+-----------------------------------------------------------------
+  UNIT:                    #hunks=        2            getdate.c
+    CODE: start =$00000028 size  =$0000001F ---------- text
+          count =        2                  EXT_DREF16 _DOSBase
+          count =        2                  EXT_REF16  _strcat
+          offset=$00000000 pos   =$00000028 EXT_DEF    _getDate
+    DATA: start =$00003678 size  =$00000001 ---------- __MERGED
+</pre>
+
+The part after the header is described.
+
+**FILE** contains three info items:
+- the size in hexadecimal long
+- the number of units, in object modules the number is regularly 1
+- the name of the FILE
+
+**UNIT** contains two info items:
+- the number of hunks, in most cases the value is one, two or three
+- the name of the UNIT, generally this is the name of the source file
+
+**CODE**, **DATA** or **BSS** contain one header line and optionally definition and / or reference lines
+
+  - Header line is always available and contains three info items:
+    - start is the offset from begin of file
+    - size of the CODE, DATA or BSS hunk 
+    - name of the CODE, DATA or BSS hunk
+  - Reference line is optional and contains three info items:
+    - the count is the quantity how often the current reference must be satisfied
+    - the type of the reference, possible values are:
+      - EXT_REF32:  32 bit reference
+      - EXT_REF16:  16 bit reference
+      - EXT_REF8:   8 bit reference
+      - EXT_DREF32: 32 bit data reference
+      - EXT_DREF16: 16 bit data reference
+      - EXT_DREF8:  8 bit data reference
+      - EXT_COMMON: reference in COMMON block (? ... never seen this)
+      - PPC_REF26:  PPC reference (only in WarpUp / WarpOS modules)
+    - reference name
+  - Definition line is optional as well and contains four info items:
+    - the offset from start of hunk
+    - the pos is the position from start of file
+    - the type of the definition, possible values are:
+      - EXT_DEF:    relocatable definition
+      - EXT_ABS:    absolute definition, no relocation
+      - EXT_RES:    resident definition, obsolete since Amiga OS 2.x
+      - EXT_DEFCOMMON: definition of COMMON block or item in COMMON block (? ... never seen this; first described in NDK3.1 assembler header file)
+    - definition name
+
+***NOTE:*** Hunk names often have default names; the SAS/C compiler normally names CODE hunks as 'text', DATA and BSS hunks are named '__MERGED'. In 
+assembler sources the hunk name is set with the SECTION or CSECT directive.
+
+***NOTE:*** The size is always specified in hexadecimal long like  the values in 
+the AmigaDOS binary files. The size value in the header is in decimal byte: 
+ex.: obj/xdate.o has a file size of $C8 LONGWORDs, that is 200 in decimal LONGWORDs, and 800 in decimal BYTEs. 
+
+***NOTE:*** If the analyzed file is a link library module, the type names start with 'LIB_' instead of 'EXT_'.

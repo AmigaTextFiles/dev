@@ -1,0 +1,18 @@
+MODULE	'exec/nodes'
+
+OBJECT ExtendedNode|XLN
+	Succ:PTR TO LN,
+	Pred:PTR TO LN,
+	Type:UBYTE,
+	Pri:BYTE,
+	Name:PTR TO CHAR,
+	Subsystem:UBYTE,
+	Subtype:UBYTE,
+	Library:LONG,
+	Init:LONG
+
+CONST	SS_GRAPHICS=2,
+		VIEW_EXTRA_TYPE=1,
+		VIEWPORT_EXTRA_TYPE=2,
+		SPECIAL_MONITOR_TYPE=3,
+		MONITOR_SPEC_TYPE=4

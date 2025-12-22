@@ -1,0 +1,9 @@
+_LVOOpenFiles               EQU     -30
+_LVOCloseFiles              EQU     -36
+_LVOWriteHeaders            EQU     -42
+_LVOWriteVars               EQU     -48
+_LVOWriteData               EQU     -54
+_LVOWriteStrings            EQU     -60
+_LVOWriteChipData           EQU     -66
+_LVOWriteCode               EQU     -72
+_LVOConfig                  EQU     -78

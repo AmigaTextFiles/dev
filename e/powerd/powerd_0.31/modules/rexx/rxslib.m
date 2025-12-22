@@ -1,0 +1,74 @@
+MODULE	'rexx/storage'
+
+#define RXSNAME  'rexxsyslib.library'
+#define RXSDIR   'REXX'
+#define RXSTNAME 'ARexx'
+
+OBJECT RxsLib
+	Node:Lib,
+	Flags:UBYTE,
+	Shadow:UBYTE,
+	SysBase:APTR,
+	DOSBase:APTR,
+	IeeeDPBase:APTR,
+	SegList:LONG,
+	NIL:LONG,
+	Chunk:LONG,
+	MaxNest:LONG,
+	NULL:PTR TO NexxStr,
+	FALSE:PTR TO NexxStr,
+	TRUE:PTR TO NexxStr,
+	REXX:PTR TO NexxStr,
+	COMMAND:PTR TO NexxStr,
+	STDIN:PTR TO NexxStr,
+	STDOUT:PTR TO NexxStr,
+	STDERR:PTR TO NexxStr,
+
+	Version:PTR TO UBYTE,
+
+	TaskName:PTR TO UBYTE,
+	TaskPri:LONG,
+	TaskSeg:LONG,
+	StackSize:LONG,
+	RexxDir:PTR TO UBYTE,
+	CTABLE:PTR TO UBYTE,
+	Notice:PTR TO UBYTE,
+
+	RexxPort:MP,
+	ReadLock:UWORD,
+	TraceFH:LONG,
+	TaskList:LH,
+	NumTask:WORD,
+	LibList:LH,
+	NumLib:WORD,
+	ClipList:LH,
+	NumClip:WORD,
+	MsgList:LH,
+	NumMsg:WORD,
+	PgmList:LH,
+	NumPgm:WORD,
+
+	TraceCnt:UWORD,
+	avail:WORD
+
+CONST	RLFB_TRACE=RTFB_TRACE,
+		RLFB_HALT=RTFB_HALT,
+		RLFB_SUSP=RTFB_SUSP,
+		RLFB_STOP=6,
+		RLFB_CLOSE=7
+
+CONST	RLFMASK=1<<RLFB_TRACE|1<<RLFB_HALT|1<<RLFB_SUSP
+
+CONST	RXSCHUNK=1024,
+		RXSNEST=32,
+		RXSTPRI=0,
+		RXSSTACK=4096
+
+FLAG	CT_SPACE,
+		CT_DIGIT,
+		CT_ALPHA,
+		CT_REXXSYM,
+		CT_REXXOPR,
+		CT_REXXSPC,
+		CT_UPPER,
+		CT_LOWER

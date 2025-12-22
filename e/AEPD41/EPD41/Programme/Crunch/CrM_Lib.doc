@@ -1,0 +1,499 @@
+TABLE OF CONTENTS
+
+CrM.library/cmAllocCrunchStructA
+CrM.library/cmCheckCrunched
+CrM.library/cmCrunchData
+CrM.library/cmCryptData
+CrM.library/cmDecrunch
+CrM.library/cmFreeCrunchStruct
+CrM.library/cmProcessCrunchStructA
+CrM.library/cmProcessPW
+
+CrM.library/cmAllocCrunchStructA             CrM.library/cmAllocCrunchStructA
+
+    NAME
+	cmAllocCrunchStructA -- Allocate a crunchstruct. (V4)
+
+    SYNOPSIS
+	crunchstruct = cmAllocCrunchStructA (taglist);
+	D0             -78                   A0
+
+	struct cmCrunchStruct *cmAllocCrunchStructA
+	    (struct TagItem *taglist);
+
+	crunchstruct = cmAllocCrunchStruct (firsttag, ...);
+
+	struct cmCrunchStruct *cmAllocCrunchStruct (Tag, ...);
+
+    FUNCTION
+	Allocates a cmCrunchStruct structure needed by cmCrunchData().  See
+	the docs to cmProcessCrunchStructA() for more details.  This is a
+	last minute add on to the library, so don't get confused.  You should
+	use cmAllocCrunchStructA() and cmFreeCrunchStruct() instead of
+	cmProcessCrunchStructA() because they are easier to use, but I
+	implemented these functions too late for the example sources, so they
+	still use cmProcessCrunchStructA().
+
+    INPUTS
+	taglist - pointer to an array of tags
+
+    TAGS
+	See cmProcessCrunchStructA() for the tags.
+
+    RESULT
+	crunchstruct - pointer to a cmCrunchStruct structure or Null for
+	               failure.
+
+    BUGS
+	Well, it's not really a bug, but you should not change the cmcr_Algo
+	field yourself.  This means that you should free your old
+	crunchstruct and allocate a new one also to swtich a minor thing like
+	password encryption on or off.  This is for future compatibility.  It
+	is safe to change the flags in the cmcr_Algo field between two calls
+	to cmCrunchData() but it's not a nice way.  _NEVER_ change the
+	crunchalgorithm this way!
+
+    SEE ALSO
+	cmCrunchData(), cmFreeCrunchStruct(), cmProcessCrunchStructA()
+
+CrM.library/cmCheckCrunched                       CrM.library/cmCheckCrunched
+
+    NAME
+	cmCheckCrunched -- Check whether file is crunched or not.
+
+    SYNOPSIS
+	type = cmCheckCrunched (dataheader);
+	D0     -42              A0
+
+	ULONG cmCheckCrunched (struct DataHeader *);
+
+    FUNCTION
+	Checks the dh_ID field of the DataHeader to determine which crunch
+	algorithm was used.  See CrM_lib.h for the type.  Currently the
+	following are supported (lower 4 Bits of D0):
+	    cm_Normal  - File was crunched with CrM-Normal algorithm
+	    cm_LZH     - File was crunched with LZ-Huffman algorithm
+	additionally these Flags may be set:
+	    cmF_Sample - additionally the Sample-Mode was used
+	    cmF_PW     - additionally the Password Encryption was enabled
+
+	This Function check only the dh_ID field of the DataHeader, you don't
+	need to initialize the rest of it.
+
+	You need not to call this funtion when you want to decrunch some data
+	but it is very useful as you don't need to load the whole file.
+
+    INPUTS
+	DataHeader - pointer to a DataHeader structure
+
+    RESULT
+	type - type of cruncher used to compress the data, or NULL if the
+	       data is not crunched or if the header is not recognized.
+
+    SEE ALSO
+	cmDecrunch(), cmProcessCrunchStructA()
+
+CrM.library/cmCrunchData                             CrM.library/cmCrunchData
+
+    NAME
+	cmCrunchData() -- Crunch some piece of data. (V4)
+
+    SYNOPSIS
+	newlen = cmCrunchData (crunchstruct);
+	D0       -72           A0
+
+	ULONG cmCrunchData (struct cmCrunchStruct *);
+
+    FUNCTION
+	Crunch some piece of data.  All details have to be initialized in the
+	cmCrunchStruct structure allocated with cmProcessCrunchStructA().
+
+	The fields and their meanings:
+	  cmcr_Src         - (APTR)
+	                     Points to the data to be crunched.  Has to be
+	                     initialized before calling cmCrunchData().
+	  cmcr_SrcLen      - (ULONG)
+	                     This is the lenght of the source data region.
+	                     Has to be initialized before calling
+	                     cmCrunchData().
+	  cmcr_Dest        - (APTR)
+	                     Points to the buffer for the crunched data.  You
+	                     may use the Source memory region as Destination
+	                     (only one buffer needed), then you have to set
+	                     the cmF_Overlay flag.
+	  cmcr_DestLen     - (ULONG)
+	                     This is the lenght of the Destination memory
+	                     region.  If the crunched data doesn't fit into
+	                     the buffer cmCrunchData() will return with an
+	                     error:  newlen = 0, cmcr_QuitFlag = "n"
+	  cmcr_DataHdr     - (struct DataHeader *)
+	                     Pointer to a 14 bytes long array.  The
+	                     dataheader for the file will be generated there.
+	                     Set this value to NULL if you don't want a
+	                     dataheader.
+	  cmcr_DisplayHook - (struct Hook *)
+	                     The crunch algorithm will call this hook from
+	                     time to time.  You can vary the between two
+	                     calls with the cmcr_DisplayStep variable.  Set
+	                     cmcr_DisplayHook to NULL if you don't need a
+	                     hook.  Parameters are as follows:
+	                       A0 - (struct Hook *) your hook
+	                       A2 - (struct cmCrunchStruct *) your
+	                            crunchstructure
+	                       A1 - (struct cmCurrentStats *) structure
+	                            telling you how far the crunching process
+	                            has advanced.  The structure looks like
+	                            this:
+	                              cmcu_ToGo - number of bytes remaining
+	                                          to be processed.
+	                              cmcu_Len  - len of currently crunched
+	                                          data.  In the LZ-Huffman
+	                                          mode this value will be to
+	                                          big especially with short
+	                                          files.
+	                     You have to return TRUE or FALSE.  TRUE means
+	                     that you want to continue crunching, FALSE tells
+	                     the crunch algorithm that you want to abort.
+	  cmcr_DisplayStep - (UWORD)
+	                     Sets the number of bytes processed between two
+	                     calls of the hook.  Default is $400 = 1024.
+	The following fields are *READONLY*:
+	  cmcr_Offset      - (UWORD)
+	                     Offset you want to crunch the data with.  Bigger
+	                     offsets produce better results but also longer
+	                     crunch times.  Maximum is $7ffe.  Set this value
+	                     with cmProcessCrunchData().
+	  cmcr_HuffSize    - (UWORD)
+	                     Sets the size of the huffman buffer in KBytes
+	                     (only valid if you use the cm_LZH algorith).
+	                     Default is 16.
+	  cmcr_Algo        - (UWORD)
+	                     Determines which algorithm you want to use.
+	                     Values may be (stored in lower 4 bits):
+	                       cm_Normal    - File was crunched with
+	                                      CrM-Normal algorithm.
+	                       cm_LZH       - File was crunched with
+	                                      LZ-Huffman algorithm.
+	                     in addition these Flags may be set (def=FALSE):
+	                       cmF_Sample   - additionally the Sample-Mode
+	                                      was used.
+	                       cmF_PW       - additionally the Password
+	                                      Encryption was enabled.
+	                       cmF_Overlay  - Source and Dest memory region
+	                                      overlap.
+	                                      (cmcr_Dest <= cmcr_Src) has to
+	                                      be true in this case.
+	                       cmF_LEDFlash - Power LED flashes while
+	                                      crunching.
+	  cmcr_MaxOffset   - (ULONG)
+	                     Offset for which the buffers have been
+	                     allocated.
+	  cmcr_RealOffset  - (ULONG)
+	                     Offset which is used for current data.  This is
+	                     either cmcr_MaxOffset or cmcr_SrcLen.
+	  cmcr_MinSecDist  - (ULONG)
+	                     Minimum Security Distance:  Distance that has to
+	                     be kept between source and destination buffer
+	                     (when they overlap) to decrunch savely.
+	  cmcr_CrunchedLen - (ULONG)
+	                     Size of crunched data. NULL if crunching failed.
+	  cmcr_QuitFlag    - (CHAR)
+	                     Reason for returning:
+	                     NULL - no error occurred.
+	                     "a"  - crunching was aborted (display hook
+	                            returned FALSE).
+	                     "n"  - not able to crunch: Destination buffer is
+	                            to small.
+	  cmcr_LEDFlashFlag - (BOOLEAN)
+	                     Has the same function as the cmF_LEDFlash flag
+	                     but this field is used by the crunchalgorithm.
+	                     You may change this field _ONLY_ from within the
+	                     display hook (while crunching).
+
+	NOTE: cmcr_Src and cmcr_Dest have to be even addresses.
+
+    INPUTS
+	crunchstruct - pointer to a struct cmCrunchStruct allocated with
+	               cmProcessCrunchStructA().
+                     
+    RESULT
+	newlen - Lenght of the crunched data or NULL if crunching failed.
+
+    SEE ALSO
+	cmProcessCrunchStructA()
+        
+CrM.library/cmCryptData                               CrM.library/cmCryptData
+
+    NAME
+	cmCryptData() -- (De-)crypt some piece of data with a password. (V4)
+
+    SYNOPSIS
+	action = cmCryptData (datahdr, data, password, action);
+	D0       -60          A0       A1    A2        D0
+
+	ULONG cmCryptData (struct DataHeader *, APTR, CHAR *, ULONG);
+
+    FUNCTION
+	Crypts or decrypts the data provided.  In either case you have to
+	provide the data and the dataheader.
+
+	Action determines how this function behaves.  If action is Null the
+	data will switch its state, i.e.  from encrypted to normal or vice
+	versa.  cm_EnCrypt will lead to some crypted piece of data, when the
+	data is already crypted nothing is done.  cm_DeCrypt behaves in the
+	same way:  when the data isn't crypted at all nothing is done.
+
+	Password lets you specify a password yourself.  If the password is
+	Null, an empty string or the wrong one for decryption and reqtools
+	requester will appear.  When decrypting the internal list is scanned
+	first for the right password before displaying a requester.  The
+	maximum size for passwords is 80 chars plus the terminating zero.
+
+	In case of decryption each password you enter will be added to the
+	internal list of passwords.  This list is used only for decryption
+	and is scanned at every attempt to decrypt something for the right
+	password.  So you only have to type your password once.  When the
+	entered password is already present in the list another requetser
+	appears allowing you to remove this or all passwords from the list.
+
+	To encrypt some data you have to enter you password twice.  This is
+	to prevent mistakes as you cannot read what you type.  If you provide
+	an empty string as password cmCryptData() will put the string the
+	user entered there.  Thus password has to point to an area which is
+	at least 84 bytes long.
+
+	The return values reflect what was done.  Null indicates that nothing
+	was done due to an error (not packed at all) or due to the data
+	already being in the wanted state.  cm_EnCrypt/cm_Decrypt means that
+	the data was en-/decrypted.
+
+    INPUTS
+	datahdr  - pointer to a dataheader structure.
+	data     - pointer to your crunched (and crypted) data.
+	password - pointer to a (empty) string or Null.
+	action   - cm_EnCrypt, cm_Decrypt or Null to switch the state.
+
+    RESULT
+	action - action that was performed (cm_EnCrypt, cm_DeCrypt or Null).
+
+    SEE ALSO
+	cmCrunchData(), cmDecrunch()
+
+CrM.library/cmDecrunch                                 CrM.library/cmDecrunch
+
+    NAME
+	cmDecrunch() -- Decrunch some piece of data.
+
+    SYNOPSIS
+	newdest = cmDecrunch (source, dest, datahdr);
+	D0        -48         A0      A1    A2
+
+	APTR cmDecrunch (APTR, APTR, struct DataHeder *);
+
+    FUNCTION
+	This function decrunches some piece of data to any location you want.
+	It checks whether the data is crunched or not and will choose the
+	right decruncher.  If the data was packed using the Sample-Mode it is
+	automatically decrypted.  If you used password encryption the library
+	internal list is scanned first for a matching password.  In case of
+	failure a reqtools requester is displayed to get the right password.
+	If you cancel it decrunching fails.
+
+	The first 14 bytes of a data file are the data header you need to
+	decrunch the data, so there is no need to create a special one.
+
+	After decrunching newdest points to the start of the decrunched data.
+	Normally this equals dest, but when dh_MinSecDist in the dataheader
+	is not zero there is some additional memory needed for decrunching.
+	In this case newdest points dest + dh_MinSecDist.  This is also the
+	reason why you have to provide a dh_OriginalLen + dh_MinSecDist large
+	destination area for save decrunching.
+
+	source and dest areas may overlap where source has to be smaller or
+	equal to dest.  This is not the case when source and dest areas do
+	not overlap.  The crunched data may not be longer than the decrunched
+	data.  This is not very often the case (and silly, too) but be
+	careful!
+
+    INPUTS
+	source  - pointer to crunched data (has to be even!)
+	dest    - pointer to buffer for decrunched (original) data
+	datahdr - pointer to a DataHeader structure
+
+    RESULT
+	newdest - pointer to beginning of decrunched data of Null for failure
+	          NOTE: newdest may be different from dest when the
+	                dh_MinSecDist field is not zero.
+
+    SEE ALSO
+	cmCheckCrunched(), cmCrunchData()
+
+CrM.library/cmFreeCrunchStruct                 CrM.library/cmFreeCrunchStruct
+
+    NAME
+	cmFreeCrunchStruct -- Free a crunchstruct. (V4)
+
+    SYNOPSIS
+	cmFreeCrunchStruct (crunchstruct);
+	-84                 A0
+
+	VOID cmFreeCrunchStruct (struct cmCrunchStruct *);
+
+    FUNCTION
+	Frees a cmCrunchStruct structure needed by cmCrunchData().  See the
+	docs to cmProcessCrunchStructA() for more details.  This is a last
+	minute add on to the library, so don't get confused.  You should use
+	cmAllocCrunchStructA() and cmFreeCrunchStruct() instead of
+	cmProcessCrunchStructA() because they are easier to use, but I
+	implemented these functions too late for the example sources, so they
+	still use cmProcessCrunchStructA().
+
+    INPUTS
+	crunchstruct - pointer to a cmCrunchStruct struture
+
+    RESULT
+	no result.
+
+    SEE ALSO
+	cmCrunchData(), cmAllocCrunchStructA(), cmProcessCrunchStructA()
+
+CrM.library/cmProcessCrunchStructA         CrM.library/cmProcessCrunchStructA
+
+    NAME
+	cmProcessCrunchStructA -- Allocate/Free a crunchstruct. (V4)
+
+    SYNOPSIS
+	crunchstruct = cmProcessCrunchStructA
+	                                     (crunchstruct, action, taglist);
+	D0             -66                    A1            D0      A0
+
+	APTR cmProcessCrunchStructA (struct cmCrunchStruct *, ULONG,
+	    struct TagItem *taglist);
+
+	crunchstruct = cmProcessCrunchStruct (crunchstruct, action,
+	    firsttag, ...);
+
+	APTR cmProcessCrunchStruct (struct cmCrunchStruct *, ULONG,
+	    Tag, ...);
+
+    FUNCTION
+	Allocates or frees a cmCrunchStruct structure needed by
+	cmCrunchData().  action has to be either cm_AllocStruct or
+	cm_FreeStruct.
+
+	action=cm_AllocStruct allocates a cmCrunchStruct and crunchstruct may
+	be of any value.  You may control the crunchalgorithm, the
+	crunchoffset and the huffman buffer size (in LZ-Huffman mode) with
+	tags (see below).  You may use the same crunchstruct for several
+	calls to cmCrunchData() but you may *NOT* change any of the readonly
+	fields.  So you have to free the crunchstruct and allocate another
+	one when you want to change the crunchalgorithm or the crunchoffset.
+	The allocated crunchstruct is returned in D0.  When you don't have
+	enough memory for the buffers needed, that is about 200-400K
+	depending on algorithm and offset, cmProcessCrunchStructA() will fail
+	and return Null.
+
+	When you choose action=cmFreeStruct you have to provide a
+	crunchstruct but no tags are taken care of.  All allocated buffers
+	will be freed.  In this case cmProcessCrunchStructA() will always
+	return Null.
+
+    INPUTS
+	crunchstruct - pointer to a cmCrunchStruct struture
+	               (action=cm_FreeStruct)
+	action       - type of operation: cm_AllocStruct or cm_FreeStruct
+	taglist      - pointer to an array of tags (action=cm_AllocStruct)
+
+    TAGS
+	CMCS_Algo     - (UWORD)
+	                Determines which algorithm you want to use.  Values
+	                may be (stored in lower 4 bits):
+	                  cm_Normal    - File was crunched with CrM-Normal
+	                                 algorithm.
+	                  cm_LZH       - File was crunched with LZ-Huffman
+	                                 algorithm.
+	                in addition these Flags may be set (default=FALSE):
+	                  cmF_Sample   - Use the Sample-Mode.
+	                  cmF_PW       - Enable Password Encryption.
+	                  cmF_Overlay  - Source and Dest memory region
+	                                 overlap. (cmcr_Dest <= cmcr_Src) has
+	                                 to be true in this case.
+	                  cmF_LEDFlash - Power LED flashes while crunching.
+	                Default is cm_LZH.
+	CMCS_Offset   - (UWORD)
+	                Offset you want to crunch the data with.  Bigger
+	                offsets produce better results but also longer crunch
+	                times.  Default and maximum is $7ffe.
+	CMCS_HuffSize - (UWORD)
+	                Sets the size of the huffman buffer in KBytes (only
+	                valid if you use the cm_LZH algorith).  Default is
+	                16.
+
+    RESULT
+	crunchstruct - pointer to a cmCrunchStruct structure or Null for
+	               failure when action=cm_AllocStruct.
+
+    BUGS
+	Well, it's not really a bug, but you should not change the cmcr_Algo
+	field yourself.  This means that you should free your old
+	crunchstruct and allocate a new one also to swtich a minor thing like
+	password encryption on or off.  This is for future compatibility.  It
+	is safe to change the flags in the cmcr_Algo field between two calls
+	to cmCrunchData() but it's not a nice way.  _NEVER_ change the
+	crunchalgorithm this way!
+
+    SEE ALSO
+	cmCrunchData()
+
+CrM.library/cmProcessPW                               CrM.library/cmProcessPW
+
+    NAME
+	cmProcessPW() -- Add/remove a pw to/from the internal list. (V4)
+
+    SYNOPSIS
+	action = cmProcessPW (password, action);
+	D0       -54          A0        D0
+
+	ULONG cmProcessPW (CHAR *, ULONG);
+
+    FUNCTION
+	Add or remove a password to/from the library internal list.
+
+	The password may be upto 80 bytes long plus the terminating zero.
+	Supplying Null instead a pointer to the password will display a
+	reqtools requester to let you enter the password.
+
+	To add a password to the list set action to cm_AddPW.  When the
+	password is already in the list nothing will happen and Null is
+	returned, otherwise the password will be added and you get cm_AddPW
+	as resultcode.
+
+	If you set action to cm_RemovePW the given password will be searched
+	in the list and removed from it.  When the password is not in the
+	list Null is returned, otherwise cm_RemovePW.
+
+	action=cm_RemoveAll will clear the whole list.  You always get
+	cm_RemoveAll as resultcode.
+
+	To switch the state of the password set action to Null.  This means
+	that when the given password is already in the list it will be
+	removed from it, otherwise it is added to the list.  The return value
+	reflects the action that was done.
+
+	A returned Null either means that nothing was done or that there
+	occured an error as no reqtools.library or not enough memory
+	available.
+
+    INPUTS
+	password - pointer to the password to process or Null to invoke a
+	           reqtools requester.
+	action   - type of operation: cm_AddPW, cm_RemovePW, cm_RemoveAll or
+	           Null.
+
+    RESULT
+	action   - operation that was done.
+
+    SEE ALSO
+	cmCryptData(), cmDecrunch()
+
+

@@ -1,0 +1,1245 @@
+;DEVICE 16C84
+;developer version 0.1
+;****************************************
+;*  ALFANUMERIC LCD DISPLAY CONTROLLER  *
+;*             6bit version             *
+;*                                      *
+;*      (c)1.9.1997 Tomas Beyer         *
+;****************************************
+;use with X-Tal 3.2768 Mhz and
+;TM162D (16x2 DOT MATRIX Display)
+;
+;comment or uncomment following lines to modify source
+
+;ENGLISH     EQU     1  ; for english version of all messages
+
+
+
+
+;*** ERROR CODES ***
+
+;0-4 EEPROM routine errors
+
+ERR_POR     EQU     5                   ; power on reset
+
+            INCLUDE "PIC:Sources/16C84.DEF"
+            INCLUDE "PIC:Sources/NEWINST.DEF"
+
+#define     RBANK1  bsf STATUS,b_RP0
+#define     RBANK0  bcf STATUS,b_RP0
+#define     DI      bcf INTCON,b_GIE
+#define     EI      bsf INTCON,b_GIE
+#define     TIME    FLAGS,b_TIME
+#define     DAYS    FLAGS,b_DAY
+
+#define     SCL     PORTB,b_SCL
+#define     SDA     PORTB,b_SDA
+
+#define     CARRY   STATUS,b_CARRY
+#define     SETTIME FLAGS,b_SETTIM
+
+#define     NOSEC   FLAGS2,b_NOSEC
+#define     NOCURS  FLAGS2,b_NOCURS
+
+
+b_ATC       EQU     1
+b_ATD       EQU     0
+
+
+LCD_RESET   EQU     b'00101000'
+
+CWD_WR      EQU     b'10100000'
+CWD_RD      EQU     b'10100001'
+
+ALLKEYS     EQU     b'00011100'
+
+MAXPAR      EQU     8
+
+LSTACK      EQU     0x38
+
+TMP0        EQU     0x10
+TMP1        EQU     0x11
+TMP2        EQU     0x12
+TMP3        EQU     0x13
+
+R25         EQU     0x14
+SECONDS     EQU     0x15
+MINUTES     EQU     0x16
+HOURS       EQU     0x17
+DAY         EQU     0x18
+
+LSD         EQU     0x19
+MSD         EQU     0x1A
+HSD         EQU     0x1B
+
+FLAGS       EQU     0x1C
+
+TXBUF       EQU     0x1D
+RXBUF       EQU     0x1E
+
+ADR         EQU     0x1F
+TMPL        EQU     0x20
+TMPH        EQU     0x21
+
+TIMER1      EQU     0x22
+TIMER2      EQU     0x23
+
+KEYBUF      EQU     0x24
+MODE        EQU     0x25
+
+WAITK       EQU     0x26
+
+MIN         EQU     0x27
+MAX         EQU     0x28
+
+VALUE       EQU     0x29
+POS         EQU     0x2A
+
+FLAGS2      EQU     0x2B
+
+W_TEMP      EQU     0x2D
+STATUS_TEMP EQU     0x2E
+
+RTMP        EQU     0x2F
+STACK       EQU     0x30
+RTMP2       EQU     0x31
+
+DATAO       EQU     0x32
+ATEMP       EQU     0x33
+
+TTEMP       EQU     0x34
+
+ATchar      EQU     0x35
+
+
+
+;*** PORT A ***
+;keyboard (needs external pull ups)
+
+b_DOWN      EQU     0x2
+b_UP        EQU     0x3
+b_SET       EQU     0x4
+
+
+
+;*** PORT B ***
+
+b_SCL       EQU     0x0
+b_EXE       EQU     0x4
+b_RS        EQU     0x5
+b_SDA       EQU     0x6
+
+;*** FLAGS ***
+
+b_TIME      EQU     0x0
+b_DAY       EQU     0x1
+b_ERROR     EQU     0x2
+b_DI        EQU     0x3
+b_DO        EQU     0x4
+b_KEN       EQU     0x5
+b_MEN       EQU     0x6
+b_SETTIM    EQU     0x7
+
+;*** FLAGS2 ***
+
+b_NOSEC     EQU     0x0
+b_NOCURS    EQU     0x1
+b_NOZERO    EQU     0x2
+
+
+#macro      push    %1
+            movf    %1,w
+            call    :xpush      ;use colon before label (in macro)
+                                ;to specify it as global
+#endm
+
+#macro      pop     %1
+            movlw   %1
+            call    :xpop
+#endm
+
+
+            ID      0x0000
+            FUSE    CPOFF|PWRTE|XT
+            DEBUG
+            OUTPUT  INHX16
+            DEVICE  16C84
+
+            ORG     0x0000
+
+            clrf    STACK
+            goto    Start
+
+;********************************************
+;*        Interrupt Service Routine         *
+;********************************************
+
+            ORG     INTERRUPT
+
+            movwf   W_TEMP
+            swapf   STATUS,W
+            movwf   STATUS_TEMP
+
+            RBANK0
+
+            calls   INTCON,b_T0IF,Clock
+
+ISR_BACK    swapf   STATUS_TEMP,w
+            movwf   STATUS
+            swapf   W_TEMP
+            swapf   W_TEMP,w
+            retfie
+
+;********************************************
+;*                  Tables                  *
+;********************************************
+
+
+#ifdef ENGLISH
+
+T_po        deft    'Mon'
+T_ut        deft    'Tue'
+T_st        deft    'Wed'
+T_ct        deft    'Thu'
+T_pa        deft    'Fri'
+T_so        deft    'Sat'
+T_ne        deft    'Sun'
+T_nastav    deft    'Set'
+M_cas       deft    'time'
+M_datum     deft    'day'
+
+#else
+
+T_po        deft    'Pondeli'
+T_ut        deft    'Utery'
+T_st        deft    'Streda'
+T_ct        deft    'Ctvrtek'
+T_pa        deft    'Patek'
+T_so        deft    'Sobota'
+T_ne        deft    'Nedele'
+T_nastav    deft    'Nastav'
+M_cas       deft    'cas'
+M_datum     deft    'den'
+
+#endif
+
+GetDay      andlw   0x7
+            addwf   PCL
+            defb    T_po,T_ut,T_st,T_ct,T_pa,T_so,T_ne
+
+GetMode     movf    MODE,w
+            andlw   0xF
+            addwf   PCL
+
+            defb    M_cas,M_datum,T_po,T_ut,T_st,T_ct,T_pa,T_so,T_ne
+
+
+HexDig      andlw   0xF
+            addwf   PCL
+
+            defb    '0','1','2','3','4','5','6','7'
+            defb    '8','9','A','B','C','D','E','F'
+
+
+DoMode      movf    MODE,w
+            andlw   0xF
+            addwf   PCL
+
+            goto    SetTime
+            goto    SetDay
+
+            goto    SetTemp
+            goto    SetTemp
+            goto    SetTemp
+            goto    SetTemp
+            goto    SetTemp
+            goto    SetTemp
+            goto    SetTemp
+
+;*****************************************************************************
+;**                                 Start                                   **
+;*****************************************************************************
+
+Start       call    Setup
+
+            movf    STATUS,w
+            andlw   b'00011000'
+            xorlw   b'00011000'
+            movlw   ERR_POR
+
+            skipnz
+            call    err
+
+            bsf     DAYS
+            bsf     TIME
+
+Main        movf    TIMER1
+            jpnz    main_2
+
+            clrf    MODE
+
+            calls   FLAGS,b_DAY,DisDay
+            calls   FLAGS,b_TIME,DisClock
+
+main_2      call    Keyboard
+
+            jpns    KEYBUF,b_UP,SelUp
+            jpns    KEYBUF,b_DOWN,SelDown
+            jpns    KEYBUF,b_SET,SelSet
+
+            calls   FLAGS,b_MEN,DispMode
+
+            goto    Main
+
+SelUp       movlw   3
+            movwf   TIMER1
+            incf    MODE
+            movf    MODE,w
+            xorlw   MAXPAR+1
+            skipnz
+            clrf    MODE
+            bsf     FLAGS,b_MEN
+            goto    Main
+
+SelDown     movlw   3
+            movwf   TIMER1
+            movf    MODE,w
+            skipnz
+            movlw   MAXPAR+1
+            movwf   MODE
+            decf    MODE
+            bsf     FLAGS,b_MEN
+            goto    Main
+
+SelSet      call    DoMode
+            clrf    TIMER1
+            bsf     FLAGS,b_DAY
+            bsf     FLAGS,b_TIME
+            goto    Main
+
+;********************************************
+;*            Set Temperature               *
+;********************************************
+
+SetTemp     clrf    MIN
+            movlw   23
+            movwf   MAX
+            clrf    VALUE
+
+            push    FLAGS2
+
+            movlw   5
+            movwf   TIMER1
+            movwf   TTEMP
+
+            goto    DispTemp
+
+
+SetTemp2    call    Keyboard
+
+            callns  KEYBUF,b_UP,Plus
+            callns  KEYBUF,b_DOWN,Minus
+
+            movf    VALUE,w
+            movwf   ATEMP
+
+            jpns    KEYBUF,b_SET,TempSet
+
+            jps     FLAGS,b_MEN,DispTemp
+
+            movf    TIMER1
+            jpz     back
+
+            goto    SetTemp2
+
+back        pop     FLAGS2
+            clrf    TTEMP
+            goto    HrSet
+
+
+TempSet     push    MIN
+            push    MAX
+            push    VALUE
+
+            bcf     NOCURS
+
+            movlw   5
+            movwf   MIN
+            movlw   50
+            movwf   MAX
+
+            call    ReadTemp
+            movwf   VALUE
+
+            movlw   0x43
+            movwf   POS
+            call    GetNumber
+
+            movf    VALUE,w
+            call    WriteTemp
+
+            pop     VALUE
+            pop     MAX
+            pop     MIN
+            goto    SetTemp2
+
+
+DispTemp    bsf     NOCURS
+            movlw   0x40
+            movwf   POS
+            call    DispNumber
+            movlw   '='
+            call    PutChar
+
+            push    VALUE
+            call    ReadTemp
+            movwf   VALUE
+
+            movlw   0x43
+            movwf   POS
+            call    DispNumber
+            movlw   0xDF
+            call    PutChar
+            movlw   'C'
+            call    PutChar
+
+            pop     VALUE
+
+            bcf     FLAGS,b_MEN
+            goto    SetTemp2
+
+HrSet       movlw   0x40
+            goto    Clear
+
+;********************************************
+;*                 Set Time                 *
+;********************************************
+
+SetTime     bsf     SETTIME
+            bsf     NOSEC
+            bcf     NOCURS
+
+            clrf    SECONDS
+            movlw   0x40
+            call    DisClockX
+            movlw   0x40
+            movwf   POS
+            clrf    MIN
+            movlw   23
+            movwf   MAX
+            movf    HOURS,w
+            movwf   VALUE
+            call    GetNumber
+            movf    VALUE,w
+            movwf   HOURS
+            movlw   0x43
+            movwf   POS
+            clrf    MIN
+            movlw   59
+            movwf   MAX
+            movf    MINUTES,w
+            movwf   VALUE
+            call    GetNumber
+            movf    VALUE,w
+            movwf   MINUTES
+            bcf     SETTIME
+            movlw   0x40
+            goto    Clear
+
+
+SetDay      clrf    MIN
+            movlw   6
+            movwf   MAX
+            movf    DAY,w
+            movwf   VALUE
+
+            movlw   0xC0
+            goto    DispDay
+
+SetDay2     call    Keyboard
+
+            callns  KEYBUF,b_UP,Plus
+            callns  KEYBUF,b_DOWN,Minus
+            jpns    KEYBUF,b_SET,DaySet
+
+            jps      FLAGS,b_MEN,DispDay
+
+            goto     SetDay2
+
+DaySet      movf    VALUE,w
+            movwf   DAY
+
+            movlw   0x40
+            goto    Clear
+            return
+
+
+;********************************************
+;*               Display mode               *
+;********************************************
+
+DispMode    bcf     FLAGS,b_MEN
+            clrw
+            call    Clear
+            movlw   b'10000000'
+            call    PutDATA
+            movlw   T_nastav
+            call    PutText
+            movlw   32
+            call    PutChar
+            call    GetMode
+            call    PutText
+            movlw   '.'
+            call    PutChar
+            return
+
+;********************************************
+;*               Keyboard test              *
+;********************************************
+
+Keyboard    movf    PORTA,w
+            andlw   ALLKEYS
+            movwf   TMP0
+            xorlw   ALLKEYS
+            jpnz    key2
+
+            bsf     FLAGS,b_KEN
+            movlw   ALLKEYS
+            movwf   KEYBUF
+
+            movlw   100
+            movwf   WAITK
+            return
+
+key2        movf    TTEMP,w
+            skipz
+            movwf   TIMER1
+
+            movf    TMP0,w
+            xorwf   KEYBUF,w
+            jpnz    key3
+
+            movlw   ALLKEYS
+            movwf   KEYBUF
+
+key3        decfsz  WAITK
+            return
+
+            retns   FLAGS,b_KEN
+
+            bcf     FLAGS,b_KEN
+            movf    TMP0,w
+            movwf   KEYBUF
+            return
+
+;********************************************
+;*               Display Text               *
+;********************************************
+
+PutText     movwf   TMP2
+PutText2    movf    TMP2,w
+            call    GetChar
+            andlw   0x7F
+            call    PutChar
+
+            movf    TMP2,w
+            call    GetChar
+            andlw   0x80
+            retnz
+            incf    TMP2
+            goto    PutText2
+
+GetChar     movwf   PCL
+
+;********************************************
+;*              Execute Tick                *
+;********************************************
+
+SendCMD     nop
+            bsf     PORTB,b_EXE
+            nop
+            nop
+            bcf     PORTB,b_EXE
+            nop
+            return
+
+;********************************************
+;*             Execute command              *
+;********************************************
+
+DoCMD       call    PutDATA
+            return
+
+;********************************************
+;*               Put one char               *
+;********************************************
+
+PutChar     bsf     PORTB,b_RS
+            movwf   TMP0
+            movf    TMP0,w
+            skipnz
+            movlw   32
+            call    PutDATA
+            bcf     PORTB,b_RS
+            return
+
+;********************************************
+;*           Convert 8bit to 4bit           *
+;********************************************
+
+PutDATA     movwf   TMP0
+            swapf   TMP0,w
+            andlw   0xF
+            movwf   TMP1
+            movf    PORTB,w
+            andlw   0xF0
+            iorwf   TMP1,w
+            movwf   PORTB
+            bsf     PORTB,b_EXE
+            nop
+            nop
+            bcf     PORTB,b_EXE
+            movlw   0xF
+            andwf   TMP0
+            movf    PORTB,w
+            andlw   0xF0
+            iorwf   TMP0,w
+            movwf   PORTB
+            bsf     PORTB,b_EXE
+            nop
+            nop
+            bcf     PORTB,b_EXE
+            goto    Wait40us
+
+;********************************************
+;*          Cold initializing LCD           *
+;********************************************
+
+InitComm    movlw   b'00000010'
+            movwf   PORTB
+            call    SendCMD
+            call    Wait40us
+            return
+
+;********************************************
+;*               Wait routines              *
+;********************************************
+
+Wait2ms     clrf    TMP0
+wcmd        nop
+            nop
+            decfsz  TMP0
+            goto    wcmd
+            return
+
+Wait40us    movlw   15
+            movwf   TMP0
+            goto    wcmd
+
+;********************************************
+;*               Setup device               *
+;********************************************
+
+Setup       clrf    INTCON
+
+            clrf    PORTA
+            clrf    PORTB
+
+            movlw   25
+            movwf   R25
+
+            clrf    SECONDS
+            clrf    MINUTES
+            clrf    HOURS
+            clrf    DAY
+
+            clrf    FLAGS
+            clrf    FLAGS2
+
+            clrf    TIMER1
+            clrf    TIMER2
+            clrf    TTEMP
+
+            clrf    MODE
+            clrf    KEYBUF
+
+            movlw   0x1F
+            tris    PORTA
+            clrw
+            tris    PORTB
+
+            call    Wait2ms
+            call    Wait2ms
+
+            movlw   b'00000110'
+            option
+
+            call    InitComm
+
+            movlw   1
+            call    DoCMD
+            call    Wait2ms
+
+            movlw   0xC
+            call    DoCMD
+            call    Wait40us
+
+            bsf     INTCON,b_T0IE
+            EI
+            return
+
+;********************************************
+;*              Clock ticking               *
+;********************************************
+
+Clock       bcf     INTCON,b_T0IF
+
+            rets    SETTIME
+
+            decfsz  R25
+            return
+
+            movlw   25
+            movwf   R25
+
+            movf    TIMER1,w
+            skipz
+            decf    TIMER1
+
+            movf    TIMER2,w
+            skipz
+            decf    TIMER2
+
+            bsf     TIME
+            bsf     DAYS
+
+            incf    SECONDS
+            movf    SECONDS,w
+            xorlw   60
+            retnz
+
+            clrf    SECONDS
+
+            incf    MINUTES
+            movf    MINUTES,w
+            xorlw   60
+            retnz
+
+            clrf    MINUTES
+
+            incf    HOURS
+            movf    HOURS,w
+            xorlw   24
+            retnz
+
+            clrf    HOURS
+
+            incf    DAY
+            movf    DAY,w
+            xorlw   0x7
+            skipnz
+            clrf    DAY
+            return
+
+;********************************************
+;*              Clock ticking               *
+;********************************************
+
+Clear       iorlw   0x80
+            call    PutDATA
+            movlw   16
+            movwf   TMP3
+clr         movlw   32
+            call    PutChar
+            decfsz  TMP3
+            goto    clr
+            return
+
+;********************************************************************
+;**                  Binary To BCD Conversion Routine              **
+;********************************************************************
+
+BinBCD      clrf    HSD
+            clrf    MSD
+            movwf   LSD
+binbcd_2    movlw   100
+            subwf   LSD,w
+            jpnc    binbcd_3
+            movwf   LSD
+            incf    HSD
+            goto    binbcd_2
+binbcd_3    movlw   10
+            subwf   LSD,w
+            retnc
+            movwf   LSD
+            incf    MSD
+            goto    binbcd_3
+
+;********************************************************************
+;**                          Display Time                          **
+;********************************************************************
+
+DisClock    movlw   8
+            bcf     NOSEC
+DisClockX   iorlw   0x80
+            call    PutDATA
+            bcf     TIME
+            movf    HOURS,w
+            call    BinBCD
+            movf    MSD,w
+            skipz
+            addlw   '0'
+            call    PutChar
+            movf    LSD,w
+            addlw   '0'
+            call    PutChar
+            movlw   ':'
+            call    PutChar
+            movf    MINUTES,w
+            call    BinBCD
+            movf    MSD,w
+            addlw   '0'
+            call    PutChar
+            movf    LSD,w
+            addlw   '0'
+            call    PutChar
+            rets    NOSEC
+            movlw   ':'
+            call    PutChar
+            movf    SECONDS,w
+            call    BinBCD
+            movf    MSD,w
+            addlw   '0'
+            call    PutChar
+            movf    LSD,w
+            addlw   '0'
+            call    PutChar
+            return
+
+;********************************************************************
+;**                          Display Day                            *
+;********************************************************************
+
+GetNumber   call    DispNumber
+GetNumber2  call    Keyboard
+            callns  KEYBUF,b_UP,Plus
+            callns  KEYBUF,b_DOWN,Minus
+            jpns    KEYBUF,b_SET,Done
+            calls   FLAGS,b_MEN,DispNumber
+            bcf     FLAGS,b_MEN
+            goto    GetNumber2
+
+Done        movlw   b'00001100'             ;switch off blinking display
+            goto    PutDATA
+
+Plus        bsf     FLAGS,b_MEN
+            movf    VALUE,w
+            xorwf   MAX,w
+            jpz     Plus2
+
+            incf    VALUE
+            return
+
+Plus2       movf    MIN,w
+            movwf   VALUE
+            return
+
+Minus       bsf     FLAGS,b_MEN
+            movf    VALUE,w
+            xorwf   MIN,w
+            jpz     Minus2
+
+            decf    VALUE
+            return
+
+Minus2      movf    MAX,w
+            movwf   VALUE
+            return
+
+;********************************************************************
+;**                    Display Decimal Number                       *
+;********************************************************************
+
+DispNumber  movf    POS,w
+            iorlw   0x80
+            call    PutDATA
+            movf    VALUE,w
+            call    BinBCD
+            movf    MSD,w
+            skipnz
+            btfss   FLAGS2,b_NOZERO
+            addlw   '0'
+            call    PutChar
+            movf    LSD,w
+            addlw   '0'
+            call    PutChar
+            rets    NOCURS
+            movlw   b'00001111'
+            call    PutDATA
+            movlw   b'00010000'
+            call    PutDATA
+            return
+
+;********************************************************************
+;**                    Display Hex Number                           *
+;********************************************************************
+
+
+DispHEX     movf    POS,w
+            iorlw   0x80
+            call    PutDATA
+            swapf   VALUE,w
+            andlw   0xF
+            call    HexDig
+            call    PutChar
+
+            movf    VALUE,w
+            andlw   0xF
+            call    HexDig
+            call    PutChar
+            return
+
+
+;********************************************************************
+;**                          Display Day                            *
+;********************************************************************
+
+DisDay      clrw
+            call    Clear
+            movlw   b'10000000'
+            call    PutDATA
+            bcf     DAYS
+            movf    DAY,w
+            call    GetDay
+            call    PutText
+            return
+
+DispDay     bcf     FLAGS,b_MEN
+            movlw   0x40
+            call    Clear
+            movlw   0xC0
+            call    PutDATA
+            movf    VALUE,w
+            call    GetDay
+            call    PutText
+            goto    SetDay2
+
+;*****************************************************************************
+;**                              Write byte                                 **
+;*****************************************************************************
+
+wr_byte     bcf     FLAGS,b_ERROR
+
+            movlw   CWD_WR
+            movwf   TXBUF
+            call    bstart
+            call    tx
+            movf    ADR,w
+            movwf   TXBUF
+            call    tx
+            movf    DATAO,w
+            movwf   TXBUF
+            call    tx
+            call    bstop
+            btfsc   FLAGS,b_ERROR
+            call    err
+            return
+
+;*****************************************************************************
+;**                               Read byte                                 **
+;*****************************************************************************
+
+rd_byte     bcf     FLAGS,b_ERROR
+
+            movlw   CWD_WR
+            movwf   TXBUF
+
+            call    bstart
+            call    tx
+
+            movf    ADR,w
+            movwf   TXBUF
+            call    tx
+            call    bstart
+
+            movlw   CWD_RD
+            movwf   TXBUF
+
+            call    tx
+            call    rx
+            call    bstop
+            movf    RXBUF,w
+
+            btfsc   FLAGS,b_ERROR
+            call    err
+            return
+
+;*****************************************************************************
+;**                            Receive  byte                                **
+;*****************************************************************************
+
+rx          movlw   8
+            movwf   TMPL
+            clrf    RXBUF
+
+rxlp        bcf     STATUS,b_CARRY
+            rlf     RXBUF
+
+            call    bitin
+            btfsc   FLAGS,b_DI
+            bsf     RXBUF,0
+
+            decfsz  TMPL
+            goto    rxlp
+
+            bsf     FLAGS,b_DO
+            call    bitout
+            return
+
+;*****************************************************************************
+;**                            Transmit byte                                **
+;*****************************************************************************
+
+tx          movlw   8
+            movwf   TMPL
+
+txlp        bcf     FLAGS,b_DO
+            btfsc   TXBUF,7
+            bsf     FLAGS,b_DO
+            call    bitout
+            rlf     TXBUF
+
+            bcf     TXBUF,0
+            btfsc   STATUS,b_CARRY
+            bsf     TXBUF,0
+
+            decfsz  TMPL
+            goto    txlp
+
+            call    bitin
+            movlw   3
+            btfsc   FLAGS,b_DI
+            call    err
+            return
+
+;*****************************************************************************
+;**                          Generates start bit                            **
+;*****************************************************************************
+
+bstart      movlw   b'00000000'
+            tris    PORTB
+
+            bsf     SDA
+            bsf     SCL
+            movlw   1
+            btfss   SCL
+            call    err
+
+            bcf     SDA
+            nop
+            nop
+            nop
+            nop
+            bcf     SCL
+            return
+
+;*****************************************************************************
+;**                      Generates stop bit                                 **
+;*****************************************************************************
+
+bstop       movlw   b'00000000'
+            tris    PORTB
+
+            bcf     SDA
+            bsf     SCL
+            nop
+            nop
+            nop
+            movlw   1
+            btfss   SCL
+            call    err
+
+            bsf     SDA
+            movlw   4
+
+            btfss   SDA
+            call    err
+            return
+
+;*****************************************************************************
+;**                           Receive one bit                               **
+;*****************************************************************************
+
+bitin       movlw   b'01000000'
+            tris    PORTB
+
+            bsf     SDA
+            bcf     FLAGS,b_DI
+            bsf     SCL
+
+            movlw   1
+            btfsc   SCL
+            goto    bit1
+
+            btfss   FLAGS,b_ERROR
+            movwf   TMPH
+            bsf     FLAGS,b_ERROR
+
+bit1        btfsc   SDA
+            bsf     FLAGS,b_DI
+            nop
+            bcf     SCL
+            return
+
+;*****************************************************************************
+;**                           Transmit one bit                              **
+;*****************************************************************************
+
+bitout      movlw   b'00000000'
+            tris    PORTB
+
+            btfss   FLAGS,b_DO
+            goto    bit0
+
+            bsf     SDA
+            movlw   2
+            btfsc   SDA
+            goto    clk1
+
+            btfss   FLAGS,b_ERROR
+            movwf   TMPH
+            bsf     FLAGS,b_ERROR
+            goto    clk1
+
+bit0        bcf     SDA
+            nop
+            nop
+clk1        bsf     SCL
+            movlw   1
+            btfsc   SCL
+            goto    bit2
+
+            btfss   FLAGS,b_ERROR
+            movwf   TMPH
+            bsf     FLAGS,b_ERROR
+bit2        nop
+            nop
+            bcf     SCL
+            return
+
+
+
+err         movwf   TMPL
+            movlw   0x40
+            iorlw   0x80
+            call    PutDATA
+            movlw   'C'
+            call    PutChar
+            movlw   ':'
+            call    PutChar
+            movlw   '0'
+            addwf   TMPL,w
+            call    PutChar
+
+loop        call    Keyboard
+            jps     KEYBUF,b_SET,loop
+
+            movlw   0x40
+            call    Clear
+            return
+
+
+ReadTemp    call    DoAdr
+            goto    rd_byte
+
+WriteTemp   movwf   DATAO
+            call    DoAdr
+            goto    wr_byte
+
+DoAdr       movf    ATEMP,w
+            movwf   TMP2
+            swapf   DAY,w
+            movwf   TMP3
+            bcf     CARRY
+            rlf     TMP3
+            movf    TMP2,w
+            addwf   TMP3
+
+            movf    TMP3,w
+            movwf   ADR
+            return
+
+
+; *** Waits for keyboard to send code ***
+
+ATgetkey
+            clrf    ATchar
+            bsf     PORTA,b_ATC              ; Kclk=1 Allow keyboard to talk
+            RBANK1
+            bsf     PORTA,b_ATC              ; Kclk is in input mode
+            RBANK0
+
+skip1st     movlw   0
+            callns  PORTA,b_SET,Clear
+            jps     PORTA,b_ATC,skip1st      ; wait for keyboard to make Kclk=0
+
+skippy      jpns    PORTA,b_ATC,skippy       ; wait for keyboard to make Kclk=1
+
+            movlw   8
+            movwf   TMPL
+
+ATwait0     jps     PORTA,b_ATC,ATwait0
+
+            rrf     ATchar
+
+            bsf     ATchar,7
+            btfss   PORTA,b_ATD
+            bcf     ATchar,7
+
+ATwait1     jpns    PORTA,b_ATC,ATwait1      ; wait for keyboard to make Kclk=1
+
+            decfsz  TMPL
+            goto    ATwait0             ; get all 8 bits of data
+
+parity0     jps     PORTA,b_ATC,parity0      ; wait for keyboard to make Kclk=0
+
+parity1     jpns    PORTA,b_ATC,parity1      ; wait for keyboard to make Kclk=1
+
+stop0       jps     PORTA,b_ATC,stop0        ; wait for keyboard to make Kclk=0
+
+stop1       jpns    PORTA,b_ATC,stop1        ; wait for keyboard to make Kclk=1
+
+            bcf     PORTA,b_ATC              ; Kclk=0 Send handshake
+            RBANK1
+            bcf     PORTA,b_ATC              ; Kclk is in output mode
+            RBANK0
+            return
+
+
+
+xpush       movwf   RTMP
+            decf    STACK,w
+            andlw   0x7
+            movwf   STACK
+            addlw   LSTACK
+            movwf   FSR
+            movf    RTMP,w
+            movwf   INDF
+            return
+
+xpop        movwf   RTMP
+            movf    STACK,w
+            addlw   LSTACK
+            movwf   FSR
+            addlw   1
+            andlw   0x7
+            movwf   STACK
+            movf    INDF,w
+            movwf   RTMP2
+            movf    RTMP,w
+            movwf   FSR
+            movf    RTMP2,w
+            movwf   INDF
+            return
+
+

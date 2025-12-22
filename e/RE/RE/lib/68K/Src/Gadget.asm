@@ -1,0 +1,338 @@
+;rE
+	machine mc68020
+	fpu	1
+
+	dsource	"re:lib/elib_68K/Gadget.e"
+;MOD:re:modules/intuition/intuition.m
+;MOD:re:modules/exec/types.m
+;MOD:re:modules/graphics/gfx.m
+;MOD:re:modules/graphics/clip.m
+;MOD:re:modules/exec/semaphores.m
+;MOD:re:modules/exec/nodes.m
+;MOD:re:modules/exec/lists.m
+;MOD:re:modules/exec/ports.m
+;MOD:re:modules/exec/tasks.m
+;MOD:re:modules/utility/hooks.m
+;MOD:re:modules/graphics/view.m
+;MOD:re:modules/graphics/copper.m
+;MOD:re:modules/graphics/gfxnodes.m
+;MOD:re:modules/graphics/monitor.m
+;MOD:re:modules/graphics/displayinfo.m
+;MOD:re:modules/graphics/modeid.m
+;MOD:re:modules/utility/tagitem.m
+;MOD:re:modules/hardware/custom.m
+;MOD:re:modules/graphics/rastport.m
+;MOD:re:modules/graphics/layers.m
+;MOD:re:modules/graphics/text.m
+;MOD:re:modules/devices/inputevent.m
+;MOD:re:modules/devices/timer.m
+;MOD:re:modules/exec/types.m
+;MOD:re:modules/exec/io.m
+;MOD:re:modules/intuition/screens.m
+;MOD:re:modules/intuition/preferences.m
+;MOD:re:modules/graphics/rastport.m
+;MOD:re:modules/graphics/text.m
+;MOD:re:modules/lib/restd_68K.m
+	xdef	_Gadget
+_Gadget:
+Gadget_buf	equ	36
+Gadget_glist	equ	32
+Gadget_id	equ	28
+Gadget_flags	equ	24
+Gadget_x	equ	20
+Gadget_y	equ	16
+Gadget_width	equ	12
+Gadget_string	equ	8
+	link	a5,#-8
+	movem.l	a0,-(a7)
+;DEF tlen,topaz=['topaz.font',8,0,0]:TextAttr
+Gadget_tlen	equ	-8
+	lea	_list1,a0
+	move.l	a0,d0
+	move.l	a0,d0
+Gadget_topaz	equ	-4
+	move.l	d0,Gadget_topaz(a5)
+;tlen:=StrLen(string)*8                   
+	move.l	a0,-(a7)
+	move.l	Gadget_string(a5),a0
+	jsr	_StrLen
+	move.l	(a7)+,a0
+	muls.l	#8,d0
+	move.l	d0,Gadget_tlen(a5)
+;                   
+;width:=Max(width,tlen+4)
+	move.l	Gadget_width(a5),-(a7)
+	move.l	Gadget_tlen(a5),d1
+	addi.l	#4,d1
+	move.l	(a7)+,d0
+	cmp.l	d1,d0
+	bge.b	*+2
+	move.l	d1,d0
+	move.l	d0,Gadget_width(a5)
+;
+;IF glist THEN buf[-1].gad.NextGadget    :=  buf                            
+Gadget_if1:
+	move.l	Gadget_glist(a5),d0
+	tst.l	d0
+	beq	Gadget_else1_0
+;buf[-1].gad.NextGadget    :=  buf                            
+	move.l	Gadget_buf(a5),d0
+	lea.l	Gadget_buf(a5),a0
+	move.l	(a0),a0
+	move.l	d0,-100(a0)
+Gadget_else1_0:
+;
+;buf.gad.NextGadget    :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,(a0)
+;
+;buf.gad.LeftEdge      :=  x
+	move.l	Gadget_x(a5),d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,4(a0)
+;
+;buf.gad.TopEdge       :=  y
+	move.l	Gadget_y(a5),d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,6(a0)
+;
+;buf.gad.Width         :=  width
+	move.l	Gadget_width(a5),d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,8(a0)
+;
+;buf.gad.Height        :=  FIXHEIGHT
+	move.l	#12,d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,10(a0)
+;
+;buf.gad.Flags         :=  GFLG_GADGHCOMP
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,12(a0)
+;
+;buf.gad.Activation    :=  GACT_RELVERIFY OR GACT_IMMEDIATE OR GACT_TOGGLESELECT
+	move.l	#259,d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,14(a0)
+;
+;buf.gad.GadgetType    :=  GTYP_BOOLGADGET
+	move.l	#1,d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,16(a0)
+;
+;buf.gad.GadgetRender  :=  &buf.brd
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#44,a0
+	move.l	a0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,18(a0)
+;
+;buf.gad.SelectRender  :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,22(a0)
+;
+;buf.gad.GadgetText    :=  &buf.txt
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#80,a0
+	move.l	a0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,26(a0)
+;
+;buf.gad.MutualExclude :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,30(a0)
+;
+;buf.gad.SpecialInfo   :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,34(a0)
+;
+;buf.gad.GadgetID      :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,38(a0)
+;
+;buf.gad.UserData      :=  id
+	move.l	Gadget_id(a5),d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,40(a0)
+;
+;buf.brd.LeftEdge      :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,44(a0)
+;
+;buf.brd.TopEdge       :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,46(a0)
+;
+;buf.brd.FrontPen      :=  1
+	move.l	#1,d0
+	movea.l	Gadget_buf(a5),a0
+	move.b	d0,48(a0)
+;
+;buf.brd.BackPen       :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.b	d0,49(a0)
+;
+;buf.brd.DrawMode      :=  JAM1
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.b	d0,50(a0)
+;
+;buf.brd.Count         :=  5
+	move.l	#5,d0
+	movea.l	Gadget_buf(a5),a0
+	move.b	d0,51(a0)
+;
+;buf.brd.XY            :=  &buf.coo
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.l	a0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,52(a0)
+;
+;buf.brd.NextBorder    :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,56(a0)
+;
+;buf.coo[0]            :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.w	d0,(a0)
+;
+;buf.coo[1]            :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.w	d0,2(a0)
+;
+;buf.coo[2]            :=  width
+	move.l	Gadget_width(a5),d0
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.w	d0,4(a0)
+;
+;buf.coo[3]            :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.w	d0,6(a0)
+;
+;buf.coo[4]            :=  width
+	move.l	Gadget_width(a5),d0
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.w	d0,8(a0)
+;
+;buf.coo[5]            :=  FIXHEIGHT
+	move.l	#12,d0
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.w	d0,10(a0)
+;
+;buf.coo[6]            :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.w	d0,12(a0)
+;
+;buf.coo[7]            :=  FIXHEIGHT
+	move.l	#12,d0
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.w	d0,14(a0)
+;
+;buf.coo[8]            :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.w	d0,16(a0)
+;
+;buf.coo[9]            :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	adda.l	#60,a0
+	move.w	d0,18(a0)
+;
+;buf.txt.FrontPen      :=  1
+	move.l	#1,d0
+	movea.l	Gadget_buf(a5),a0
+	move.b	d0,80(a0)
+;
+;buf.txt.BackPen       :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.b	d0,81(a0)
+;
+;buf.txt.DrawMode      :=  JAM1
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.b	d0,82(a0)
+;
+;buf.txt.LeftEdge      :=  (width-tlen)/2
+	move.l	Gadget_width(a5),d0
+	sub.l	Gadget_tlen(a5),d0
+	divs.l	#2,d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,84(a0)
+;
+;buf.txt.TopEdge       :=  2
+	move.l	#2,d0
+	movea.l	Gadget_buf(a5),a0
+	move.w	d0,86(a0)
+;
+;buf.txt.ITextFont     :=  topaz
+	move.l	Gadget_topaz(a5),d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,88(a0)
+;
+;buf.txt.IText         :=  string
+	move.l	Gadget_string(a5),d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,92(a0)
+;
+;buf.txt.NextText      :=  0
+	move.l	#0,d0
+	movea.l	Gadget_buf(a5),a0
+	move.l	d0,96(a0)
+;
+;ENDPROC buf+SIZEOF eGadget
+	xdef	Gadgetend
+Gadgetend:
+	move.l	Gadget_buf(a5),d0
+	addi.l	#100,d0
+Gadget_finish:
+	movem.l	(a7)+,a0
+	unlk	a5
+	rts
+; END
+; NOX
+	xref	_StrLen
+	cnop	0,2
+
+	section	".tocd",data
+	xref	_laststackptr
+	xref	_stdrast
+	xref	_lastexceptptr
+	xref	_lastframeptr
+	xref	_exceptioninfo
+	xref	_exception
+_list1:
+	dc.l	_str1
+	dc.w	8
+	dc.b	0
+	dc.b	0
+	cnop	0,2
+_str1:
+	dc.b	"topaz.font"
+	dc.b	0
+	cnop	0,2

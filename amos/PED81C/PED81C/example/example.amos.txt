@@ -1,0 +1,276 @@
+'-----------------------------------------------------------------------------
+'$VER: PED81C example 1.0 (23.6.2023) (c) 2023 RETREAM
+'Legal terms: please refer to the accompanying documentation.
+'www.retream.com/PED81C
+'contact@retream.com
+'-----------------------------------------------------------------------------
+
+'-----------------------------------------------------------------------------
+'DESCRIPTION
+'This shows how to set up a PED81C screen and to perform some basic operations
+'on it.
+'Screen features:
+' * equivalent to a 319x256 LORES screen
+' * 160 dots wide raster
+' * single buffer
+' * blanked border
+' * 64-bit bitplanes fetch mode
+' * CMYW color model
+'
+'NOTES
+'The code is written to be readable, not to be general-purpose/optimal.
+'-----------------------------------------------------------------------------
+
+'-----------------------------------------------------------------------------
+'GLOBAL VARIABLES
+
+Global RASTERADDRESS,RASTERWIDTH,RASTERHEIGHT,RASTERSIZE
+
+RASTERWIDTH=160
+RASTERHEIGHT=256
+RASTERSIZE=RASTERWIDTH*RASTERHEIGHT
+
+'-----------------------------------------------------------------------------
+'MAIN
+
+'Initialize everything.
+
+_INITIALIZE_AMOS_ENVIRONMENT
+_INITIALIZE_SCREEN
+
+'If the initialization succeeded, load a picture into the raster and, in case
+'of success, execute a simple effect on it.
+
+If Param
+   _LOAD_PICTURE_INTO_RASTER["picture-160x256.raw"]
+   If Param
+      _TURN_DISPLAY_DMA_ON[0]
+      _RANDOMIZE_RASTER
+      _TURN_DISPLAY_DMA_OFF
+   End If
+End If
+
+'Deinitialize everything.
+
+_DEINITIALIZE_SCREEN
+_RESTORE_AMOS_ENVIRONMENT
+
+'-----------------------------------------------------------------------------
+'ROUTINES
+
+Procedure _ALLOCATE_BITPLANE[BANKINDEX,SIZE]
+   '--------------------------------------------------------------------------
+   'DESCRIPTION
+   'Allocates a CHIP RAM buffer to be used as a bitplane.
+   '
+   'INPUT
+   'BANKINDEX = index of bank to use
+   'SIZE      = size [bytes] of bitplane
+   '
+   'OUTPUT
+   '64-bit-aligned bitplane address (0 = error)
+   '
+   'WARNINGS
+   'The buffer must be freed with Erase BANKINDEX or Erase All.
+   '--------------------------------------------------------------------------
+
+   Trap Reserve As Chip Data BANKINDEX,SIZE+8
+   If Errtrap=0 Then A=(Start(BANKINDEX)+7) and $FFFFFFF8
+
+End Proc[A]
+Procedure _DEINITIALIZE_SCREEN
+   '--------------------------------------------------------------------------
+   'DESCRIPTION
+   'Deinitializes the screen.
+   '
+   'WARNINGS
+   'Can be called only if the display is off.
+   '--------------------------------------------------------------------------
+
+   Erase All
+   Doke $DFF1FC,0 : Rem FMODE
+
+End Proc
+Procedure _INITIALIZE_AMOS_ENVIRONMENT
+   '--------------------------------------------------------------------------
+   'DESCRIPTION
+   'Ensures the program cannot be interrupted or brought to back, and turns
+   'off the AMOS video system.
+   '--------------------------------------------------------------------------
+
+   Break Off
+   Amos Lock
+   Comp Test Off
+   Auto View Off
+   Update Off
+   Copper Off
+   _TURN_DISPLAY_DMA_OFF
+
+End Proc
+Procedure _INITIALIZE_SCREEN
+   '--------------------------------------------------------------------------
+   'DESCRIPTION
+   'Initializes the screen.
+   '
+   'OUTPUT
+   '-1/0 = OK/error
+   '
+   'WARNINGS
+   '_DEINITIALIZE_SCREEN[] must be called also in case of failure.
+   '
+   'NOTES
+   'Sets RASTERADDRESS.
+   '--------------------------------------------------------------------------
+
+   'Allocate the raster.
+
+   _ALLOCATE_BITPLANE[10,RASTERSIZE] : If Param=0 Then Pop Proc[0]
+   RASTERADDRESS=Param
+
+   'Allocate and fill the selector bitplanes.
+
+   _ALLOCATE_BITPLANE[11,RASTERSIZE] : If Param=0 Then Pop Proc[0]
+   B3A=Param
+   Fill B3A To B3A+RASTERSIZE,$55555555
+
+   _ALLOCATE_BITPLANE[12,RASTERSIZE] : If Param=0 Then Pop Proc[0]
+   B4A=Param
+   Fill B4A To B4A+RASTERSIZE,$33333333
+
+   'Set the chispet.
+
+   Doke $DFF100,$4241 : Rem BPLCON0
+   Doke $DFF102,$10 : Rem BPLCON1
+   Doke $DFF104,$224 : Rem BPLCON2
+   Doke $DFF106,$20 : Rem BPLCON3
+   Doke $DFF108,0 : Rem BPLMOD1
+   Doke $DFF10A,0 : Rem BPLMOD2
+   Doke $DFF092,$38 : Rem DDFSTRT
+   Doke $DFF094,$D0 : Rem DDFSTOP
+   Doke $DFF08E,$2C82 : Rem DIWSTRT
+   Doke $DFF090,$2CC1 : Rem DIWSTOP
+   Doke $DFF1E4,$A100 : Rem DIWHIGH
+   Doke $DFF1FC,$3 : Rem FMODE
+
+   'Set COLORxx.
+
+   Doke $DFF180,0
+   Doke $DFF182,$88
+   Doke $DFF184,$88
+   Doke $DFF186,$FF
+   Doke $DFF188,$0
+   Doke $DFF18A,$808
+   Doke $DFF18C,$808
+   Doke $DFF18E,$F0F
+   Doke $DFF190,$0
+   Doke $DFF192,$880
+   Doke $DFF194,$880
+   Doke $DFF196,$FF0
+   Doke $DFF198,$0
+   Doke $DFF19A,$888
+   Doke $DFF19C,$888
+   Doke $DFF19E,$FFF
+
+   'Build a Copperlist that sets the bitplanes pointers.
+
+   Cop Movel $E0,RASTERADDRESS
+   Cop Movel $E4,RASTERADDRESS
+   Cop Movel $E8,B3A
+   Cop Movel $EC,B4A
+   Cop Swap
+
+End Proc[-1]
+Procedure _LOAD_PICTURE_INTO_RASTER[FILEPATH$]
+   '--------------------------------------------------------------------------
+   'DESCRIPTION
+   'Loads a raw 8-bit chunky picture into the raster, ensuring that its size
+   'is correct.
+   '
+   'OUTPUT
+   '-1/0 = OK/error
+   '--------------------------------------------------------------------------
+
+   Trap Open In 1,FILEPATH$ : If Errtrap Then Pop Proc[0]
+   L=Lof(1)
+   Close(1)
+   If L<>RASTERSIZE Then Pop Proc[0]
+   Trap Bload FILEPATH$,RASTERADDRESS
+
+End Proc[Errtrap=0]
+Procedure _RANDOMIZE_RASTER
+   '--------------------------------------------------------------------------
+   'DESCRIPTION
+   'Randomizes the raster by swapping 16 dots per frame, until a mouse button
+   'is pressed.
+   '--------------------------------------------------------------------------
+
+   XM=RASTERWIDTH-1
+   YM=RASTERHEIGHT-1
+   Repeat
+      C=16
+      While C
+         X0=Rnd(XM)
+         Y0=Rnd(YM)
+         X1=Rnd(XM)
+         Y1=Rnd(YM)
+         A0=Y0*RASTERWIDTH+X0+RASTERADDRESS
+         A1=Y1*RASTERWIDTH+X1+RASTERADDRESS
+         C0=Peek(A0)
+         Poke A0,Peek(A1)
+         Poke A1,A0
+         Dec C
+      Wend
+      _WAIT_SCREEN_BOTTOM
+   Until Mouse Click
+
+End Proc
+Procedure _RESTORE_AMOS_ENVIRONMENT
+   '--------------------------------------------------------------------------
+   'DESCRIPTION
+   'Restores the AMOS environment.
+   '--------------------------------------------------------------------------
+
+   Copper On
+   Update On
+   Auto View On
+   Amos Unlock
+   Break On
+   _TURN_DISPLAY_DMA_ON[$20]
+
+End Proc
+Procedure _TURN_DISPLAY_DMA_OFF
+   '--------------------------------------------------------------------------
+   'DESCRIPTION
+   'Disables the bitplanes, Copper and sprites DMA.
+   '--------------------------------------------------------------------------
+
+   _WAIT_SCREEN_BOTTOM
+   Doke $DFF096,$3A0 : Rem DMACON
+
+End Proc
+Procedure _TURN_DISPLAY_DMA_ON[SSPRITESFLAG]
+   '--------------------------------------------------------------------------
+   'DESCRIPTION
+   'Enables the bitplanes and Copper DMA.
+   '
+   'INPUT
+   'SSPRITESFLAG = $20/0 = turn / do not turn sprites on
+   '
+   'WARNINGS
+   'The chipset must have been set up properly.
+   '--------------------------------------------------------------------------
+
+   _WAIT_SCREEN_BOTTOM
+   Doke $DFF096,$8380 or SSPRITESFLAG : Rem DMACON
+
+End Proc
+Procedure _WAIT_SCREEN_BOTTOM
+   '--------------------------------------------------------------------------
+   'DESCRIPTION
+   'Waits for the bottom of the screen.
+   '--------------------------------------------------------------------------
+
+   While Deek($DFF004) and $3 : Wend
+   Repeat : Until(Leek($DFF004) and $3FF00)>$12C00
+
+End Proc

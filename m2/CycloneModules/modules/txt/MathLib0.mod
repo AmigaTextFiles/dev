@@ -1,0 +1,46 @@
+IMPLEMENTATION MODULE MathLib0;
+
+IMPORT mb:MathIEEESingBas,mt:MathIEEESingTrans;
+
+PROCEDURE sqrt(x:REAL):REAL;
+BEGIN
+ RETURN mt.Sqrt(x);
+END sqrt;
+
+PROCEDURE exp(x:REAL):REAL;
+BEGIN
+ RETURN mt.Exp(x);
+END exp;
+
+PROCEDURE ln(x:REAL):REAL;
+BEGIN
+ RETURN mt.Log(x);
+END ln;
+
+PROCEDURE sin(x:REAL):REAL;
+BEGIN
+ RETURN mt.Sin(x);
+END sin;
+
+PROCEDURE cos(x:REAL):REAL;
+BEGIN
+ RETURN mt.Cos(x);
+END cos;
+
+PROCEDURE arctan(x:REAL):REAL;
+BEGIN
+ RETURN mt.Atan(x);
+END arctan;
+
+PROCEDURE real(x:LONGINT):REAL;
+BEGIN
+ RETURN mb.Flt(x);
+END real;
+
+PROCEDURE entier(x:REAL):LONGINT;
+BEGIN
+ RETURN mb.Fix(x);
+END entier;
+
+BEGIN
+END MathLib0.

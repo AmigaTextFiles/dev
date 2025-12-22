@@ -1,0 +1,599 @@
+/****************************************************************
+**                                                             **
+** Name:        Prestige Cracktro "Super Stardust"             **
+** Author:      Mr.X of Barracuda                              **
+** Version:     1.2                                            **
+** Date:        13.05.17                                       **
+** Interpreter: Hollywood 6.0                                  **
+** Licence:     Sample program for Hollywood                   **
+** Function:    Hollywood port of this nice cracktro           **
+**                                                             **
+** Notes:       This one uses the famous "blitter tornado"     **
+**              effect by FairLight and Virtual Dreams (first  **
+**              seen in Full Moon AGA at The Party '93).       **
+**                                                             **
+** History:                                                    **
+**                                                             **
+** 1.2: (13.05.17)                                             **
+**                                                             **
+** - adapted for RebelSDL                                      **
+**                                                             **
+** 1.1: (02.01.15)                                             **
+**                                                             **
+** - uses Disable/EnableLineHook() now for better performance  **
+**                                                             **
+** 1.0: (30.01.09)                                             **
+**                                                             **
+** - initial release                                           **
+**                                                             **
+****************************************************************/
+
+/*
+** Important! Check if the used Hollywood version is at least
+** version 6.0!
+*/
+@VERSION 6,0
+
+/*
+** This script requires the RebelSDL plugin
+*/
+@REQUIRE "rebelsdl"
+
+@BRUSH 10, "logo.png", {Transparency = #BLACK}
+@BRUSH 11, "font.png", {Transparency = #BLACK}
+
+@MUSIC 1, "prestige.mod"
+
+@DISPLAY {Width = 320, Height = 256, Color = $442222}
+
+/* make a new page of text */
+Function p_MakeTextPage()
+
+	If cc = 30 * 24 * 6 Then cc = 0
+	
+	CreateBrush(4, 30 * 8, 24 * 9, #RED)
+	SelectBrush(4)
+	
+	; draw text to brush (24 lines à 30 chars)
+	For Local y = 0 To 23	
+		For Local x = 0 To 29
+			Local c = Asc(MidStr(t$, cc, 1)) - ' '			
+			DisplayBrushPart(11, (c % 40) * 8, (c \ 40) * 8, x * 8, y * 9, 8, 8)			
+			cc = cc + 1
+		Next
+	Next
+	
+	EndSelect
+	
+	SetBrushTransparency(4, #RED)
+	
+	CopyBrush(4, 5)
+	
+	; change text's foreground color
+	ReplaceColors(5, {ctable[1], ctable[3]})
+	
+	CreateBrush(6, 30 * 8 + 2, 24 * 9 + 2, #RED)
+	SelectBrush(6)
+	
+        ; create a border around the text
+	For Local y = 0 To 2
+		For Local x = 0 To 2
+			DisplayBrush(5, x, y)
+		Next
+	Next
+			
+	DisplayBrush(4, 1, 1)
+	EndSelect
+	
+	SetBrushTransparency(6, #RED)
+	
+EndFunction
+
+/* compute the tornado grids */
+Function p_ComputeGrid()
+
+	Local TabPosY1 = {4,3,2,1,0,-1,-2,-3,-4}
+	Local TabPosX1 = {-5,-4,-3,-2,-1,0,1,2,3,4,5}
+	Local TabPosX2 = {-5,-4,-3,-2,-1,0,1,2,3,4,5}
+	Local TabPosY2 = {-4,-3,-2,-1,0,1,2,3,4}
+	
+	Local k = 0
+	
+	BufferPos1 = {}
+	BufferRotat = {}
+	
+	; 11x9 tiles	
+	For Local y = 1 To 9	
+		For Local x = 1 To 11
+			BufferPos1[k] = x * 32
+			BufferPos1[k + 1] = y * 32
+			k = k + 2
+		Next
+	Next
+	
+	k = 0
+	
+	; compute rotation
+	For Local y = 0 To 8
+		For Local x = 0 To 10
+			BufferRotat[k] = TabPosY1[y] + TabPosX2[x]
+			BufferRotat[k+1] = TabPosY2[y] + TabPosX1[x]
+			k = k + 2
+		Next
+	Next
+			
+EndFunction
+
+/* initialize tornado effect */
+Function p_InitTornado()
+
+	p_ComputeGrid()
+	
+	Local TornadoDatas = {0,$10,8,$18,4,$14,$C,$1C,2,$12,
+		$A,$1A,6,$16,$E,$1E,1,$11,9,$19,
+		5,$15,$D,$1D,3,$13,$B,$1B,7,$17,
+		$f, $1f}	
+	Local cptpattern = 0	
+	Local BufferPos2 = {}
+	
+	d4 = TornadoDatas[31] & 15
+	
+	Buf = {}
+	BufTiles = {}
+	
+	; init 32x9x11 tornado tiles
+	For Local k = 0 To 31
+	
+		d0 = TornadoDatas[k]
+		
+		; here are some register names - this is a direct 68k asm to Hollywood port :)
+		d2 = d4
+		d1 = d0
+		d4 = d0 & 15
+		d0 = d0 - d4
+		
+		cptpattern = d2
+		patternpos = d4
+		
+		bak_d4 = d4
+		
+		j = 0
+		
+		For Local i = 0 To 98
+			BufferPos2[j] = BufferPos1[j] + d0
+			BufferPos2[j+1] = BufferPos1[j+1] + d1			
+			j = j + 2
+		Next	
+		
+		j = 0
+		
+		; compute source and destination position for the 9x11 tiles
+		For Local i = 0 To 98
+			
+			x1 = BufferPos2[j]
+			y1 = BufferPos2[j+1]
+			x2 = BufferRotat[j]
+			y2 = BufferRotat[j+1]
+			j = j + 2
+			
+			x2 = x2 + patternpos - cptpattern
+			
+			d6 = 0
+			d4 = x2
+			
+			If x2 > 0  			
+				d4 = d4 & 15
+				If d4 <> 0
+					x2 = x2 - d4
+					d6 = 2
+					d4 = 16 - d4
+				Else
+					d4 = (-d4) & 15
+					x2 = x2 + d4
+				EndIf
+			Else
+				d4 = (-d4) & 15
+				x2 = x2 + d4
+			EndIf
+			
+			d4 = Ror(d4, 4, #SHORT)
+
+			BufTiles[(k * 99) + i] = {sx = x1 - x2 + 32 - d6 * 8, sy = y1 - y2 + 31, dx = x1 + 32, dy = y1 + 31, shift = d4 >> 12} 				
+		Next
+		
+		d4 = bak_d4		
+	Next
+	
+	Local shift = TornadoDatas[0] & 15
+	Local lastshift = TornadoDatas[31] & 15
+	
+	; compute 32 copper shift positions
+	For Local k = 0 To 31
+	
+	 	Local i = k + 1
+	 	If i = 32 Then i = 0
+	 	
+	 	curshift = TornadoDatas[k] & 15
+		shift = shift - curshift + lastshift
+		lastshift = curshift
+		
+		Buf[i] = shift		
+	Next
+					
+EndFunction
+
+/* get next shift & pattern position */
+Function p_ShiftTornado()
+
+	db = 1 - db
+	
+	; wrap
+	If bc = 32 Then bc = 0
+	
+	shiftcop = (shiftcop & -16) | Buf[bc]			
+	patternpos = Buf[bc]
+	bc = bc + 1
+		
+EndFunction
+
+/* draw tornado pattern to screen center */
+Function p_PutPattern()
+
+	Local p = Pattern[pc]
+	
+	If p = -1  ; end? --> wrap!
+		p = Pattern[0]
+		pc = 0
+	EndIf	
+	pc = pc + 1
+	
+	Local x = 222 - patternpos
+	Local col1 = p >> 8   ; = bits 8 & 9
+	Local col2 = p & 3    ; = bits 0 & 1
+	
+	SelectBrush(db + 1)
+	
+	; draw 4x4 pixels in up to 4 different colors	
+	For Local y = 190 To 193
+		Plot(x, y, ctable[col1])
+		Plot(x + 2, y, ctable[col1])
+		Plot(x + 1, y, ctable[col2])
+		Plot(x + 3, y, ctable[col2])		
+	Next
+	
+	EndSelect
+		
+EndFunction
+
+/* create the next tornado effect frame */
+Function p_BlitterTornado()
+
+	Local base = (bc - 1) * 99 + 98
+	
+	; draw 99 tiles with blitter shifting! (0-15 bits)
+	For Local k = 98 To 0 Step -1
+	
+		Local sx = BufTiles[base-k].sx
+		Local sy = BufTiles[base-k].sy	
+		Local dx = BufTiles[base-k].dx
+		Local dy = BufTiles[base-k].dy		
+		Local shift = BufTiles[base-k].shift	
+		
+		SelectBrush((1 - db) + 1)
+		DisplayBrushPart(db + 1, sx - 32 + shift, sy - 32, dx - 32, dy - 32, 48 - shift, 32)
+		EndSelect		
+	Next
+
+	; emulate copper shifting in Hollywood!
+	Local idx = IIf(bc = 32, 0, bc)		
+	nextshiftcop = (shiftcop & -16) | Buf[idx]
+	
+	SelectBrush(3)
+	DisplayBrushPart((1 - db) + 1, 48 + 16 - nextshiftcop, 64, 0, 0, 66, 256)
+	EndSelect
+	
+	; we use this little trick to emulate the dual playfield of the original intro
+	; (the Prestige logo appears between tornado bitplane 1 & tornado bitplane 2)
+	ReplaceColors(3, {ctable[0], #RED, ctable[1], #RED})
+	SetBrushTransparency(3, #RED)
+	
+	; draw tornado plane 1	
+	DisplayBrushPart((1 - db) + 1, 48 + 16 - nextshiftcop, 64, 0, 0, 320, 256)
+
+	; circular tornado center
+	Circle(#CENTER, #CENTER, 2, ctable[0])
+	
+	; draw Prestige logo
+	DisplayBrush(10, 18, 8)	
+
+        ; draw tornado plane 2
+	DisplayBrush(3, 0, 0)
+
+EndFunction
+
+/* our main loop - called 50 times per second */
+Function p_MainLoop()
+
+	DisableLineHook()
+	
+	; compute & display next tornado frame
+	p_ShiftTornado()
+	p_PutPattern()		
+	p_BlitterTornado()
+	
+	; handle text pages
+	If tx = 72
+	
+		If GetTimer(1) > threshold
+		
+			If gottext = False
+				threshold = 8000
+				parm = -5
+				tx = 320
+				p_MakeTextPage()							
+			Else
+				parm = 5
+				tx = 77
+			EndIf		
+
+			gottext = True
+		EndIf
+		
+	ElseIf gottext = True
+			
+		tx = tx + parm
+		
+		If tx < 72
+			tx = 72
+			StartTimer(1)
+		ElseIf tx > 320
+			tx = 320
+			parm = -5
+			p_MakeTextPage()
+		EndIf
+			
+	EndIf	
+
+	If gottext = True Then DisplayBrush(6, tx, 19)				
+	
+	; flip double buffer
+	Flip
+	
+	EnableLineHook()
+	
+EndFunction
+
+t$ =
+"The Mighty Mongols are back..."..
+"      And this time with      "..
+"                              "..
+"    - SUPER STARDUST AGA -    "..
+"                              "..
+"         From TEAM 17         "..
+"                              "..
+"                              "..
+"  Original by the Stinky Duo  "..
+"                              "..
+"      - Troops & Troll -      "..
+"                              "..
+"& Cracked by da Hamster Maniac"..
+"                              "..
+"           - Mok -            "..
+"                              "..
+"                              "..
+" A BIG Thx to Deathknight for "..
+"   playtesting the game :)    "..
+" Hey Mike: Stop Smoking hehe! "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"  To get the LATEST CONSOLE   "..
+"COPIERS at the BEST PRICES for"..
+"  your SEGA or SNES write to  "..
+"                              "..
+"         PO BOX 547           "..
+"        35100 PADOVA          "..
+"           ITALY              "..
+
+"                              "..
+"                              "..
+"                              "..
+"Call our Nice Boards Worldwide"..
+"------------------------------"..
+"                              "..
+"Zion's Hideout                "..
+"               +1-ITS-PRI-VATE"..
+"Complex 39                    "..
+"               +1-407-589-1313"..
+"The Enquisition               "..
+"               +1-812-886-0688"..
+"Wizard Palace                 "..
+"               +1-913-784-4703"..
+"The Notice                    "..
+"               +1-514-582-9623"..
+"Neon City                     "..
+"               +31-4780-12-733"..
+"Cool Corona                   "..
+"               +31-50-13-98-09"..
+"Sky Tower                     "..
+"               +45-74-83-38-86"..
+"                              "..
+"                              "..
+
+"                              "..
+"                              "..
+"                              "..
+"  The Ugly Hamsters behind    "..
+"      PRESTiGE are...         "..
+"                              "..
+"Abh -  BlackBird -  Bomber Man"..
+"Candy Man - Deathknight - Enzo"..
+"Fletcher   -   Fury   -   Groo"..
+"Hard Rider - Jake - King Cobra"..
+"Mark - Mok - Mr Hyde - Phantom"..
+"Polaris - Samir - Skol - Shark"..
+"Striker - The Freak  -  Troops"..
+"Troll   -    Willy   -    Zion"..
+"                              "..
+"                              "..
+" Our Everlasting greetings to "..
+"  all our stinky mongols who  "..
+"make all of this shit possible"..
+" Thanx mates! You're the BEST "..
+" a group could ever get... :) "..
+"                              "..
+"                              "..
+"                              "..
+
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"         PRESTiGE...          "..
+" Scratch our Balls and we'll  "..
+"   follow you anywhere! :)    "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"                              "..
+"        Intro credits:        "..
+"                              "..
+"Coding and design             "..
+"               Stelios/Scoopex"..
+"Prestige logo                 "..
+"                Reward/Complex"..
+"Superb music                  "..
+"                Nao/Spaceballs"..
+"                              "..
+"                              "
+
+; the tornado pattern - see how we can use binary numbers in Hollywood!
+Pattern = {
+Val("%0000000000000001"),
+Val("%0000000100000000"),
+Val("%0000001100000011"),
+Val("%0000001100000011"),
+Val("%0000000000000001"),
+Val("%0000000100000000"),
+Val("%0000001100000011"),
+Val("%0000001100000011"),
+Val("%0000001000000011"),
+Val("%0000001100000010"),
+Val("%0000001100000000"),
+Val("%0000000000000011"),
+Val("%0000000000000000"),
+Val("%0000001000000010"),
+Val("%0000001000000010"),
+Val("%0000000100000011"),
+Val("%0000001100000001"),
+Val("%0000001000000000"),
+Val("%0000000000000010"),
+Val("%0000000100000010"),
+Val("%0000001000000001"),
+Val("%0000000100000001"),
+Val("%0000000100000001"),
+Val("%0000000100000010"),
+Val("%0000001000000001"),
+Val("%0000001000000000"),
+Val("%0000000000000010"),
+Val("%0000000100000011"),
+Val("%0000001100000001"),
+Val("%0000001000000010"),
+Val("%0000001000000010"),
+Val("%0000001100000000"),
+Val("%0000000000000011"),
+Val("%0000001000000011"),
+Val("%0000001100000010"),
+-1}
+
+; palette
+ctable = {$442222, $664444, $886666, $ddbbbb}
+
+ReplaceColors(11, {#WHITE, ctable[1]})
+
+SetFillStyle(#FILLCOLOR)
+
+; two brushes for double buffering the tornado
+CreateBrush(1, 448, 384, ctable[0])
+CreateBrush(2, 448, 384, ctable[0])
+
+; temp. brush for dual playfield effect
+CreateBrush(3, 66, 256)
+
+patternpos = 0
+tx = 72
+threshold = 9500
+
+p_InitTornado()
+
+p_ShiftTornado()
+
+EscapeQuit(True)
+
+PlayMusic(1)
+
+; easy!
+DisplayBrushFX(10, 18, 8, #PIXELZOOM1)	
+
+StartTimer(1)
+
+BeginDoubleBuffer
+
+; let's go!
+Repeat
+	p_MainLoop()
+	CheckEvent
+Forever
+
+
+
+
+
+

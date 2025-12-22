@@ -1,0 +1,9 @@
+#pragma libcall XpkBase XpkExamine 24  9802
+#pragma libcall XpkBase XpkPack 2A 801
+#pragma libcall XpkBase XpkUnpack 30 801
+#pragma libcall XpkBase XpkOpen 36 9802
+#pragma libcall XpkBase XpkRead 3C 09803
+#pragma libcall XpkBase XpkWrite 42 09803
+#pragma libcall XpkBase XpkSeek 48 10803
+#pragma libcall XpkBase XpkClose 4E 801
+#pragma libcall XpkBase XpkQuery 54 801

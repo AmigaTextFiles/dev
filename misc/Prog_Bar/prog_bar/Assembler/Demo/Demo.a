@@ -1,0 +1,210 @@
+
+   include exec/libraries.i
+   include intuition/intuition.i
+   include intuition/intuition_lib.i
+   include exec/exec_lib.i
+   include graphics/graphics_lib.i
+   include exec/memory.i
+   include libraries/dos_lib.i
+   include libraries/dos.i
+   include libraries/gadtools_lib.i
+   include utility/utility_lib.i
+
+   include libraries/prog_bar.i
+
+   include easystart.i
+
+
+* firstly open the intuition library
+   lea   intname(pc),a1
+   moveq #0,d0                   dont care which version
+   CALLEXEC OpenLibrary
+   tst.l d0
+   beq   goawayfast              if didnt open
+
+   move.l   d0,_IntuitionBase    store lib pointer
+
+* and open the graphics library
+   lea   grafname(pc),a1
+   moveq #0,d0
+   CALLEXEC OpenLibrary
+   tst.l d0
+   beq   goawaycloseint
+   move.l   d0,_GfxBase
+
+* and open a DOS library
+   lea   dosname(pc),a1
+   moveq #0,d0
+   CALLEXEC OpenLibrary
+   tst.l d0
+   beq   goawayclosegraf
+   move.l   d0,_DOSBase
+
+* and open a Gadtools library
+   lea   gadname(pc),a1
+   moveq #0,d0
+   CALLEXEC OpenLibrary
+   tst.l d0
+   beq   goawayclosedos
+   move.l   d0,_GadToolsBase
+
+* and open the Utility library
+   lea   utilityname(pc),a1
+   moveq #0,d0
+   CALLEXEC OpenLibrary
+   tst.l d0
+   beq   goawayclosegadtools
+   move.l   d0,_UtilityBase
+
+* open a window next
+   lea   windowdef(pc),a0
+   CALLINT  OpenWindow
+   tst.l d0
+   beq   goawaycloseall          if no window
+   move.l   d0,windowptr         store the pointer
+
+* create the progress bar
+   pea.l    pbar_tags
+   move.l   max_size,-(sp)
+   move.l   #30,-(sp)
+   move.l   #300,-(sp)
+   move.l   #65,-(sp)
+   move.l   #100,-(sp)
+   move.l   windowptr,-(sp)
+   jsr      _CreateProgBarA
+   move.l   d0,PBar_ptr
+   lea      28(sp),sp
+   tst.l    d0
+   beq      closewindow
+
+mainloop
+* now see if a message is waiting for me
+messagetest
+   move.l      windowptr(pc),a0
+   move.l      wd_UserPort(a0),a0      windows message port
+   CALLEXEC    GetMsg
+   tst.l       d0
+   beq.s       nomessage
+
+* there was a message, which in our case must be CLOSEWINDOW,
+* so we should reply then go away
+   move.l      d0,a1
+   CALLEXEC    ReplyMsg
+   bra.s       killbar
+
+* no messages waiting, so suspend myself for a short while then
+* do it all again
+nomessage
+   move.l      counter,D0
+   addq.l      #1,D0
+   move.l      max_size,D1
+   addq.l      #1,D1
+   cmp.l       D1,D0
+   bcs         no_reset
+
+   move.l      PBar_ptr,-(sp)
+   jsr         _ResetProgBar
+   addq.l      #4,sp
+   moveq.l     #0,D0
+
+no_reset
+   move.l      D0,counter
+
+   move.l      D0,-(sp)
+   move.l      PBar_ptr,-(sp)
+   jsr         _UpdateProgBar
+   addq.l      #8,sp
+
+   moveq       #5,D1
+   CALLDOS     Delay
+   bra         mainloop
+
+* close clicked so kill the progress bar and close the window
+killbar
+   move.l      PBar_ptr,-(sp)
+   jsr         _FreeProgBar
+   addq.l      #4,sp
+
+closewindow
+   move.l   windowptr(pc),a0
+   CALLINT     CloseWindow
+
+* close all the libraries
+
+* close the utility library
+goawaycloseall
+   move.l   _UtilityBase,a1
+   CALLEXEC CloseLibrary
+
+* close the gadtools library
+goawayclosegadtools
+   move.l   _GadToolsBase,a1
+   CALLEXEC CloseLibrary
+
+* close the graphics library
+goawayclosedos
+   move.l   _DOSBase,a1
+   CALLEXEC CloseLibrary
+
+* close the graphics library
+goawayclosegraf
+   move.l   _GfxBase,a1
+   CALLEXEC CloseLibrary
+
+* finished so close Intuition library
+goawaycloseint
+   move.l   _IntuitionBase,a1
+   CALLEXEC CloseLibrary
+
+goawayfast
+   moveq #0,d0
+   rts
+
+
+* window definition here
+windowdef   dc.w  50,50       x posn, y posn
+   dc.w  500,150              width,height
+   dc.b  -1,-1                default pens
+   dc.l  CLOSEWINDOW          easy IDCMP flag
+   dc.l  WINDOWDEPTH!WINDOWCLOSE!SMART_REFRESH!ACTIVATE!WINDOWDRAG
+   dc.l  0                    no gadgets
+   dc.l  0                    no checkmarks
+   dc.l  windowtitle          title of window
+   dc.l  0                    no screen
+   dc.l  0                    no bitmap
+   dc.w  0,0,0,0              minimum, irrelevant as no sizing gadget
+   dc.w  WBENCHSCREEN         in workbench
+
+* prog_bar taglist
+pbar_tags
+   dc.l  PB_BorderType,PBBT_RIDGE
+   dc.l  PB_TextMode,PBTM_PERCENT
+   dc.l  PB_TextPosition,PBTP_CENTRE
+   dc.l  TAG_DONE
+
+* strings here
+intname        INTNAME           name of intuition lib
+grafname       GRAFNAME          name of graphics library
+dosname        DOSNAME           name of dos library
+gadname        GADNAME           name of gadtools library
+utilityname    UTILITYNAME       name of utility library
+
+windowtitle dc.b  ' Prog_Bar Demo Program in Assembler',0
+
+* variables here
+_IntuitionBase    dc.l  0        for int library
+_GfxBase          dc.l  0        for graphics library
+_DOSBase          dc.l  0        for dos library
+_GadToolsBase     dc.l  0        for gadtools library
+_UtilityBase      dc.l  0        for Utility library
+
+   XDEF     _IntuitionBase
+   XDEF     _GfxBase
+   XDEF     _DOSBase
+   XDEF     _GadToolsBase
+   XDEF     _UtilityBase
+
+windowptr         dc.l  0        for window ptr
+counter           dc.l  0        for loop counter
+max_size          dc.l  200      for bar size
+PBar_ptr          dc.l  0        for prog_bar pointer

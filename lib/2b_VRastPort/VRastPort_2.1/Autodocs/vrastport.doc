@@ -1,0 +1,679 @@
+TABLE OF CONTENTS
+
+vrastport.lib/--background--
+vrastport.lib/FreeVRastPort
+vrastport.lib/GetVRPAttrsA
+vrastport.lib/MakeVRastPortTagList
+vrastport.lib/RastToRealX
+vrastport.lib/RastToRealY
+vrastport.lib/RealToRastX
+vrastport.lib/RealToRastY
+vrastport.lib/SetVRPAttrsA
+vrastport.lib/VAreaBox
+vrastport.lib/VAreaEllipse
+vrastport.lib/VAreaPolygon
+vrastport.lib/VDrawBox
+vrastport.lib/VDrawEllipse
+vrastport.lib/VDrawLine
+vrastport.lib/VDrawPolygon
+vrastport.lib/VSetRast
+vrastport.lib/VWritePixel
+
+vrastport.lib/--background--                     vrastport.lib/--background--
+
+   NAME   
+       vrastport.lib
+
+   PURPOSE
+       vrastport.lib is a set of functions used for 2D vector graphics
+       rendering in Amiga RastPorts. It automatically performs
+       clipping (even on a non-layered rastports) and low-level stuff
+       handling like temporary rasters and AreaInfo.
+
+       Clipping
+
+       All drawing functions performs clipping before rendering to
+       a RastPort. It has two advantages:
+       - functions are significantly faster than OS ones,
+         especially if part of a figure is clipped out.
+       - Clipping works on non-layered RastPorts (used e.g. for
+         printing.
+       - no need to call MUI_AddClipping() in MUI custom classes.
+
+       Temporary Raster management
+
+       vrastport.lib uses temporary rasters for filled polygons and
+       ellipses. TmpRas buffer is as small as possible to reduce
+       chip memory usage. It is created by first call to a function
+       needing it. TmpRas size is calculated from clipping
+       rectangle size. When the size changes, TmpRas is disposed,
+       and again created by a first call to filling function. So it
+       always uses only really needed amount of chip-ram.
+
+       AreaInfo management
+
+       AreaInfo is created in VRastPort creation time. It has
+       a size for triangle by default. If You try to draw a polygon
+       with more vertices old AreaInfo buffer gets disposed and new
+       one is allocated and initialized. It is used as long as You
+       draw polygons with no more vertices than previously. And
+       again if AreaInfo is too small, a new one is allocated, and
+       old one is disposed. This scheme reduces memory usage. E.g.
+       if You draw in Your application only tetragons, AreaInfo
+       buffer will be never bigger than 25 bytes.
+
+       Virtual RastPort concept
+
+       vrastport.lib creates for You a new coordinate system called
+       VRastPort. Imagine that VRastPort is a big plane, and
+       clipping rectangle is a window. You can see a part of
+       VRastPort through the window. You can move the window, and
+       change zoom level independently in X and Y dimension.
+       VRastPort coordinates system is Carthesian one (X grows
+       right, Y grows up). All needed calculations are done
+       automatically. All You have to do is:
+       - create a RastPort (e.g. by opening an Intuition window).
+       - create a VRastPort.
+       - set a clipping rectangle bounds on the created RastPort.
+       - decide which part of the VRastPort You want to "see"
+         through the clipping rect. (using VRastPort attributes)
+       - draw some figures in VRastPort.
+
+       VRastPort base unit
+
+       Coordinates in VRastPorts are not in pixels. These are in an
+       abstract base unit. You can set base unit adequate to Your needs.
+       The size of a VRastPort is 2^31x2^31 base units. Eg. if You make
+       vector grahics editor You can choose base unit equal to 0.001 mm (1
+       um!). It gives You maximal page size about 2.14km x 2.14km. I hope
+       it's enough:-). Or if You prefer Imperial measure system - let's
+       base unit be 0.000001 inch. The page size in this case can be up to
+       58 x 58 yards. So VRastPort combines accuracy and big work
+       area size. When You choose base unit You can easily make VRastPort
+       to display objects at given dpi. Let's assume that base unit
+       = 0.001 mm, and You want 360 dpi in both axes. You can
+       calculate VRP_XScale and VRP_Yscale from the formula:
+
+                    dpi * 2^32        360 * 4294967296
+       scale = -------------------- = ---------------- = 60873552
+               1 inch in base units         25400
+
+       rounding error doesn't exceed 0.5 pixel in the whole
+       VRastPort area.
+
+       Overriding graphics.library limitations
+
+       Filled ellipse procedure has no chip-ram, and blitter
+       limitations. So filled ellipses can have both radii up to
+       32767 pixels.
+
+       VRastPort limitations
+
+       Coordinates range: -2^30+1 to +2^30-1 base unit in both axes.
+       Scale range: from 2 to 2^32 base units per pixel.
+       Number of polygon vertices - 16384 outline, 16380 filled.
+       Size of ellipse: radius up to 2^30-1 base units, but
+       rendered only if radius < 32767 pixels on RastPort (so if
+       You set scale to 4 base units per pixel only ellipses
+       smaller than 131068 base units will be drawn). This limit can
+       be removed in the future.
+
+       Speed
+
+       vrastport.lib uses no floating point math. It gives good
+       speed no matter if You have FPU or not. Effective clipping
+       makes it possible to render only visible parts of figures.
+       It speeds the rendering up especially on slower gfx devices
+       (eg. native Amiga chipsets).
+
+ EXAMPLE
+       See example code in the archive.
+
+vrastport.lib/FreeVRastPort                       vrastport.lib/FreeVRastPort
+
+   NAME	
+       FreeVRastPort -- Free VRastPort structure and all allocated
+       resources (V1).
+
+   SYNOPSIS
+       FreeVRastPort (vrastport)
+
+       void FreeVRastPort (struct VRastPort*);
+
+   FUNCTION
+       Frees memory allocated for VRastPort structure and all resources
+       allocated by VRastPort itself.
+
+   INPUTS
+       vrastport - VRastPort to free (must be valid VRastPort address).
+
+   SEE ALSO
+       MakeVRastPortTagList()
+
+vrastport.lib/GetVRPAttrsA                         vrastport.lib/GetVRPAttrsA
+
+   NAME
+       GetVRPAttrsA -- Gets a list of attributes from VRastPort (V1).
+
+   SYNOPSIS
+       GetVRPAttrsA (vrastport, taglist)
+
+       void GetVRPAttrsA (struct VRastPort*, struct TagItem*);
+       void GetVRPAttrs (struct VRastPort*, ULONG,...);
+
+   FUNCTION
+       Gets attributes from taglist for given VRastPort. ti_Data of every
+       struct TagItem in the list points to a longword, where attribute
+       value will be stored. Possible attributes are the same as for 
+       SetVRPAttrsA().
+
+       You can also use any of RPTAG_xxxx tags, they will be passed to
+       associated RastPort via GetRPAttrsA().
+
+   INPUTS
+       vrastport - VRastPort to get attrs from.
+       taglist   - list of VRastPort attributes.
+
+
+   NOTES
+       Don't put unknown tags (I mean tags other than VRP_xxxx or
+       RPTAG_xxxx) in the list! GetRPAttrsA() hangs up if it finds any.
+
+       Getting RPTAG_xxx attributes is senseless if there is no RastPort
+       associated with the VRastPort.
+
+   SEE ALSO
+       SetVRPAttrsA(), graphics.library/SetRPAttrsA(),
+
+vrastport.lib/MakeVRastPortTagList         vrastport.lib/MakeVRastPortTagList
+
+   NAME
+       MakeVRastPortTagList -- Creates a VRastPort with attributes from
+       given tag list (V1).
+
+   SYNOPSIS
+       vrastport = MakeVRastPortTagList (taglist)
+
+       struct VRastPort *MakeVRastPortTagList (struct TagItem*);
+       struct VRastPort *MakeVRastPortTags (ULONG,...);
+
+   FUNCTION
+       Creates a new VRastPort and set its attributes according to given
+       tag list. For possible tags see SetVRPAttrsA() docs. You can also
+       include to list RastPort attributes as described in
+       graphics.library/SetRPAttrsA(). If VRP_RastPort is set, RastPort
+       attributes will be passed to it.
+
+   INPUTS
+       taglist  - list of created VRastPort attributes.
+
+   RESULT
+       Initialized VRastPort address or NULL if falied.
+
+   NOTES
+       Don't put unknown tags (I mean tags other than VRP_xxxx or
+       RPTAG_xxxx) in the list! SetRPAttrsA() hangs up if it finds any.
+
+       Putting RPTAG_xxx tags is senseless if VRP_RastPort is not present
+       in the list.
+
+       You must not draw anything until You set VRP_RastPort.
+
+   SEE ALSO
+       SetVRPAttrsA(), graphics.library/SetRPAttrsA(), FreeVRastPort()
+
+vrastport.lib/RastToRealX                           vrastport.lib/RastToRealX
+
+   NAME	
+       RastToRealX -- Converts RastPort X coordinate to real X coordinate
+       (V1).
+
+   SYNOPSIS
+       realX = RastToRealX (vrastport, rastX)
+
+       LONG RastToRealX (struct VRastPort*, LONG);
+
+   FUNCTION
+       Converts X coordinate from RastPort coordinates system to VRastPort
+       system according to X axis scaling factor, X offset and coodrinates
+       of clipping rectangle on the RastPort.
+
+   INPUTS
+       vrastport - VRastPort to convert to.
+       rastX     - X coordinate in pixels. Range from -2^30+1 to +2^30-1 or
+                   smaller depending on VRastPort parameters.
+
+   RESULT
+       realX     - X coordinate in VRastPort base units. Range from -2^30+1
+                   to +2^30-1.
+
+   NOTES
+       Since one RastPort pixel represents at least two VRastPort base
+       units, returned value may be invalid when RastPort shows bigger
+       area than VRastPort area. In this case function returns
+       0x80000000. This value is never returned in normal conditions.
+
+       It is guarranted that RealToRastX (RastToRealX (a)) = a, if
+       RastToRealX() gives proper result.
+
+   SEE ALSO
+       RastToRealY(), RealToRastX(), RealToRastY(), SetVRPAttrsA()
+
+vrastport.lib/RastToRealY                           vrastport.lib/RastToRealY
+
+   NAME	
+       RastToRealY -- Converts RastPort Y coordinate to real Y coordinate
+       (V1).
+
+   SYNOPSIS
+       realY = RastToRealY (vrastport, rastY)
+
+       LONG RastToRealY (struct VRastPort*, LONG);
+
+   FUNCTION
+       Converts Y coordinate from RastPort coordinates system to VRastPort
+       system according to Y axis scaling factor, Y offset and coodrinates
+       of clipping rectangle on the RastPort.
+
+   INPUTS
+       vrastport - VRastPort to convert to.
+       rastY     - Y coordinate in pixels. Range from -2^30+1 to +2^30-1 or
+                   smaller depending on VRastPort parameters.
+
+   RESULT
+       realY     - Y coordinate in VRastPort base units. Range from -2^30+1
+                   to +2^30-1
+
+   NOTES
+       Since one RastPort pixel represents at least two VRastPort base
+       units, returned value may be invalid when RastPort shows bigger
+       area than VRastPort area. In this case function returns
+       0x80000000. This value is never returned in normal conditions.
+
+       It is guarranted that RealToRastY (RastToRealY (a)) = a, if
+       RastToRealY() gives proper result.
+
+   SEE ALSO
+       RastToRealX(), RealToRastX(), RealToRastY(), SetVRPAttrsA()
+
+vrastport.lib/RealToRastX                           vrastport.lib/RealToRastX
+
+   NAME	
+       RealToRastX -- Converts real X coordinate to RastPort X coordinate
+       (V1).
+
+   SYNOPSIS
+       rastX = RealToRastX (vrastport, realX)
+
+       LONG RealToRastX (struct VRastPort*, LONG);
+
+   FUNCTION
+       Converts X coordinate from VRastPort coordinates system to RastPort
+       system according to X axis scaling factor, X offset and coodrinates
+       of clipping rectangle on the RastPort.
+
+   INPUTS
+       vrastport - VRastPort to convert from.
+       realX     - X coordinate in VRastPort base units. Range from
+                   -2^30+1 to +2^30-1.
+
+   RESULT
+       rastX     - X coordinate in pixels. Range from -2^30+1 to +2^30-1.
+
+   NOTES
+       Since one RastPort pixel represents at least two VRastPort base
+       units, returned value is always valid.
+
+       It is guarranted that RealToRastX (RastToRealX (a)) = a, if
+       RastToRealX() gives proper result.
+
+   SEE ALSO
+       RealToRastX(), RastToRealY(), RealToRastY(), SetVRPAttrsA()
+
+vrastport.lib/RealToRastY                           vrastport.lib/RealToRastY
+
+   NAME	
+       RealToRastY -- Converts real Y coordinate to RastPort Y coordinate
+       (V1).
+
+   SYNOPSIS
+       rastY = RealToRastY (vrastport, realY)
+
+       LONG RealToRastY (struct VRastPort*, LONG);
+
+   FUNCTION
+       Converts Y coordinate from VRastPort coordinates system to RastPort
+       system according to Y axis scaling factor, Y offset and coodrinates
+       of clipping rectangle on the RastPort.
+
+   INPUTS
+       vrastport - VRastPort to convert from.
+       realY     - Y coordinate in VRastPort base units. Range from -2^30+1
+                   to +2^30-1.
+
+   RESULT
+       rastY     - Y coordinate in pixels. Range from -2^30+1 to +2^30-1.
+
+   NOTES
+       Since one RastPort pixel represents at least two VRastPort base
+       units, returned value is always valid.
+
+       It is guarranted that RealToRastY (RastToRealY (a)) = a, if
+       RastToRealY() gives proper result.
+
+   SEE ALSO
+       RastToRealY(), RealToRastX(), RastToRealX(), SetVRPAttrsA()
+
+vrastport.lib/SetVRPAttrsA                         vrastport.lib/SetVRPAttrsA
+
+   NAME
+       SetVRPAttrsA -- Sets a list of attributes for VRastPort (V1).
+
+   SYNOPSIS
+       SetVRPAttrsA (vrastport, taglist)
+
+       void SetVRPAttrsA (struct VRastPort*, struct TagItem*);
+       void SetVRPAttrs (struct VRastPort*, ULONG,...);
+
+   FUNCTION
+       Sets attributes from taglist for given VRastPort. Possible
+       attributes are:
+       VRP_RastPort    - RastPort associated with VRastPort. It must be set
+                         before any rendering.
+       VRP_XScale      - X axis scale coefficient. It says how many pixels
+                         in the RastPort equates 2^32 VRastPort base units.
+       VRP_YScale      - Y axis scale coefficient. It says how many pixels
+                         in the RastPort equates 2^32 VRastPort base units.
+       VRP_LeftBound   - Left edge of clipping rectangle on RastPort in 
+                         pixels.
+       VRP_RightBound  - Right edge of clipping rectangle on RastPort in 
+                         pixels.
+       VRP_TopBound    - Top edge of clipping rectangle on RastPort in 
+                         pixels.
+       VRP_BottomBound - Bottom edge of clipping rectangle on RastPort in 
+                         pixels.
+       VRP_XOffsett    - X coordinate of left lower cliprect corner in
+                         VRastPort base units.
+       VRP_YOffsett    - Y coordinate of left lower cliprect corner in
+                         VRastPort base units.
+       You can also use any of RPTAG_xxxx tags, they will be passed to
+       associated RastPort via SetRPAttrsA().
+
+   INPUTS
+       vrastport - VRastPort to set attrs for.
+       taglist   - list of VRastPort attributes.
+
+
+   NOTES
+       Don't put unknown tags (I mean tags other than VRP_xxxx or
+       RPTAG_xxxx) in the list! SetRPAttrsA() hangs up if it finds any.
+
+       Seting RPTAG_xxx attributes is senseless if there is no RastPort
+       associated with the VRastPort.
+
+       You must not draw anything until You set VRP_RastPort.
+
+   SEE ALSO
+       MakeVRastPortTagList(), graphics.library/SetRPAttrsA(),
+
+vrastport.lib/VAreaBox                                 vrastport.lib/VAreaBox
+
+   NAME   
+       VAreaBox -- Draws a filled rectangle. Rectangle sides are
+       vertical and horizontal (V2).
+
+   SYNOPSIS
+       VAreaBox (vrastport, x0, y0, x1, y1)
+
+       void VAreaBox (struct VRastPort*, LONG, LONG, LONG, LONG);
+
+   FUNCTION
+       Draws a filled rectangle placed parallel to VRastPort coordinates
+       system axes. VDrawBox() is much faster than a call to VAreaPolygon().
+
+   INPUTS
+       vrastport - VRastPort to render the box.
+       x0, y0    - coordinates of any rectangle corner in base units. Range
+                   from -2^30+1 to +2^30-1.
+       x1, y1    - coordinates of the opposite corner. Range from -2^30+1
+                   to +2^30-1.
+
+vrastport.lib/VAreaEllipse                         vrastport.lib/VAreaEllipse
+
+   NAME   
+       VAreaEllipse
+
+   SYNOPSIS
+       VAreaEllipse (vrastport, x, y, a, b);
+
+       void VAreaEllipse (struct VRastPort*, LONG, LONG, LONG, LONG);
+
+   FUNCTION
+       Draws a filled ellipse in the VRastPort. Ellipse is clipped to
+       clipping rectangle bounds.
+
+   INPUTS
+       vrastport - VRastPort to draw the ellipse.
+       x, y      - coordinates of the ellipse centre in VRastPort base
+                   units. Range is from -2^30+1 to +2^30-1.
+       a, b      - horizontal and vertical ellipse radius in VRastPort base
+                   units. Range is from -2^30+1 to +2^30-1.
+       
+   NOTES
+       This procedure doesn't use graphics.library/AreaEllipse() function.
+       This makes it independent on hardawre blitter or chip memory
+       limitations. It can draw an ellipse with both raster radii 32767
+       pixels without any chip-ram allocation. This function is also much
+       faster than OS one when drawing big (a or b > 256 pixels) ellipses.
+       On the other hand for small ellipses blitter is faster so using the
+       blitter for small ellipses may be implemented in the future.
+
+       Unlike OS AreaXxxx() functions, VAreaEllipse() doesn't require
+       InitArea() and AreaEnd() calls.
+
+   BUGS
+       Function doesn't draw anything if at least one of raster radii is
+       greater than 32767 pixels.
+
+   SEE ALSO
+       graphics.library/AreaEllipse()
+
+vrastport.lib/VAreaPolygon                         vrastport.lib/VAreaPolygon
+
+   NAME
+       VAreaPolygon -- Draws a filled convex polygon in the VRastPort (V1).
+
+   SYNOPSIS
+       success = VAreaPolygon (vrastport, polygon, vertices)
+
+       LONG VAreaPolygon (struct VRastPort*, struct Point32*, WORD);
+
+   FUNCTION
+       Draws a filled convex polygon in the RastPort. Polygon is clipped to
+       clipping rectangle bounds. 
+
+   INPUTS
+       vrastport - VRastPort to draw the filled polygon.
+       polygon   - pointer to a table of polygon vertices ((x,y) pairs). X,
+                   Y coordinates are limited to a range from -2^30+1 to
+                   +2^30-1.
+       vertices  - number for polygon vertices (from 3 to 16380).
+       
+   RESULT
+       TRUE if all went OK. Function allocates some memory for internal
+       tables. If allocation fails VDrawPolygon returns FLASE. It can also
+       fail when it needs to create a new temporary raster or AreaInfo for
+       filling operations, and this creation fails.
+       
+   NOTES
+       Polygon MUST BE convex. You'll get unpredictable results otherwise.
+
+       Unlike OS AreaXxxx() functions VAreaPolygon() automatically handles
+       low-level filling stuff like TmpRas, AreaInfo, InitArea() and
+       AreaEnd().
+
+   BUGS
+       Memory for internal tables is allocated directly from the system. It
+       can lead to memory fragmentation. It will use a memory pool in the
+       future.
+       
+vrastport.lib/VDrawBox                                 vrastport.lib/VDrawBox
+
+   NAME   
+       VDrawBox -- Draws an outline of a rectangle. Rectangle sides are
+       vertical and horizontal (V2).
+
+   SYNOPSIS
+       VDrawBox (vrastport, x0, y0, x1, y1)
+
+       void VDrawBox (struct VRastPort*, LONG, LONG, LONG, LONG);
+
+   FUNCTION
+       Draws an outline of rectangle placed parallel to VRastPort
+       coordinates system axes. VDrawBox() is much faster than 4 calls to
+       VDrawLine() or call to VDrawPolygon().
+
+   INPUTS
+       vrastport - VRastPort to render the box.
+       x0, y0    - coordinates of any rectangle corner in base units. Range
+                   from -2^30+1 to +2^30-1.
+       x1, y1    - coordinates of the opposite corner. Range from -2^30+1
+                   to +2^30-1.
+
+vrastport.lib/VDrawEllipse                         vrastport.lib/VDrawEllipse
+
+   NAME   
+       VDrawEllipse -- Draw an ellipse outline in a VRastPort (V1).
+
+   SYNOPSIS
+       VDrawEllipse (vrastport, x, y, a, b)
+
+       void VDrawEllipse (struct VRastPort*, LONG, LONG, LONG, LONG);
+
+   FUNCTION
+       Draws ellipse outline to a VRastPort. Ellipse is clipped to clipping
+       rectangle bounds.
+
+   INPUTS
+       vrastport - VRastPort to draw the ellipse.
+       x, y      - coordinates of the ellipse centre in VRastPort base
+                   units. Range is from -2^30+1 to +2^30-1
+       a, b      - horizontal and vertical ellipse radius in VRastPort base
+                   units. Range is from -2^30+1 to +2^30-1.
+
+   NOTES
+       Function doesn't use graphics.library DrawEllipse() function. This
+       may change if on gfx boards OS code is faster than my code. On AGA
+       based Amigas my code is faster.
+
+   BUGS
+       Function doesn't draw anything if at least one of raster radii is
+       greater than 32767 pixels.
+
+   SEE ALSO
+       graphics.library/DrawEllipse()
+
+vrastport.lib/VDrawLine                               vrastport.lib/VDrawLine
+
+   NAME   
+       VDrawLine -- Draws line in a VRastPort (V1).
+
+   SYNOPSIS
+       result = VDrawLine (vrastport, x0, y0, x1, y1)
+
+       LONG VDrawLine (struct VRastPort, LONG, LONG, LONG, LONG);
+
+   FUNCTION
+       Draws a line in VRastPort from point (x0,y0) to (x1,y1). Line is
+       clipped to clipping rectangle bounds.
+
+   INPUTS
+       vrastport - VRastPort to draw the line.
+       x0, y0    - line start point coordinates in VRastPort base units.
+                   Range from -2^30+1 to +2^30-1.
+       x0, y0    - line end point coordinates in VRastPort base units.
+                   Range from -2^30+1 to +2^30-1.
+
+   RESULT
+       TRUE if any section of the line is rendered. FALSE if the whole line
+       is clipped out.
+
+vrastport.lib/VDrawPolygon                         vrastport.lib/VDrawPolygon
+
+   NAME   
+       VDrawPolygon -- Draws an outline of a polygon in the VRastPort (V1).
+
+   SYNOPSIS
+       success = VDrawPolygon (vrastport, polygon, vertices)
+       
+       LONG VDrawPolygon (struct VRastPort*, struct Point32*, WORD);
+
+   FUNCTION
+       Draws an outline of any polygon (may be not convex) in the
+       VRastPort. Polygon is clipped to clipping rectangle bounds.
+
+   INPUTS
+       vrastport - VRastPort to draw the polygon.
+       polygon   - pointer to a table of polygon vertices ((x,y) pairs). X,
+                   Y coordinates are limited to a range from -2^30+1 to
+                   +2^30-1.
+       vertices  - number for polygon vertices (from 3 to 16384).
+
+   RESULT
+       TRUE if all went OK. Function allocates some memory for internal
+       tables. If allocation fails VDrawPolygon returns FLASE.
+
+   BUGS
+       Memory for internal tables is allocated directly from the system. It
+       can lead to memory fragmentation. It will use a memory pool in the
+       future.
+
+vrastport.lib/VSetRast                                 vrastport.lib/VSetRast
+
+   NAME   
+       VSetRast -- Fills the whole clipping rectangle with the given colour
+       (V1).
+
+   SYNOPSIS
+       VSetRast (vrastport, colour);
+
+       void VSetRast (struct VRastPort*, UBYTE);
+
+   FUNCTION
+       Fills the whole clipping rectangle with the given colour. Filling is
+       performed via RectFill(). RastPort APen is preserved.
+
+   INPUTS
+       vrastport - VRastPort to fill.
+       colour    - colour number in screen's ColorMap.
+
+   NOTES
+       VSetRast uses graphics.library/RectFill() to fill the clipping
+       rectangle. So it inherits RectFill() bugs.
+
+   SEE ALSO
+       graphics.library/RectFill(), graphics/view.h
+
+vrastport.lib/VWritePixel                           vrastport.lib/VWritePixel
+
+   NAME
+       VWritePixel -- Writes a pixel to VRastPort (V1).
+
+   SYNOPSIS
+       result = VWritePixel (vrastport, x, y)
+
+       LONG VWritePixel (struct VRastPort*, LONG, LONG);
+
+   FUNCTION
+       Writes a pixel to VRastPort. This always is rendered in RastPort as
+       single pixel no matter what VRP_XScale nad VRP_YScale are.
+
+   INPUTS
+       vrastport - VRastPort to render a pixel.
+       x, y      - Pixel coordinates in VRastPort base units. Range is from
+                   -2^30+1 to +2^30-1 for both.
+
+   RESULT
+       TRUE when pixel was actually placed in the RastPort, FALSE if it has
+       been clipped out.
+

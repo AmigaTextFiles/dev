@@ -1,0 +1,1102 @@
+/***********************************************************************
+ *
+ *	C - Smalltalk Interface module
+ *
+ ***********************************************************************/
+
+/***********************************************************************
+ *
+ * Copyright (C) 1990, 1991, 1992 Free Software Foundation, Inc.
+ * Written by Steve Byrne.
+ *
+ * This file is part of GNU Smalltalk.
+ *
+ * GNU Smalltalk is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 1, or (at your option) any later 
+ * version.
+ * 
+ * GNU Smalltalk is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or 
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ * 
+ * You should have received a copy of the GNU General Public License along with
+ * GNU Smalltalk; see the file COPYING.  If not, write to the Free Software
+ * Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.  
+ *
+ ***********************************************************************/
+
+
+/*
+ *    Change Log
+ * ============================================================================
+ * Author      Date       Change 
+ * sbb	     23 Feb 92	  Added support for reading and writing scalar types.
+ *
+ * sbb	     19 Jul 91	  Started adding support for the DLD package.
+ *
+ * sbb	     22 Jan 91	  Added putenv().
+ *
+ * sbb	     17 Nov 90	  Added support for UnixStream primitives.
+ *
+ * sbb	     11 Aug 90	  Added knowledge of byteArrayOut type.
+ *
+ * sbyrne     4 Jun 89	  Added Smalltalk data conversion type.
+ *
+ * sbyrne    29 May 89	  Created.
+ *
+ */
+
+/* Define this to enable initialization of the SunView hacks in the
+   ./examples directory */
+/* #define SUN_WIN_HACKS */
+
+#include "mst.h"
+#include "mstinterp.h"
+#include "mstdict.h"
+#include "mstoop.h"
+#include "mstsym.h"
+#include "mstcallin.h"
+
+#define ARG_VEC_SIZE		20 /* 20 ints, 10 longs or ptrs, 5 dbls */
+
+
+typedef enum {
+  intAlign,
+  longAlign,
+  ptrAlign,
+  doubleAlign
+} AlignmentType;
+
+typedef enum {			/* types for C parameters */
+  unknownType,			/* when there is no type a priori */
+  charType,
+  stringType,
+  stringOutType,		/* for things that modify string params */
+  symbolType,
+  byteArrayType,
+  byteArrayOutType,
+  intType,
+  longType,
+  doubleType,
+  voidType,			/* valid only as a return type */
+  variadicType,			/* for parameters, this param is an array
+				   to be interpreted as arguments.  Note that
+				   only simple conversions are performed in
+				   this case. */
+  cObjectType,			/* a C object is being passed */
+  smalltalkType			/* no conversion to-from C...C sees this
+				   as "void *".  */
+} CDataType;
+
+typedef struct CFuncDescriptorStruct {
+  OBJ_HEADER;
+  OOP		cFunction;
+  OOP		cFunctionName;
+  OOP		returnType;
+  OOP		numFixedArgs;
+  OOP		argTypes[1];	/* variable length, really numFixedArgs long */
+} *CFuncDescriptor;
+
+typedef struct SymbolTypeMapStruct {
+  OOP		*symbol;
+  CDataType	type;
+} SymbolTypeMap;
+
+typedef struct StringInfoStruct {
+  Byte		*cString;
+  OOP		stringOOP;
+  CDataType	returnedType;
+} StringInfo;
+
+typedef union CParamUnionUnion {
+  int		intVal;
+  long		longVal;
+  voidPtr	ptrVal;
+  double	doubleVal;
+  int		valueVec[sizeof(double) / sizeof(int)];
+} CParamUnion;
+
+typedef struct 	CFuncInfoStruct {
+  char		*funcName;
+  void		(*funcAddr)();
+} CFuncInfo;
+
+extern int			errno;
+
+void				defineCFunc();
+
+static void 			pushObj(), callCFunction(),
+				badType(), pushSmalltalkObj();
+static CDataType 		getCType();
+static CFuncDescriptor 		getCFuncDescriptor();
+static OOP			classifyTypeSymbol();
+static int			savedErrno;
+
+static OOP			readChar();
+static OOP			readUChar();
+static OOP			readShort();
+static OOP			readUShort();
+static OOP			readLong();
+static OOP			readULong();
+static OOP			readFloat();
+static OOP			readDouble();
+
+static void			writeChar();
+static void			writeShort();
+static void			writeLong();
+static void			writeFloat();
+static void			writeDouble();
+
+static CFuncInfo		cFuncInfo[100], *cFuncIndex = cFuncInfo;
+static int			cArgVec[ARG_VEC_SIZE];
+static int			*cArg;
+static StringInfo		stringInfo[ARG_VEC_SIZE], *sip;
+/* printable names for corresponding C types */
+static char			*cTypeName[] = {
+  "void?",			/* unknownType */
+  "char",			/* charType */
+  "char *",			/* stringType */
+  "char *",			/* stringOutType */
+  "char *",			/* symbolType */
+  "char *",			/* byteArrayType */
+  "char *",			/* byteArrayOutType */
+  "int",			/* intType */
+  "long",			/* longType */
+  "double",			/* doubleType */
+  "void?",			/* voidType */
+  "var args?",			/* variadicType */
+  "void *",			/* cObjectType */
+  "void *",			/* smalltalkType */
+};
+
+static SymbolTypeMap	symbolTypeMap[] = {
+  &unknownSymbol, unknownType,
+  &charSymbol, charType,
+  &stringSymbol, stringType,
+  &stringOutSymbol, stringOutType,
+  &symbolSymbol, symbolType,
+  &byteArraySymbol, byteArrayType,
+  &byteArrayOutSymbol, byteArrayOutType,
+  &intSymbol, intType,
+  &longSymbol, longType,
+  &doubleSymbol, doubleType,
+  &voidSymbol, voidType,
+  &variadicSymbol, variadicType,
+  &cObjectSymbol, cObjectType,
+  &smalltalkSymbol, smalltalkType,
+  nil, unknownType
+};
+
+/* the arg vec pointer must be = 0 mod alignments[align] */
+/* This is quite likely to be machine dependent.  Currently it is set up
+ * to work correctly on sun2's, sun3's and sun4's */
+static int 		alignments[] = {
+  sizeof(int),			/* intType */
+  sizeof(long),			/* longType */
+  sizeof(voidPtr),		/* ptrType */
+  DOUBLE_ALIGNMENT		/* doubleType */
+};
+
+static int		typeSizes[] = {
+  sizeof(int),			/* intType */
+  sizeof(long),			/* longType */
+  sizeof(voidPtr),		/* ptrType */
+  sizeof(double)		/* doubleType */
+};
+
+/*
+ *	void marli(n)
+ *
+ * Description
+ *
+ *	Test/example C function.
+ *
+ * Inputs
+ *
+ *	n     : number of times to emit message.
+ *
+ */
+void marli(n)
+int n;
+{
+  int		i;
+
+  for (i = 0; i < n; i++) {
+    printf("Marli loves Steve!!!\n");
+  }
+}
+
+static int getErrno()
+{
+  return (savedErrno);
+}
+ 
+
+
+#ifdef debugging /* Wed Nov 14 12:34:44 1990 */
+/**/myioctl(fd, request, arg)
+/**/int	fd, request;
+/**/char	*arg;
+/**/{
+/**/  printf("fd %d request %x arg %x\n", fd, request, arg);
+/**/  return (ioctl(fd, request, arg));
+/**/}
+#endif /* debugging Wed Nov 14 12:34:44 1990 */
+
+/*
+ *	static int my_putenv(str)
+ *
+ * Description
+ *
+ *	Does a putenv library call.  Exists because putenv (at least Sun's)
+ *	expects that the string passed in will exist for the duration, and
+ *	Smalltalk will free the string it passed to this this routine when
+ *	control returns to it.
+ *
+ * Inputs
+ *
+ *	str   : String to stuff into the environment.  Of the form name=value.
+ *
+ * Outputs
+ *
+ *	Returned value from putenv() call.
+ */
+static int my_putenv(str)
+char	*str;
+{
+  char		*clone;
+  int		len;
+
+  len = strlen(str) + 1;	/* hold the null */
+  clone = (char *)malloc(len);
+  strcpy(clone, str);
+  return (putenv(clone));
+}
+
+
+static void testCallin(oop)
+OOP	oop;
+{
+  strMsgSend(oop, "inspect", nil);
+#ifdef preserved /* Tue Dec 31 21:55:47 1991 */
+/**/  OOP		o, sel;
+/**/  double	f;
+/**/
+/**/  sel = symbolToOOP("printNl");
+/**/  o = msgSend(stringToOOP(msg), sel, nil);
+/**/  strMsgSend(o, "inspect", nil);
+/**/  strMsgSend(strMsgSend(o, ",", o, nil), "printNl", nil);
+/**/  msgSendf(nil, "%s %s printNl", "this is a test");
+/**/  msgSendf(&f, "%f %i + %f", 3, 4.7);
+/**/  printf("result = %f\n", f);
+#endif /* preserved Tue Dec 31 21:55:47 1991 */
+}
+
+void initCFuncs()
+{
+  extern void marli(), windowLoop();
+  extern char *getAttrName();
+  extern voidPtr *getAttrValue();
+  extern void window_create();
+  extern int system();
+  extern char *getenv();
+  extern int read(), write(), open(), close(), ioctl(), lseek(), tell();
+
+  defineCFunc("system", system);
+  defineCFunc("getenv", getenv);
+  defineCFunc("putenv", my_putenv);
+
+  defineCFunc("open", open);
+  defineCFunc("close", close);
+  defineCFunc("read", read);
+  defineCFunc("write", write);
+  /* defineCFunc("ioctl", myioctl); */
+  defineCFunc("ioctl", ioctl);
+  defineCFunc("lseek", lseek);
+  defineCFunc("tell", tell);
+
+  /* just to round out the set */
+  defineCFunc("readChar", readChar);
+  defineCFunc("readUChar", readUChar);
+  defineCFunc("readShort", readShort);
+  defineCFunc("readUShort", readUShort);
+  defineCFunc("readLong", readLong);
+  defineCFunc("readULong", readULong);
+  defineCFunc("readFloat", readFloat);
+  defineCFunc("readDouble", readDouble);
+
+  defineCFunc("writeChar", writeChar);
+  defineCFunc("writeShort", writeShort);
+  defineCFunc("writeLong", writeLong);
+  defineCFunc("writeFloat", writeFloat);
+  defineCFunc("writeDouble", writeDouble);
+
+  defineCFunc("getErrno", getErrno);
+
+  defineCFunc("testCallin", testCallin);
+
+#ifdef DLD
+  initDldLib();
+#endif
+
+  /* Non standard routines */
+
+  defineCFunc("marli", marli);
+#ifdef SUN_WIN_HACKS
+  defineWindowFuncs();
+#endif /* SUN_WIN_HACKS */
+
+#ifdef notdefined
+  defineCFunc("getAttrName", getAttrName);
+  defineCFunc("getAttrValue", getAttrValue);
+#endif
+}
+
+static OOP readChar(fd)
+int	fd;
+{
+  char		c;
+
+  if (read(fd, &c, sizeof(c)) != sizeof(c)) {
+    return (nilOOP);
+  }
+
+  return (charOOPAt(c));
+}
+
+static OOP readUChar(fd)
+int	fd;
+{
+  unsigned char	c;
+
+  if (read(fd, &c, sizeof(c)) != sizeof(c)) {
+    return (nilOOP);
+  }
+
+  return (charOOPAt(c));
+}
+
+static OOP readShort(fd)
+int	fd;
+{
+  short		s;
+
+  if (read(fd, &s, sizeof(s)) != sizeof(s)) {
+    return (nilOOP);
+  }
+
+  return (fromInt(s));
+}
+
+static OOP readUShort(fd)
+int	fd;
+{
+  unsigned short s;
+
+  if (read(fd, &s, sizeof(s)) != sizeof(s)) {
+    return (nilOOP);
+  }
+
+  return (fromInt(s));
+}
+
+static OOP readLong(fd)
+int	fd;
+{
+  long		l;
+
+  if (read(fd, &l, sizeof(l)) != sizeof(l)) {
+    return (nilOOP);
+  }
+
+  return (fromInt(l));
+}
+
+static OOP readULong(fd)
+int	fd;
+{
+  unsigned long l;
+
+  if (read(fd, &l, sizeof(l)) != sizeof(l)) {
+    return (nilOOP);
+  }
+
+  return (fromInt(l));
+}
+
+static OOP readFloat(fd)
+int	fd;
+{
+  float 	f;
+
+  if (read(fd, &f, sizeof(f)) != sizeof(f)) {
+    return (nilOOP);
+  }
+
+  return (floatNew(f));
+}
+
+static OOP readDouble(fd)
+int	fd;
+{
+  double 	d;
+
+  if (read(fd, &d, sizeof(d)) != sizeof(d)) {
+    return (nilOOP);
+  }
+
+  return (floatNew(d));
+}
+
+static void writeChar(fd, c)
+int	fd;
+char	c;
+{
+  write(fd, &c, sizeof(c));
+}
+
+static void writeShort(fd, s)
+int	fd;
+short	s;
+{
+  write(fd, &s, sizeof(s));
+}
+
+static void writeLong(fd, l)
+int	fd;
+long	l;
+{
+  write(fd, &l, sizeof(l));
+}
+
+static void writeFloat(fd, f)
+int	fd;
+float	f;
+{
+  write(fd, &f, sizeof(f));
+}
+
+static void writeDouble(fd, d)
+int	fd;
+double	d;
+{
+  write(fd, &d, sizeof(d));
+}
+
+
+#ifdef DLD
+
+/***********************************************************************
+ *
+ *	GNU Dynamic Linking support code
+ *
+ ***********************************************************************/
+
+#include <dld.h>
+
+char	*dldArgv0;
+
+static int getUndefinedSymCount()
+{
+  return (dld_undefined_sym_count);
+}
+
+
+initDldLib()
+{
+  if (dld_init (dld_find_executable (dldArgv0)) == 0) {
+    defineCFunc("dldLink", dld_link);
+    defineCFunc("dldUnlinkByFile", dld_unlink_by_file);
+    defineCFunc("dldUnlinkBySymbol", dld_unlink_by_symbol);
+    defineCFunc("dldGetSymbol", dld_get_symbol);
+    defineCFunc("dldGetFunc", dld_get_func);
+    defineCFunc("dldFunctionExecutableP", dld_function_executable_p);
+    defineCFunc("dldListUndefinedSym", dld_list_undefined_sym);
+    defineCFunc("dldCreateReference", dld_create_reference);
+    defineCFunc("dldDefineSym", dld_define_sym);
+    defineCFunc("dldRemoveDefinedSymbol", dld_remove_defined_symbol);
+
+    defineCFunc("getUndefinedSymCount", getUndefinedSymCount);
+
+    /* so user level code can invoke it! */
+    defineCFunc("defineCFunc", defineCFunc);
+  }
+}
+
+#endif
+
+
+void defineCFunc(funcName, funcAddr)
+char	*funcName;
+void	(*funcAddr)();
+{
+  cFuncIndex->funcName = funcName;
+  cFuncIndex->funcAddr = funcAddr;
+  cFuncIndex++;
+}
+
+void (*lookupFunction(funcName))()
+char	*funcName;
+{
+  CFuncInfo	*fip;
+
+  for (fip = cFuncInfo; fip < cFuncIndex; fip++) {
+    if (strcmp(funcName, fip->funcName) == 0) {
+      return (fip->funcAddr);
+    }
+  }
+  return (nil);
+}
+
+
+
+/*
+ *	void invokeCRoutine(numArgs, methodOOP)
+ *
+ * Description
+ *
+ *	Invokes a C routine.  The Smalltalk arguments have been popped off the
+ *	Smalltalk stack when this routine returns.
+ *
+ * Inputs
+ *
+ *	numArgs: 
+ *		
+ *	methodOOP: 
+ *		
+ *
+ */
+void invokeCRoutine(numArgs, methodOOP)
+long	numArgs;
+OOP	methodOOP;
+{
+  CFuncDescriptor desc;
+  CDataType	cType;
+  OOP		oop; /* oopArgVec[32]; */
+  int		i;
+
+  cArg = cArgVec;
+  
+  desc = getCFuncDescriptor(methodOOP);
+
+  sip = stringInfo;
+
+  for (i = 0; i < numArgs; i++) {
+    oop = stackAt(numArgs - i - 1);
+    cType = getCType(desc, i);
+    pushSmalltalkObj(oop, cType);
+  }
+
+  popNOOPs(numArgs);
+
+  callCFunction(desc);
+
+  /* Fixup all returned string variables */
+  for ( ; sip-- != stringInfo; ) {
+    if (sip->returnedType == stringOutType) {
+      setOOPString(sip->stringOOP, sip->cString);
+    } else if (sip->returnedType == byteArrayOutType) {
+      setOOPBytes(sip->stringOOP, sip->cString);
+    }
+    free(sip->cString);
+  }
+}
+
+static CFuncDescriptor getCFuncDescriptor(methodOOP)
+OOP	methodOOP;
+{
+  OOP		associationOOP, descOOP;
+
+  associationOOP = methodLiteralExt(methodOOP, 0);
+  descOOP = associationValue(associationOOP);
+  return ((CFuncDescriptor)oopToObj(descOOP));
+}
+
+static CDataType getCType(desc, index)
+CFuncDescriptor desc;
+int	index;
+{
+  if (index < toInt(desc->numFixedArgs)) {
+    return ((CDataType)toInt(desc->argTypes[index]));
+  } else {
+    return (unknownType);
+  }
+}
+
+static void pushSmalltalkObj(oop, cType)
+OOP	oop;
+CDataType cType;
+{
+  OOP		class;
+  int		i;
+  CParamUnion	u;
+
+  if (cArg - cArgVec >= ARG_VEC_SIZE) {
+    errorf("Attempt to push more than %d ints; extra parameters ignored",
+	   ARG_VEC_SIZE);
+    return;
+  }
+
+  if (isInt(oop)) {
+    class = integerClass;
+  } else if (oop == trueOOP || oop == falseOOP) {
+    class = booleanClass;
+  } else {
+    class = oopClass(oop);
+  }
+
+  if (cType == smalltalkType) {
+    u.ptrVal = (voidPtr)oop;
+    registerOOP(oop);		/* make sure it doesn't get gc'd */
+    pushObj(&u, ptrAlign);
+  } else if (class == integerClass) {
+    if (cType == longType || cType == unknownType) {
+      u.longVal = toInt(oop);
+      pushObj(&u, longAlign);
+    } else if (cType == intType || cType == charType) {
+      u.intVal = toInt(oop);
+      pushObj(&u, intAlign);
+    } else {
+      badType("Integer", cType);
+    }
+  } else if (class == booleanClass) {
+    if (cType == intType || cType == charType || cType == unknownType) {
+      u.intVal = (oop == trueOOP);
+      pushObj(&u, intAlign);
+    } else if (cType == longType) {
+      u.longVal = (oop == trueOOP);
+      pushObj(&u, longAlign);
+    } else {
+      badType("Boolean", cType);
+    }
+  } else if (class == charClass) {
+    if (cType == charType || cType == unknownType) {
+      u.intVal = charOOPValue(oop);
+      pushObj(&u, intAlign);
+    } else {
+      badType("Character", cType);
+    }
+  } else if (class == stringClass) {
+    if (cType == stringType || cType == stringOutType
+	|| cType == unknownType) {
+      if (sip - stringInfo >= ARG_VEC_SIZE) {
+	errorf("Too many string arguments, max is %d.  Extra ignored",
+	       ARG_VEC_SIZE);
+      }
+      sip->cString = toCString(oop);
+      u.ptrVal = (voidPtr)sip->cString;
+      sip->stringOOP = oop;
+      sip->returnedType = cType;
+      sip++;
+      pushObj(&u, ptrAlign);
+    } else {
+      badType("String", cType);
+    }
+  } else if (class == symbolClass) {
+    if (cType == symbolType || cType == stringType || cType == unknownType) {
+      if (sip - stringInfo >= ARG_VEC_SIZE) {
+	errorf("Too many string arguments, max is %d.  Extra ignored",
+	       ARG_VEC_SIZE);
+      }
+      sip->cString = toCString(oop);
+      u.ptrVal = (voidPtr)sip->cString;
+      sip->stringOOP = oop;
+      sip->returnedType = cType;
+      sip++;
+      pushObj(&u, ptrAlign);
+    } else {
+      badType("Symbol", cType);
+    }
+  } else if (class == byteArrayClass) {
+    if (cType == byteArrayType || cType == byteArrayOutType
+	|| cType == unknownType) {
+      if (sip - stringInfo >= ARG_VEC_SIZE) {
+	errorf("Too many string arguments, max is %d.  Extra ignored",
+	       ARG_VEC_SIZE);
+      }
+      sip->cString = toByteArray(oop);
+      u.ptrVal = (voidPtr)sip->cString;
+      sip->stringOOP = oop;
+      sip->returnedType = cType;
+      sip++;
+      pushObj(&u, ptrAlign);
+    } else {
+      badType("ByteArray", cType);
+    }
+  } else if (class == floatClass) {
+    if (cType == doubleType || cType == unknownType) {
+      u.doubleVal = floatOOPValue(oop);
+      pushObj(&u, doubleAlign);
+    } else {
+      badType("Float", cType);
+    }
+  } else if (class == cObjectClass) { 
+    if (cType == cObjectType || cType == unknownType) {
+      u.ptrVal = cObjectValue(oop);
+      pushObj(&u, ptrAlign);
+    } else {
+      badType("CObject", cType);
+    }
+  } else if ((cType == cObjectType || cType == unknownType)
+	     && isAKindOf(class, cObjectClass)) {
+    u.ptrVal = cObjectValue(oop);
+    pushObj(&u, ptrAlign);
+  } else if (class == undefinedObjectClass) { /* how to encode nil */
+    switch (cType) {
+    case cObjectType:
+    case stringType:
+    case symbolType:
+    case unknownType:
+      u.ptrVal = nil;
+      pushObj(&u, ptrAlign);
+      break;
+
+    default:
+      badType("UndefinedObject", cType);
+    }
+  } else if (class == arrayClass) {
+    for (i = 1; i <= numOOPs(oopToObj(oop)); i++) {
+      pushSmalltalkObj(arrayAt(oop, i), unknownType);
+    }
+  }
+  
+}
+
+static void pushObj(up, align)
+CParamUnion *up;
+AlignmentType align;
+{
+  int i, alignInts;
+
+  alignInts = alignments[ENUM_INT(align)] / sizeof(int);
+
+  /* Align the stack properly */
+  if ((cArg - cArgVec) % alignInts) {
+    cArg += alignInts - ((cArg - cArgVec) % alignInts);
+  }
+  
+  for (i = 0; i < typeSizes[ENUM_INT(align)] / sizeof(int); i++) {
+    if (cArg - cArgVec >= ARG_VEC_SIZE) {
+      errorf("Too many parameters, max = %d.  Extra parameters ignored",
+	     ARG_VEC_SIZE);
+      return;
+    }
+    *cArg++ = up->valueVec[i];
+  }
+}
+
+static void callCFunction(desc)
+CFuncDescriptor desc;
+{  
+  int		intResult;
+  long		longResult;
+  double	doubleResult;
+  int		(*cFunction)();
+  CDataType	returnType;
+  OOP		returnTypeOOP;
+
+  cFunction = (int (*)())cObjectValue(desc->cFunction);
+  if (isInt(desc->returnType)) {
+    returnType = (CDataType)toInt(desc->returnType);
+    returnTypeOOP = nil;
+  } else {
+    returnTypeOOP = desc->returnType;
+    returnType = cObjectType;
+  }
+    
+  switch (returnType) {
+  case voidType:
+    (*cFunction)(
+      cArgVec[0],  cArgVec[1],  cArgVec[2],  cArgVec[3],
+      cArgVec[4],  cArgVec[5],  cArgVec[6],  cArgVec[7],
+      cArgVec[8],  cArgVec[9],  cArgVec[10], cArgVec[11],
+      cArgVec[12], cArgVec[13], cArgVec[14], cArgVec[15],
+      cArgVec[16], cArgVec[17], cArgVec[18], cArgVec[19]);
+    break;
+  case charType:
+  case intType:
+    intResult = (*cFunction)(
+      cArgVec[0],  cArgVec[1],  cArgVec[2],  cArgVec[3],
+      cArgVec[4],  cArgVec[5],  cArgVec[6],  cArgVec[7],
+      cArgVec[8],  cArgVec[9],  cArgVec[10], cArgVec[11],
+      cArgVec[12], cArgVec[13], cArgVec[14], cArgVec[15],
+      cArgVec[16], cArgVec[17], cArgVec[18], cArgVec[19]);
+    switch (returnType) {
+    case intType: 
+      setStackTop(fromInt((long)intResult));
+      break;
+    case charType:
+      setStackTop(charOOPAt((Byte)intResult));
+      break;
+    }
+    break;
+
+  case longType:
+  case stringType:
+  case symbolType:
+  case cObjectType:
+  case smalltalkType:
+    longResult = (*(long (*)())cFunction)(
+      cArgVec[0],  cArgVec[1],  cArgVec[2],  cArgVec[3],
+      cArgVec[4],  cArgVec[5],  cArgVec[6],  cArgVec[7],
+      cArgVec[8],  cArgVec[9],  cArgVec[10], cArgVec[11],
+      cArgVec[12], cArgVec[13], cArgVec[14], cArgVec[15],
+      cArgVec[16], cArgVec[17], cArgVec[18], cArgVec[19]);
+    switch (returnType) {
+    case longType:
+      setStackTop(fromInt(longResult));
+      break;
+    case stringType:
+      if (longResult == 0) {
+	setStackTop(nilOOP);
+      } else {
+	setStackTop(stringNew((char *)longResult));
+      }
+      break;
+    case symbolType:
+      if (longResult == 0) {
+	setStackTop(nilOOP);
+      } else {
+	setStackTop(internString((char *)longResult));
+      }
+      break;
+    case cObjectType:
+      if (longResult == 0) {
+	setStackTop(nilOOP);
+      } else {
+	if (returnTypeOOP) {
+	  setStackTop(cObjectNewTyped((voidPtr)longResult, returnTypeOOP));
+	} else {
+	  setStackTop(cObjectNew((voidPtr)longResult));
+	}
+      }
+      break;
+    case smalltalkType:
+      setStackTop((OOP)longResult);
+      break;
+    }
+    break;
+
+  case doubleType:
+    doubleResult = (*(double (*)())cFunction)(
+      cArgVec[0],  cArgVec[1],  cArgVec[2],  cArgVec[3],
+      cArgVec[4],  cArgVec[5],  cArgVec[6],  cArgVec[7],
+      cArgVec[8],  cArgVec[9],  cArgVec[10], cArgVec[11],
+      cArgVec[12], cArgVec[13], cArgVec[14], cArgVec[15],
+      cArgVec[16], cArgVec[17], cArgVec[18], cArgVec[19]);
+    setStackTop(floatNew(doubleResult));
+    break;
+
+  default:
+    errorf("Invalid C function return type specified, index %d\n",
+	   returnType);
+    break;
+  }
+
+  savedErrno = errno;
+}
+
+static void badType(smalltalkTypeName, cType)
+char	*smalltalkTypeName;
+CDataType cType;
+{
+  errorf("Attempt to pass a %s as a %s", smalltalkTypeName,
+	 cTypeName[ENUM_INT(cType)]);
+}
+
+
+OOP makeDescriptor(funcNameOOP, returnTypeOOP, argsOOP)
+OOP	funcNameOOP, returnTypeOOP, argsOOP;
+{
+  char		*funcName;
+  void		(*funcAddr)();
+  int		numArgs, i;
+  CFuncDescriptor desc;
+
+  funcName = (char *)toCString(funcNameOOP);
+  funcAddr = lookupFunction(funcName);
+
+  if (argsOOP == nilOOP) {
+    numArgs = 0;
+  } else {
+    numArgs = numOOPs(oopToObj(argsOOP));
+  }
+
+  /*
+   * since these are all either ints or new objects, I'm not moving the
+   * oops
+   */
+  desc = (CFuncDescriptor)newInstanceWith(cFuncDescriptorClass, numArgs);
+  desc->cFunction = cObjectNew(funcAddr);
+  desc->cFunctionName = stringNew(funcName);
+  desc->numFixedArgs = fromInt(numArgs);
+  desc->returnType = classifyTypeSymbol(returnTypeOOP, true);
+  for (i = 1; i <= numArgs; i++) {
+    desc->argTypes[i - 1] = classifyTypeSymbol(arrayAt(argsOOP, i), false);
+  }
+
+  return (allocOOP(desc));
+}
+
+static OOP classifyTypeSymbol(symbolOOP, isReturn)
+OOP	symbolOOP;
+Boolean	isReturn;
+{
+  SymbolTypeMap	*sp;
+  Byte		*symbolName;
+
+  for (sp = symbolTypeMap; sp->symbol != nil; sp++) {
+    if (*sp->symbol == symbolOOP) {
+      return (fromInt(sp->type));
+    }
+  }
+
+  if (isReturn) {
+    if (isClass(symbolOOP, cTypeClass)) {
+      return (symbolOOP);	/* this is the type we want! */
+    }
+  }
+
+  symbolName = toCString(symbolOOP); /* yeah yeah...but they have the same
+				        representation! */
+  errorf("Unknown data type symbol: %s", symbolName);
+
+  return (fromInt(unknownType));
+}
+
+/*
+ *	void restoreCFuncDescriptor(cFuncDescOOP)
+ *
+ * Description
+ *
+ *	This routine is called during image loading to restore a C function
+ *	descriptor pointer.  This is because between the time that the image
+ *	was made and now, the executable image may have changed, so any
+ *	reference to the C function address may be invalid.  We therefore just
+ *	perform the function lookup again and use that value.
+ *
+ * Inputs
+ *
+ *	cFuncDescOOP: 
+ *		A C function descriptor object to be adjusted.  Contains the
+ *		name of the function to be looked up.
+ *
+ */
+void restoreCFuncDescriptor(cFuncDescOOP)
+OOP	cFuncDescOOP;
+{
+  CFuncDescriptor desc;
+  void		(*funcAddr)();
+  char		*funcName;
+
+  desc = (CFuncDescriptor)oopToObj(cFuncDescOOP);
+  funcName = (char *)toCString(desc->cFunctionName);
+  funcAddr = lookupFunction(funcName);
+  setCObjectValue(desc->cFunction, funcAddr);
+}
+
+
+/***********************************************************************
+ *
+ *	Call-in support code
+ *
+ ***********************************************************************/
+
+
+#ifdef not_working_yet
+send(receiver, selectorStr, arg1, arg2, arg3, arg4, arg5, arg6, arg7,
+     arg8, arg9, arg10, arg11, arg12, arg13, arg14, arg15, arg16, arg17,
+     arg18, arg19, arg20)
+OOP receiver, selector;
+OOP arg1, arg2, arg3, arg4, arg5, arg6, arg7, arg8, arg9, arg10, arg11, arg12,
+  arg13, arg14, arg15, arg16, arg17, arg18, arg19, arg20;
+{
+}
+
+OOP newIntObject(i)
+long	i;
+{
+  return (fromInt(i));
+}
+
+OOP newCharObject(c)
+Byte	c;
+{
+  return (charOOPAt(c));
+}
+
+OOP newFloatObject(f)
+double	f;
+{
+  OOP		oop;
+
+  oop = floatNew(f);
+  registerOOP(oop);
+  return (oop);
+}
+
+??? Want byte array types ???
+
+OOP newStringObject(str)
+char	*str;
+{
+  OOP		oop;
+
+  if (str == nil) {
+    return (nilOOP);
+  } else {
+    oop = stringNew(str);
+    registerOOP(oop);
+    return (oop);
+  }
+}
+
+OOP newSymbolObject(str)
+char	*str;
+{
+  OOP		oop;
+
+  if (str == nil) {
+    return (nilOOP);
+  } else {
+    oop = internString(str);
+    return (oop);
+  }
+}
+
+
+OOP newCObject(cObject)
+voidPtr	cObject;
+{
+  OOP		oop;
+
+  if (cObject == nil) {
+    return (nilOOP);
+  } else {
+    oop = cObjectNew(cObject);
+    registerOOP(oop);
+    return (oop);
+  }
+}
+
+objectType(oop)
+returns the type of an object, an enum, or unknown 
+
+need back conversion routines
+
+void freeObject(oop)
+OOP	oop;
+{
+  printf("!!! IMPLEMENT freeObject\n");
+}
+
+
+static void registerOOP(oop)
+OOP	oop;
+{
+  printf("!!! IMPLEMENT registerOOP\n");
+}
+
+#endif /* not_done_yet */

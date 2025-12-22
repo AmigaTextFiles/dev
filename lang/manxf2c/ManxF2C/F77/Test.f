@@ -1,0 +1,11 @@
+C	Berechne Sinus
+
+	PROGRAM test
+	REAL PI,Y
+	PI=3.1415927
+
+	DO 40 Y=0.0, 2*PI, .05
+		PRINT *, Y, SIN(Y)
+40		CONTINUE
+	STOP
+	END

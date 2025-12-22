@@ -1,0 +1,254 @@
+================================
+DIFFERENCES, ANNOYANCES AND BUGS
+================================
+
+Scheme
+Version 1.2
+19-March-1988
+
+The following is a list of implementation details and trouble spots.
+Not everything mentioned is a bug, but there are bugs here!
+
+
+
+================================================================================
+
+
+
+call-with-current-continuation
+------------------------------
+The procedure call-with-current-continuation is named call/cc
+
+
+
+Dynamically-Wound I/O
+---------------------
+The I/O procedures with-input-from-file and with-output-to-file, use
+dynamic-wind to ensure that their files are always open within their
+context, and are closed when control passes out of their context.
+
+The procedures load, call-with-input-file and call-with-output-file are not
+dynamically-wound.  Thus, the file will be closed upon normal exit from
+these procedures' contexts, but not necesarily otherwise. (The garbage
+collector closes files after all references to them go away.) Once the file
+is closed, nonlocal entries (via continuations passed out) will encounter
+an I/O error; the file is not automatically reopened.
+
+EXAMPLE
+
+    :=> (define xxx
+	  (call/cc
+	    (lambda (return)
+	      (with-output-to-file "CON:10/10/300/100/Wound-IO"
+		(lambda ()
+		  (write (call/cc (lambda (later) (return later))))
+		  (sleep 50) )))))
+    xxx
+    ; The window opens, then closes as soon as the
+    ; continuation named "later" is thrown out.
+
+    :=> (define the-cont xxx)
+    the-cont
+
+    :=> (the-cont "Hello again!")
+    xxx
+
+    ; The window re-opens and the string "Hello again! is printed in it.
+    ; Approximately 1 second later, the window closes and xxx is
+    ; (mysteriously) re-defined.  The window will re-open and close
+    ; in the same way each time the-cont is applied.
+
+
+
+delay
+-----
+The primitive procedure delay accepts more than one expression.
+(delay exp1 ...) is equivalent to (delay (begin exp1 ...))
+
+
+
+Case-Sensitivity
+----------------
+Character case is significant in symbols.  The standard specifies that
+symbol names should be converted to the system-preferred case when read.
+In this implementation, your symbol names are left in the case in which
+they were entered.
+
+All keywords (e.g., define) are recognized as the lower-case version of
+their symbols.	This also includes format symbols used by number->string.
+
+Character specifiers and number prefixes, on the other hand, are
+case-insensitive.  This is according to the standard.
+
+EXAMPLES
+
+    (DEFINE a 1)	  --> ERROR	; (assuming DEFINE is not a procedure)
+    (eq? 'Abc 'Abc)       --> #t        ; according to standard
+    (eq? 'Abc 'aBc)       --> #f        ; not according to standard
+    (eq? #\Space #\space) --> #t	; according to standard
+    (= #X12 #x12)	  --> #t	; according to standard
+
+I prefer case-sensitivity.  However, this should be switchable; it
+currently is not.  The next release will almost certainly have this fixed.
+
+
+
+Syntax
+------
+The non-essential special forms "let*", "case" and "do" are not directly
+implemented.  However, add-syntax! provides a means of adding new special
+forms, and the file "special-forms.scm" provides definitons for "let*"
+and "case".
+
+Special forms currently are not careful about syntax errors which do not
+prevent necessary parts of the form to be accessed.  So while (let ((a)) a)
+will cause a syntax error, (if a b c d e f g h) will not.
+
+
+
+Internal Definitions
+--------------------
+Internal definitions do not behave exactly as an equivalent letrec. Instead
+of first establishing all symbols which will be introduced into a new block
+and then evaluating the block's expressions, internal defines are merely
+evaluated as encountered.
+
+This will be fixed, but for now it should not cause problems with "normal"
+code.  Unlike letrec, a variable will be unbound (rather than merely
+uninitialized) until its definition is evaluated.
+
+
+
+Immutable Data
+--------------
+There is no concept of immutable data in the system.  Instead, private data
+passed out of the system internals is copied.  For example, even though the
+system allows (string-set! (symbol->string 'abc) 0 #\x), this will not
+affect the symbol abc.
+
+
+
+Out-Of-Memory
+-------------
+If the system runs out of heap space and cannot allocate more, it will
+panic and abort (and without so much as a message!).  This needs to be
+fixed, but it will take some doing to clean up after such an error.  Still,
+it should at least give you the satisfaction of clicking a requester, even
+if you are still going to lose the stuff currently in the system!
+
+
+
+Tags and the 68020
+------------------
+The tags for Scheme object references are stored in bits 31:24.  On the
+68000 and 68010, these could be left even during pointer dereferencing
+since these bits are not used by the processor in address calculations.
+However, the 68020 does use these bits.
+
+In the system, no pointer is ever dereferenced without first stripping its
+tags.  This therefore is compatible with the 68020.  However, I assume that
+any pointer returned by AllocMem will always be "boxable", i.e., bits 31:24
+will all be 0.	I don't know if this conflicts with any plans for future
+versions of the Amiga or not.
+
+As the system stands, it never verifies that AllocMem returned a boxable
+pointer (it never needs to on the A1000).  However, it should do this and
+either retry or abort if it gets a "bad" pointer.
+
+
+
+number->string
+--------------
+Only the formats "int" and "heur" are recognized, and these are treated
+equivalently.  In addition, the modifiers "exactness" and "radix" may be
+supplied.
+
+Number->string improperly allows more than one modifier of the same kind to
+appear.  Settings caused by the modifiers shadow those caused by earlier
+modifiers in the same format.  This can cause a misleading conversion:
+
+    :=> (number->string #x12 '(int (radix o e) (radix x s)))
+    "#o12"
+
+number->string has a strange representation for the system's most-negative
+number.  Try this:
+
+    :=> (- -#x7FFFFFFF 1)
+
+
+
+Numbers
+-------
+Only signed 32-bit numbers are supported.  Numbers from -#x7FFFFFFF to
+#x7FFFFFFF may be input.  The most-negative number -#x100000000 cannot be
+input, but is nevertheless internally represented.
+
+Exactness is supported.
+
+Only the binary versions of procedures such as + and < are provided.
+You may extend these procedures to allow arbitrary numbers of arguments
+by redefining them.  However, this will all eventually migrate down into
+the primitives.
+
+I hope to get support for bignums and rationals soon....
+
+The following (nonessential) numeric functions have been omitted:
+
+	modulo		; but it can be defined in terms of remainder
+	numerator
+	denominator
+	gcd
+	lcm
+	floor
+	ceiling
+	truncate
+	round
+	rationalize
+	exp
+	log
+	sin
+	cos
+	tan
+	asin
+	acos
+	atan
+	sqrt
+	expt
+	make-rectangular
+	make-polar
+	real-part
+	imag-part
+	magnitude
+	angle
+
+
+
+Interrupts and Errors in read
+-----------------------------
+While a call to read waits, interrupts will not be acted upon.	Therefore,
+while at the ":=> " prompt, pressing CTRL-C causes no immediately
+observable behavior.  Entering some object (representation) at this point
+will cause the interrupt to be recognized by the interpreter.
+
+The input stream is not flushed when an error occurs.  Therefore, if you
+type ))))))))) at the prompt, a long sequence of errors ensues.
+
+Read errors (like illegal right parentheses) cause a string to be thrown to
+the error handler as the reason.  This should be changed to a symbol in
+order to make it easier for debuggers to recognize error types.  Other
+system-detected errors throw symbols.
+
+
+
+eqv?
+----
+The predicate eqv? (and thus its associated procedures memv and assv) is no
+smarter than eq?.
+
+
+
+Other Omitted Procedures
+------------------------
+transcript-on
+transcript-off
+

@@ -1,0 +1,754 @@
+static unsigned DOING_IO; /*  0 = we are not doing some IO
+                           *  1 = we are doing some IO ... not let the debugger
+                           *      come alive now because some io functions may
+                           *      be written in ASpecT
+                           */
+
+/***************************************************************************/
+/***        OUTPUT                                                       ***/
+/***************************************************************************/
+
+static unsigned  OUT_MODE;       /* 0=>system, 1=>user defined             */
+static PUT_CHAR  usr_putc;       /* user defined putchar opn (OUT_MODE 1)  */
+static TERM      usr_outchannel; /* some outchannel (OUT_MODE 1)           */
+static TERM      OUT_FRAME_STACK;
+       FOURBYTES FILE_O_POS;
+
+/*** basic OUTPUT operations */
+
+/***  of a character */
+
+void
+DEFUN(C_OUT,(c),
+      char c)
+ {
+   if(OUT_MODE==0) {
+      putc(c,STDOUT);
+      FILE_O_POS++;
+   } else {
+      usr_outchannel=usr_putc(usr_outchannel,(TERM)(unsigned)c);
+   }
+   return;
+ }
+
+
+/***  of a string */
+
+void
+DEFUN(S_OUT,(s),
+      char *s)
+ {
+   if(OUT_MODE==0) {
+      while (*s != '\0')
+            putc(*s++,STDOUT),
+            FILE_O_POS++;
+   } else {
+      while (*s != '\0')
+            usr_outchannel=usr_putc(usr_outchannel,(TERM)(unsigned)*s++);
+   }
+   return;
+ }
+
+
+static void EXFUN(WR_global,(char *,unsigned,unsigned,
+                             unsigned,unsigned,CONSREC,
+                             TERM,unsigned *,unsigned *));
+
+#ifndef DEBUG
+static void EXFUN(NCWRITE,(SORTREC,TERM));
+#endif
+
+#define is_list_mt(SR)  ((strcmp(sort->consarr[SR]->name,"mt")==0)&&  \
+                         (sort->consarr[SR]->numargs==0))
+#define is_list_ins(SR) ((strcmp(sort->consarr[SR]->name,":")==0)&&   \
+                         (sort->consarr[SR]->numargs==2) &&           \
+                         (sort->consarr[SR]->argsarr[1]==sort))
+                    
+#ifndef DEBUG
+static
+#endif
+unsigned
+DEFUN(listsort,(sort,mt),
+      SORTREC  sort AND
+      unsigned *mt)
+ { extern int EXFUN(strcmp,(CONST char *,CONST char *));
+   if (sort==_S_FUNC) return FALSE;
+   if (sort->numcons==2) {
+     if (is_list_mt(0) && is_list_ins(1))
+        { *mt=0; return TRUE; }
+     if (is_list_mt(1) && is_list_ins(0)) 
+        { *mt=1; return TRUE; }
+   }
+   return FALSE;
+ }
+
+#undef is_list_mt
+#undef is_list_ins
+
+static void
+DEFUN(WR_doit,(needpar,cr,aterm,i),
+      unsigned needpar AND
+      CONSREC  cr      AND
+      TERM     aterm   AND
+      unsigned *i)
+ {
+     if (needpar) C_OUT('(');
+     NCWRITE(cr->argsarr[*i],aterm->ARGS[*i]);(*i)++;
+     if (needpar) C_OUT(')');
+ }
+ 
+static void
+DEFUN(WR_function,(on,infunc,truef,needpar,cr,aterm,i,j),
+      char     *on     AND
+      unsigned infunc  AND
+      unsigned truef   AND
+      unsigned needpar AND
+      CONSREC  cr      AND
+      TERM     aterm   AND
+      unsigned *i      AND
+      unsigned *j)
+ { 
+   if (truef) { if (!infunc) WR_doit(needpar,cr,aterm,i);
+                WR_global("",FALSE,TRUE ,TRUE ,TRUE ,cr,aterm,i,j);
+                WR_global("",FALSE,TRUE ,TRUE ,FALSE,cr,aterm,i,j);
+              }
+   else       { WR_global("",FALSE,infunc,TRUE ,TRUE ,cr,aterm,i,j);
+                if (*on) S_OUT(on);
+                WR_global("",FALSE,infunc,FALSE,FALSE,cr,aterm,i,j);
+              }
+ }
+
+static void
+DEFUN(WR_tuple,(on,infunc,cr,aterm,i,j),
+      char     *on    AND
+      unsigned infunc AND
+      CONSREC  cr     AND
+      TERM     aterm  AND
+      unsigned *i     AND
+      unsigned *j)
+ { REGISTER unsigned comma=FALSE;
+   if (!infunc) C_OUT('(');
+   for (;;) {
+     if (cr->argsarr[*j]==_S_COFF || *i>=cr->numargs) 
+        {(*j)++; if (!infunc) C_OUT(')'); return;}
+     if ((comma) && (!infunc)) C_OUT(',');
+     WR_global("",FALSE,infunc,TRUE,FALSE,cr,aterm,i,j);comma=TRUE ;
+   }
+ }
+ 
+static void
+DEFUN(WR_global,(on,first,infunc,truef,needpar,cr,aterm,i,j),
+      char     *on     AND
+      unsigned first   AND
+      unsigned infunc  AND
+      unsigned truef   AND
+      unsigned needpar AND
+      CONSREC  cr      AND
+      TERM     aterm   AND
+      unsigned *i      AND
+      unsigned *j)
+ { if (*i>=cr->numargs) return;
+   if (cr->argsarr[*j]==_S_FUNC) 
+     {(*j)++; WR_function(on,infunc,truef,needpar,cr,aterm,i,j); } 
+else
+   if (cr->argsarr[*j]==_S_CON) {(*j)++; WR_tuple(on,infunc,cr,aterm,i,j);}
+else
+   { (*j)++; 
+     if (first) return;
+     if (infunc) return;
+     WR_doit(needpar,cr,aterm,i);
+   }
+ }
+
+#define is_infix(S) (!isalpha(*S))
+
+#ifndef DEBUG
+static 
+#endif
+void
+DEFUN(NCWRITE,(sort,a_term),
+      SORTREC sort AND
+      TERM    a_term)
+ { REGISTER CONSREC  cr; 
+   unsigned i;
+   unsigned j;
+   TERM     dummy;
+   unsigned mtpos;
+   REGISTER unsigned infix;
+   unsigned WAS=DOING_IO;
+   SORTREC * EXFUN(write_CLOSUR2,(CLOSURE));
+   
+   DOING_IO=1;
+   if (sort==_S_FUNC) {
+     write_CLOSUR2((CLOSURE)a_term);
+     DOING_IO=WAS;return;
+   }
+   
+#ifdef DEBUG
+   if (D_WRITEDEBUG) {
+     if(!D_show_sort(sort->name)) {
+       S_OUT("#");
+       DOING_IO=WAS;return;
+     }
+   }
+#endif
+
+   if (sort->numcons<0) {
+     if(sort->numcons!=-30000) {
+       ((WPROC)(sort->consarr[1]))(sort,COPY(sort,a_term),dummy,&dummy,&dummy);
+       DOING_IO=WAS;return;
+     }
+   }
+     
+#ifdef DEBUG
+   if (D_WRITEDEBUG) {
+     if (!(--D_WRITEDEPTH)) {
+       S_OUT("..."); 
+       D_WRITEDEPTH++; 
+       DOING_IO=WAS;return; 
+     }
+   }
+#endif
+
+   if (listsort(sort,&mtpos)){
+     i= 0;
+     C_OUT('[');
+     
+     while(OPN(a_term)!=mtpos) {
+       i++;
+       if (i>1) C_OUT(',');
+#ifdef DEBUG
+       if (D_WRITEDEBUG && !D_LISTMODE && !(--D_WRITEDEPTH)) { 
+         S_OUT("..."); 
+         break; 
+       }
+#endif
+       NCWRITE(sort->consarr[1-mtpos]->argsarr[0],a_term->ARGS[0]);
+       a_term= a_term->ARGS[1];
+     }
+#ifdef DEBUG
+     if (D_WRITEDEBUG && !D_LISTMODE) D_WRITEDEPTH += i;
+     if (D_WRITEDEBUG) D_WRITEDEPTH++;
+#endif
+     C_OUT(']');
+     DOING_IO=WAS;return;
+   }
+   
+   if (sort->numcons<0) {
+     cr = sort->consarr[0];
+     if(cr->numargs==1) {
+       write_CLOSUR2((CLOSURE)a_term);
+#ifdef DEBUG
+   if (D_WRITEDEBUG) D_WRITEDEPTH++;
+#endif
+       DOING_IO=WAS;return;
+     }
+   } else {
+     cr=sort->consarr[OPN(a_term)];
+     if (!(infix=is_infix(cr->name))) S_OUT(cr->name);
+   }
+   i=0;
+   j=cr->numargs;
+   WR_global((infix) ? cr->name : "",TRUE,FALSE,FALSE,FALSE,cr,a_term,&i,&j);
+
+#ifdef DEBUG
+   if (D_WRITEDEBUG) D_WRITEDEPTH++;
+#endif
+   DOING_IO=WAS;
+ }
+
+void
+DEFUN(_RUNTIME_WRITE,(sort,a_term,sysi,ok,syso),
+      SORTREC sort   AND
+      TERM    a_term AND
+      TERM    sysi   AND
+      TERM    *ok    AND
+      TERM    *syso)
+ { NCWRITE(sort,a_term);
+   FREE(sort,a_term);
+   *syso = sysi;
+   *ok   = true;
+ }
+
+void
+DEFUN(OUTtoUSER_MODE,(PUTC,OUTChannel),
+      PUT_CHAR PUTC AND
+      TERM OUTChannel)
+ {
+      OUT_FRAME_STACK=MK(2,1,usr_outchannel,OUT_FRAME_STACK);
+      OUT_FRAME_STACK=MK(2,1,(TERM)usr_putc,OUT_FRAME_STACK);
+      OUT_FRAME_STACK=MK(2,1,(TERM)OUT_MODE,OUT_FRAME_STACK);
+   OUT_MODE=1;
+   usr_putc=PUTC;
+   usr_outchannel=OUTChannel;
+ }
+
+void
+DEFUN_VOID(OUTtoSYS_MODE)
+ {
+      OUT_FRAME_STACK=MK(2,1,usr_outchannel,OUT_FRAME_STACK);
+      OUT_FRAME_STACK=MK(2,1,(TERM)usr_putc,OUT_FRAME_STACK);
+      OUT_FRAME_STACK=MK(2,1,(TERM)OUT_MODE,OUT_FRAME_STACK);
+   OUT_MODE=0;
+ }
+
+TERM
+DEFUN_VOID(OUTreturnMODE)
+ { TERM old=usr_outchannel; TERM H;
+
+     OUT_MODE=(unsigned)(OUT_FRAME_STACK->ARGS[0]);
+     H=OUT_FRAME_STACK;
+     OUT_FRAME_STACK=OUT_FRAME_STACK->ARGS[1];
+     MDEALLOC(2,H);
+
+     usr_putc=(PUT_CHAR)(OUT_FRAME_STACK->ARGS[0]);
+     H=OUT_FRAME_STACK;
+     OUT_FRAME_STACK=OUT_FRAME_STACK->ARGS[1];
+     MDEALLOC(2,H);
+
+     usr_outchannel=OUT_FRAME_STACK->ARGS[0];
+     H=OUT_FRAME_STACK;
+     OUT_FRAME_STACK=OUT_FRAME_STACK->ARGS[1];
+     MDEALLOC(2,H);
+
+   return old;
+ }
+
+#undef is_infix
+
+
+
+
+
+/***************************************************************************/
+/***        INPUT                                                        ***/
+/***************************************************************************/
+
+#define MAX_BUFLEN 255
+
+       int       LAST_CH;        /* for parsing purposes in READ */
+       char      ID[MAX_IDLEN];
+       FOURBYTES FILE_I_POS;
+       char      *INBUFFER;
+       char      UG_CHAR;
+       unsigned  UG_MODE;
+static unsigned  IN_MODE;        /*  0 = system based
+                                  *  1 = some internal buffer
+                                  *  2 = user defined
+                                  */
+static unsigned  BUFFER_PTR;     /* saves FILE_I_POS while in IN_MODE 1 */
+
+static getCHAR usr_getc;      /* some getchar   (IN_MODE 2) */
+static markPOS usr_markPos;   /* some markpos   (IN_MODE 2) */
+static dropPOS usr_dropPos;   /* some droppos   (IN_MODE 2) */
+static toPOS   usr_toPos;     /* some topos     (IN_MODE 2) */
+static TERM    usr_inchannel; /* some inchannel (IN_MODE 2) */
+static TERM    IN_FRAME_STACK;
+
+/*** basic INPUT operations */
+
+char
+DEFUN_VOID(GET_CHAR)
+ { 
+   if(UG_MODE==0) {
+     switch(IN_MODE) {
+       case 0: FILE_I_POS++;
+               return (LAST_CH=getc(STDIN));
+       case 1: if (FILE_I_POS==MAX_BUFLEN)  return (LAST_CH=(char)0);
+               if (INBUFFER[FILE_I_POS]==0) return (LAST_CH=(char)0);
+               FILE_I_POS++;
+               return (LAST_CH=INBUFFER[FILE_I_POS-1]);
+       case 2: { TERM dummy,ch;
+                 usr_getc(usr_inchannel,&dummy,&ch,&usr_inchannel);
+                 return (LAST_CH=__tchar(ch));
+               }
+     }
+   } else {
+     UG_MODE=0;
+     return (LAST_CH=UG_CHAR);
+   }
+ }
+
+
+FOURBYTES
+DEFUN_VOID(mark_POS)
+ {
+    if(IN_MODE==2)
+       return (FOURBYTES)usr_markPos(usr_inchannel);
+    else
+       return FILE_I_POS;
+ }
+
+void
+DEFUN(drop_POS,(POS),FOURBYTES POS)
+ {
+   if(IN_MODE==2) usr_dropPos((TERM)POS);
+ }
+
+void
+DEFUN(to_POS,(POS), 
+      FOURBYTES POS)
+ { switch(IN_MODE) {
+     case 0: if(POS+1==FILE_I_POS)
+               ungetc(LAST_CH,STDIN);
+             else
+               fseek(STDIN,POS,0);
+             FILE_I_POS=POS;
+             return;
+     case 1: if ((POS>=0) && (POS<=FILE_I_POS)) FILE_I_POS=POS;
+             return;
+     case 2: usr_inchannel=usr_toPos((TERM)POS,usr_inchannel);
+             return;
+   }
+ }
+
+
+/*** some specific INPUT operations */
+
+void
+DEFUN_VOID(EAT_WHITESPACE)
+ { 
+   while((GET_CHAR()<=' ') && (LAST_CH > 0));
+ }
+ 
+unsigned
+DEFUN_VOID(READ_LP)    { EAT_WHITESPACE(); return LAST_CH=='('; }
+
+unsigned
+DEFUN_VOID(READ_RP)    { EAT_WHITESPACE(); return LAST_CH==')'; }
+
+static unsigned
+DEFUN_VOID(READ_LON)   { EAT_WHITESPACE(); return LAST_CH=='['; }
+
+static unsigned
+DEFUN_VOID(READ_LOFF)  { EAT_WHITESPACE(); return LAST_CH==']'; }
+
+unsigned
+DEFUN_VOID(READ_COMMA) { EAT_WHITESPACE(); return LAST_CH==','; }
+
+unsigned
+DEFUN_VOID(READ_IDENTIFIER)
+ { REGISTER unsigned cnt = 0;
+   REGISTER FOURBYTES FPOS = mark_POS();
+   EAT_WHITESPACE();
+   if (((LAST_CH<'a')||(LAST_CH>'z'))&&((LAST_CH<'A')||(LAST_CH>'Z'))) {
+     to_POS(FPOS);
+     return FALSE;
+   } else {
+     drop_POS(FPOS);
+     ID[cnt++]=LAST_CH;
+     while ((cnt<MAX_IDLEN)&&
+  	    (  ((FPOS = mark_POS(),
+  	         GET_CHAR()>='a')&&(LAST_CH<='z'))
+	    || ((LAST_CH   >='A')&&(LAST_CH<='Z'))
+            || ((LAST_CH   >='0')&&(LAST_CH<='9'))
+            || (LAST_CH=='_')
+            )
+	   ) { ID[cnt++]=LAST_CH;
+	       drop_POS(FPOS);
+	     }
+     if(cnt<MAX_IDLEN) { 
+       ID[cnt]='\0';
+       to_POS(FPOS);
+       return TRUE;
+     } else
+       return FALSE;
+   }
+ }
+
+
+static void
+DEFUN(READ_list,(lsort,mtpos,EMTI,sort,errval,sysi,ok,res,syso),
+      SORTREC  lsort  AND
+      unsigned mtpos  AND
+      TERM     EMTI   AND
+      SORTREC  sort   AND
+      TERM     errval AND
+      TERM     sysi   AND
+      TERM     *ok    AND
+      TERM     *res   AND
+      TERM     *syso)
+ { TERM list,tmp,dummy;
+   FOURBYTES StartPos = mark_POS();
+   *syso = sysi;  
+   if (READ_LOFF()) {
+     if (errval!=TNULL) FREE(lsort,errval);
+     *ok  = true;
+     *res = EMTI;
+     drop_POS(StartPos);
+   } else {
+     to_POS(StartPos);
+     _RUNTIME_READ(sort,TNULL,dummy,ok,&tmp,&dummy);
+     if (*ok==false) { 
+       *res = errval;
+     } else {
+       if (READ_COMMA()) {
+         READ_list(lsort,mtpos,EMTI,sort,TNULL,dummy,ok,&list,&dummy);
+         if (*ok==false) {
+           FREE(sort,tmp);
+           *res = errval;
+         } else {
+           if (errval!=TNULL) FREE(lsort,errval);
+           *res = MK(2,1-mtpos,tmp,list);
+         }
+       } else {
+         if (LAST_CH==']') {
+           if (errval!=TNULL) FREE(lsort,errval);
+           *ok  = true;
+           *res = MK(2,1-mtpos,tmp,EMTI);
+         } else {
+           FREE(sort,tmp);
+           *ok  = false;
+           *res = errval;
+ } } } } }
+
+void
+DEFUN(_RUNTIME_READ,(sort,errval,sysi,ok,res,syso),
+      SORTREC sort   AND
+      TERM    errval AND
+      TERM    sysi   AND
+      TERM    *ok    AND
+      TERM    *res   AND
+      TERM    *syso)
+ { unsigned mtpos,WAS=DOING_IO;
+   FOURBYTES StartPos;
+   DOING_IO=1;
+   if (sort==_S_FUNC) {
+     *syso = sysi;
+     *ok   = false;
+     *res  = errval;
+     DOING_IO=WAS;
+     return;
+   }
+   
+   StartPos = mark_POS();
+
+   if (sort->numcons<0){ 
+      if(sort->numcons!=-30000) {
+        ((RPROC)(sort->consarr[0]))(sort,errval,sysi,ok,res,syso);
+        DOING_IO=WAS;
+        if (*ok == false)
+          to_POS(StartPos);
+        else
+          drop_POS(StartPos);
+        return;
+      }
+   }
+
+
+   if (listsort(sort,&mtpos)) {
+     if (READ_LON()) { FOURBYTES FPOS;
+       FPOS = mark_POS();
+       READ_list(sort,mtpos,MT /** sort->consarr[mtpos]->argsarr[0] **/,
+                 sort->consarr[1-mtpos]->argsarr[0],
+                 errval,sysi,ok,res,syso);
+       if (*ok == false)
+          to_POS(FPOS);
+       else
+          drop_POS(FPOS);
+       DOING_IO=WAS;
+       drop_POS(StartPos);
+       return; 
+     }
+     to_POS(StartPos);
+     StartPos = mark_POS();
+   }
+     
+   { REGISTER char      *IDENT;
+     REGISTER unsigned  i;
+     REGISTER unsigned  snc;
+     extern int EXFUN(strcmp,(CONST char *,CONST char *));
+
+     *syso= sysi;
+     
+     if (sort->numcons!=-30000) 
+        if (!READ_IDENTIFIER()) { 
+           *ok  = false;
+           *res = errval;
+           to_POS(StartPos);
+           DOING_IO=WAS;
+           return;
+        }
+     
+     snc = sort->numcons; if(snc==-30000) snc=1;
+     
+     IDENT = ID;
+
+     for (i=0;i<snc;i++)
+       if (sort->numcons==-30000 ||
+           strcmp(IDENT,sort->consarr[i]->name)==0){
+	 TERM     dummy;
+	 REGISTER TERM     p;
+	 REGISTER unsigned j;
+	 REGISTER unsigned k;
+         REGISTER CONSREC  cr= sort->consarr[i];
+         REGISTER FOURBYTES FPOS;
+         
+         FPOS = mark_POS();
+	 if (cr->numargs==0) {
+	   REGISTER FOURBYTES FPOS0 = mark_POS();
+	   if (READ_LP()) {
+	     drop_POS(FPOS0);
+	     goto next2;
+	   } else {
+	     to_POS(FPOS0);
+	     if (errval!=TNULL) FREE(sort,errval);
+             *ok  = true;
+             *res = (TERM)cr->argsarr[0]; 
+             DOING_IO=WAS;
+             drop_POS(FPOS);
+             drop_POS(StartPos);
+             return;
+           }
+	 }
+
+	 if (!READ_LP()) goto next2;
+
+	 p= NEW_CELL(cr->numargs);
+	 p->NAME= i;
+	 
+	 for (j=0;j<cr->numargs;j++){
+	   if ((j>0) && !READ_COMMA()) goto next;
+   	   _RUNTIME_READ(cr->argsarr[j],TNULL,dummy,ok,&(p->ARGS[j]),&dummy);
+	   if (*ok==false) goto next;
+	 }
+	 
+	 if (!READ_RP()){ j=cr->numargs; goto next; }
+	
+	 if (errval!=TNULL) FREE(sort,errval); 
+	 *ok  = true;
+	 *res = p;
+	 DOING_IO=WAS;
+	 drop_POS(FPOS);
+	 drop_POS(StartPos);
+	 return;
+
+next:    for (k=0;k<j;k++) FREE(cr->argsarr[k],p->ARGS[k]);
+         MDEALLOC(cr->numargs,p); 
+next2:   to_POS(FPOS);
+       }
+     
+     *ok  = false;
+     *res = errval;
+     to_POS(StartPos);
+     DOING_IO=WAS;
+   }
+ }
+
+void
+DEFUN_VOID(toBUFFER_MODE)
+ { INBUFFER=malloc(MAX_BUFLEN);
+   INBUFFER=fgets(INBUFFER,MAX_BUFLEN,stdin);
+   BUFFER_PTR=FILE_I_POS;
+   FILE_I_POS=0;
+   IN_MODE=1;
+ }
+
+#undef MAX_BUFLEN
+
+void
+DEFUN_VOID(cancleBUFFER_MODE)
+ {
+#ifdef NEED_STD_DECL
+   extern void EXFUN(free,(char *));
+#endif
+   FILE_I_POS=BUFFER_PTR;
+   IN_MODE=0;
+   free(INBUFFER);
+ }
+
+
+void
+DEFUN(INtoUSER_MODE,(FgetCHAR,FmarkPOS,FdropPOS,FtoPOS,InChannel),
+      getCHAR FgetCHAR  AND
+      markPOS FmarkPOS  AND
+      dropPOS FdropPOS  AND
+      toPOS   FtoPOS    AND
+      TERM    InChannel)
+ {
+      IN_FRAME_STACK=MK(2,1,usr_inchannel,IN_FRAME_STACK);
+      IN_FRAME_STACK=MK(2,1,(TERM)usr_getc,IN_FRAME_STACK);
+      IN_FRAME_STACK=MK(2,1,(TERM)usr_markPos,IN_FRAME_STACK);
+      IN_FRAME_STACK=MK(2,1,(TERM)usr_dropPos,IN_FRAME_STACK);
+      IN_FRAME_STACK=MK(2,1,(TERM)usr_toPos,IN_FRAME_STACK);
+      IN_FRAME_STACK=MK(2,1,(TERM)IN_MODE,IN_FRAME_STACK);
+    IN_MODE = 2;
+    usr_getc=FgetCHAR;
+    usr_markPos=FmarkPOS;
+    usr_dropPos=FdropPOS;
+    usr_toPos=FtoPOS;
+    usr_inchannel=InChannel;
+ }
+
+void
+DEFUN_VOID(INtoSYS_MODE)
+ {
+      IN_FRAME_STACK=MK(2,1,usr_inchannel,IN_FRAME_STACK);
+      IN_FRAME_STACK=MK(2,1,(TERM)usr_getc,IN_FRAME_STACK);
+      IN_FRAME_STACK=MK(2,1,(TERM)usr_markPos,IN_FRAME_STACK);
+      IN_FRAME_STACK=MK(2,1,(TERM)usr_dropPos,IN_FRAME_STACK);
+      IN_FRAME_STACK=MK(2,1,(TERM)usr_toPos,IN_FRAME_STACK);
+      IN_FRAME_STACK=MK(2,1,(TERM)IN_MODE,IN_FRAME_STACK);
+    IN_MODE = 0;
+ }
+
+TERM
+DEFUN_VOID(INreturnMODE)
+ { TERM old=usr_inchannel; TERM H;
+
+     IN_MODE=(unsigned)(IN_FRAME_STACK->ARGS[0]);
+     H=IN_FRAME_STACK;
+     IN_FRAME_STACK=IN_FRAME_STACK->ARGS[1];
+     MDEALLOC(2,H);
+
+     usr_toPos=(toPOS)(IN_FRAME_STACK->ARGS[0]);
+     H=IN_FRAME_STACK;
+     IN_FRAME_STACK=IN_FRAME_STACK->ARGS[1];
+     MDEALLOC(2,H);
+
+     usr_dropPos=(dropPOS)(IN_FRAME_STACK->ARGS[0]);
+     H=IN_FRAME_STACK;
+     IN_FRAME_STACK=IN_FRAME_STACK->ARGS[1];
+     MDEALLOC(2,H);
+
+     usr_markPos=(markPOS)(IN_FRAME_STACK->ARGS[0]);
+     H=IN_FRAME_STACK;
+     IN_FRAME_STACK=IN_FRAME_STACK->ARGS[1];
+     MDEALLOC(2,H);
+
+     usr_getc=(getCHAR)(IN_FRAME_STACK->ARGS[0]);
+     H=IN_FRAME_STACK;
+     IN_FRAME_STACK=IN_FRAME_STACK->ARGS[1];
+     MDEALLOC(2,H);
+
+     usr_inchannel=IN_FRAME_STACK->ARGS[0];
+     H=IN_FRAME_STACK;
+     IN_FRAME_STACK=IN_FRAME_STACK->ARGS[1];
+     MDEALLOC(2,H);
+
+   return old;
+ }
+
+
+/***************************************************************************/
+/***        GENERAL                                                      ***/
+/***************************************************************************/
+
+static
+void
+DEFUN_VOID(INIT_READWRITE)
+ {
+   DOING_IO    = 0;
+
+   STDIN          = stdin;
+   IN_MODE        = 0;
+   IN_FRAME_STACK = (TERM)MT_TERM;
+   LAST_CH        = ' ';
+   FILE_I_POS     = 0;
+
+   STDOUT          = stdout;
+   OUT_MODE        = 0;
+   OUT_FRAME_STACK = (TERM)MT_TERM;
+   FILE_O_POS      = 0;
+   UG_MODE         = 0;
+ }

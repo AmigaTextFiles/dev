@@ -1,0 +1,225 @@
+;GetCDDB_ParseFuncs.bb2
+
+; parse CDDB files
+
+XINCLUDE "GetCDDB_MiscFuncs.bb2"
+XINCLUDE "GetCDDB_Consts.bb2"
+
+;----------------------------------------------------------------------
+; This function relies on the CDDB file returned being in an exact format
+; - bit of a kludge
+
+Function.w GetCDDBResult{cddbfile$}
+
+If OpenFile(0,cddbfile$)
+  FileInput 0
+  Repeat
+    inputstr$=Edit$(80)
+  Until Instr(inputstr$,"Content-Type:")
+
+  inputstr$=Edit$(80) ; this is a blank line
+
+  inputstr$=Edit$(80) ; inputstr now contains the result code
+
+  CloseFile 0
+  Function Return Value{Left$(inputstr$,3)}
+Else
+  Function Return 0
+EndIf
+End Function
+
+;----------------------------------------------------------------------
+; Process result number - return whether ok or not 
+; Result was obtained from GetCDDBResult
+
+Function.b ResolveResult{cddbresult.w}
+
+  If cddbresult=0
+    Function Return 0
+  EndIf
+
+  result$=Left$(Str$(cddbresult),2) ;get first two digits of error code
+                                    ; for generically addressing errors
+
+  Select result$
+
+    Case "20"
+      ;cmd ok, no action needed
+      Function Return -1
+
+    Case "21"
+      ;cmd ok, prepare to read data from server
+      Function Return -1
+
+    Case "22"
+      ;cmd ok, prewpare to give server data - if unexpected, treat as 21
+      Function Return -1
+
+    Case "23"
+      ;cmd ok, connection closing at client's request
+      Function Return -1
+
+    Case "40"
+      If cddbresult=401
+        ; no entry
+        Function Return #_NOENTRY_ERROR
+      Else
+        ;cmd failed due to server error - try different server
+        ErrorReq{"Command failed due to server error|Reconnect to different server"}
+        Function Return #_SERVER_ERROR
+      EndIf
+
+    Case "41"
+      ;cmd failed as 40, information follows reconnect as 40
+      ErrorReq{"Command failed due to server error|Reconnect to different server"}
+      Function Return #_SERVER_ERROR
+
+    Case "43"
+      ;cmd failed as 40, connection dropped by server reconnect as 40
+      ErrorReq{"Command failed due to server error|Reconnect to different server"}
+      Function Return #_SERVER_ERROR
+
+    Case "50"
+      ;cmd failed due to client error - don't reconnect
+      ErrorReq{"CDDB server returned 'Command syntax error'|Please contact author about this error"}
+      Function Return #_CLIENT_ERROR
+
+    Case "51"
+      ;cmd failed as 50, info follows
+      ErrorReq{"CDDB server returned 'Command syntax error'|Please contact author about this error"}
+      Function Return #_CLIENT_ERROR
+
+    Case "53"
+      ; cmd failed, connection dropped, retry connect
+      ErrorReq{"CDDB server returned 'Command syntax error'|Please contact author about this error"}
+      Function Return #_CLIENT_ERROR
+
+    Default
+      ErrorReq{"Unexpected return code from server"}
+      Function Return #_UNEXPECTED_ERROR
+
+  End Select
+End Function
+
+;----------------------------------------------------------------------
+
+
+Function.b ConvertCDDBFile{cdplayer$, cddbfile$, cddafile$}
+
+  SHARED overwrite.b
+
+  If Exists(cddafile$) AND overwrite.b=0 ;ie don't overwrite
+    Function Return -1
+  EndIf
+
+  GTSetString 0,#_STATUS_TEXT,"Converting file..." ; this possibly should be  
+                                                   ; SetStatus("Converting file.."
+
+  result.w=ResolveResult{GetCDDBResult{cddbfile$}}
+  If result.w<>-1
+    Function Return result
+  EndIf
+
+  If NOT ReadFile(3,cddbfile$)
+    ErrorReq{"Unable to read temporary CDDB file"}
+    Function Return #_READ_ERROR
+  EndIf
+
+  FileInput 3
+
+  CaseSense 0
+
+  Dim track$(100)
+  author$=""
+  title$=""
+
+  Repeat
+    inputstr$=Edit$(80)
+  Until Instr(inputstr$,"HTTP") OR Eof(3)
+
+  If Eof(3)
+    ErrorReq{"Unexpected page loading error"}
+    Function Return #_UNEXPECTED_ERROR
+   EndIf
+
+
+  ;inputstr now has the line with the page error code on it
+  ; eg "HTTP\1.1 200 OK"
+  inputstr$=UnRight$(inputstr$,9)
+
+  errorcode.w=Value{Left$(inputstr$,3)}
+
+  If errorcode.w<>200
+    ErrorReq{"An error has occurred in the loading on this page. The server returned error code "+Str$(errorcode.w)}
+    Function Return #_HTTP_ERROR
+  EndIf
+
+  ;suppose we now know that we have a disc file
+  i.b=0
+  Repeat
+    inputstr$=Edit$(80)
+    If Instr(inputstr$,"DTITLE=")
+      Select LCase$(cdplayer$)
+        Case "optycdplayer"
+          temp$=UnRight$(inputstr$,7)
+          author$=Left$(temp$,Instr(temp$," /")) ; botchy?
+          title$=UnRight$(temp$,Instr(temp$," /")+2)
+          If Len(title$)=0 Then title$=author$
+
+;        Case "splayer"  ;splayer now uses the same format as Optycdplayer
+;          title$=Replace$(UnRight$(inputstr$,7),"/",":")
+
+        Default
+          cdplayer$="optycdplayer"
+          temp$=UnRight$(inputstr$,7)
+          author$=UnLeft$(temp$,Instr(temp$," /")+4) ; botchy?
+          title$=UnRight$(temp$,Instr(temp$," /")+2)
+
+      End Select
+    EndIf
+
+    If Instr(inputstr$,"TTITLE")
+      inputstr$=Replace$(inputstr$,"TTITLE","")
+      i.b=Value{Left$(inputstr$,Instr(inputstr$,"="))}
+      track$(i)=Right$(inputstr$,Len(inputstr$)-Instr(inputstr$,"="))
+;      NPrint track$(i)
+    EndIf
+
+    tot_tracks.b=i
+
+  Until Eof(3)
+  CloseFile 3
+
+  If Len(title$)=0 OR Len(track$(0))=0 ; invalid cddb file
+    ErrorReq{"This CD is not in the CDDB database. Try a different genre"}
+    DeleteFile_ cddbfile$
+    Function Return #_NOENTRY_ERROR
+  EndIf
+
+  If WriteFile(4,cddafile$)
+    FileOutput 4
+    If LCase$(cdplayer$)="optycdplayer"
+      NPrint author$
+      NPrint title$
+    Else
+      If LCase$(cdplayer$)="splayer"
+        NPrint title$
+      EndIf
+    EndIf
+
+    For i=0 To tot_tracks
+      NPrint track$(i)
+    Next
+
+    CloseFile 4
+  Else
+    ErrorReq{"Unable to open temporary output file for writing"}
+    Function Return #_WRITE_ERROR
+  EndIf
+
+  WindowOutput 0
+  Function Return -1
+
+End Function
+
+

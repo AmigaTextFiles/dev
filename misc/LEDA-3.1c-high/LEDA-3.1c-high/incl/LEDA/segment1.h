@@ -1,0 +1,170 @@
+/*******************************************************************************
++
++  LEDA  3.1c
++
++
++  Segment1.h
++
++
++  Copyright (c) 1994  by  Max-Planck-Institut fuer Informatik
++  Im Stadtwald, 6600 Saarbruecken, FRG     
++  All rights reserved.
++ 
+*******************************************************************************/
+
+
+#ifndef LEDA_SEGMENTEXACT_H
+#define LEDA_SEGMENTEXACT_H
+
+#include <LEDA/_Point1.h>
+
+//------------------------------------------------------------------------------
+// Segments
+//------------------------------------------------------------------------------
+
+
+class Segment_rep : public handle_rep {
+
+friend class Segment;
+//friend class Line;
+//friend class Circle;
+   
+   Point start;
+   Point end;
+
+   Int dx;
+   Int dy;
+
+  
+public:
+   
+   Segment_rep(const Point&, const Point&);
+   Segment_rep();  
+
+  ~Segment_rep() {}
+
+   
+   LEDA_MEMORY(Segment_rep)
+   
+};
+
+
+class Segment  : public handle_base 
+{
+
+//friend class Line;
+//friend class Circle;
+
+Segment_rep* ptr() const { return (Segment_rep*)PTR; }
+
+public:
+
+ Segment();                 
+ Segment(const Point&, const Point&); 
+ Segment(const Int&, const Int&, const Int&, const Int&);
+// Segment(const Point&, double dir, double length);
+ Segment(const Segment& s) : handle_base(s) {}     
+~Segment()                { clear(); }
+
+Segment& operator=(const Segment& s) { handle_base::operator=(s); return *this;}
+
+//operator vector()  { return vector(xcoord2()-xcoord1(), ycoord2()-ycoord1()); }
+
+bool intersection(const Segment& s, Point& inter) const;
+
+bool intersection_of_lines(const Segment& s, Point& inter) const;
+
+
+Point start() const { return ptr()->start; }
+Point end()   const { return ptr()->end; }
+
+double xcoord1() const { return ptr()->start.xcoord(); }
+double xcoord2() const { return ptr()->end.xcoord();   }
+double ycoord1() const { return ptr()->start.ycoord(); }
+double ycoord2() const { return ptr()->end.ycoord();   }
+
+#if defined(__GNUG__)
+Int X1() const { return ptr()->start.X(); }
+Int X2() const { return ptr()->end.X();   }
+Int Y1() const { return ptr()->start.Y(); }
+Int Y2() const { return ptr()->end.Y();   }
+Int W1() const { return ptr()->start.W(); }
+Int W2() const { return ptr()->end.W();   }
+Int dx() const { return ptr()->dx; }
+Int dy() const { return ptr()->dy; }
+#else
+const Int& X1() const { return ptr()->start.X(); }
+const Int& X2() const { return ptr()->end.X();   }
+const Int& Y1() const { return ptr()->start.Y(); }
+const Int& Y2() const { return ptr()->end.Y();   }
+const Int& W1() const { return ptr()->start.W(); }
+const Int& W2() const { return ptr()->end.W();   }
+const Int& dx() const { return ptr()->dx; }
+const Int& dy() const { return ptr()->dy; }
+#endif
+
+double XD1() const { return ptr()->start.XD(); }
+double XD2() const { return ptr()->end.XD();   }
+double YD1() const { return ptr()->start.YD(); }
+double YD2() const { return ptr()->end.YD();   }
+double WD1() const { return ptr()->start.WD(); }
+double WD2() const { return ptr()->end.WD();   }
+
+double dxd() const { return Itodouble(ptr()->dx); }
+double dyd() const { return Itodouble(ptr()->dy); }
+
+bool vertical()   const { return ptr()->dx == 0; }
+bool horizontal() const { return ptr()->dy == 0; }
+
+
+//double slope() const { return ptr()->slope; }
+//double y_abs() const { return ptr()->y_abs; }
+
+//double angle()     const { return ptr()->angle; }
+//double direction() const { return angle(); }
+
+ 
+//double length() const { return start().distance(end()); }
+
+//Segment translate(double,double) const;
+//Segment translate(const vector&) const;
+
+//double  angle(const Segment&) const;
+
+//double  distance(const Segment&) const;
+//double  distance(const Point&) const;
+//double  distance() const;
+//double  x_proj(double) const;
+//double  y_proj(double) const;
+
+//double operator()(double x) { return y_proj(x); }
+
+//Segment rotate(const Point&,double) const;
+//Segment rotate(double) const;
+
+//bool  right()  const  { return ptr()->start.ptr()->x < ptr()->end.ptr()->x; }
+//bool  left()   const  { return ptr()->start.ptr()->x > ptr()->end.ptr()->x; }
+//bool  up()     const  { return ptr()->start.ptr()->y < ptr()->end.ptr()->y; }
+//bool  down()   const  { return ptr()->start.ptr()->y > ptr()->end.ptr()->y; }
+
+//Segment operator+(const vector& v) const { return translate(v); }
+
+int operator==(const Segment& s) const
+{ return (ptr()->start == s.ptr()->start && ptr()->end == s.ptr()->end); }
+
+int operator!=(const Segment& s) const { return !operator==(s);}
+
+friend ostream& operator<<(ostream& out, const Segment& s);
+friend istream& operator>>(istream& in, Segment& s);
+
+friend void Print(const Segment&, ostream&  =cout);
+friend void Read(Segment&,  istream& =cin);
+
+};
+
+inline void Print(const Segment& s, ostream& out) { out << s; } 
+inline void Read(Segment& s,  istream& in)        { in >> s; }
+
+LEDA_HANDLE_TYPE(Segment)
+
+#endif

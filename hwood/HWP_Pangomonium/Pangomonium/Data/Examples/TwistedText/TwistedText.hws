@@ -1,0 +1,479 @@
+/* 
+** Example code to show how to use pangocairo to render text
+** projected on a path.
+**
+** Written by Behdad Esfahbod, 2006..2007
+** Ported to Hollywood by Andreas Falkenhahn.
+**
+** Permission to use, copy, modify, distribute, and sell this example
+** for any purpose is hereby granted without fee.
+** It is provided "as is" without express or implied warranty.
+*/
+
+@REQUIRE "pangomonium"
+@DISPLAY {Width = 1000, Height = 800, Color = #WHITE}
+
+/* 
+** A fancy cairo_stroke[_preserve]() that draws points and control
+** points, and connects them together.
+*/
+Function p_FancyCairoStroke(cr, preserve)
+
+	cr:Save()
+	cr:SetSourceRGB(1.0, 0.0, 0.0)
+	
+	Local linewidth = cr:GetLineWidth()
+	Local path = cr:CopyPath()
+	cr:NewPath()
+	
+	cr:Save()
+	cr:SetLineWidth(linewidth / 3)
+	cr:SetDash(dash, 0, 10, 10)
+	  
+	Local p = path:Get()
+	  
+	For Local i = 0 To ListItems(p) - 1
+	  	
+		Switch p[i].type
+		Case #CAIRO_PATH_MOVE_TO:    
+			FallThrough
+		Case #CAIRO_PATH_LINE_TO:
+			cr:MoveTo(p[i].x1, p[i].y1)
+		Case #CAIRO_PATH_CURVE_TO:
+			cr:LineTo(p[i].x1, p[i].y1)
+			cr:MoveTo(p[i].x2, p[i].y2)
+			cr:LineTo(p[i].x3, p[i].y3)
+		EndSwitch
+	Next
+	  
+	cr:Stroke()
+	cr:Restore()
+	
+	cr:Save()
+	cr:SetLineWidth(linewidth * 4)
+	cr:SetLineCap(#CAIRO_LINE_CAP_ROUND)
+	  
+	For Local i = 0 To ListItems(p) - 1
+	  	
+		Switch p[i].type
+		Case #CAIRO_PATH_MOVE_TO:
+			cr:MoveTo(p[i].x1, p[i].y1)
+		Case #CAIRO_PATH_LINE_TO:
+			cr:RelLineTo(0, 0)
+			cr:MoveTo(p[i].x1, p[i].y1)
+		Case #CAIRO_PATH_CURVE_TO:
+			cr:RelLineTo(0, 0)
+			cr:MoveTo(p[i].x1, p[i].y1)
+			cr:RelLineTo(0, 0)
+			cr:MoveTo(p[i].x2, p[i].y2)
+			cr:RelLineTo(0, 0)
+			cr:MoveTo(p[i].x3, p[i].y3)
+		Case #CAIRO_PATH_CLOSE_PATH:
+			cr:RelLineTo(0, 0)
+		EndSwitch
+	Next
+	  
+	cr:RelLineTo(0, 0)
+	cr:Stroke()
+	cr:Restore()
+	
+	For Local i = 0 To ListItems(p) - 1
+	
+		Switch p[i].type
+		Case #CAIRO_PATH_MOVE_TO:
+			cr:MoveTo(p[i].x1, p[i].y1)
+		Case #CAIRO_PATH_LINE_TO:
+			cr:LineTo(p[i].x1, p[i].y1)
+		Case #CAIRO_PATH_CURVE_TO:
+			cr:CurveTo(p[i].x1, p[i].y1, p[i].x2, p[i].y2, p[i].x3, p[i].y3)
+		Case #CAIRO_PATH_CLOSE_PATH:
+			cr:ClosePath()
+		EndSwitch
+	Next
+	    
+	cr:Stroke()
+	
+	If preserve Then cr:AppendPath(path)
+	
+	cr:Restore()
+
+EndFunction
+
+/* Returns Euclidean distance between two points */
+Function p_TwoPointsDistance(a, b)
+
+	Local dx = b.x - a.x
+  	Local dy = b.y - a.y
+
+	Return(sqrt(dx * dx + dy * dy))
+
+EndFunction
+
+/* 
+** Returns length of a Bezier curve.
+** Seems like computing that analytically is not easy.  The
+** code just flattens the curve using cairo and adds the length
+** of segments.
+*/
+Function p_CurveLength(x0, y0, x1, y1, x2, y2, x3, y3)
+	
+	Local surface = cairo.ImageSurface(#CAIRO_FORMAT_A8, 0, 0)
+	Local cr = cairo.Context(surface)
+	
+	cr:MoveTo(x0, y0)
+	cr:CurveTo(x1, y1, x2, y2, x3, y3)
+	
+	Local length = 0
+	Local path = cr:CopyPathFlat()
+	Local p = path:Get()
+	Local current_point = {x = 0, y = 0}
+	  
+	For Local i = 0 To ListItems(p) - 1
+	  	
+		Switch p[i].type
+	    	Case #CAIRO_PATH_MOVE_TO:
+			current_point.x = p[i].x1
+			current_point.y = p[i].y1
+	
+	    	Case #CAIRO_PATH_LINE_TO:
+			length = length + p_TwoPointsDistance(current_point, {x = p[i].x1, y = p[i].y1})
+			current_point.x = p[i].x1
+			current_point.y = p[i].y1
+	    	EndSwitch
+	Next  
+	
+	Return(length)
+
+EndFunction
+
+/* 
+** Compute parametrization info.  That is, for each part of the 
+** cairo path, tags it with its length.
+*/
+Function p_ParametrizePath(p)
+
+	Local current_point = {x = 0, y = 0}
+	Local last_move_to = {x = 0, y = 0} 
+	Local parametrization = {}
+	Local p = path:Get()
+	  
+	For Local i = 0 To ListItems(p) - 1
+	  	
+		parametrization[i] = 0.0
+		    
+		Switch p[i].type
+		Case #CAIRO_PATH_MOVE_TO:
+			last_move_to.x = p[i].x1
+			last_move_to.y = p[i].y1    	
+			current_point.x = p[i].x1
+			current_point.y = p[i].y1    	
+		
+		Case #CAIRO_PATH_CLOSE_PATH:
+			; Make it look like it's a line_to to last_move_to 
+			parametrization[i] = p_TwoPointsDistance(current_point, last_move_to)
+		
+			current_point.x = last_move_to.x
+			current_point.y = last_move_to.y  
+			
+		Case #CAIRO_PATH_LINE_TO:
+			parametrization[i] = p_TwoPointsDistance(current_point, {x = p[i].x1, y = p[i].y1})
+		
+			current_point.x = p[i].x1
+			current_point.y = p[i].y1   
+		
+		Case #CAIRO_PATH_CURVE_TO:
+			parametrization[i] = p_CurveLength(current_point.x, current_point.y,
+							   p[i].x1, p[i].y1,
+							   p[i].x2, p[i].y2,
+							   p[i].x3, p[i].y3)
+					   
+			current_point.x = p[i].x3
+			current_point.y = p[i].y3					   
+		EndSwitch
+	Next
+	
+	Return(parametrization)
+
+EndFunction
+
+/* 
+** Project a path using a function.  Each point of the path (including
+** Bezier control points) is passed to the function for transformation.
+*/
+Function p_TransformPath(p, f, srcp, parametrization)
+ 
+	For Local i = 0 To ListItems(p) - 1
+			  		
+		Switch p[i].type
+		Case #CAIRO_PATH_CURVE_TO:
+		      p[i].x3, p[i].y3 = f(srcp, parametrization, p[i].x3, p[i].y3)
+		      p[i].x2, p[i].y2 = f(srcp, parametrization, p[i].x2, p[i].y2)   
+		      FallThrough
+		Case #CAIRO_PATH_MOVE_TO:
+		      FallThrough
+		Case #CAIRO_PATH_LINE_TO:    
+		      p[i].x1, p[i].y1 = f(srcp, parametrization, p[i].x1, p[i].y1)
+		EndSwitch
+	Next
+  
+EndFunction
+
+/* 
+** Project a point X,Y onto a parameterized path.  The final point is
+** where you get if you walk on the path forward from the beginning for X
+** units, then stop there and walk another Y units perpendicular to the
+** path at that point.  In more detail:
+**
+** There's three pieces of math involved:
+**
+**   - The parametric form of the Line equation
+**     http://en.wikipedia.org/wiki/Line
+**
+**   - The parametric form of the Cubic Bézier curve equation
+**     http://en.wikipedia.org/wiki/B%C3%A9zier_curve
+**
+**   - The Gradient (aka multi-dimensional derivative) of the above
+**     http://en.wikipedia.org/wiki/Gradient
+**
+** The parametric forms are used to answer the question of "where will I be
+** if I walk a distance of X on this path".  The Gradient is used to answer
+** the question of "where will I be if then I stop, rotate left for 90
+** degrees and walk straight for a distance of Y".
+*/
+Function p_PointOnPath(p, parametrization, x, y)
+	
+	Local current_point = {x = 0, y = 0}
+  	Local last_move_to = {x = 0, y = 0} 
+  	Local the_x, the_y = x, y
+  	Local dx, dy, ratio
+  	Local plen = ListItems(p)
+  	Local i = 0
+  
+	While (i + 1 < plen) And ((the_x > parametrization[i]) Or (p[i].type = #CAIRO_PATH_MOVE_TO))	
+	
+		the_x = the_x - parametrization[i]
+	
+	    	Switch p[i].type
+	    	Case #CAIRO_PATH_MOVE_TO:
+			current_point.x = p[i].x1
+			current_point.y = p[i].y1 
+			last_move_to.x = p[i].x1
+			last_move_to.y = p[i].y1    	
+	    	Case #CAIRO_PATH_LINE_TO:
+			current_point.x = p[i].x1
+			current_point.y = p[i].y1 
+	    	Case #CAIRO_PATH_CURVE_TO:
+			current_point.x = p[i].x3
+			current_point.y = p[i].y3 
+	    	EndSwitch
+	    
+	    	i = i + 1
+	Wend
+  
+	Local px = p[i].x1
+  	Local py = p[i].y1
+  
+	Switch p[i].type
+	Case #CAIRO_PATH_CLOSE_PATH:
+		; Make it look like it's a line_to to last_move_to 
+	      	px = last_move_to.x
+	      	py = last_move_to.y
+	
+	      	FallThrough
+	Case #CAIRO_PATH_LINE_TO:
+	      	ratio = the_x / parametrization[i]
+	      	; Line polynomial 
+	      	x = current_point.x * (1 - ratio) + px * ratio
+	      	y = current_point.y * (1 - ratio) + py * ratio
+	
+	      	; Line gradient 
+	      	dx = -(current_point.x - px)
+	      	dy = -(current_point.y - py)
+		
+	      	; optimization for: ratio = the_y / sqrt (dx * dx + dy * dy)
+	      	ratio = the_y / parametrization[i]
+	      	x = x + -dy * ratio
+	      	y = y + dx * ratio
+	
+	Case #CAIRO_PATH_CURVE_TO:
+	      	; FIXME the formulas here are not exactly what we want, because the
+		; Bezier parametrization is not uniform.  But I don't know how to do
+		; better.  The caller can do slightly better though, by flattening the
+		; Bezier and avoiding this branch completely.  That has its own cost
+		; though, as large y values magnify the flattening error drastically.
+			
+		Local ratio_1_0, ratio_0_1
+		Local ratio_2_0, ratio_0_2
+		Local ratio_3_0, ratio_2_1, ratio_1_2, ratio_0_3
+		Local _1__4ratio_1_0_3ratio_2_0, _2ratio_1_0_3ratio_2_0
+	
+		ratio = the_x / parametrization[i]
+	
+		ratio_1_0 = ratio
+		ratio_0_1 = 1 - ratio
+	
+		ratio_2_0 = ratio_1_0 * ratio_1_0 ;      ratio  *      ratio  
+		ratio_0_2 = ratio_0_1 * ratio_0_1 ; (1 - ratio) * (1 - ratio)
+	
+		ratio_3_0 = ratio_2_0 * ratio_1_0 ;      ratio  *      ratio  *      ratio  
+		ratio_2_1 = ratio_2_0 * ratio_0_1 ;      ratio  *      ratio  * (1 - ratio) 
+		ratio_1_2 = ratio_1_0 * ratio_0_2 ;      ratio  * (1 - ratio) * (1 - ratio) 
+		ratio_0_3 = ratio_0_1 * ratio_0_2 ; (1 - ratio) * (1 - ratio) * (1 - ratio) 
+	
+		_1__4ratio_1_0_3ratio_2_0 = 1 - 4 * ratio_1_0 + 3 * ratio_2_0
+		_2ratio_1_0_3ratio_2_0    =     2 * ratio_1_0 - 3 * ratio_2_0
+	
+		; Bezier polynomial 
+		*x = current_point.point.x * ratio_0_3
+		   + 3 *   p[i].x1 * ratio_1_2
+		   + 3 *   p[i].x2 * ratio_2_1
+		   +       p[i].x3 * ratio_3_0
+		*y = current_point.point.y * ratio_0_3
+		   + 3 *   p[i].y1 * ratio_1_2
+		   + 3 *   p[i].y2 * ratio_2_1
+		   +       p[i].y3 * ratio_3_0
+	
+		; Bezier gradient 
+		dx =-3 * current_point.point.x * ratio_0_2
+		   + 3 *       p[i].x1 * _1__4ratio_1_0_3ratio_2_0
+		   + 3 *       p[i].x2 * _2ratio_1_0_3ratio_2_0
+		   + 3 *       p[i].x3 * ratio_2_0
+		dy =-3 * current_point.point.y * ratio_0_2
+		   + 3 *       p[i].y1 * _1__4ratio_1_0_3ratio_2_0
+		   + 3 *       p[i].y2 * _2ratio_1_0_3ratio_2_0
+		   + 3 *       p[i].y3 * ratio_2_0
+	
+		ratio = the_y / sqrt (dx * dx + dy * dy)
+		x = x + -dy * ratio
+		y = y + dx * ratio
+	EndSwitch
+	  
+	doskip = 1
+	
+	Return(x,y)
+
+EndFunction    
+
+/* Projects the current path of cr onto the provided path. */
+Function p_MapPathOnto(cr, path)
+
+	Local p = path:get()
+  	Local parametrization = p_ParametrizePath(p)
+  	Local current_path = cr:CopyPath()
+  	Local cp = current_path:Get()
+  	
+  	cr:NewPath()
+
+  	p_TransformPath(cp, p_PointOnPath, p, parametrization)
+  
+  	current_path = cairo.Path(cp)
+  
+  	cr:AppendPath(current_path)
+
+EndFunction
+
+Function p_DrawText(cr, x, y, font, text$)
+
+	Local font_options = cairo.FontOptions()
+	
+	font_options:SetHintStyle(#CAIRO_HINT_STYLE_NONE)
+	font_options:SetHintMetrics(#CAIRO_HINT_METRICS_OFF)
+	
+	cr:SetFontOptions(font_options)
+	
+	Local layout = cr:PangoLayout()
+	
+	Local desc = pango.FontDescription(font)
+	layout:SetFontDescription(desc)
+	layout:SetText(text$)
+	
+	Local line = layout:GetLineReadOnly(0)
+	
+	cr:MoveTo(x, y)
+	cr:LayoutLinePath(Line)
+
+EndFunction
+
+Function p_DrawTwisted(cr, x, y, font, text$)
+
+	cr:Save()
+	
+	; Decrease tolerance a bit, since it's going to be magnified 
+	cr:SetTolerance(0.01)
+	
+	; Using cr:CopyPath() here shows our deficiency in handling
+	; Bezier curves, specially around sharper curves.
+	;
+	; Using cr:CopyPathFlat() on the other hand, magnifies the
+	; flattening error with large off-path values.  We decreased
+	; tolerance for that reason.  Increase tolerance to see that
+	; artifact.
+	path = cr:CopyPathFlat()
+	;path = cr:CopyPath()
+	
+	cr:NewPath()
+	
+	p_DrawText(cr, x, y, font, text$)
+	p_MapPathOnto(cr, path)
+	  
+	cr:FillPreserve()
+	
+	cr:Save()
+	cr:SetSourceRGB(0.1, 0.1, 0.1)
+	cr:Stroke()
+	cr:Restore()
+	
+	cr:Restore()
+
+EndFunction
+
+Function p_DrawDream(cr)
+
+	cr:MoveTo(50, 650)
+	
+	cr:RelLineTo(250, 50)
+	cr:RelCurveTo(250, 50, 600, -50, 600, -250)
+	cr:RelCurveTo(0, -400, -300, -100, -800, -300)
+	
+	cr:SetLineWidth(1.5)
+	cr:SetSourceRGBA(0.3, 0.3, 1.0, 0.3)
+	
+	p_FancyCairoStroke(cr, True)
+	  
+	p_DrawTwisted(cr, 0, 0, "Serif 72", "It was a dream... Oh Just a dream...")
+
+EndFunction
+
+Function p_DrawWow(cr)
+
+	cr:MoveTo(400, 780)
+	
+	cr:RelCurveTo(50, -50, 150, -50, 200, 0)
+	
+	cr:Scale(1.0, 2.0)
+	cr:SetLineWidth(2.0)
+	cr:SetSourceRGBA(0.3, 1.0, 0.3, 1.0)
+	
+	p_FancyCairoStroke(cr, True)
+	
+	p_DrawTwisted(cr, -20, -150, "Serif 60", "WOW!")
+
+EndFunction
+
+surface = cairo.ImageSurface(#CAIRO_FORMAT_ARGB32, 1000, 800)
+;surface = cairo.PDFSurface("test.pdf", 1000, 800)
+;surface = cairo.SVGSurface("test.svg", 1000, 800)
+
+cr = cairo.Context(surface)
+cr:SetSourceRGB(1.0, 1.0, 1.0)
+cr:Paint()
+
+DisableLineHook
+p_DrawDream(cr)
+p_DrawWow(cr)
+EnableLineHook
+
+surface:ToBrush(1)
+DisplayBrush(1, 0, 0)
+WaitLeftMouse
+End

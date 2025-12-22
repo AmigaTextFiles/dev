@@ -1,0 +1,14 @@
+VERSION		EQU	1
+REVISION	EQU	160
+DATE	MACRO
+		dc.b	'7.5.95'
+	ENDM
+VERS	MACRO
+		dc.b	'NaeGrey 1.160'
+	ENDM
+VSTRING	MACRO
+		dc.b	'NaeGrey 1.160 (7.5.95)',13,10,0
+	ENDM
+VERSTAG	MACRO
+		dc.b	0,'$VER: NaeGrey 1.160 (7.5.95)',0
+	ENDM

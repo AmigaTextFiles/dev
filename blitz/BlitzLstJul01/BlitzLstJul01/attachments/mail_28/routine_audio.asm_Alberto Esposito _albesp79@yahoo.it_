@@ -1,0 +1,192 @@
+	SECTION	PlayLongSamples,CODE
+
+Start:
+	bset	#1,$bfe001		;filter off
+
+	lea	sample,a0		;sample address
+	move.l	#sample_end-sample,d0	;sample lenght
+	move.w	#17897,d1		;frequecy
+	moveq	#64,d2			;volume
+	bsr.s	playlongsample_init	;INIT routine
+
+WLMB:	btst	#6,$bfe001		;LMB+RMB
+	bne.s	wlmb
+	btst	#10,$dff016
+	bne.s	wlmb
+
+	bsr.w	playlongsample_restore	;RESTORE routine
+	rts
+
+
+***************************************
+*****  Play Long Sample Routines  *****
+***************************************
+
+PlayLongSample_init:
+		;[a0=sample adr]
+		;[d0.l=lenght sample, d1.w=frequency, d2.w=volume]
+		;* AutoVector Lv4 IRQ free *
+
+_LVOSupervisor	equ	-30
+_LVOAllocMem	EQU	-198
+_LVOFreeMem	EQU	-210
+_LVOAvailMem	EQU	-216
+MEMF_CHIP	equ	1<<1
+MEMF_LARGEST	equ	1<<17
+MEMF_CLEAR	equ	1<<16
+Clock		equ	3546895
+AFB_68010	equ	0
+AttnFlags	equ	296
+
+	movem.l	d0-d2/a0-a1/a5-a6,-(sp)	;save some
+
+	lea	plsregs(pc),a5
+	movem.l	d0/a0,(a5)
+	movem.l	d0/a0,4*2(a5)
+	move.l	4.w,a6
+	move.l	#MEMF_CHIP!MEMF_LARGEST,d1
+	jsr	_LVOAvailMem(a6)	;-> d0.l=chip block
+	cmp.l	#2*128*1024,d0		;d0.l > 256 kB ?
+	bls.s	.okmem			;NO: take block lenght
+	move.l	#2*128*1024,d0		;YES: 256 kB good
+.OkMem:	and.w	#~%111,d0		;d0.l=total lenght >> 64 bit
+	move.l	d0,4*4(a5)
+	move.l	#MEMF_CHIP!MEMF_CLEAR,d1;MEMF_CLEAR: at 0 RAM allocated
+	jsr	_LVOAllocMem(a6)	;get 2 banks of 128 kB
+	tst.l	d0			;d0.l=0 ?
+	beq.w	.bye			;YES: RAM not -> exit
+	move.l	d0,4*5(a5)		;save first bank base in chip
+	move.l	4*4(a5),d1
+	lsr.l	#1,d1
+	add.l	d1,d0
+	move.l	d0,4*6(a5)		;save second bank base in chip
+	movem.l	4(sp),d1-d2		;retake d1-d2 from stack
+	sub.l	a0,a0
+	move.l	4.w,a6
+	btst	#afb_68010,attnflags+1(a6)	;68010+ ?
+	beq.s	.no010
+	lea	getvbr(pc),a5
+	jsr	_LVOSupervisor(a6)
+.No010:	lea	$dff000,a6
+	move.w	#$0780,$9c(a6)		;no IRQ request!
+	move.w	$1c(a6),oldint		;save INTENA
+	move.w	#$0780,$9a(a6)		;mask INT AUD0-AUD3
+	move.l	$70(a0),oldlv4		;save Autovector Lv4
+	move.l	#lv4irq,$70(a0)		;NEW!
+	move.w	d2,$a8(a6)		;AUD0VOL
+	move.w	d2,$b8(a6)		;AUD1VOL
+	move.w	d2,$c8(a6)		;AUD2VOL
+	move.w	d2,$d8(a6)		;AUD3VOL
+	move.l	#clock,d2
+	divu.w	d1,d2			;d2.w=clock/freq
+	move.w	d2,$a6(a6)		;AUD0PER
+	move.w	d2,$b6(a6)		;AUD1PER
+	move.w	d2,$c6(a6)		;AUD2PER
+	move.w	d2,$d6(a6)		;AUD3PER
+	move.w	$2(a6),olddma		;save DMACON
+	move.w	#$c400,$9a(a6)		;active AUD3 IRQ
+	move.w	#$8400,$9c(a6)		;forcing IRQ to start...
+	movem.l	(sp)+,d0-d2/a0-a1/a5-a6
+.Bye:	rts
+;--------------------------------------
+GetVBR:
+	dc.l	$4e7a8801	;movec	vbr,a0
+	rte
+;--------------------------------------
+PlayLongSample_restore:
+	movem.l	d0-d2/a0-a1/a5-a6,-(sp)
+	sub.l	a0,a0
+	move.l	4.w,a6
+	btst	#afb_68010,attnflags+1(a6)
+	beq.s	.no010
+	lea	getvbr(pc),a5
+	jsr	_LVOSupervisor(a6)
+.No010:	lea	$dff000,a6
+	move.w	#$0780,$9c(a6)
+	move.w	#$0400,$9a(a6)		;mask INT AUD3
+	move.l	oldlv4(pc),$70(a0)	;retake Autovector Lv4
+	move.w	#$000f,$96(a6)		;off DMA audio
+	move.w	oldint(pc),d0
+	or.w	#$8000,d0		;SET/CLR in INTENAR 
+	move.w	d0,$9a(a6)		;retake INTENA
+	move.w	olddma(pc),d0
+	or.w	#$8000,d0		;SET/CLR in DMACONR
+	move.w	d0,$96(a6)		;retake DMACON
+	move.l	4.w,a6
+	movem.l	plsregs+4*4(pc),d0/a0-a1
+	cmp.l	a0,a1			;a1 < a0 ?
+	blo.s	.min
+	move.l	a0,a1
+.Min:	jsr	_LVOFreeMem(a6)		;free RAM
+	movem.l	(sp)+,d0-d2/a0-a1/a5-a6
+	rts
+;--------------------------------------
+PlayLongSample_IRQ:
+	movem.l	d0-d2/a0-a1/a5-a6,-(sp)
+	lea	$dff000,a6
+	lea	plsregs+4*4(pc),a5
+	movem.l	-4*2(a5),d0/a0		;d0.l=remain/a0=sample base
+	movem.l	(a5),d1/a1		;d1.l=bank/a1=bank base
+	move.l	a1,$a0(a6)		;AUDLC
+	move.l	a1,$b0(a6)
+	move.l	a1,$c0(a6)
+	move.l	a1,$d0(a6)
+	lsr.l	#1,d1			;half bank
+	cmp.l	d0,d1			;half bank <= remain ?
+	bls.s	.longc
+	move.l	d0,d1			;NO: copy & play remain
+.LongC:	move.l	d1,d2
+	lsr.l	#1,d1			;AUDLEN.w/2
+	move.w	d1,$a4(a6)		;AUDLEN
+	move.w	d1,$b4(a6)
+	move.w	d1,$c4(a6)
+	move.w	d1,$d4(a6)
+	lsr.l	#1,d1
+	subq.w	#1,d1
+	move.w	#$007,$180(a6)	;blu color > copying (only for test)
+.CopyLp:move.l	(a0)+,(a1)+
+	dbra	d1,.copylp
+	move.w	#$000,$180(a6)	;black color > ending (only for test)
+	move.l	-4*1(a5),a0
+	add.l	d2,a0			;a0 = next bank
+	sub.l	d2,d0			;lenght-played
+	bhi.s	.noloop			;d0 => 1 ? (1 byte more ?)
+	movem.l	plsregs(pc),d0/a0	;NO: retake original regs
+.NoLoop:movem.l	d0/a0,-4*2(a5)		;save d0 & a0
+	movem.l	4*1(a5),a0/a1		;exchange bank pointers
+	exg	a0,a1
+	movem.l	a0/a1,4*1(a5)
+	move.w	#$820f,$96(a6)
+	movem.l	(sp)+,d0-d2/a0-a1/a5-a6
+	rts
+;--------------------------------------
+OldINT:	dc.w	0
+OldDMA:	dc.w	0
+OldLv4:	dc.l	0
+PLSRegs:dc.l	0,0	;lenght,sample pointer - lock
+	dc.l	0,0	;lenght,sample pointer - variable
+	dc.l	0,0,0	;lenght,bank 1 pointer,bank 2 pointer - lock
+
+
+***************************************
+*****  Level 4 Interrupt Handler  *****
+***************************************
+
+	cnop	0,8
+Lv4IRQ:	
+	btst	#10-8,$dff01e		;IRQ AUD3 ?
+	beq.s	.exit
+	move.w	#$0780,$dff09c
+	bsr.w	playlongsample_irq
+.Exit:	rte
+
+
+
+	SECTION	Sample,DATA_F
+
+Sample:
+	incbin	"rawsoundexperiment"
+Sample_end:
+
+	END
+

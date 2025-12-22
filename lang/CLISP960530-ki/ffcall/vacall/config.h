@@ -1,0 +1,18 @@
+/* config.h.  Generated automatically by configure.  */
+/* Bruno Haible 11.2.1995 */
+
+/*
+ * Copyright 1995 Bruno Haible, <haible@ma2s2.mathematik.uni-karlsruhe.de>
+ *
+ * This is free software distributed under the GNU General Public Licence
+ * described in the file COPYING. Contact the author if you don't have this
+ * or can't live with it. There is ABSOLUTELY NO WARRANTY, explicit or implied,
+ * on this software.
+ */
+
+/* CL_ABORT */
+/* Define as the return type of abort(). */
+#define RETABORTTYPE void
+/* Define as __volatile__ if the declaration of abort() needs it. */
+#define ABORT_VOLATILE
+

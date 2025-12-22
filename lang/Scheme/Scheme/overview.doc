@@ -1,0 +1,408 @@
+======================
+OVERVIEW OF THE SYSTEM
+======================
+
+Scheme
+Version 1.2
+19-March-1988
+
+
+TOPICS
+------
+STARTING THE SYSTEM
+INITIALIZATION FILE
+GARBAGE COLLECTION AND MEMORY MANAGEMENT
+INDEX TO EXAMPLE CODE
+MORE INFORMATION ABOUT SCHEME
+BUG REPORTS AND OTHER COMMUNICATION
+
+
+
+================================================================================
+
+STARTING THE SYSTEM
+-------------------
+
+The system may be run either from the Workbench (by double-clicking
+its icon) or from the CLI (by issuing its name from the command line).
+
+The system requires approximately 285k bytes to start, of which there must
+be two contiguous blocks of 64k each.  Heap memory can be dynamically
+resized after startup; the total memory usage can be reduced to a minimum
+of approximately 185k.	The system's stacks (there are two in this
+implementation) are allocated internally, so the task may be started with
+AmigaDOS' default 4k stack.
+
+Below, it is assumed that the Scheme system program is named "Scheme" and
+resides in some directory accessible in your CLI Path.
+
+Here is a quick example of running the system, starting from the CLI:
+
+    1> Scheme is fun!
+    Scheme
+    Version 1.2  19-March-1988
+    Implemented by Ed Puckett
+    MIT Branch PO
+    PO Box 61
+    Cambridge, MA  02139
+
+
+    :=> command-name
+    Scheme
+    :=> command-line
+    is fun!
+
+    :=> (write command-line)
+    "is fun!\
+    "#u
+
+The ":=> " prompt is issued by the system read-eval-print-loop.  This loop
+is interface with the Scheme system, and it does just what its name
+implies: it reads an expression, evaluates it, prints the result and loops
+back to read another expression.  (Some people colorfully refer to the
+read-eval-print-loop as a "Listener".)
+
+Two variables (among others) are introduced in the above example:
+command-name and command-line.	These can be used by your programs to
+determine if the system was started from the Workbench or from the CLI,
+and to determine what arguments may have been issued on the CLI command line.
+
+If run from the Workbench, the symbols command-name and command-line
+will both be bound to empty strings.  From the CLI, they are bound to
+repectively, the name of the executable file (usually "Scheme", unless
+you rename it) and the remainder of the command line.
+
+Notice that applying write to command-line's value showed us that it
+includes a newline character.  The string representation of a newline is
+the string escape character \ followed by a newline.  This is why the rest
+of the string is on the next line.  The #u which appears after the closing
+double quote is the return value from write.
+
+We can also see the individual characters that comprise this string:
+
+    :=> (write (string->list command-line))
+    (#\i #\s #\space #\f #\u #\n #\! #\lf)#u
+
+To leave the system, simply cause an end-of-file (by pressing CTRL-\) or
+else call the procedure abort-system:
+
+    :=> (abort-system)
+    1>
+
+See the section MORE INFORMATION ABOUT SCHEME for references to other
+literature on Scheme.  Extensions particular to this implementation are
+described in the file "ext.doc".
+
+
+
+================================================================================
+
+INITIALIZATION FILE
+-------------------
+
+Just prior to entering the read-eval-print-loop for the first time, the
+system attempts to open the file "S:Scheme-init.scm".  If this file exists,
+it is loaded before the first read-eval-print-loop prompt is issued.  You
+may put any valid Scheme expressions into this file.
+
+Some uses for the initialization file:
+
+    * Load your own frequently-used procedures.
+
+    * Parse the command line, and take action on it.  For example,
+      you could evaluate each file specified on the command line and
+      then exit.  If no files were given, then you could do the normal
+      read-eval-print-loop.  This would be something like Unix's /bin/sh.
+
+    * Start your own custom read-eval-print-loop.  See repl.scm for a
+      crude example.
+
+
+
+================================================================================
+
+GARBAGE COLLECTION AND MEMORY MANAGEMENT
+----------------------------------------
+
+The garbage collector combines both mark/sweep and copying methods.
+Storage for strings and ports is allocated outside the heap memory (via
+AllocMem) and is collected in a mark/sweep fashion.  All other memory (such
+as that for pairs and vectors) is allocated from the heap, and is collected
+by the copying method.
+
+The copying method is reasonably fast (this system collects about 13500
+pairs/second), and takes time proportional to the current amount of storage
+used (i.e., storage which is not currently garbage).
+
+It has two major drawbacks.  One is that it destroys objects' locality of
+reference.  The other is that only half of the allocated memory is ever
+available for use.  This is because it maintains two equal-sized blocks
+of memory, a working block and a free block.
+
+The locality issue does not really affect the Amiga since no virtual
+addressing is employed.  As for the amount of memory required, what the
+heck, we can always add more memory (!).
+
+Seriously though, the copying method's speed was its major attraction.
+Typically, I see 1/4 second delays (for instance, in the middle of
+printing) if I see them at all.  Only when a lot of internal structures are
+allocated do the delays become very noticable.
+
+Strings contain no references to other objects on the heap, and it seemed a
+shame to clog up the heap with them; each collection would move each string.
+
+Ports, too, contain no heap references, but there was another reason for
+collecting them with mark/sweep.  Since the mark/sweep scans unused as well
+as used objects, unused ports are merely closed by the garbage collector
+during the sweep phase.  (It is by no means impossible to detect unused
+open ports in the heap, but the mark/sweep method seemed easier.)
+
+Incidentally, the default error handler calls the garbage collector.  This
+aids in the following circumstance.  Suppose you are loading a file (with
+the primitive procedure "load"), and an error is detected in the file.  If
+the port associated with the file from which you were reading were left
+open, you would not be able to modify the file because it would be locked.
+So the error handler cleans out the registers, removing load's reference to
+the port, and calls the garbage collector which in turn closes the port,
+thereby unlocking the file.
+
+Changing Memory Size
+--------------------
+Several procedures are provided by which you can dynamically change the
+size of the heap: extend-size, shrink-size, change-size and minimize-size.
+(See "ext.doc" for detailed descriptions of these.)
+
+These procedures start by garbage collecting into the free block
+(extend-size skips this step).	Because the copying method compacts
+storage, it is then possible to determine the minimum amount of memory that
+the system must have.  Two new blocks of the requested size are now
+allocated, and another collection is performed into one of the new blocks.
+Now the old pair of blocks can be discarded, and the new ones installed in
+their place.
+
+These routines will fail if there is not enough memory available for both
+the old and new pairs of blocks simultaneously.  Though a very conservative
+measure, it seems too risky to trust that a freed block can be reallocated
+if the new blocks can not be.
+
+Finally, the heap management system will attempt to increase the size of
+the heap if heap storage is requested and none is available.  It currently
+adds increments of #x800 bytes (i.e. 256 pairs).  If the reallocation is
+unsuccessful, the system will abort.  (This needs to be changed so that
+you can at least decide!!!)
+
+This naive strategy should instead attempt reallocation based on the amount
+ultimately needed.  Each heap reallocation is time-consuming, and may
+fragment the Amiga system memory so that further reallocations are
+impossible.  However, out-of-memory is currently detected at a quite low
+level, and it is tough to determine the ultimate need.
+
+You may enjoy watching the memory on a graphically-displayed memory monitor
+as the system is trying to allocate a lot of memory.  You can cause this
+by calling minimize-size and then appending a long list to another list.
+Though it's probably not something you want to happen when you're doing
+real work, it's fun to watch this memory "shell game".
+
+
+
+================================================================================
+
+INDEX TO EXAMPLE CODE
+---------------------
+
+HOP.scm
+-------
+This file contains useful higher-order procedures which I load into my
+system during initialization.  For example, repeat is useful for testing
+something repeatedly:
+
+    :=> (repeat
+	  (lambda ()
+	    (do-test)		; some time-consuming test
+	    (display "."))      ; progress indicator
+	  10)
+    ..........#u
+
+The procedure "filter" allows you to select elements from a list for which
+a predicate returns true:
+
+    :=> (filter even? '(0 1 2 3 4 5 6 7 8 9))
+    (0 2 4 6 8)
+
+The procedure "repeated" forms the n-fold composition of a function.
+Here it is used to define multiplication in terms of addition:
+
+    :=> (define (mult m n)
+	  ((repeated (lambda (x) (+ n x)) m) 0))
+    mult
+
+    :=> (mult 200 340)
+    68000
+
+
+
+dump.scm
+--------
+
+This file has many procedures and definitions pertinent to the system
+internals.  Careless use of these functions will probably cause a crash!
+That's why they're so fun!
+
+The representation of many objects is noted in this file, and procedures
+for dumping things like environments are defined.
+
+
+
+load-patches.scm
+----------------
+
+This file shows examples of how you may modify existing procedures.
+Its main functions are "cd" and "load".
+
+Use "cd" to change the current directory.  Then, "load" will prepend this
+name when relative pathnames are given to it:
+
+    :=> (cd "Scheme:tests")
+    #u
+
+    :=> (cd)
+    Scheme:tests/	; with no arguments, returns current directory
+
+    :=> (load "xxx")
+    *** ERROR: could-not-open-port
+    Scheme:tests/xxx
+
+    :=> (load "test-cwcc.scm")
+    #u
+
+    :=> (load "test-tests.scm" "test-dwind.scm")
+    #u			; more than one file can be specified; loaded in order
+
+    :=> (load)
+    #u			; reloads last specified list of files
+
+
+
+repl.scm
+--------
+This file defines a custom read-eval-print-loop.  To start it, apply the
+function repl to a read function, an eval function and a print function.
+Typical choices for these are read, eval and display:
+
+    :=> (repl read eval display)
+
+    1=> (repl read eval display)
+
+    2=> <eof>
+
+    1=>
+
+Each time it is invoked, it increases the level number displayed in the
+prompt.  Each time you exit a level, the number is decremented.
+These repl's execute in their own environments.  When you leave
+one, all of its definitions are lost.
+
+Commands can be easily passed to AmigaDOS.  Simply enter the command
+prefixed with the character ~.	It is not necessary to separate the ~ and
+the rest of the command, and you needn't enter parentheses.  Everything up
+to the end of the line will be sent to AmigaDOS.
+
+    1=> ~dir S:
+      .edrc			       Scheme-init.scm
+      Startup-Sequence
+
+    1=>
+
+These read-eval-print-loops install their own error handler:
+
+    1=> )
+    Yeeow!  #u
+    Illegal right parenthesis
+    Interrupt flags/mask: #x0/#x2
+
+    1=>
+
+If you install your own error handler, you don't fall out of your subsystem
+just because you get an error.
+
+All in all, the code in repl.scm is a hack-job.  It represents a lot of
+experimentation (actually playing) with the system.  For example, it would
+be much better to dynamically-wind the level number rather than using a
+global variable.  But it provides a decent example of fun things that you
+can do.
+
+
+
+special-forms.scm
+-----------------
+This file gives an example of how to add new special forms to the system
+via the primitive procedure add-syntax!.  The special forms "let*" and
+"case" are defined.  Other special-forms manipulation procedures are
+delete-syntax! and get-syntax-definitions.
+
+
+
+streams.scm
+-----------
+Streams are essentially lists whose "cdr" is delayed, i.e., it is not
+evaluated until its value is required, and then that value is stored for
+future accesses.
+
+This file shows example streams functions.  After loading it, try the
+following:
+
+    (display-stream ones)
+    (display-stream natural-numbers)
+    (display-stream fibonacci-numbers)
+    (display-stream prime-numbers)
+
+These all generate infinite streams.  You can stop these by pressing CTRL-C.
+If you display the prime numbers twice, you will observe memoization in
+action -- the previously computed part of the stream come back quite
+quickly.
+
+These functions use LOTS of memory if you display long portions of the
+streams.  The system will abort if it runs out of memory.
+
+
+
+================================================================================
+
+MORE INFORMATION ABOUT SCHEME
+-----------------------------
+
+Two wonderful sources of information on Scheme are:
+
+    The book "Structure and Interpretation of Computer Programs"
+    by Harold Abelson and Gerald Jay Sussman with Julie Sussman.
+    Published by The MIT Press, Cambridge, Massachussets.
+
+    The "Revised^3 Report on the Algorithmic Language Scheme"
+    Editors: Jonathan Rees and William Clinger.
+    MIT Artificial Intelligence Laboratory Memo 848a.
+
+The bibliographies of these will direct you to a wealth of information.
+
+
+
+================================================================================
+
+BUG REPORTS AND OTHER COMMUNICATION
+-----------------------------------
+If you find bugs, please let me know.  If possible, send code which will
+reproduce the bug, or at least a description of how the bug might be
+reproduced.  If the system crashes, it would help to know the GURU
+MEDITATION NUMBER and information about your system configuration.
+Crashes are most likely the result of the garbage collector getting hold of
+some untagged datum.
+
+Suggestions and/or comments are welcome.
+Have fun!
+
+Ed Puckett
+MIT Branch PO
+PO Box 61
+Cambridge, MA  02139
+(617) 536-8876
+qix@hx.lcs.mit.edu
+

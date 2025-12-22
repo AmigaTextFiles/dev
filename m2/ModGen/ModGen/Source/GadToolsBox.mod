@@ -1,0 +1,7 @@
+IMPLEMENTATION MODULE GadToolsBox;
+
+FROM M2Lib IMPORT OpenLib;
+
+BEGIN
+  GTXBase:=OpenLib (GTXName,VERSION);
+END GadToolsBox.

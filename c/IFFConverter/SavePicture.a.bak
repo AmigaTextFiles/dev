@@ -1,0 +1,710 @@
+**
+**     $VER: SavePicture.a V1.00 (06-12-95)
+**
+**     Author:  Gerben Venekamp
+**     Updates: 06-12-95  Versin 1.00     Initial Module
+**
+**  SavePicture.a save a screen buffer to a file. This can be done
+**  in a number of ways. Possible types of saving: Interleave, RAW
+**  Copper and Font8.
+**
+
+		include	graphics/view.i
+		
+		
+ExtensionSize	equ	6	// Changes should be made to IFFConverter.h too
+
+		
+		XDEF	_SaveInterleave
+		XDEF	_SaveRaw
+		XDEF	_SaveCopperAGA
+		XDEF	_SaveCopperECS
+		XDEF	_SaveCopper32bit
+		XDEF	_SaveCopper4bit
+		XDEF	_SaveFont8
+		
+		XREF	_DOSBase
+		XREF	_PicDepth
+		
+		include	exec/types.i
+		include	exec/strings.i
+		include	dos/dos.i
+		include	graphics/gfx.i
+
+		include	dos_lib.i
+		
+		include	Gadgets_enum.i
+		
+
+		STRUCTURE Save_Buffer_struct,0
+		   APTR   Buffer
+		   ULONG  BufferSize
+		   ULONG  BufferLeft
+		   BPTR   FileHeader
+
+
+* Macro for adding text to an ASCII file
+
+AddText		MACRO
+		lea	(\1,PC),a5	Set start of text.
+		IFLT	(\2-1<<7)	See if text fits in a 'moveq'.
+		moveq	#\2,d7		Set text size.
+		ELSE			Text size needs to be a longword.
+		move.l	#\2,d7		Set text size.
+		ENDC
+		
+		jsr	WriteBuffer	Write text to a buffer.
+		ENDM
+		
+*--------------------------------------------------------------------
+*
+*  To call a library function use LIBCALL. If A6 is correct, just
+*  use LIBCALL with the functionname only. If A6 isn't correct,
+*  than use LIBCALL with the functionname AND the library offset.
+*
+*--------------------------------------------------------------------
+
+LIBCALL		MACRO
+		IFGT	NARG-2		More Then Two Arguments?
+		FAIL			Too many Arguments!!!
+		ENDC
+		IFEQ	NARG-2		Two Arguments exactly.
+		move.l	(_\2),a6
+		ENDC
+		jsr	(_LVO\1,a6)
+		ENDM
+		
+
+*-------------------------------------------------------------------------
+*
+*  SaveInterleave(BitMap, BitPlanePtrs, IFFClip, SaveBuffer)
+*                 A0      A1            A2       A3
+*
+*     Save a screen buffer to a file. If a 'SaveBuffer' exists, use it to
+*     store the data temporary. If it doesn't, save the screen buffer
+*     directly to 'SaveName'. 'SaveName' should be a valid name, because
+*     no checking is done to see if 'SaveName' exists or not.
+*
+*  pre:  A0 - Pointer to the BitMap structure of the screen to be saved.
+*        A1 - Pointer to an allocted block of memory. This will be filled
+*             with the appropiate pointer values to the bitmaps. The size
+*             of this block should be at least: bm_Depth × 4 bytes.
+*        A2 - Pointer to a structure containing all the necessary clipping
+*             values.
+*        A3 - Pointer to a buffer structure.
+*  post: None.
+* 
+*-------------------------------------------------------------------------
+
+_SaveInterleave
+		SECTION	SaveInterleave,code
+
+		movem.l	a4-5,-(SP)
+		
+		move.l	a1,a4
+		lea	(bm_Planes,a0),a5		Copy the bitplane pointers, because
+		move.w	(bm_Depth,a0),d0		we will touch them.
+		subq.w	#1,d0
+CopyBitplanePtr
+		move.l	(a5)+,(a4)+
+		dbf	d0,CopyBitplanePtr
+		
+		movem.l	(SP)+,a4-5
+		
+		rts
+
+
+		SECTION	SaveRaw,code
+_SaveRaw
+		movem.l	a4-5,-(SP)
+		
+		move.l	a1,a4
+		lea	(bm_Planes,a0),a5		Copy the bitplane pointers, because
+		move.w	(bm_Depth,a0),d0		we will touch them.
+		subq.w	#1,d0
+CpBitplanePtr
+		move.l	(a5)+,(a4)+
+		dbf	d0,CpBitplanePtr
+		
+		movem.l	(SP)+,a4-5
+
+		rts
+
+
+*-------------------------------------------------------------------------
+*
+*  SaveCopper(ColourMap, SaveBuffer )
+*             A2         A3
+*
+*     Save a colourmap to a file. The name of the file can be found in
+*     'SaveBuffer'. Since there are currently two distingt chipsets,
+*     there are different ways to build a colourmap. One for the ECS and
+*     one for AGA. Secondly a colourmap colould be directly implemented
+*     as a CopperList, or just the colour data itself and the programmer
+*     takes care of the building the CopperList himself. Anyway, this
+*     leaves us with four possible way of saving a colourmap. We could
+*     ask the user to specify how to save the colourmap or take awy the
+*     burden and save them all at once. Since a colourmap does not take
+*     up much space, the later methos is prefered. This way, the user
+*     will always have the right colourmap.
+*     The four ways a colourmap is saved are:
+*        1 - AGA             extension will be .AGA
+*        2 - ECS             extension will be .ECS
+*        3 - 32 bit colours  extension will be .32bit
+*        4 -  4 bit colours  extension will be .4bit
+*
+*  pre:  A2 - Pointer to the ColourMap of the screen to be saved.
+*             The structure is the same as for 'LoadRGB32' colourmaps.
+*        A3 - Pointer to a buffer structure.
+*        A4 - SAS C Stack offset.
+*  post: None.
+* 
+*-------------------------------------------------------------------------
+		SECTION	SaveCopper
+		
+* Code can be found after data!
+
+		
+		ENUM
+		  EITEM	dctype_Word
+		  EITEM	dctype_Long
+
+AGAHeader	dc.b	'**',LF
+		dc.b	'**     $VER: AGA CopperList',LF
+		dc.b	'**',LF
+		dc.b	'**     Author: Gerben Venekamp',LF
+		dc.b	'**',LF
+		dc.b	'**  This is an AGA CopperList made with the IFFConverter.',LF
+		dc.b	'**  Just insert this at the appropiate place inside your',LF
+		dc.b	'**  Copper List.',LF
+		dc.b	'**',LF,LF
+ASCII_OrMask	dc.b	'BPLCON3OrMask'
+ASCII_OrMaskSize	equ	*-ASCII_OrMask
+		dc.b	'	equ	$'
+BPLCON3OrMask	dc.b	'0000'
+		dc.b	LF
+AGAHeaderSize	equ	*-AGAHeader
+		
+ECSHeader	dc.b	'**',LF
+		dc.b	'**     $VER: ECS CopperList',LF
+		dc.b	'**',LF
+		dc.b	'**     Author: Gerben Venekamp',LF
+		dc.b	'**',LF
+		dc.b	'**  This is an ECS CopperList made with the IFFConverter.',LF
+		dc.b	'**  Just insert this at the appropiate place inside your',LF
+		dc.b	'**  Copper List.',LF
+		dc.b	'**',LF
+ECSHeaderSize	equ	*-ECSHeader
+
+bit32Header	dc.b	'**',LF
+		dc.b	'**     $VER: 32 bit Colour map',LF
+		dc.b	'**',LF
+		dc.b	'**     Author: Gerben Venekamp',LF
+		dc.b	'**',LF
+		dc.b	'**  This is an 32 bit colourmap made with the IFFConverter.',LF
+		dc.b	'**  See autodocs/graphics/LoadRGB32 for the structure explaination.',LF
+		dc.b	'**  You could pass it on to LoadRGB32.',LF
+		dc.b	'**',LF
+bit32HeaderSize	equ	*-bit32Header
+
+bit4Header	dc.b	'**',LF
+		dc.b	'**     $VER: 4 bit Colour map',LF
+		dc.b	'**',LF
+		dc.b	'**     Author: Gerben Venekamp',LF
+		dc.b	'**',LF
+		dc.b	'**  This is an 4 bit colourmap made with the IFFConverter.',LF
+		dc.b	'**  Each word represents a total RGB colour. Each colour compentent',LF
+		dc.b	'**  is a 4 bit value.',LF
+		dc.b	'**',LF
+bit4HeaderSize	equ	*-bit4Header
+
+
+ASCII_TAB	dc.b	'	'
+TABSize		equ	*-ASCII_TAB
+ASCII_LF		dc.b	LF
+LFSize		equ	*-ASCII_LF
+Line_dcw		dc.b	'dc.w'
+Line_dcw_Length	equ	*-Line_dcw
+Line_dcl		dc.b	'dc.l'
+Line_dcl_Length	equ	*-Line_dcl
+ColourPart	dc.b	'color+'
+ColourPartLength	equ	*-ColourPart
+ColourOffset	dc.b	'00'
+ColourOffsetSize	equ	*-ColourOffset
+ColourValue	dc.b	'000'
+ColourValueSize	equ	*-ColourValue
+ColourBank	dc.b	'bplcon3,$'
+ColourBankSize	equ	*-ColourBank
+BPLCON3Value	dc.b	'0000'
+BPLCON3ValueSize	equ	*-BPLCON3Value
+ColourValue24	dc.b	'000000'
+ColourValue24Size	equ	*-ColourValue24
+Comma		dc.b	','
+CommaLength	equ	*-Comma
+CommaStr		dc.b	',$'
+CommaStrLength	equ	*-CommaStr
+ASCII_Str	dc.b	'$'
+ASCII_StrSize	equ	*-ASCII_Str
+ASCII_Or		dc.b	'|'
+ASCII_OrSize	equ	*-ASCII_Or
+		CNOP	0,2
+
+ColourCount	dc.w	0
+BPLCON3Extra	dc.w	0
+
+bplcon3_LOCTbit	equ	9
+
+**
+**  Here's where the fun begins, pure code.
+**
+_SaveCopperAGA
+		movem.l	d2-3/d5-7/a5-6,-(SP)	Store affected non scratch registers
+		
+		clr.w	(BPLCON3Extra)
+		AddText	AGAHeader,AGAHeaderSize
+		move.l	a2,-(SP)
+DoLowNibles
+		move.l	(a2)+,d6
+		swap	d6
+		move.w	d6,(ColourCount)
+		subq.w	#1,d6
+		move.w	d6,d5			For Later use
+		lsr.w	#5,d6
+		bpl.s	MakeAGA
+		moveq	#0,d6
+MakeAGA
+		jsr	AddColourBank
+		and.w	#$1f,d5
+MakeAGA.1
+		move.w	#dctype_Word,d0
+		bsr	AddStartLine
+		
+		cmp.w	(_NumberOfItems1),d5
+		blt.s	CorrectItems
+		move.w	(_NumberOfItems1),d4
+		subq.w	#1,d4
+		bra.s	RightItems
+CorrectItems		
+		move.w	d5,d4
+RightItems
+		sub.w	d4,d5
+MakeAGA.2
+		lea	(ColourOffset,PC),a0
+		move.w	(ColourCount),d0
+		subq.w	#1,d0
+		sub.w	d5,d0
+		sub.w	d4,d0
+		add.w	d0,d0
+		and.w	#$3f,d0
+		moveq	#ColourOffsetSize,d1
+		jsr	MakeDecimal
+
+		cmp.w	#1<<bplcon3_LOCTbit,(BPLCON3Extra)
+		bne.s	BPLCON3_LowNible
+		
+		move.l	(a2)+,d0			Get Red component
+		and.l	#$f0000000,d0
+		moveq	#20,d2
+		lsr.w	d2,d0			Make R
+		move.l	(a2)+,d1			Get Green component
+		and.l	#$f0000000,d1
+		moveq	#24,d2
+		lsr.w	d2,d1
+		or.w	d1,d0			Make RG
+		move.l	(a2)+,d1			Get Blue component
+		and.l	#$f0000000,d1
+		moveq	#28,d2
+		lsr.l	d2,d1
+		or.w	d1,d0			Make RGB
+		bra.s	GotColourComponent
+
+BPLCON3_LowNible
+;  If not High Nibke that it must be Low Nible
+		move.l	(a2)+,d0			Get Red component
+		and.l	#$0f000000,d0
+		swap	d0			Make R
+		move.l	(a2)+,d1			Get Green component
+		and.l	#$0f000000,d1
+		moveq	#20,d2
+		lsr.l	d2,d1
+		or.w	d1,d0			Make RG
+		move.l	(a2)+,d1			Get Blue component
+		and.l	#$0f000000,d1
+		moveq	#24,d2
+		lsr.l	d2,d1
+		or.w	d1,d0			Make RGB
+		
+GotColourComponent		
+		moveq	#ColourValueSize,d1
+		lea	(ColourValue,PC),a0
+		jsr	MakeHex
+		
+		AddText	ColourPart,ColourPartLength
+		AddText	ColourOffset,ColourOffsetSize
+		AddText	CommaStr,CommaStrLength
+		AddText	ColourValue,ColourValueSize
+		tst.w	d4
+		beq.s	AGASkipComma
+		AddText	Comma,CommaLength
+AGASkipComma
+		
+		dbf	d4,MakeAGA.2
+		
+		dbf	d5,MakeAGA.1
+		
+		dbf	d6,MakeAGA
+
+**
+**  Okay, a very big NOTE here!!!
+**  This piece of code works fine, but *any* extentions might cause
+**  problems!!!! BE AWARE OF THIS THREAD!!!!
+**
+**  What happens is, you need to write the same copperlist twice!
+**  This is due to the fact that you write the high nible of each
+**  of your 24 bit colour components first, than the low nibles.
+**  So, $123456 will be $135 followd by $246.
+**  A special bit takes care of the nibles. So using this nible it's
+**  an easy test to check when to stop. Any changes could upset this
+**  easy rule.
+**
+		move.l	(SP),A2
+		tst.w	(BPLCON3Extra,PC)
+		bne.s	EndOfAGA
+		or.w	#1<<bplcon3_LOCTbit,(BPLCON3Extra)
+		bra	DoLowNibles	
+EndOfAGA		
+		jsr	FlushBuffer
+		
+		addq.l	#4,SP
+		movem.l	(SP)+,d2-3/d5-7/a5-6	Restore affected non scratch registers
+		rts
+
+
+_SaveCopperECS
+		movem.l	d2-3/d6-7/a5-6,-(SP)	Store affected non scratch registers
+
+		AddText	ECSHeader,ECSHeaderSize
+		
+		jsr	FlushBuffer
+		
+		movem.l	(SP)+,d2-3/d6-7/a5-6	Restore affected non scratch registers
+		rts
+
+
+
+_SaveCopper32bit
+		movem.l	d2-3/d6-7/a5-6,-(SP)	Store affected non scratch registers
+
+		AddText	bit32Header,bit32HeaderSize
+		
+		moveq	#dctype_Word,d0
+		jsr	AddStartLine
+		
+		move.l	(a2)+,d5
+		lea	(BPLCON3Value,PC),a0
+		move.w	d5,d0
+		moveq	#4,d1
+		jsr	MakeHex
+		
+		AddText	ASCII_Str,ASCII_StrSize
+		AddText	BPLCON3Value,BPLCON3ValueSize
+		AddText	CommaStr,CommaStrLength
+		swap	d5
+		lea	(BPLCON3Value,PC),a0
+		move.w	d5,d0
+		moveq	#4,d1
+		jsr	MakeHex
+		AddText	BPLCON3Value,BPLCON3ValueSize
+		
+		move.w	d5,d6			Multiply by three
+		add.w	d6,d6			Multiply by three
+		add.w	d5,d6			Multiply by three
+		subq.w	#1,d6
+Make32bit
+		moveq	#dctype_Long,d0
+		jsr	AddStartLine
+		
+		cmp.w	(_NumberOfItems2),d6
+		blt.s	CorrectItems32bit
+		move.w	(_NumberOfItems2),d5
+		subq.w	#1,d5
+		bra.s	RightItems32bit
+CorrectItems32bit
+		move.w	d6,d5
+RightItems32bit
+		sub.w	d5,d6
+Make32bit.2		
+		move.l	(a2)+,d0
+		moveq	#6,d1
+		lea	(ColourValue24,PC),a0
+		jsr	MakeHex
+		
+		AddText	ASCII_Str,ASCII_StrSize
+		AddText	ColourValue24,ColourValue24Size
+		tst.w	d5
+		beq.s	bit32SkipComma
+		AddText	Comma,CommaLength
+bit32SkipComma
+		
+		dbf	d5,Make32bit.2
+		
+		dbf	d6,Make32bit
+		
+		jsr	FlushBuffer
+		
+		movem.l	(SP)+,d2-3/d6-7/a5-6	Restore affected non scratch registers
+		rts
+
+
+_SaveCopper4bit
+		movem.l	d2-3/d6-7/a5-6,-(SP)	Store affected non scratch registers
+
+		AddText	bit4Header,bit4HeaderSize
+		
+		jsr	FlushBuffer
+		
+		movem.l	(SP)+,d2-3/d6-7/a5-6	Restore affected non scratch registers
+		rts
+
+
+*------------------------------------------------------------------------
+*
+*     AddColourBank
+*
+*------------------------------------------------------------------------
+AddColourBank
+		bsr	AddStartLine
+		AddText	ColourBank,ColourBankSize
+		move.w	(_PicDepth,a4),d0
+		subq.w	#1,d0
+		sub.w	d6,d0
+		ror.w	#3,d0
+		or.w	(BPLCON3Extra,PC),d0	Add Extra bits to BPLCON3
+		moveq	#BPLCON3ValueSize,d1
+		lea	(BPLCON3Value,PC),a0
+		jsr	MakeHex
+		
+		AddText	BPLCON3Value,BPLCON3ValueSize
+		AddText	ASCII_Or,ASCII_OrSize
+		AddText	ASCII_OrMask,ASCII_OrMaskSize
+		
+		rts
+
+
+*------------------------------------------------------------------------
+*
+*     AddStartLine( SaveBuffer, DC_Type )
+*                   A3          D0
+*
+*  Adds the beginning of a line to a save buffer. The beginning of a
+*  line look like this: <TAB1>dc.w<TAB2>
+*
+*  pre:  _TAB1 - Number of tabs at the beginning of a line.
+*        _TAB2 - Number of tabs after the 'dc.w' statement.
+*        D0 - Type of dc statement. Accepted types are: dctype_long
+*                                                       dctype_word
+*        A3 - Pointer to a savebuffer structure.
+*  post: None.
+*
+*     Uneffected registers:
+*
+*------------------------------------------------------------------------
+AddStartLine
+		movem.l	d6/d0,-(SP)
+		
+		AddText	ASCII_LF,LFSize
+		move.w	(_TAB1),d6
+		jsr	AddTabs
+		move.l	(SP)+,d0
+		cmp.w	#dctype_Long,d0
+		beq.s	Make_dc_Long
+		AddText	Line_dcw,Line_dcw_Length
+		bra.s	AddSecondTAB
+Make_dc_Long
+		AddText	Line_dcl,Line_dcl_Length
+AddSecondTAB
+		move.w	(_TAB2),d6
+		jsr	AddTabs
+		
+		move.l	(SP)+,d6
+		rts
+		
+*------------------------------------------------------------------------
+*
+*     AddTabs( Tabs, SaveBuffer )
+*              D6    A3
+*
+*  Adds a series of tabs to SaveBuffer.
+*
+*  pre:  D6 - Number of tabs to add.
+*        A3 - Pointer to a buffer structure.
+*  post: None.
+*
+*------------------------------------------------------------------------
+AddTabs
+		subq.w	#1,d6
+WriteTabs
+		AddText	ASCII_TAB,TABSize
+		dbf	d6,WriteTabs
+		
+		rts
+**
+**  Variables.
+**		
+		SECTION	__MERGED,data
+		XDEF	_TAB1
+		XDEF	_TAB2
+		XDEF	_NumberOfItems1
+		XDEF	_NumberOfItems2
+		XDEF	_BPLCON3OrMask
+		
+_TAB1		dc.w	2		Default Value.
+_TAB2		dc.w	1		Same here.
+_NumberOfItems1	dc.w	4		Same here.
+_NumberOfItems2	dc.w	9		Same here.
+_BPLCON3OrMask	dc.l	BPLCON3OrMask
+
+		SECTION	SaveFont8,code
+_SaveFont8
+		move.l	a4,-(SP)		Save SAS C Stack pointer.
+		
+		move.l	(SP)+,a4		Restore SAS C Stack pointer.
+		rts
+
+
+*------------------------------------------------------------------------
+*
+*  WriteBuffer( Buffer, Data, DataSize)
+*               A3      A5    D7
+*
+*     Writes 'Data' to a buffer. When buffer is full, the buffer will
+*     be flushed and the remaining data will be written to the buffer.
+*
+*  pre:  A3 - Pointer to a Buffer structure.
+*        A4 - SAS C Stack Pointer
+*        A5 - Pointer to the data to be written to 'Buffer'
+*        D7 - Size of the 'Data' buffer.
+*  post: None
+*
+*  Uneffected registers: A1-4, D4-6
+*
+*------------------------------------------------------------------------
+
+		SECTION	WriteBuffer,code
+WriteBuffer
+		tst.l	d7
+		beq.s	DataEmpty
+		
+		move.l	(BufferLeft,a3),d1
+		cmp.l	d1,d7
+		bge.s	BufferOverflow
+		move.l	d7,d2
+		sub.l	d7,(BufferLeft,a3)
+		bra.s	CopyDataBuffer
+BufferOverflow
+		move.l	d1,d2
+		clr.l	(BufferLeft,a3)
+CopyDataBuffer
+		sub.l	d2,d7
+		move.l	(BufferSize,a3),d0
+		sub.l	d1,d0
+		move.l	(Buffer,a3),a0
+		add.l	d0,a0
+CopyDataBuffer.1
+		move.b	(a5)+,(a0)+
+		subq.l	#1,d2
+		bne.s	CopyDataBuffer.1
+		
+		tst.l	(BufferLeft,a3)
+		bne.s	WriteBuffer
+		
+		bsr.s	FlushBuffer
+		bra.s	WriteBuffer
+DataEmpty
+		rts
+
+*------------------------------------------------------------------------
+*
+*  FlushBuffer( Buffer )
+*               A3
+*
+*     Flush the buffer. If buffer is empty, no flushing will occour.
+*
+*  pre:  A3 - Pointer to a buffer to be flushed
+*        A4 - SAS C Stack Pointer
+*  post: None.
+*
+*------------------------------------------------------------------------
+
+FlushBuffer
+		move.l	(BufferSize,a3),d3
+		sub.l	(BufferLeft,a3),d3
+		beq.s	NothingInBuffer
+		
+		move.l	(FileHeader,a3),d1
+		move.l	(Buffer,a3),d2
+		move.l	(_DOSBase,a4),a6
+		jsr	(_LVOWrite,a6)
+		move.l	(BufferSize,a3),(BufferLeft,a3)
+NothingInBuffer
+		rts
+
+*------------------------------------------------------------------------
+*
+*   MakeDecimal( Inter, Length, Buffer )
+*                D0.W   D1.W    A0.L
+*
+*     Converters an integer to a decimal representation in ASCII,
+*     leading zeroes are *not* removed
+*
+*  pre:  A0 - Pointer into which the converted integer will be stored.
+*        D0 - Integer to convert. Upper 16 bits are expected to be zero.
+*        D1 - Number of digits to be used.
+*  post: None.
+*
+*------------------------------------------------------------------------
+
+MakeDecimal
+		subq.w	#1,d1
+Convert_dec
+		divu.w	#10,d0
+		swap	d0
+		add.b	#'0',d0
+		move.b	d0,(a0,d1)
+		clr.w	d0
+		swap	d0
+		dbf	d1,Convert_dec
+		
+		rts
+		
+
+*------------------------------------------------------------------------
+*
+*   MakeHex( Inter, Length, Buffer )
+*            D0.L   D1.W    A0.L
+*
+*     Converters an integer to a hexadecimal representation in ASCII,
+*     leading zeroes are *not* removed
+*
+*  pre:  A0 - Pointer into which the converted integer will be stored.
+*        D0 - Integer to convert. Upper 16 bits are expected to be zero.
+*        D1 - Number of digits to be used.
+*  post: None.
+*
+*------------------------------------------------------------------------
+
+MakeHex
+		subq.w	#1,d1
+Convert_hex
+		moveq	#0,d2
+		divu.l	#16,d2:d0
+		cmp.w	#10,d2
+		blt.s	NoAdjustment
+		addq.w	#7,d2
+NoAdjustment
+		add.b	#'0',d2
+		move.b	d2,(a0,d1)
+		dbf	d1,Convert_hex
+		
+		rts
+		

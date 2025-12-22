@@ -1,0 +1,28 @@
+#ifndef	RESOURCES_MATHRESOURCE_H
+#define	RESOURCES_MATHRESOURCE_H
+
+#ifndef EXEC_NODES_H
+MODULE  'exec/nodes'
+#endif
+
+OBJECT MathIEEEResource
+
+			Node:Node
+	 Flags:UWORD
+	 BaseAddr:PTR TO UWORD 
+	DblBasInit:LONG
+	DblTransInit:LONG
+	SglBasInit:LONG
+	SglTransInit:LONG
+	ExtBasInit:LONG
+	ExtTransInit:LONG
+ENDOBJECT
+
+
+#define	MATHIEEERESOURCEF_DBLBAS	(1<<0)
+#define	MATHIEEERESOURCEF_DBLTRANS	(1<<1)
+#define	MATHIEEERESOURCEF_SGLBAS	(1<<2)
+#define	MATHIEEERESOURCEF_SGLTRANS	(1<<3)
+#define	MATHIEEERESOURCEF_EXTBAS	(1<<4)
+#define	MATHIEEERESOURCEF_EXTTRANS	(1<<5)
+#endif	

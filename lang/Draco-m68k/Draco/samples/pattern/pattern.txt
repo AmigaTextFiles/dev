@@ -1,0 +1,344 @@
+			Pattern Matching Library
+
+
+Poster
+
+This library (pattern.library) provides a shareable AmigaDOS library
+implementing the standard AmigaDOS pattern matcher. It contains two
+entries - 'Compile', which compiles a pattern into a form which allows the
+matcher to more efficiently work with the pattern, and 'Match', which uses
+both the original pattern and the compiled form to match subject strings.
+As is standard with AmigaDOS libraries, all parameters are passed in
+registers. Thus, although this version of the library is written in Draco,
+it can be called from C, Modula-2, assembler, etc. just as easily as the
+CBM-supplied libraries.
+
+
+Contents
+
+pattern.txt - description of the library and how it works
+pattern.library - the library - copy to your LIBS: directory
+pattern_lib.fd - 'fd' file for the library
+compile.d, match.d - Draco source for the library
+patternInternal.g - Draco include file for building the library
+pattern.s - script file to use to build the final library file
+pattern.lib - interface stubs for Draco - copy to DRLIB:
+pattern.g - Draco include file for using the library - copy to DRINC:
+test.d - Draco source for a simple test program
+test.w - BLink 'with' file to build the test program
+
+
+Introduction
+
+This library (pattern.library) provides a shareable AmigaDOS library
+implementing the standard AmigaDOS pattern matcher. It contains two
+entries - 'Compile', which compiles a pattern into a form which allows the
+matcher to more efficiently work with the pattern, and 'Match', which uses
+both the original pattern and the compiled form to match subject strings.
+As is standard with AmigaDOS libraries, all parameters are passed in
+registers. Thus, although this version of the library is written in Draco,
+it can be called from C, Modula-2, assembler, etc. just as easily as the
+CBM-supplied libraries. The supplied "fd" file contains the information
+needed to build compiler-specific interface stubs. "pattern.lib" contains
+the stubs for Draco. To use the library, copy "pattern.library" to your
+LIBS: directory. If you use Draco, also copy "pattern.lib" to your DRLIB:
+directory and "pattern.g" to your DRINC: directory.
+
+
+Using the Library
+
+Communication with the library is done via a 'PatternState' structure,
+which contains all of the state which the library needs to perform its
+operations. This structure plays a role similar to that played by a Window
+or Screen structure with regards to 'intuition.library'. Since the library
+must be fully shareable, all working storage must be provided by the
+caller. The shared structure, a Draco declaration of which is provided in
+file 'pattern.g', is as follows:
+
+    ps_pattern - pointer to the pattern to be matched. This must be present
+	on calls to both Compile and Match.
+
+    ps_compiled - points to a vector of longwords which will contain the
+	compiled form of the pattern. The vector must contain at least one
+	more longword than there are characters in the pattern.
+
+    ps_activeStates - points to a vector of longwords which Match needs to
+	maintain the set of active states. It should be the same length as
+	the ps_compiled vector. (For most patterns, this amount is not
+	needed, but for some strange patterns, it is.)
+
+    ps_length - 32 bit length of the pattern string. This library allows
+	the pattern and subject strings to contain any characters - no
+	special end-of-string character is reserved; thus the lengths of
+	both the pattern and the subject string are required.
+
+    ps_ignoreCase - set to indicate that capitalization of letters should
+	be ignored when comparing them. This is an 8 bit field. A value of
+	0 means do not ignore case, any other value means do ignore case.
+
+    ps_error - filled in by Compile to indicate the success/failure of the
+	pattern compilation. The values are 8 bits in size, and are:
+
+	    0 - compilation successful
+	    1 - the pattern ended prematurely, e.g. missing ')'
+	    2 - unexpected ')', e.g. missing '('
+	    3 - unexpected '|', e.g. after '('
+	    4 - missing ')'
+
+    ps_pad - 2 bytes of unused padding
+
+    ps_position, ps_stateCount - 4 byte fields used internally
+
+    ps_char, ps_end, ps_matched - 1 byte fields used internally
+
+Entry "Compile" has one argument - the address of the above structure. It
+returns no result - ps_error should be checked for the compilation status.
+The address of the structure should be passed to Compile in register A0.
+Entry "Match" has three arguments. The first is the address of the above
+structure, the second is the address of the subject string, and the third
+is the length of the subject string (32 bit value). It returns 'true' (1)
+if the match succeeded, else 'false' (0). Only the low 8 bits of the result
+are guaranteed to be set. The arguments should be passed to Match in
+registers A0, A1 and D0 respectively.
+
+Thus, to use the library, something like the following is done (putting the
+parameters in the proper registers is done by the interface stubs):
+
+    [100] char pattern, subject;
+    [100] ulong compiled, states;
+    PatternState_t ps;
+
+    if OpenPatternLibrary(0) ~= nil then
+	ps.ps_compiled := &compiled[0];
+	ps.ps_activeStates := &states[0];
+	ps.ps_ignoreCase := false;
+	write("Enter pattern: ");
+	readln(&pattern[0]);
+	ps.ps_pattern := &pattern[0];
+	ps.ps_length := CharsLen(&pattern[0]);
+	Compile(&ps);
+	if ps.ps_error = pse_ok then
+	    writeln("Enter subjects, one per line:");
+	    while readln(&subject[0]) do
+		if Match(&ps, &subject[0], CharsLen(&subject[0])) then
+		    writeln("Subject matched the pattern.");
+		else
+		    writeln("Subject did not match the pattern.");
+		fi;
+	    od;
+	else
+	    writeln("The pattern did not compile - it is badly formed.");
+	fi;
+	ClosePatternLibrary();
+    else
+	writeln("Could not open 'pattern.library'.");
+	writeln("Does it exist in your LIBS: directory?");
+    fi;
+
+Code fragments for C, Modula-2 and assembler would be similar. Note that
+the compiled form of a pattern can be used for many matches without having
+to change any of the PatternState structure.
+
+
+General Operation of the Library
+
+The original form of this matcher is the BCPL version (which presumeably
+exists somewhere in AmigaDOS as part of the BCPL run-time system). It can
+be found in:
+
+    "A Compact Function for Regular Expression Pattern Matching"
+    by Martin Richards	(then at the University of Cambridge)
+    Software - Practice and Experience, Vol 9, 527-534 (1979)
+
+The article contains a description of how the compiler and matcher operate,
+along with an example compilation and match. The BCPL code has very few
+comments and uses one or two character identifiers that have little or no
+meaning to the reader. The author states that the code is straightforward
+and needs no further description. I found that to be far from the truth,
+and view my main contribution here to be that of simply explaining what the
+code does. I have borrowed the example below, along with its explanation,
+from the article.
+
+A C translation of the BCPL code was done by:
+
+    Jeff Lydiatt
+    Richmond, B.C. Canada
+
+I have also seen another C version which first converts the C string of the
+pattern into a BCPL-style string with a length at the beginning, but my
+listing of that version doesn't have a name on it. I haven't tried either
+version, but they appear to be correct. Neither is suitable for use as a
+shared library, however, and both have limitations on the length of the
+pattern which they can handle without error. The BCPL version appears to
+have a similar limitation - I suspect it would break if given a string of
+length 255 containing a long alternation of single characters (which would
+not be used in real life, since it would be necessary to repeat some char-
+aracters). I tried this with the CLI, and it's not clear what is happen-
+ing - somewhere over about a line of input like "dir a|a|a|..." I get
+"Bad Arguments" - it could be the matcher overwriting something, or it
+could be DIR checking the string length.
+
+The first thing to note in the implementation is the cheating I did. The
+user-level include file describes the first three elements of the structure
+as simple pointers. In the implementation include file, they are pointers
+to arrays. This is done to allow array indexing from the pointers, rather
+than requiring explicit pointer manipulation.
+
+
+Operation of the Pattern Compiler
+
+The compiler uses a very simple recursive-descent parser to parse the
+pattern. During parsing, it builds the compiled form of the pattern in the
+ps_compiled vector. This vector contains indices into the pattern (and also
+into the vector, since the two correspond). The first longword in the
+vector does not correspond to any pattern character. It is the head of any
+top-level alternation chain (described later).
+
+The compiled vector is essentially a series of pointers showing all of the
+routes of matches through the pattern. For simple characters with no
+special meaning, the entries simply point to the next character. For
+alternations using '|', the entries make up a linked list of the alterna-
+tives. For '#', an entry points back to the '#', indicating the looping
+nature of the construct. The entries for specific pattern characters are:
+
+    | - index of next '|' in alternation, or 0 if none. These pointers are
+	followed on match failure. The pointers from the alternatives will
+	all point to the subpattern to be tried next - they are followed on
+	match success.
+    ( - index of first enclosed '|', or 0 if none
+    ) - compiled vector value not used
+    # - index of the subpattern to be tried when the subpattern being
+	repeated does not match anymore. The pointers from the subpattern
+	being repeated all point to the '#', allowing further repetitions.
+    ' - index of next subpattern to try on success. The index associated
+	with the escaped character itself is not used.
+    % - index of next subpattern to try on success
+      - other, non-special characters all have pointers to the next
+	subpattern to try on success
+
+The special 0th element of the compiled form is the head of any chain of
+alternatives at the top level. It corresponds to an implicit '(' around the
+entire pattern. As an example, taken from the above article, the pattern
+
+    (A|B|#?:|'#)#(0|1)|$
+
+compiles into the following:
+
+    position  pattern  compiled  notes
+    ----------------------------------
+	0		  19	 outermost alternation list
+	1	 (	   3	 enclosed alternation list
+	2	 A	  13	 successor to A (followed if A is matched)
+	3	 |	   5	 pointer to next alternative
+	4	 B	  13	 successor to B
+	5	 |	   9	 pointer to next alternative
+	6	 #	   8	 successor to #?
+	7	 ?	   6	 successor to ? (repetition loop)
+	8	 :	  13	 successor to : (and #?:)
+	9	 |	   0	 no more alternatives
+       10	 '	  13	 successor to '#
+       11	 #	   -	 not used
+       12	 )	   -	 not used
+       13	 #	   0	 successor to #(0|1) (successful match)
+       14	 (	  16	 enclosed alternation list
+       15	 0	  13	 successor to 0 (repetition loop)
+       16	 |	   0	 no more alternatives
+       17	 1	  13	 successor to 1 (repetition loop)
+       18	 )	   -	 not used
+       19	 |	   0	 end of outermost alternation
+       20	 $	   0	 successor to $ (successful match)
+
+
+Operation of the Pattern Matcher
+
+The matcher uses the additional storage of the ps_activeStates vector. It
+stores in here the indexes into the pattern of those parts of the pattern
+that can be reached by matching the subject string upto the current point.
+Note that 1-origin indexing into the vector is used. This is so that the
+indexes correspond to the 1-origin indexes into the compiled pattern form.
+These indexes are states in the automata represented by the pattern. At the
+beginning of the match, the only active states are those represented by the
+top level alternatives of the match. E.g., for the above pattern, the two
+states active at the very beginning are states 1 and 19. The way the
+matcher operates, however, requires that it first add on all of the states
+that immediately follow from these initial ones. State 19 is a '|', so the
+part of the pattern to actually examine is state 20, the '$'. Thus state 20
+is added to the set of active states. State 1 is itself an alternation
+list, so all of the alternatives must be added. This adds states 3, 5, and
+9. Similary, these alteratives are just markers for the actual subpatterns,
+so states 4, 6, and 10 are added. State 6 is a repetition, which can occur
+zero or more times, so its successor, state 8, must also be added. Its
+subpattern, state 7, must also be added. Thus, before we even look at the
+first character of the subject string, the following states are active:
+
+    1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 19, 20
+
+The matcher does not care what order it examines the states in, so they are
+not sorted, but simply added as a breadth-first scan through the existing
+list. Thus, for the above pattern, the set as seen by the matcher is:
+
+    1, 19, 2*, 3, 20*, 4*, 5, 6, 9, 7*, 8*, 10*
+
+States marked with '*' are those which actually contain characters to match
+against, and are not just control states. They are the only ones that can
+contribute to the set of states for the next time around.
+
+The matcher will now examine the subject string, one character at a time.
+For each character, it will check all of the active states, to see if they
+succeed. It will build a new state set containing all of the states which
+are successors to those that succeed. Expansion of the set, as above, will
+happen before examining successive characters of the subject. If state 0 is
+reached when the subject string is exhausted, then the match has been
+successful (ALL of the pattern must be matched).
+
+Consider the subject string "AB:1". The first character, 'A', matches only
+states 2* and 7*. They, after expansion, yield the set
+
+    13, 6, 14, 7*, 8*, 15*, 16, 17*
+
+The end-of-pattern state, 0, is also active since it is a successor to
+state 13, but its presence is maintained only be setting 'ps_matched'. The
+next subject character, 'B', matches state 7* only, thus we get the set
+
+    6, 7*, 8*
+
+The next character, ':', matches both states 7* and 8*, giving
+
+    6, 13, 7*, 8*, 14, 15*, 16, 17*
+
+The final character, '1' satisfies states 7* and 17*, which will yield the
+same set again. But, we have used up the subject string, and the special
+state 0 (ps_matched) is set, so the total match succeeds.
+
+
+Final Notes
+
+This Draco implementation of the compiler and matcher are longer than the
+BCPL and C variants. There are a number of reasons for this. One is that
+the conversion to a shareable library precludes the use of global
+variables, so many references to the PatternState structure are used.
+A second is that this version of the compiler returns more information
+about a failed compilation. A third is that no special end-of-string
+character has been taken away from the set that can be matched. This
+required a number of tests for end-of-string that were avoided in the other
+versions. The final reason of course is that this code is one of those
+convoluted ones in which a return statement and case-statement fallthrough
+are useful, and Draco does not provide those.
+
+I've been using the pattern library as a test library for my disassembler,
+so I've noticed the Draco code produced. In response to that, I've added a
+few more peepholes to the compiler, producing version Beta 1.3. If anyone
+wants this new version, let me know - if there is enough demand I can send
+it out (e.g. upload to CompuServe, send to Fred Fish, whatever). I've also
+hand-tuned the source to the pattern library. Those interested may want to
+study the techniques used - they can be applied to your own programs. My
+disassembler, which should be going out in a couple of days (after I
+document it and the shared library it uses), will be of help to those
+wishing to wring the last ounce out of their code.
+
+Note: BLink version 5.7, which is what I have been distributing with Draco,
+insists on putting out an extra hunk at the beginning of the output file.
+This is a problem with libraries, so I've been using a newer version (from
+Lattice C V4.0) to build the libraries. It, (version 7.2) insists on not
+passing through HUNK_SYMBOLs for HUNK_BSSs, so I use the old version for
+linking everything else. Sigh.

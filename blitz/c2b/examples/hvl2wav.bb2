@@ -1,0 +1,313 @@
+
+; C to Blitz conversion done by c2b.
+
+;
+; ** HVL2WAV
+; **
+; 
+
+; #include <stdio.h> 
+; #include <stdlib.h> 
+; #include <string.h> 
+; #include <unistd.h> 
+
+; #include "types.h" 
+; #include "replay.h" 
+
+max_frames.l = 10 * 60 * 50 ; UINT32 
+DEFTYPE .l framelen ; UINT32 
+mix_freq.l = 44100 ; UINT32 
+subsong.l = 0 ; UINT32 
+smplen.l = 0 ; UINT32 
+
+stereosep.l = 0 ; UINT32 
+*autogain.w = FALSE ; BOOL 
+*use_songend.w = TRUE ; BOOL 
+*filename.b = 0 ; CHAR 
+*outname.b = 0 ; CHAR 
+DEFTYPE .b wavname[1020] ; CHAR 
+DEFTYPE .b tmpname[1024] ; CHAR 
+*mixbuf.b = 0 ; INT8 
+*ht.hvl_tune = 0 
+FILE *of = 0
+FILE *tf = 0
+
+Statement write32 {n.l}  
+   
+   ; #ifdef _BIG_ENDIAN_  
+   fprintf( f, "%c%c%c%c", (int)(n&$ff), (int)((n LSR 8)&$ff), (int)((n LSR 16)&$ff), (int)((n LSR 24)&$ff) ) 
+   
+   ; #else  
+   fwrite( &n, 4, 1, f ) 
+   ; #endif  
+End Statement 
+
+Statement write16 {n.w}  
+   
+   ; #ifdef _BIG_ENDIAN_  
+   fprintf( f, "%c%c", n&$ff, (n LSR 8)&$ff ) 
+   ; #else  
+   fwrite( &n, 2, 1, f ) 
+   ; #endif  
+End Statement 
+
+Function.l main {argc.l, *argv[].b}  
+   
+   DEFTYPE .l i, j ; INT  
+   DEFTYPE .l l ; INT32  
+   DEFTYPE .l frm ; UINT32  
+   
+   for( i=1 i<argc i++ ) 
+      
+      if( argv[i][0] = '-' ) 
+         
+         Select( argv[i][1] )  
+            
+            case 't': 
+            max_frames = atoi( &argv[i][2] ) * 50 
+            j = 2 
+            while( ( argv[i][j] >= '0' ) AND ( argv[i][j] <= '9' ) ) j++ 
+            Wend
+            if( argv[i][j] = ':' ) 
+               
+               max_frames *= 60 
+               max_frames += (atoi( &argv[i][j+1] )*50) 
+            EndIf 
+
+            if( max_frames = 0 ) 
+               
+               printf( "Invalid timeout\n" ) 
+               Function Return 0 
+            EndIf 
+
+            use_songend = FALSE 
+            End  
+            
+            case 'f': 
+            mix_freq = atoi( &argv[i][2] ) 
+            if( ( mix_freq < 8000 ) OR ( mix_freq > 48000 ) ) 
+               
+               printf( "Frequency should be between 8000 and 48000\n" ) 
+               Function Return 0 
+            EndIf 
+            End  
+
+            
+            case 's': 
+            subsong = atoi( &argv[i][2] ) 
+            End  
+            
+            case 'a': 
+            autogain = TRUE 
+            End  
+            
+            case 'o': 
+            outname = &argv[i][2] 
+            if( outname[0] = 0 ) 
+               
+               printf( "Invalid output name\n" ) 
+               Function Return 0 
+            EndIf 
+            End  
+
+            
+            case 'x': 
+            stereosep = atoi( &argv[i][2] ) 
+            if( stereosep > 4 ) stereosep = 4 
+            EndIf
+            End  
+         End Select 
+      else 
+         if( NOT filename ) filename = argv[i] 
+         EndIf
+      EndIf 
+   Next 
+
+   
+   if( NOT filename ) 
+      
+      printf( "HVL2WAV 1.1, replayer v1.6\n" ) 
+      printf( "By Xeron/IRIS (pete@petergordon.org.uk)\n" ) 
+      printf( "\n" ) 
+      printf( "Usage: hvl2wav [options] <filename>\n" ) 
+      printf( "\n" ) 
+      printf( "Options:\n" ) 
+      printf( "  -ofile Output to 'file'\n" ) 
+      printf( "  -tm:ss Timeout after m minutes and ss seconds\n" ) 
+      printf( "         (overrides songend detection, defaults to 10:00\n" ) 
+      printf( "  -fn    Set frequency, where n is 8000 to 48000\n" ) 
+      printf( "  -sn    Use subsong n\n" ) 
+      printf( "  -a     Calculate optimal gain before converting\n" ) 
+      printf( "  -xn    Set stereo seperation (ahx only, no effect on HVL files)\n" ) 
+      printf( "            0 = 0%% (Mono)\n" ) 
+      printf( "            1 = 25%%\n" ) 
+      printf( "            2 = 50%%\n" ) 
+      printf( "            3 = 75%%\n" ) 
+      printf( "            4 = 100%% (Paula)\n" ) 
+      Function Return 0 
+   EndIf 
+
+   framelen = (mix_freq*2*2)/50 
+   mixbuf = malloc( framelen ) 
+   if( NOT mixbuf ) 
+      
+      printf( "Out of memory :-(\n" ) 
+      Function Return 0 
+   EndIf 
+
+   hvl_InitReplayer() 
+   
+   ht = hvl_LoadTune( filename, mix_freq, stereosep ) 
+   if( NOT ht ) 
+      
+      free( mixbuf ) 
+      printf( "Unable to open '%s'\n", filename ) 
+      Function Return 0 
+   EndIf 
+
+   if( NOT hvl_InitSubsong( ht, subsong ) ) 
+      
+      hvl_FreeTune( ht ) 
+      free( mixbuf ) 
+      printf( "Unable to initialise subsong %ld\n", subsong ) 
+      Function Return 0 
+   EndIf 
+
+   if( autogain ) 
+      
+      printf( "Calculating optimal gain...\n" ) 
+      l = hvl_FindLoudest( ht, max_frames, use_songend ) 
+      if( l > 0 ) 
+         l = 3276700/l 
+      else 
+
+         l = 100 
+      EndIf
+      
+
+      if( l > 200 ) l = 200 
+      EndIf
+      ht\ht_mixgain = (l*256)/100 
+      
+      hvl_InitSubsong( ht, subsong ) 
+      ht\ht_SongEndReached = 0 
+   EndIf 
+
+   printf( "Converting tune...\n" ) 
+   
+   if( outname ) 
+      
+      strncpy( wavname, outname, 1020 ) 
+   else 
+      if( ( strlen( filename ) > 4 ) AND 
+         ( ( strncasecmp( filename, "hvl.", 4 ) = 0 ) || 
+         ( strncasecmp( filename, "ahx.", 4 ) = 0 ) ) ) 
+         strncpy( wavname, &filename[4], 1020 ) 
+      else 
+
+         strncpy( wavname, filename, 1020 ) 
+      EndIf
+
+      if( ( strlen( wavname ) > 4 ) AND 
+         ( ( strcasecmp( &wavname[strlen(wavname)-4], ".hvl" ) = 0 ) || 
+         ( strcasecmp( &wavname[strlen(wavname)-4], ".ahx" ) = 0 ) ) ) 
+         wavname[strlen(wavname)-4] = 0 
+      EndIf
+      strcat( wavname, ".wav" ) 
+
+   EndIf 
+
+   strcpy( tmpname, wavname ) 
+   strcat( tmpname, ".tmp" ) 
+   
+   tf = fopen( tmpname, "wb" ) 
+   if( NOT tf ) 
+      
+      hvl_FreeTune( ht ) 
+      free( mixbuf ) 
+      printf( "Unable to open '%s' for output\n", tmpname ) 
+      Function Return 0 
+   EndIf 
+
+   frm = 0 
+   smplen = 0 
+   while( frm < max_frames ) 
+      
+      if( ( use_songend ) AND ( ht\ht_SongEndReached ) ) 
+         End  
+      EndIf
+
+      hvl_DecodeFrame( ht, mixbuf, &mixbuf[2], 4 ) 
+      
+      ; #ifdef _BIG_ENDIAN_  
+      ; The replayer generates audio samples in the same
+      ; endian mode as the CPU. So on big endian systems
+      ; we have to swap it all to stupid endian for the
+      ; WAV format.
+      for( i=0 i<framelen i+=2 ) 
+         
+         DEFTYPE .b k ; INT8  
+         k = mixbuf[i] 
+         mixbuf[i] = mixbuf[i+1] 
+         mixbuf[i+1] = k 
+
+      Next 
+      ; #endif  
+      
+      fwrite( mixbuf, framelen, 1, tf ) 
+      smplen += framelen 
+      frm++ 
+   Wend 
+   
+   fclose( tf ) 
+   
+   of = fopen( wavname, "wb" ) 
+   if( NOT of ) 
+      
+      hvl_FreeTune( ht ) 
+      free( mixbuf ) 
+      unlink( tmpname ) 
+      printf( "Unable to open '%s' for output\n", wavname ) 
+      Function Return 0 
+   EndIf 
+
+   tf = fopen( tmpname, "rb" ) 
+   if( NOT tf ) 
+      
+      fclose( of ) 
+      unlink( wavname ) 
+      unlink( tmpname ) 
+      hvl_FreeTune( ht ) 
+      free( mixbuf ) 
+      printf( "Unable to open '%s' for input\n", tmpname ) 
+      Function Return 0 
+   EndIf 
+
+   fprintf( of, "RIFF" ) 
+   write32( of, smplen+36 ) 
+   fprintf( of, "WAVE" ) 
+   fprintf( of, "fmt " ) 
+   write32( of, 16 ) 
+   write16( of, 1 ) 
+   write16( of, 2 ) 
+   write32( of, mix_freq ) 
+   write32( of, mix_freq*4 ) 
+   write16( of, 4 ) 
+   write16( of, 16 ) 
+   fprintf( of, "data" ) 
+   write32( of, smplen ) 
+   
+   for( i=0 i<smplen i+=framelen ) 
+      
+      fread( mixbuf, framelen, 1, tf ) 
+      fwrite( mixbuf, framelen, 1, of ) 
+   Next 
+   
+   fclose( of ) 
+   fclose( tf ) 
+   unlink( tmpname ) 
+   hvl_FreeTune( ht ) 
+   free( mixbuf ) 
+   printf( "ALL DONE!\n" ) 
+   Function Return 0 
+End Function 

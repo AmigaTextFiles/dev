@@ -1,0 +1,518 @@
+/****************************************************************
+**                                                             **
+** Name:        Crystal Cracktro "Moonstone"                   **
+** Author:      Mr.X of Barracuda                              **
+** Version:     1.2                                            **
+** Date:        13.05.17                                       **
+** Interpreter: Hollywood 6.0                                  **
+** Licence:     Sample program for Hollywood                   **
+** Function:    Hollywood port of this nice cracktro           **
+**                                                             **
+** Notes:       Famous cracktro by Crystal using the nice logo **
+**              effect. Thanks to VrS! for resourcing the      **
+**              original cracktro!                             **
+**                                                             **
+** History:                                                    **
+**                                                             **
+** 1.2: (13.05.17)                                             **
+**                                                             **
+** - adapted for RebelSDL                                      **
+**                                                             **
+** 1.1: (02.01.15)                                             **
+**                                                             **
+** - uses Disable/EnableLineHook() now for better performance  **
+**                                                             **
+** 1.0: (08.02.09)                                             **
+**                                                             **
+** - initial release                                           **
+**                                                             **
+****************************************************************/
+
+/*
+** Important! Check if the used Hollywood version is at least
+** version 6.0!
+*/
+@VERSION 6,0
+
+/*
+** This script requires the RebelSDL plugin
+*/
+@REQUIRE "rebelsdl"
+
+/*
+** we use the original transformation data of the cracktro
+*/
+@FILE 1, "tabshift.bin"
+@FILE 2, "y3move.bin"
+@FILE 3, "ymove.bin"
+@FILE 4, "xzoom.bin"
+@FILE 5, "logo.bin"
+
+/*
+** text font stored in a brush
+*/
+@BRUSH 11, "font.png", {Transparency = #WHITE}
+
+@DISPLAY {Width = 360, Height = 284}
+
+@MUSIC 1, "crystal.mod"
+
+/* make a new page of text */
+Function p_MakeTextPage()
+
+	If cc = 40 * 22 * 3 Then cc = 0
+	
+	CreateBrush(4, 40 * 8, 22 * 8, #RED)
+	SelectBrush(4)
+	
+	; draw text to brush (22 lines à 40 chars)
+	For Local y = 0 To 21	
+		For Local x = 0 To 39
+			Local c = Asc(MidStr(t$, cc, 1)) - ' '			
+			DisplayBrushPart(11, c * 8, 0, x * 8, y * 8, 8, 8)			
+			cc = cc + 1
+		Next
+	Next
+	
+	EndSelect
+	
+	SetBrushTransparency(4, #RED)
+	
+	CreateBrush(5, 40 * 8, 22 * 8)
+	SelectAlphaChannel(5)
+	SetAlphaIntensity(0)
+	Cls
+	EndSelect
+	
+EndFunction
+
+/* fade text page in/out using alpha channel */
+Function p_FadeTextPage()
+
+	SelectAlphaChannel(5)
+	
+	; draw different alpha channel values to every line
+	For Local y = 175 To fadeline Step -1 
+		SetAlphaIntensity(fadelevel[y])
+		DisplayBrushPart(4, 0, y, 0, y, 320, 1)
+		fadelevel[y] = fadelevel[y] + fademode
+		If fadelevel[y] >= 255 Then fadelevel[y] = 255
+		If fadelevel[y] <= 0 Then fadelevel[y] = 0
+	Next
+	
+	fadeline = fadeline - 8
+	If fadeline <= 0 Then fadeline = 0
+	
+	; fade done - now wait for next action
+	If fademode < 0
+		If fadelevel[0] = 0
+			fademode = 0
+			nextwait = 2000
+			StartTimer(1)
+		EndIf	
+	Else		
+		If fadelevel[0] = 255
+			fademode = 0
+			nextwait = 15000
+			StartTimer(1)
+		EndIf	
+	EndIf	
+	
+	EndSelect	
+				
+EndFunction
+
+/* init precalculated deformation tables */
+Function p_InitDeform()
+
+	TabShift = {}
+	XZoom = {}
+	Ymove = {}
+	Y3move = {}
+	Logo = {}
+	
+	; we simply use the values from the original cracktro so that the logo
+	; effect is exactly the same
+	For Local k = 0 To 2047 Do TabShift[k] = (ReadShort(1) << 4) | 8
+	For Local k = 0 To 2047 Do Y3move[k] = ReadShort(2)
+	For Local k = 0 To 2047 Do Ymove[k] = ReadShort(3)
+	For Local k = 0 To 1535 Do XZoom[k] = ReadShort(4) + 25
+	For Local k = 0 To 6143 Do logo[k] = ReadShort(5)
+	
+EndFunction
+
+/* create deformed logo outline in a mask */
+Function p_WriteLogo()
+
+	Local px = posXzoom
+	Local py = posYmove
+	Local py3 = posY3move
+	Local off = 0
+	Local xz = 0
+
+        ; wrap values when they reach the limit
+	posXzoom = Wrap(posXzoom + 1, 0, 256)
+	posYmove = Wrap(posYmove + 2, 0, 1024)
+	posY3move = Wrap(posY3move + 2, 0, 1024)
+
+	SelectMask(1)
+	SetMaskMode(#MASKINVISIBLE)
+	Cls
+
+	SetMaskMode(#MASKVISIBLE)
+	
+	; draw 320x8 pixels (logo outline will be filled below)
+	For Local k = 0 To 39
+	
+		For Local j = 0 To 7
+		
+			Local ym = Ymove[py] + Y3move[py3]
+			xz = xz + Xzoom[px]
+				
+			py = py + 1
+			py3 = py3 + 1
+			px = px + 1
+
+			Local x = (xz \ 64) * 8
+			
+			For Local y = 0 To 7
+				If logo[x+y] = 0 Then Break
+
+				Local ay = (off + logo[x+y] + ym) \ 40
+				Local ax = ((off + logo[x+y] + ym) % 40) * 8 + j
+				
+				Plot(16 + ax, ay)	
+			Next
+		Next
+
+		off = off + 1
+	Next
+
+	EndSelect
+
+EndFunction
+
+/* fill logo outline */
+Function p_BlitFill()
+
+	CopyBrush(1, 2)
+	
+	; 205 lines
+        ; this is some overhead because Hollywood can't draw to brush 1 from brush 1.. thus
+        ; we need two use two brushes
+	For Local y = 0 To 204
+	
+	        ; flood fill
+		SelectMask(1)
+		SetMaskMode(#MASKXOR)
+		DisplayBrushPart(2, x, y, x, y + 1, 320, 1)
+		EndSelect
+
+                ; copy line back to original brush
+		SelectMask(2)
+		SetMaskMode(#MASKVANILLACOPY)
+		DisplayBrushPart(1, x, y + 1, x, y + 1, 320, 1)
+		EndSelect				
+	Next
+	
+EndFunction
+
+/* draw logo to display with copper shifts */
+Function p_BlitHShift()
+
+	Local off1 = 8
+	
+	posTabShift = Wrap(posTabShift + 4, 0, 256)
+	
+	Local shiftpos = posTabShift
+
+        ; set brush foreground to gray
+	SelectBrush(2)
+        Cls(ctable[2])
+        EndSelect
+
+	SelectMask(2)
+	SetMaskMode(#MASKVANILLACOPY)
+	
+        ; shift every line in the logo according to the shift table
+	For Local y = 0 To 204
+	
+		xshift = TabShift[shiftpos]
+		shiftpos = shiftpos + 2
+	
+		Local off2 = 16 - (xshift >> 4)
+		
+		DisplayBrushPart(1, off2, y, 0, y, 320, 1)
+	Next
+	
+	EndSelect
+	
+        ; display logo layer 1 (gray)
+	DisplayBrush(2, 30, 34)
+
+        ; display logo layer 2 (gray)
+	DisplayBrushPart(1, off1, 0, 30, 34, 320, 205)
+
+        ; the area where the two logo layers overlap will be drawn in a green-bluish color
+        ; we use the #MASKAND mode to compute the overlapping area!
+	SelectMask(2)
+	SetMaskMode(#MASKAND)
+	DisplayBrushPart(1, off1, 0, 0, 0, 320, 205)
+	EndSelect
+	
+        ; set brush foreground to green-blue
+	SelectBrush(2)
+	Cls(ctable[3])
+	EndSelect
+	
+        ; display logo layer 3 (green-blue)
+	DisplayBrush(2, 30, 34)
+		
+EndFunction
+
+/* this is our main loop */
+Function p_MainLoop()
+
+        ; are we currently in pixel boucing mode?
+	If bounce > 0
+	
+                ; display pixel at bounce position gotten from table
+
+		DisplaySprite(1, bx, 284 - DataBounce[bc\2])
+		bx = bx + IIf(bounce = 1, 2, -2)
+		bc = bc + 12
+		bc = bc & $fdff
+		
+		If (bx >= 360) And (bounce = 1)
+
+                	; right border reached --> start main intro now!
+			bounce = 0
+			RemoveSprite(1)
+			BeginDoubleBuffer
+			StartTimer(1)
+			fademode2 = -5
+			fadelevel2 = 255
+
+		ElseIf (bx <= 0) And (bounce = 2)	
+			
+                        ; left border reached --> quit intro!
+                        End
+		EndIf
+	
+	Else		
+	
+		DisableLineHook()
+		
+                ; display background
+        	DisplayBrush(12, 0, 0)
+
+                ; compute and render next logo frame
+		p_WriteLogo()
+		p_BlitFill()
+		p_BlitHShift()
+		
+                ; check timer
+		If GetTimer(1) >= nextwait
+
+			fadeline = 22 * 8 - 1
+
+			If nextwait = 15000
+				fademode = -6
+			Else	
+				p_MakeTextPage()
+				fademode = 6
+			EndIf
+			
+			nextwait = 1000000 ; infinite						
+		EndIf
+		
+                ; are we currently fading a text page?
+		If fademode <> 0 Then p_FadeTextPage()
+		
+                ; display text page if we have one!
+		If cc > 0 Then DisplayBrush(5, #CENTER + 8, #CENTER)
+		
+                ; global screen fader
+		If fademode2 <> 0
+		
+			If (fademode2 > 0) And (fadelevel2 >= 255)
+				fademode2 = 0	
+				fadelevel2 = 255
+			ElseIf (fademode2 < 0) And (fadelevel2 <= 0)
+				fademode2 = 0
+				fadelevel2 = 0	
+			EndIf
+								
+                        ; we simply fade in/out by drawing a black box with an alpha channel
+			Box(0, 0, 360, 284, ARGB(fadelevel2 ~ $ff, #BLACK))
+			fadelevel2 = fadelevel2 + fademode2
+			
+			If (fademode2 = 0) And (fadelevel2 = 255) Then bounce = 2
+		EndIf
+
+                ; flip back buffer to front
+		Flip
+		
+                ; the bouncing pixel will not use double buffering mode
+		If bounce = 2 Then EndDoubleBuffer
+		
+		EnableLineHook()
+		
+                ; check for exit
+		If IsLeftMouse() = True Then fademode2 = 5
+	EndIf
+	
+EndFunction
+
+; y positions for bouncing pixel
+DataBounce = {
+$0000,$0001,$0002,$0003,$0004,$0006,$0007,$0008,$0009,$000b,
+$000c,$000d,$000e,$000f,$0011,$0012,$0013,$0014,$0015,$0017,
+$0018,$0019,$001a,$001b,$001d,$001e,$001f,$0020,$0021,$0022,
+$0023,$0025,$0026,$0027,$0028,$0029,$002a,$002b,$002c,$002e,
+$002f,$0030,$0031,$0032,$0033,$0034,$0035,$0036,$0037,$0038,
+$0039,$003a,$003b,$003c,$003d,$003e,$003f,$0040,$0041,$0042,
+$0043,$0044,$0044,$0045,$0046,$0047,$0048,$0049,$004a,$004a,
+$004b,$004c,$004d,$004e,$004e,$004f,$0050,$0051,$0051,$0052,
+$0053,$0053,$0054,$0055,$0055,$0056,$0057,$0057,$0058,$0058,
+$0059,$0059,$005a,$005a,$005b,$005b,$005c,$005c,$005d,$005d,
+$005e,$005e,$005e,$005f,$005f,$0060,$0060,$0060,$0061,$0061,
+$0061,$0061,$0062,$0062,$0062,$0062,$0062,$0063,$0063,$0063,
+$0063,$0063,$0063,$0063,$0063,$0063,$0063,$0063,$0064,$0063,
+$0063,$0063,$0063,$0063,$0063,$0063,$0063,$0063,$0063,$0063,
+$0062,$0062,$0062,$0062,$0062,$0061,$0061,$0061,$0061,$0060,
+$0060,$0060,$005f,$005f,$005e,$005e,$005e,$005d,$005d,$005c,
+$005c,$005b,$005b,$005a,$005a,$0059,$0059,$0058,$0058,$0057,
+$0057,$0056,$0055,$0055,$0054,$0053,$0053,$0052,$0051,$0051,
+$0050,$004f,$004e,$004e,$004d,$004c,$004b,$004a,$004a,$0049,
+$0048,$0047,$0046,$0045,$0044,$0044,$0043,$0042,$0041,$0040,
+$003f,$003e,$003d,$003c,$003b,$003a,$0039,$0038,$0037,$0036,
+$0035,$0034,$0033,$0032,$0031,$0030,$002f,$002e,$002c,$002b,
+$002a,$0029,$0028,$0027,$0026,$0025,$0023,$0022,$0021,$0020,
+$001f,$001e,$001d,$001b,$001a,$0019,$0018,$0017,$0015,$0014,
+$0013,$0012,$0011,$000f,$000e,$000d,$000c,$000b,$0009,$0008,
+$0007,$0006,$0004,$0003,$0002,$0001}
+
+t$ =
+"                                        "..
+"                                        "..
+"       We are proud to present:         "..
+"                                        "..
+"               MOONSTONE                "..
+"               |||||||||                "..
+"                                        "..
+" Another fine CRYSTAL crack, to add to  "..
+" the almost infinite library of high-   "..
+" quality CRYSTAL wares..                "..
+"                                        "..
+"                                        "..
+"Make sure to show up at the event of    "..
+"the 90's, the CRYSTAL-Silents-Anarchy   "..
+"party 26-28/12-91 in Aalborg, Denmark!  "..
+"Write the Danish address for info..     "..
+"                                        "..
+"                                        "..
+"        Accept no imitations..          "..
+"        We are the world's #1!          "..
+"                                        "..
+"                                        "..
+"                                        "..
+"  For serious impact*, write to the     "..
+"  following addresses..                 "..
+"                                        "..
+"           a) P.O. Box 2                "..
+"              8330 Beder                "..
+"               Denmark                  "..
+"                                        "..
+" b)  P.O. Box 93    c) Via De Meo 2     "..
+"   2140 Borgerhout    83100 Avellino    "..
+"       Belgium            Italy         "..
+"                                        "..
+"* impact: a) software on Amiga and PC   "..
+"(we carry everything in games and uti-  "..
+"lities), donations, info about Cuba     "..
+"f.ex rise in population, annual finan-  "..
+"cial figures etc.!                      "..
+"b) CC's (should be self-exlanatory) +   "..
+"playing a)'s role for Belgian people.   "..
+"NB, Cuba-info should still go Denmark!  "..
+"c) playing a)'s role for Italians..     "..
+"                                        "..
+"                                        "..
+"                                        "..
+"                                        "..
+"                                        "..
+"                                        "..
+"                                        "..
+"                                        "..
+" -------======= o OO o =======-------   "..
+"                                        "..
+" ..intro incredible by melon dezign..   "..
+" Code by.....................Paleface   "..
+" Font/design by..................Seen   "..
+" Music by..............TDK of Anthrox   "..
+"                                        "..
+" -------======= o OO o =======-------   "..
+"                                        "..
+"                                        "..
+"                                        "..
+"                                        "..
+"                                        "..
+"                                        "..
+"                                        "
+
+; our palette
+ctable = {#WHITE, $DDDDDD, $999999, $66CCAA}
+
+bounce = 1
+
+For k = 0 To 255 Do DataBounce[k] = (DataBounce[k] + 100)
+
+SetFillStyle(#FILLCOLOR)
+
+; this is a working buffer for our logo
+CreateBrush(1, 336, 206, ctable[1])
+SetBrushTransparency(1, ctable[1])
+
+; create the bouncing pixel (well, actually it's two pixels :))
+CreateBrush(10, 2, 2, #WHITE)
+SelectBrush(10)
+Plot(0, 0, #WHITE)
+Plot(1, 0, $CCCCCC)
+Plot(0, 1, $CCCCCC)
+Plot(1, 1, $AAAAAA)
+EndSelect
+
+; create the background for the logo effect
+CreateBrush(12, 360, 284)
+SelectBrush(12)
+Box(0, 0, 360, 38, $DD8899)
+Box(0, 38, 360, 1, #BLACK)
+Box(0, 244, 360, 1, #BLACK)
+Box(0, 245, 360, 39, $DDBBEE)
+Box(0, 39, 360, 205, #WHITE)
+EndSelect
+
+; convert bouncing pixel brush to sprite
+CreateSprite(1, #BRUSH, 10)
+
+; read tables from disk
+p_InitDeform()
+
+; initialize text fader
+fadelevel = {}
+For Local k = 0 To 175 Do fadelevel[k] = 0
+
+nextwait = 3000
+
+EscapeQuit(True)
+
+; play TDK of Anthrox
+PlayMusic(1)
+
+; and go!
+Repeat
+	p_MainLoop
+	CheckEvent
+Forever
+

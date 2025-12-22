@@ -1,0 +1,5 @@
+OPT NATIVE
+->{#include <boost/preprocessor/punctuation/comma.hpp>}
+ NATIVE {BOOST_PREPROCESSOR_PUNCTUATION_COMMA_HPP} CONST
+
+ NATIVE {BOOST_PP_COMMA} CONST	->BOOST_PP_COMMA() ,

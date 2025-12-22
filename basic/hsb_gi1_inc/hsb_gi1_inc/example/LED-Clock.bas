@@ -1,0 +1,247 @@
+' led-clock.bas
+' Author: 	steffen.leistner@styx.in-chemnitz.de
+' Compiler: HSB 2.0
+' Includes: 3.1
+
+DEFLNG a-z
+
+REM $NOSTACK
+REM $NOARRAY
+REM $NOOVERFLOW
+REM $NOWINDOW
+REM $NOLIBRARY
+
+REM $INCLUDE exec.bh
+REM $INCLUDE dos.bh
+REM $INCLUDE graphics.bh
+REM $INCLUDE intuition.bh
+REM $INCLUDE timer.bc
+REM $INCLUDE utility.bh
+REM $INCLUDE images/led.bh
+REM $INCLUDE BLib/ExecSupport.bas
+REM $INCLUDE BLib/HookEntryTask.bas
+
+CONST workbufsize& 		= 1024&
+CONST daystringoffs&	= 30&
+CONST datestringoffs&	= 50&
+CONST timestringoffs&	= 70&
+CONST timehouroffs&		= 70&
+CONST timeminoffs&		= 73&
+CONST timesecoffs&		= 76&
+CONST winw& 			= 272&
+CONST winh& 			= 72&
+
+'******************************************************************************
+
+SUB TimerTask							'send one signal per second to the maintask
+	SHARED maintask&, tsig&, runtimer&
+	
+	timerport& = CreatePort&(NULL&, 0%)
+	IF timerport& <> NULL&
+		
+		timerio& = CreateExtIO&(timerport&, timerequest_sizeof%)
+		IF timerio& <> NULL&
+			
+			fl& = OpenDevice&(SADD("timer.device" + CHR$(0)), UNIT_VBLANK&, timerio&, 0%)
+			IF fl& = NULL&
+				DIM currentval(timeval_sizeof% \ 2%)
+				
+				WHILE runtimer&	
+					Signal maintask&, tsig&
+					POKEL VARPTR(currentval(0)) + tv_secs%, 	1&
+					POKEL VARPTR(currentval(0)) + tv_micro%, 	0&
+					POKEW timerio& + tr_node% + IORequestio_Command%, TR_ADDREQUEST&
+					CopyMem VARPTR(currentval(0)), timerio& + tr_time%, timeval_sizeof%
+					junk& = DoIO&(timerio&)
+				WEND
+			
+			END IF
+			DeletePort timerport&
+			CloseDevice timerio&
+			DeleteExtIO timerio&
+		
+		END IF
+	END IF
+
+	Forbid
+END SUB
+
+'******************************************************************************
+
+FUNCTION Main&
+	SHARED workbuf&, maintask&, runtimer&, tsig&
+
+	Main& = RETURN_ERROR&
+	
+	check$ = "Libs:Images/led.image"
+	IF NOT FEXISTS(check$)
+		PRINT "Can't find " + check$
+		EXIT FUNCTION
+	END IF
+	
+	LIBRARY OPEN "exec.library", 37&
+	LIBRARY OPEN "dos.library"
+	LIBRARY OPEN "graphics.library"
+	LIBRARY OPEN "intuition.library"
+	LIBRARY OPEN "images/led.image"
+	
+	workbuf& = AllocVec&(workbufsize&, MEMF_PUBLIC& OR MEMF_CLEAR&)
+	IF workbuf& = NULL&
+		PRINT "Not enough Memory!"
+		EXIT FUNCTION
+	END IF
+	
+	TAGLIST workbuf&, _
+		WA_AutoAdjust&,		TRUE&, _
+		WA_InnerWidth&,		winw&, _
+		WA_InnerHeight&,	winh&, _
+		WA_GimmeZeroZero&,	TRUE&, _
+		WA_DragBar&,		TRUE&, _
+		WA_RMBTrap&,		TRUE&, _
+		WA_CloseGadget&,	TRUE&, _
+		WA_DepthGadget&,	TRUE&, _
+		WA_SimpleRefresh&,	TRUE&, _
+		WA_IDCMP&,			IDCMP_CLOSEWINDOW& OR IDCMP_REFRESHWINDOW&, _
+		WA_ScreenTitle&,	"LED-Clock", _
+	TAG_END&
+	
+	mainwin& = OpenWindowTagList&(NULL&, workbuf&)
+	IF mainwin&
+		
+		userport& = PEEKL(mainwin& + UserPort%)
+		rastport& = PEEKL(mainwin& + RPort%)
+		colmap& = PEEKL(ViewPortAddress&(mainwin&) + ColorMap%)
+		
+		TAGLIST workbuf&, _
+			OBP_Precision&,	PRECISION_IMAGE&, _
+			OBP_FailIfBad&,	TRUE&, _
+		TAG_END&
+		f_pen& = ObtainBestPenA& (colmap&, NULL&, &HA9999999&, NULL&, workbuf&)
+		b_pen& = ObtainBestPenA& (colmap&, NULL&, NULL&, NULL&, workbuf&)
+		
+		SetBPen rastport&, b_pen&
+		SetRast rastport&, b_pen&
+		DIM s%(2%)
+		
+		Main& = RETURN_FAIL&
+
+		TAGLIST workbuf&, _
+			IA_FGPen&,		f_pen&, _
+			IA_BGPen&,		b_pen&, _
+			IA_Width&,		winw& - 10&, _
+			IA_Height&,		winh& - 10&, _
+			LED_Pairs&,		3%, _
+			LED_Values&,	VARPTR(s%(0%)), _
+			LED_Colon&,		TRUE&, _
+		TAG_END&
+		im& = NewObjectA& (NULL&, SADD("led.image" + CHR$(0)), workbuf&)
+		IF im&
+
+			tsig& = AllocSignal&(NOT NULL&)
+			IF tsig&
+				
+				maintask& = FindTask&(NULL&)
+				runtimer& = NOT NULL&
+				
+				tatask& = CreateHookEntryTask& (SADD("LEDClockTimer" + CHR$(0)), _
+												NULL&, VARPTRS(TimerTask), 4096&)
+				IF tatask&
+					
+					DO
+						sig& = xWait&((1& << PEEKB(userport& + mp_SigBit%)) OR _
+									 	SIGBREAKF_CTRL_C& OR tsig&)
+						
+						SELECT CASE sig&
+							CASE SIGBREAKF_CTRL_C&
+
+								EXIT LOOP
+							
+							CASE tsig&		'from Timertask
+
+								IF (PEEKL(mainwin& + WindowFlags%) AND WFLG_WINDOWREFRESH&) = NULL&
+								junk& = DateStamp& (workbuf&)
+								POKEB workbuf& + dat_Format%,	FORMAT_DOS&
+								POKEB workbuf& + dat_Flags%,	0&
+								POKEL workbuf& + dat_StrDay%,	workbuf& + daystringoffs&
+								POKEL workbuf& + dat_StrDate%,	workbuf& + datestringoffs&
+								POKEL workbuf& + dat_StrTime%,	workbuf& + timestringoffs&
+								junk& = DateToStr&(workbuf&)
+								s%(2%) = VAL(PEEK$(workbuf& + timesecoffs&))	';-)
+								s%(1%) = VAL(PEEK$(workbuf& + timeminoffs&))
+								s%(0%) = VAL(PEEK$(workbuf& + timehouroffs&))
+								
+								TAGLIST workbuf&, _
+									LED_Values&,	VARPTR(s%(0%)), _
+								TAG_END&
+								junk& = SetAttrsA& (im&, workbuf&)	
+								
+								DrawImage rastport&, im&, 5%, 5%
+								
+								title$ = PEEK$(workbuf& + daystringoffs&) + ", " + _
+										 PEEK$(workbuf& + datestringoffs&) + CHR$(0)
+								SetWindowTitles mainwin&, SADD(title$), NOT NULL&
+								END IF
+
+							CASE REMAINDER
+
+								msg& = GetMsg&(userport&)
+								IF msg&
+									mclass& = PEEKL(msg& + Class%)
+									ReplyMsg msg&
+									
+									SELECT CASE mclass&
+										CASE IDCMP_CLOSEWINDOW&
+											
+											EXIT LOOP
+										
+										CASE IDCMP_REFRESHWINDOW&
+											
+											BeginRefresh mainwin&
+											SetRast rastport&, b_pen&
+											DrawImage rastport&, im&, 5%, 5%
+											EndRefresh mainwin&, TRUE&
+									
+									END SELECT
+								
+								END IF
+
+						END SELECT
+					LOOP
+					
+					runtimer& = NULL&		'stop timerloop
+					Main& = RETURN_OK&
+				ELSE
+					PRINT "Can't create TimerTask!"
+				END IF
+				
+				FreeSignal tsig&
+			END IF
+			
+			DisposeObject im&
+		ELSE
+			PRINT "Can't create LED-Image!"
+		END IF
+		
+		ReleasePen colmap&, f_pen&
+		ReleasePen colmap&, b_pen&
+		CloseWindow mainwin&
+	ELSE
+		PRINT "Can't open Window!"
+	END IF
+	
+	WHILE FindTask&(SADD("LEDClockTimer" + CHR$(0))) <> NULL&		'wait for ending timertask
+		Delay 5
+	WEND
+	
+	IF tsig& THEN
+		FreeSignal tsig&
+	END IF
+	
+	FreeVec workbuf&
+END FUNCTION
+
+'******************************************************************************
+
+STOP Main&
+
+DATA "$VER: LED-Clock V0.1 "

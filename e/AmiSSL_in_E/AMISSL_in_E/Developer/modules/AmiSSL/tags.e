@@ -1,0 +1,23 @@
+-> NOREV
+OPT MODULE
+OPT EXPORT
+OPT PREPROCESS
+
+MODULE  'utility/tagitem'
+
+CONST AMISSL_SOCKETBASE       = TAG_USER + $01
+CONST AMISSL_VERSION          = TAG_USER + $02 /* OBSOLETE */
+CONST AMISSL_REVISION         = TAG_USER + $03 /* OBSOLETE */
+CONST AMISSL_VERSIONOVERRIDE  = TAG_USER + $04 /* OBSOLETE */
+/* CONST AMISSL_TCPSTACK      = TAG_USER + $05    OBSOLETE */
+/* CONST AMISSL_SSLVERSIONAPP = TAG_USER + $06    OBSOLETE */
+
+#ifdef AMIGAOS4
+CONST AmiSSL_ISocket          =  TAG_USER + $07 /* Only accessible from ppc code */
+CONST AmiSSL_ISocketPtr       =  TAG_USER + $08 /* Used by auto initializer to avoid dependancy on opening order */
+#endif
+
+CONST AMISSL_SOCKETBASEBRAND  = TAG_USER + $09
+CONST AMISSL_MLINKLOCK        = TAG_USER + $0A
+CONST AMISSL_ERRNOPTR         = TAG_USER + $0B
+

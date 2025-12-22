@@ -1,0 +1,257 @@
+                              BCPL
+
+Author: Bill Kinnersley
+Date: Mar 12, 1988
+Mail: Physics Dept.
+      Montana State University
+      Bozeman, MT 59717
+BITNET: iphwk@mtsunix1
+INTERNET: iphwk%mtsunix1.bitnet@cunyvm.cuny.edu
+UUCP: ...psuvax1!mtsunix1.bitnet!iphwk
+
+
+TRIPOS
+
+        AmigaDOS is a port of the TRIPOS operating system developed at
+Cambridge University.  From the beginning, Unix and C were meant for
+each other. The same thing goes for BCPL and TRIPOS.
+
+        On the one hand, TRIPOS was written in a high level language
+(BCPL) to provide easy portability from one hardware to another.  A
+TRIPOS port requires only the construction of a native kernel to provide
+process management and message passing--exactly the services handled on
+the Amiga by Exec.  On the other hand, BCPL requires extensive run-time
+support that TRIPOS is designed to offer.
+
+        In fact the coupling between system and application is even
+stronger in TRIPOS than in Unix.  A TRIPOS application program is like a
+subroutine of the operating system.  It requires shared access to system
+variables (the Global Vector) and resident system libraries.  As a result,
+BCPL programs tend to be smaller than C programs.
+
+        TRIPOS was never designed to run on mainframes, nor on single
+user micros.  From the beginning it was intended to run a network of
+workstations.   The target was a collection of small memory, small disk
+capacity machines in a network environment.  Multitasking and message
+passing are clearly an essential feature of such an environment.
+Presumably the hooks for networking are still present in AmigaDOS...
+
+
+BCPL
+
+        BCPL itself is an ancestor of C and is actually a somewhat lower
+level language.  (A sample BCPL program is given in the ROM KernelManual,
+Appendix G.)  References to BCPL and TRIPOS are:
+
+        Richards, Martin, "TRIPOS--A Portable Operating System
+                for Mini-computers",
+                Software Practice and Experience, 9, 513-526 (1979)
+
+        Richards, Martin, "BCPL--the language and its compiler"
+                Cambridge University Press, 1979
+                ISBN 0-521-21965-5   QA76.73 B17 R5
+                Emery, Glyn, "BCPL and C", Blackwell, 1986
+                ISBN 0-632-01607-8   QA76.73 B38 E44
+
+        Moody, Ken, "A Coroutine Mechanism for BCPL",
+                Software Practice and Experience, 10, 765 (1980)
+
+
+BPTRS
+
+          BCPL is a typeless language--every data item takes up the
+same amount of storage.  In the 68000 family, pointers are 32 bits.
+Hence Amiga TRIPOS is forced to store all data in 32 bit longwords.
+Unfortunately, 68000 memory is not longword addressable.  Assembly
+expressions like 10(A0,D1) calculate an effective address assuming
+that the offsets 10 and D1 are measured in bytes.  This leads to the
+need for a distinction between APTRs which are byte addresses, and
+BPTRs which are longword addresses.  BPTR = APTR/4, and BPTRs can only
+point to locations which are longword aligned.
+        (Strings are the only exception to the uniform size rule.  BCPL
+strings are packed, four characters to a longword.)
+
+
+MULTITASKING
+
+        The main AmigaDOS facility for multitasking is the CLI.  CLI's
+are kept in a fixed array, so there is a maximum number of CLI's allowed
+at any time.  Every BCPL program must be launched from its own CLI.
+
+        When a CLI executes a command, it loads the program with LoadSeg
+and calls it as a subroutine (not a coroutine as claimed by the AmigaDOS
+manual).  It does not create a separate process.  Thus the command
+inherits all of the CLI's existing environment: the Task, the Process,
+the Input and Output file handles, etc.  When the program returns, the
+CLI is there to take care of the cleanup chores.  CLI's may be created
+in two ways:
+
+        NewCLI creates an interactive CLI.  A new window is created,
+along with a new instance of the CON: device.  The default Input and
+Output file handles refer to this device.  Interactive CLI's are
+destroyed by EndCLI merely by pushing them into the background.  A
+background CLI with nothing to do automatically commits suicide.
+
+        RUN creates a CLI in the background that executes a given
+command and then terminates.  The Input handle is a fake one containing
+the command in its input buffer.  The Output handle is shared with
+that of the creator.
+
+        An AmigaDOS Process may spawn an unlimited number of children
+using CreateProc.  (This is what WorkBench does.)  A process created in
+this manner automatically starts execution at once, but typically its
+first few lines of code causes it wait at the Process DOSPort for a
+startup message.  It then continues execution and replies to the message
+when done.  This approach is necessary because someone else needs to do
+the unloading: either the parent, the WorkBench, or a CLI.
+        LoadWB creates a child process, WorkBench, but exits without
+waiting for a reply.  As a result WorkBench cannot terminate.
+
+
+INITIAL ENVIRONMENT
+
+        Upon entry to any BCPL routine, the register contents are as
+follows:
+
+        d0 - amount of global area currently in use
+        d1-d4 - up to 4 parameters.  Further parameters can be passed on
+                the stack (see below).
+        d5-d7 - unused
+        a0 - base of system address space - always 0.
+                RAM addresses are computed as offsets from a0
+        a1 - base of the current BCPL stack frame
+        a2 - pointer to the BCPL Global Vector
+        a3 - return address of the caller
+        a4 - entry address
+        a5 - pointer to a "caller" service routine
+        a6 - pointer to a "returner" service routine
+        a7 - stack for temporaries
+
+        This register environment is available to any application
+program.  However if you're programming in C, the startup code supplied
+by your linker generally ignores the initial register contents and
+eventually they get overwritten.
+
+The parameters passed by the CLI to an application are:
+        d0 - length of command line
+        a0 - APTR to command line
+The command itself may be found in the CLI->cli_Command field.  Two items
+are available on the stack: pointers to the top and the bottom of the
+stack that was allocated.
+
+
+STACKS AND CALLS
+
+        The a7 stack is rarely used by AmigaDOS, except for interfacing
+calls to Exec which must be C-like.  Normal BCPL calls use the a1 stack.
+It is organized by frames of local variables, growing toward higher RAM
+addresses.
+
+        In C the caller pushes parameters on the stack in reverse order,
+then does the call.  The callee pushes its own locals on the stack as
+needed and restores the original stack pointer when done.  The caller
+then pops the parameters off.  More specifically, C uses the 68000 LINK
+and UNLK instructions to maintain a stack pointer (SP) and a frame
+pointer (FP).  Upon entry to a subroutine:
+
+          SP--->Nth local
+                ...
+                1st local
+          FP--->old FP
+                return address
+                2nd param
+                ...
+
+        In BCPL, parameters and locals are not pushed.  There is a frame
+pointer, a1, but no stack pointer.  Instead the compiler maintains a
+"current size".  The caller puts his parameters in d1-d4, his current
+size in d0, the subroutine address in a4, and then jsr's to (a5).
+        The (a5) entry routine increments a1 by d0.  It pops the return
+address off the a7 stack into a3, saves a1, a3, and a4 in locations just
+BELOW a1, saves d1-d4 just ABOVE a1 (all without changing a1), and then
+jumps to (a4).  Upon entry to a subroutine:
+
+                old a1
+                return address
+                entry address
+          a1--->1st param
+                2nd param
+                ...
+
+(Note that BCPL frames grow toward higher memory instead of lower.)  The
+(a6) exit routine restores a1, a3, and a4, and jumps to (a3).
+
+        A BCPL routine must therefore preserve a0, a1, a2, a5, a6 and a7.
+Results are typically returned in d1 and/or a1.
+
+        For example, suppose your last global is at 100(a1).  You must
+call a subroutine with d0 = 110.  The (a5) routine will save registers
+in 104, 108, and 10c, and put the first four parameters at 110, 114, 118,
+and 11c.  The called routine (using the new a1) will find them at (a1),
+4(a1), 8(a1), and c(a1).  If you want to pass a 5th parameter, you must
+put it ahead of time at 120(a1).  The called routine will find it at 10(a1).
+
+        BCPL variables are either global or local.  Global variables are
+located in the Global Vector and are visible to all modules.  They are
+referenced by an offset from a2.
+        In C, the linker combines the globals declared by various program
+modules and arranges them in the common area.  BCPL is not linked!  The
+BCPL programmer must handle these details himself, declaring explicitly
+where each global is to be located in the Global Vector.
+        Blocks may be nested, but locals declared in surrounding blocks
+are not visible, i.e. nonlocal variables may not be referenced.
+
+
+SEGMENTS
+
+        A program exists on the disk in sections called hunks.  When the
+program is loaded, the hunks are separately relocated as segments, and
+these are linked together with headers to form a SegList.  Process
+creation combines the program's SegList with several system SegLists to
+make up a SegArray.  Execution begins at the beginning of the first
+SegList, which is system startup code.  Entries in the SegArray are
+allowed to be missing (0), and that is probably the reason for using
+an array: to allow easy addition and deletion of chunks of code.
+
+        For example, if a program is launched from the CLI, the SegArray
+looks like (4/sys1/sys2/sys3/0/prog).  If the program is RUN, theSegArray
+will be (4/sys1/sys2/0/sys4/prog).  If the program is CreateProc'ed, the
+array is only (2/sys1/sys2).
+
+
+MODULE STRUCTURE
+
+A BCPL module has the following structure:
+
+        dc.l    size    ;module size in longwords
+        dc.w    0       ;pad
+        dc.b    '09'    ;version
+        dc.b    name    ;name of the module as a BSTR
+        Any number of BCPL subroutines
+        ...
+        Table of Global definitions
+        dc.l    maxGV   ;GV size the module will need.
+
+        Each subroutine may be preceded by a BSTR label.  The main entry
+is always labeled "start  ".  If the subroutine uses local constants such
+as strings, these immediately follow the code.
+
+        The definition table is used to place public entry points into
+the GV.  This is done by the startup code, specifically the library
+function installseg().  The table consists of pairs:
+
+        (offset into the module in bytes, offset into the GV in longwords).
+
+The table runs in reverse order, and is terminated with a 0.  For example,
+if the module ends with
+
+        dc.l    0, 1,24, 85,504, 88
+
+it means there are two entries to be installed: offset 24 at GV:1 and
+offset 504 at GV:85.  The last number, 88, is the GV size requested.
+
+        All BCPL programs that can be called from the command line are
+composed of two hunks.  The first hunk is common startup code that makes
+a private copy of the system GV before installing the program's globals.
+The purpose is to insure that AmigaDOS commands are reentrant.  Global
+variables installed by one instance will not overwrite those of another.

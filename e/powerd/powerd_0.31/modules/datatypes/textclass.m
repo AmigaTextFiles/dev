@@ -1,0 +1,31 @@
+MODULE 'exec/nodes'
+
+CONST TDTA_Buffer=$8000112C,
+		TDTA_BufferLen=$8000112D,
+		TDTA_LineList=$8000112E,
+		TDTA_WordSelect=$8000112F,
+		TDTA_WordDelim=$80001130,
+		TDTA_WordWrap=$80001131
+
+#define TEXTDTCLASS 'text.datatype'
+
+OBJECT Line
+	Link:MLN,
+	Text:PTR TO UBYTE,
+	TextLen:ULONG,
+	XOffset:UWORD,
+	YOffset:UWORD,
+	Width:UWORD,
+	Height:UWORD,
+	Flags:UWORD,
+	FGPen:BYTE,
+	BGPen:BYTE,
+	Style:ULONG,
+	Data:APTR
+
+CONST	LNF_LF=1,
+		LNF_LINK=2,
+		LNF_OBJECT=4,
+		LNF_SELECTED=8,
+		ID_FTXT=$46545854,
+		ID_CHRS=$43485253

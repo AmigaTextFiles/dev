@@ -1,0 +1,85 @@
+OPT MODULE
+OPT EXPORT
+
+MODULE  'rtgmaster/rtgsublibs',
+        'utility/tagitem',
+        'exec/libraries',
+        'exec/types','exec/ports'
+
+CONST SMR_DUMMY=             TAG_USER
+CONST SMR_MINWIDTH=          SMR_DUMMY+$01
+CONST SMR_MAXWIDTH=          SMR_DUMMY+$02
+CONST SMR_MINHEIGHT=         SMR_DUMMY+$03
+CONST SMR_MAXHEIGHT=         SMR_DUMMY+$04
+CONST SMR_PLANARROUNDW=      SMR_DUMMY+$05
+CONST SMR_PLANARROUNDH=      SMR_DUMMY+$06
+CONST SMR_CHUNKYROUNDW=      SMR_DUMMY+$07
+CONST SMR_CHUNKYROUNDH=      SMR_DUMMY+$08
+CONST SMR_PROGRAMUSESC2P=    SMR_DUMMY+$0C
+CONST SMR_CHUNKYSUPPORT=     SMR_DUMMY+$09
+CONST SMR_PLANARSUPPORT=     SMR_DUMMY+$0A
+CONST SMR_BUFFERS=           SMR_DUMMY+$0B
+CONST SMR_INITIALWIDTH=      SMR_DUMMY+$10
+CONST SMR_INITIALHEIGHT=     SMR_DUMMY+$11
+CONST SMR_INITIALDEPTH=      SMR_DUMMY+$12
+CONST SMR_INITIALSCREENMODE= SMR_DUMMY+$13
+CONST SMR_INITIALDEFAULTW=   SMR_DUMMY+$14
+CONST SMR_INITIALDEFAULTH=   SMR_DUMMY+$15
+CONST SMR_PREFSFILENAME=     SMR_DUMMY+$16
+CONST SMR_FORCEOPEN=         SMR_DUMMY+$17
+CONST SMR_TITLETEXT=         SMR_DUMMY+$18
+CONST SMR_WINDOWLEFTEDGE=    SMR_DUMMY+$19
+CONST SMR_WINDOWTOPEDGE=     SMR_DUMMY+$1A
+CONST SMR_SCREEN=            SMR_DUMMY+$1B
+CONST SMR_PUBSCREENNAME=     SMR_DUMMY+$1C
+CONST SMR_MINPIXELASPECT=    SMR_DUMMY+$1D
+CONST SMR_MAXPIXELASPECT=    SMR_DUMMY+$1E
+CONST SMR_WORKBENCH=         SMR_DUMMY+$1F
+
+-> #define SMR_PIXELASPECT_PROPORTIONAL    Shl(1,16)
+-> #define SMR_PIXELASPECT_WIDE            Div(SMR_PIXELASPECT_PROPORTIONAL,2)
+-> #define SMR_PIXELASPECT_NARROW          Mul(SMR_PIXELASPECT_PROPORTIONAL,2)
+
+OBJECT rdcmpdata
+    port:PTR TO mp
+    signal:LONG
+    mousex:INT
+    mousey:INT
+ENDOBJECT
+
+OBJECT rtgmasterbase
+    base:PTR TO lib
+    pad:INT
+    seglist:LONG
+    dosbase:INT
+    execbase:INT
+    gadtoolsbase:INT
+    gfxbase:INT
+    intbase:INT
+    utilitybase:INT
+    track[8]:ARRAY
+    libraries:PTR TO rtglibs 
+    firstscreenmode:INT
+    linkerdb:INT
+ENDOBJECT
+
+OBJECT rtglibs
+    next:INT
+    id:LONG
+    libbase:INT
+    smlist:INT
+    lastsm:INT
+    libversion:INT
+ENDOBJECT
+
+OBJECT rtgbobhandle
+    bufsize:LONG
+    rtgscreen:PTR TO rtgscreen
+    refreshbuffer:INT
+    bpr:LONG
+    width:LONG
+    height:LONG
+    numsprites:INT
+    maxnum:INT
+    reserved:LONG
+ENDOBJECT

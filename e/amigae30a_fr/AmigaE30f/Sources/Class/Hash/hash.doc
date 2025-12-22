@@ -1,0 +1,175 @@
+HASH.M: flexible and fast hashing functions.
+
+note: if you have no clue what hashing is, you might want to read a little
+      explanation I gave at the end of this doc first.
+
+why use these hashing functions?
+--------------------------------
+simple:   one does not need to know anything about how hashing to make
+          good use of this module.
+flexible: the functions do not make _any_ assumptions upon the nature
+          of the data, the size of it, or anything else. you may therefore
+          use it to hash strings, graphical data, etc.
+fast:     not only does this module use a high performance hashing function,
+          but also the most time-consuming function, hash_find() has been
+          written in optimised inline assembly.
+
+the object
+----------
+
+OBJECT hashtable
+  hashtable(tablesize)
+  end()
+  find(ptr,len)
+  add(link,hashvalue,ptr,len)
+  iterate(do_proc)
+  calc_hash_spread()
+ENDOBJECT
+
+methods
+-------
+
+	hastable(tablesize)
+
+This constructor initialises an empty hashtable. tablesize is the size of
+the hashtable, predifined are some usefull values:
+
+		tablesize	size in kb
+HASH_NORMAL	211*		1
+HASH_MEDIUM	941		4
+HASH_HEAVY	3911		16
+HASH_HEAVIER	16267		64
+
+(*) the tablesizes above are primes close to 2 to the power
+    of 8,10,12,14,16 (for performance reasons)
+
+The larger the table, the faster the search.
+instead of these constanst, you can also use your own size,
+if you wish. the size should however be between 2 and 65535,
+and a prime for best performance.
+
+example:
+
+DEF t:PTR TO hashtable
+NEW t.hashtable(HASH_HEAVY)
+
+may raise: "MEM"
+
+
+	end()
+
+frees table. memory is also deallocated automatically at the end of
+the program. example:
+
+END t
+
+
+	hashlink,hashvalue:=t.find(data,len)
+
+Tries to find data with length len in hash table. When data is not present
+in the table, hashlink will NIL. You'll need to store hashvalue only if you
+wish to call add() next, and hashlink only if you wish to access the data
+related to whatever you hashed next (see below).
+
+
+	add(link:PTR TO hashlink,hashvalue,data,len)
+
+
+adds data to table. you'll need to call find() before this one,
+not only to know the hashvalue this function needs, but also to be
+sure data isn't already in the table. link must be a subclass of
+'hashlink':
+
+OBJECT hashlink
+ENDOBJECT     /* SIZEOF=12 */
+
+the hashtable uses this object to store data in the table. if you wish
+to associate data with whatever you're hashing, make a subclass:
+
+OBJECT mylink OF hashlink
+  type:INT			-> extra field
+ENDOBJECT
+
+these objects are also the ones return by find if data is already present in
+table. example:
+
+t.add(NEW linkptr,hashv,ptr,len)
+
+ptr and len are the same ones you passed to find(). note that add() does
+not copy the 'ptr'.
+
+
+	total,num:=t.iterate(proc)
+
+walks through the whole hashtable, calling proc for every link.
+proc must be something like:
+
+PROC it(link:PTR TO hashlink,depth)
+
+depth is how deep the link hangs in a chain, i.e. minimally 1.
+returned from iterate() is the sum of all returnvalues from
+calling proc, and the number of links visited.
+
+	calc_hash_spread()
+
+makes use of iterate() to calculate the average number of StrCmp's
+needed to find some data in this table. see hashtest.e for example use.
+
+
+example use
+-----------
+
+Imagine we're programming a compiler, like EC. To keep things simple,
+we only do global variables. first, set up the table:
+
+DEF t:PTR TO hashtable, identinfo:PTR TO mylink		-> see above
+NEW t.hashtable(HASH_MEDIUM)
+
+now the following piece of code would be entered when we've read
+an identifier. in 'ident' and 'len' we have the identifier,
+and 'status' says wether we are currently in the scope of a DEF or not:
+
+-> see if ident is already there
+identinfo,hashvalue:=t.find(ident,len:=EstrLen(ident))
+
+IF identinfo
+  IF status=DEFINITION THEN Raise('double declaration!')
+  -> do something with identinfo.type here, for example
+ELSE
+  IF status=USE THEN Raise('unknown variable!')
+  t.add(NEW identinfo,hashvalue,ident,len)
+  -> assign here to identinfo.type, for example
+ENDIF
+
+
+for those who don't know: what is hashing?
+------------------------------------------
+Assume the task of having to store identifiers like the ones used
+for variables in E, and later finding them again (this could be any
+kind of data, but for now just strings). We could put all these strings
+in a linked list, and when a new identifier arrives, simply walk down
+the list and see if it's there. While this may seem a nice and easy
+way of doing it, this becomes unacceptably slow when storing, say,
+2000 identifiers: we would, on average, perform 1000 StrCmp()s just
+to find one identifier!
+
+then comes hashing, which is a simple and fast technique to dramatically
+reduce search times:
+
+take a table of n entries (say, n=256), and take a function which for
+every ident can compute a number 0..n-1 (this is called the hashvalue,
+and such a function might be: add all ascii values MOD n). when you
+now put the idents in n linked list hanging from the n entries in the
+table, you only have to compute the hashvalue to theorethically wipe
+out 255 of each 256 possibilities. searchtime for our example becomes
+2000/256/2 => 4 StrCmp, without any costly computations.
+and imagine what happens if you take a larger n, say 4096, then for most
+compilations, you reduce to 1 StrCmp (!).
+
+This is an ideal situation, since strangely enough, in reality lot's of
+strings end up in the same entry. To make a good distribution of strings
+over entries, this module uses several techniques, among them a better
+hashing function, primes for n, and others. While in reality you may
+end up doing 8 StrCmp()s instead of 4 as in the ideal case, this is
+still a huge improvement over the 1000 we started with.
+

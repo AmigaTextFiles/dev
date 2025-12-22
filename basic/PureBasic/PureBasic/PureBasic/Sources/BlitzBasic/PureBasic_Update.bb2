@@ -1,0 +1,285 @@
+; --------------------------------------------------------------------------------------
+;
+; This source file is part of PureBasic
+; For the latest info, see http://www.purebasic.com/
+; 
+; Copyright (c) 1998-2006 Fantaisie Software
+;
+; This program is free software; you can redistribute it and/or
+; modify it under the terms of the GNU General Public License
+; as published by the Free Software Foundation; either version 2
+; of the License, or (at your option) any later version.
+;
+; This program is distributed in the hope that it will be useful,
+; but WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+; GNU General Public License for more details.
+;
+; You should have received a copy of the GNU General Public License
+; along with this program; if not, write to the Free Software
+; Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+;
+; --------------------------------------------------------------------------------------
+;
+; PureBasic update tool...
+;
+;
+; 09/09/2000
+;   Now use the nice PurePatcher tool !
+;   Reworked a bit.. Easier to use and seems to be clean.
+;
+; 12/03/2000
+;   Added automatic WDelta file generation for libraries...
+;
+; 01/03/2000
+;   First version
+;   Work fine and is very fast (thanks to the assembly compare function :*)
+;
+;
+; Magic line: WDelta Dh3:OldVersion/PureBasic/PureBasic/PureLibraries/Font Ram:PBCompiler
+;
+
+
+WBStartup
+
+OldVersionDrawer$ = "Dh3:PureBasic_old/PureBasic/"
+Update$           = "Dh3:Update/"
+Drawer$           = "Dh4:PureBasic/PureBasic/"
+LogFile$          = "Dh3:Update_PureBasic"
+
+Data.s "$VER: PureBasic Update Tool V1.19 (09/09/2000) - (c) 2000 Fantaisie Software"
+
+*TagList = NInitTagList(20)
+NInitASL
+
+Function.l CompareFiles{*CmpFile1, *CmpFile2, Length.l}
+
+  UNLK   a4
+
+  MOVE.l  d0, a0
+  MOVE.l  d1, a1
+
+_TestLoop:
+  MOVE.b  (a0)+, d0
+  MOVE.b  (a1)+, d1
+  CMP.b   d0,d1
+  BNE    _Fail
+  SUBQ.l  #1, d2
+  BNE    _TestLoop
+
+  MOVEQ.l #0, d0
+  RTS
+
+_Fail:
+  MOVEQ.l #1, d0
+  RTS
+
+;  While *Pos < Length AND Quit = 0
+;
+;    If NPeekB(*CmpFile1+*Pos) <> NPeekB(*CmpFile2+*Pos)
+;      Quit = 1
+;    EndIf
+;
+;    *Pos+1
+;  Wend
+;
+;  Function Return Quit
+
+End Function
+
+Statement ExamineDirectory{Drawer$}
+  SHARED  OldVersionDrawer$, Update$, DrawerLength
+
+
+  DEFTYPE.FileInfoBlock TmpFIB
+
+  Dim FileList$(1000)
+  Dim FileType.b(1000)
+
+  If Drawer$
+    If Right$(Drawer$,1) <> ":" AND Right$(Drawer$,1) <> "/"
+      Drawer$+"/"
+    EndIf
+  EndIf
+
+  NumFic.l = -1
+  *Lock = Lock_(&Drawer$,-2)
+  If *Lock <> 0
+    If Examine_(*Lock, &TmpFIB) <> 0          ; quel est le chemin ?
+      While ExNext_(*Lock, &TmpFIB) <> 0      ; regardons tous les fichiers
+        USEPATH TmpFIB
+
+        NumFic+1
+
+        If \fib_DirEntryType<0             ; si c'est pas un tiroir
+          FileType(NumFic) = 0
+        Else
+          FileType(NumFic) = 1
+        EndIf
+
+        FileName$ = Peek.s(&\fib_FileName)
+        FileList$(NumFic) = FileName$
+      Wend
+    EndIf
+
+    UnLock_ *Lock
+  EndIf
+
+  ;
+  ; Now, process all the files...
+  ;
+
+  ShortDrawer$ = UnRight$(Drawer$, DrawerLength)
+
+  ;NPrint "Hello = ", ShortDrawer$
+
+  For k=0 To NumFic
+
+    ;NPrint OldVersionDrawer$+ShortDrawer$+FileName$
+
+    CopyFile = 0
+
+    FileName$ = FileList$(k)
+    If FileType(k) = 0
+      If ReadFile(0, OldVersionDrawer$+ShortDrawer$+FileName$)
+
+        Length1.l = Lof(0)
+        *MyFile1  = AllocVec_(Length1, 0)
+        ReadMem   0, *MyFile1, Length1
+        CloseFile 0
+
+
+        If ReadFile (0, Drawer$+FileName$)
+
+          Length2.l = Lof(0)
+          *MyFile2  = AllocVec_(Length2,0)
+          ReadMem   0, *MyFile2, Length2
+          CloseFile 0
+
+          If Length1 = Length2
+            CopyFile = CompareFiles{*MyFile1, *MyFile2, Length1}
+          Else
+            CopyFile = 1
+          EndIf
+        EndIf
+
+        FreeVec_ *MyFile1
+        FreeVec_ *MyFile2
+      Else
+        CopyFile = 1
+      EndIf
+
+      If CopyFile = 1
+        If ShortDrawer$
+          a$ = UnLeft$(Update$+"PureBasic/"+ShortDrawer$,1)
+          *Lock = CreateDir_(&a$)
+          UnLock_(*Lock)
+        EndIf
+
+  Execute_ "Copy "+Chr$(34)+Drawer$+FileName$+Chr$(34)+" TO "+Chr$(34)+Update$+"PureBasic/"+ShortDrawer$+Chr$(34)+" ALL",0,0
+
+        FileOutput 1
+        NPrint "    "+Drawer$+FileName$+" has changed..."
+        DefaultOutput
+        NPrint "    "+Drawer$+FileName$+" has changed..."
+      EndIf
+    Else
+      a$ = Update$+"PureBasic/"+ShortDrawer$+FileName$
+      *Lock = CreateDir_(&a$)
+      UnLock_(*Lock)
+
+      NPrint "Examining ", ShortDrawer$+FileName$, "..."
+      ExamineDirectory{Drawer$+FileName$+"/"}
+    EndIf
+  Next
+
+End Statement
+
+NPrint ""
+NPrint "PureBasic automatic update tool is now working :-).."
+NPrint ""
+
+NPrint "First, delete 'PureBasic.asm' and 'ExecutableLib' if any"
+
+a$="PureBasic:Compilers/PureBasic.asm"
+DeleteFile_ &a$
+a$="PureBasic:Compilers/ExecutableLib"
+DeleteFile_ &a$
+
+NPrint ""
+
+DrawerLength = Len(Drawer$)
+
+If WriteFile(1, LogFile$)
+  ExamineDirectory{Drawer$}
+EndIf
+
+
+KeyFile$ = "Dh1:PureBasic/PureBasic/Compilers/Data"
+
+NPrint ""
+NPrint "Patching PBCompiler..."
+Execute_ "PurePatcher "+KeyFile$+" "+Drawer$+"Compilers/PBCompiler "+Update$+"DeltaFiles/PBCompiler.delta",0,0
+
+;
+; To patch all the changed libraries automatically
+;
+
+Drawer$ = Update$+"PureBasic/PureLibraries/"
+
+Dim FileList$(100)
+DEFTYPE.FileInfoBlock TmpFIB
+
+NumFic.l = -1
+*Lock = Lock_(&Drawer$,-2)
+If *Lock <> 0
+  If Examine_(*Lock, &TmpFIB) <> 0          ; quel est le chemin ?
+    While ExNext_(*Lock, &TmpFIB) <> 0      ; regardons tous les fichiers
+      USEPATH TmpFIB
+
+      If \fib_DirEntryType<0             ; si c'est pas un tiroir
+        NumFic+1
+        FileName$ = Peek.s(&\fib_FileName)
+        FileList$(NumFic) = FileName$
+      EndIf
+    Wend
+  EndIf
+
+  UnLock_ *Lock
+EndIf
+
+
+;
+; Now, encrypt all the purelibraries with the PurePatcher..
+;
+
+For k=0 To NumFic
+  SourceFile$ = Drawer$+FileList$(k)
+  Execute_ "PurePatcher "+KeyFile$+" "+SourceFile$+" "+Update$+"DeltaFiles/"+FileList$(k)+".delta",0,0
+  DeleteFile_ &SourceFile$
+Next
+
+NPrint ""
+NPrint "Deleting 'PBCompiler'"
+a$ = Update$+"PureBasic/Compilers/PBCompiler"
+DeleteFile_ &a$
+
+
+NPrint "Deleting 'Data' keyfile"
+a$ = Update$+"PureBasic/Compilers/Data"
+DeleteFile_ &a$
+
+
+
+NPrint ""
+NPrint "PureBasic update finished."
+NPrint ""
+
+;Repeat
+;  VWait
+;Until Joyb(0) = 3
+
+MouseWait
+
+End
+

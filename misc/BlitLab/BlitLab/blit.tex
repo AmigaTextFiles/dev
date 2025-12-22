@@ -1,0 +1,846 @@
+%
+%   Blitter manual
+%
+\input blitmac
+%
+{\let\textindent=\relax
+\footnote{}{\vbox{\sm\baselineskip=9pt\noindent
+Copyright \copyright\ 1988 by Radical Eye Software, Box 2081,
+Stanford, CA\ \ 94309.  All Rights Reserved.
+Every effort has been made to supply complete and accurate information.
+However, Radical Eye Software and Tomas Rokicki assume no responsibility
+for its use, nor for any infringements of patents or other rights of
+third parties which would result.}}}
+\footline={\hss\tenrm Blitter---\folio\hss}
+\vskip 1in
+\centerline{\Bbf BlitLab and the Amiga Blitter}
+\medskip\medskip
+\centerline{Tomas Rokicki}
+\medskip
+\centerline{\vbox{\radeyelogo}}
+\medskip
+\centerline{13 April 1988}
+\vb\vb\vb
+
+This manual will not make much sense without a working copy of BlitLab 1.3,
+as most of the documentation is in the examples provided.  For a free copy,
+including source, simply write to Tomas Rokicki, Box 2081,
+Stanford, CA\ \ 94309.  A few bucks for floppies and postage would be nice,
+but not necessary.
+
+\section Introduction\\
+
+So you have pored over the Hardware Manual and the ROM Kernel Manual, and
+you cannot find the information you need on the blitter.  Well, never
+fear; all the information you should ever need about the blitter is
+contained in this one handy document.
+
+All information below was derived from the Hardware Manual, ROM Kernel
+Manual, the ROM's, and a lot of empirical testing.  Using the blitter directly,
+as described in this report, however, bypasses the layers library.
+If you want to use these techniques for graphics,
+open your own custom screen; if you open any windows on this screen,
+be careful to not destroy the graphics rendered by Intuition.
+Or, do your graphics in an off-screen bitmap, and blast it into your
+windows periodically.
+
+\section The Hardware\\
+
+The blitter comprises part of the Agnes chip in the Amiga, and can only
+access CHIP memory.  (CHIP memory is the lower 512K of memory in the
+current Amiga models, but this may change.)  To the 68000, it appears as a
+set of approximately twenty sixteen bit write only registers.  It can
+access memory at 7.2 megabytes per second, or twice the bandwidth of
+the 68000 (although, as we shall see, it doesn't always run this fast.)
+Any video memory accesses can slow the blitter down, whether for
+screen refresh or for the 68000.  For instance, the standard two bit
+deep high resolution workbench screen can slow the blitter down by
+approximately 30\%.  A low resolution single bit plane screen can slow it
+down by about 8\%.  A high resolution four bit plane screen can slow down
+the blitter by about 60\%.  The blitter is so fast, however, that even
+with this handicap it performs its tasks many times faster than the 68000.
+
+The first thing a programmer of this chip must realize is that
+the Amiga blitter is not a `bit' blitter; rather, it operates on words.
+This fact must be kept in mind when programming the blitter.
+With the appropriate programming, it can manipulate arbitrary rectangles
+of bits.
+
+The blitter uses four DMA channels to perform its work; these are labeled
+A, B, and C (sources) and D (destination).  Any or all of them may be
+disabled independently.  The destination can be calculated from any of
+256 possible logical equations on A, B, and C.  The A and B sources can
+be shifted up to 15 bits to the right, and the first and last word in a
+line from the A source can be masked by a constant.  Each of the four
+channels has its own modulo.  The blitter also has an area fill and a
+line draw mode.
+
+\section Getting Access\\
+
+There are currently four ways you can use the blitter.  Some work better
+than others.  The first way is to use the standard ROM Kernel routines
+for graphics.  This is the simplest and most reliable method; future
+blitters and operating systems will not disrupt your code.  I am not
+going to discuss this approach here, because I don't want to, and all of
+that information is in the ROM Kernel Manuals.  The second method is
+to arbitrarily write to the blitter registers, ignoring Intuition
+and friends.  This is a good way to make enemies; you can trash disks
+as well as system memory, but it makes for good laughs on those slow
+winter nights.  Just pop some random values into those blitter registers,
+and watch the pyrotechnics fly!
+
+The third method is a variation of the second, but you politely request
+permission from the system first, by calling \b OwnBlitter().  This routine
+notifies the Amiga that you want exclusive access to the blitter, and you
+don't want anyone else playing with it.  After this
+call returns, you can almost use the blitter.  Unfortunately, someone
+else may have already given the blitter something to do that hasn't completed;
+therefore, you should call \b WaitBlit() before actually mucking with
+the registers.  This second routine blocks until the blitter is actually
+finished with its work.  Once \b WaitBlit() returns, you are free to do
+what you like with the blitter.
+
+While you have the blitter, you must remember that the rest of the system
+cannot use it.  Therefore, \b Text() calls will not work, and your debug
+printf's will block if they are written to the screen.
+The blitter is used for disk I/O and most user interaction like gadgets,
+so tying
+up the blitter for long periods of time (longer than, say, a few
+milliseconds) is considered highly unfriendly.  Tying up the blitter
+for a second or more is grounds for lynching.
+
+When you are finished with the blitter, you should call \b DisownBlitter()
+to allow everyone else to do what they like.  Remember, however, that
+\b DisownBlitter() might return before the blitter is finished with your
+last operation, so before you use any data created by the blitter,
+call \b WaitBlit() to allow the blitter to finish.
+This last point is worth rereading, as it is often
+the source of some subtle bugs.
+
+Thus, your code might look like the following:
+
+\bv
+OwnBlit() ;
+WaitBlit() ;
+/*
+ *   here you can muck with the blitter
+ *   until it falls off . . .
+ */
+draw_my_polygons() ; /* for example */
+DisownBlitter() ;
+/*
+ *   Now we want to examine the memory region
+ *   the blitter played with.  We wait for
+ *   the blit to complete.
+ */
+WaitBlit() ;
+copy_to_disk() ;    /* for example */
+$endverb
+
+There is another way to gain access to the blitter; you can use the
+supplied queue blitter routines.  This is described
+in the ROM Kernel Manual, Volume 1, pages 2-62 through 2-65.  As of yet,
+I haven't had reason to use these routines; perhaps a later edition of
+this manuscript will have information on them.
+
+\section BlitLab\\
+
+To allow easy experimentation with the blitter, I have written a program
+called BlitLab.  This program provides a laboratory in which you can
+play with the blitter registers in a somewhat safe manner.
+
+The blitter has a much greater potential for damage to system memory
+than the 68000 does, since once started it performs operations on large
+areas of memory without interruption or instruction checking.  If the
+68000 starts executing random data as instructions, it usually very
+quickly executes an odd-address or illegal op-code trap.  The blitter,
+on the other hand, could easily wipe out kilobytes of data before the
+system noticed anything was amok.  BlitLab therefore carefully checks
+the values you have entered to be sure that system memory will not be
+overwritten.  Only if it will not be are you allowed to do the blit.
+That is, except for line mode; it is so complicated to check for line
+mode validity, that I let you trash memory with it.  But more on that
+later.
+
+With BlitLab, you can either use the actual blitter to perform the
+experiment, or use a blitter simulator included in the program.  To
+switch between the two, hit the gadget marked `Real' (or
+`Simul').  When running with a simulated blitter, you can write a log
+file containing the actions of the blitter.  The name of this file can
+be specified with the `Log' string gadget; a null name indicates no log
+file is to be written.
+
+Note that simulation of the line mode does not work in version 1.3 of
+BlitLab.
+
+\section DMA Channels\\
+
+So now we have control of the blitter; we can write to all of its
+registers and do whatever we like.  Before we get into exactly what
+we can do, let me describe the blitter DMA channels.
+
+As mentioned, the blitter has four DMA channels, A, B, C, and D.
+These are shown in the lower right hand corner of the BlitLab display.
+What, you say you are not in BlitLab yet?  Go to your Amiga, plug in
+a disk with BlitLab on it, and {\tt run blitlab}.  The rest of this
+manual assumes that you have done this.  If you are running an interlaced
+screen or odd colors, you might find the BlitLab display visually jarring;
+rerun BlitLab with the command {\tt run blitlab -c} to open a custom
+screen.
+
+Back to the DMA channels.
+The first three are always sources, the last is always a destination.
+You can use any combination of the four channels, from none of them
+to all four.  Each of the four channels has a 32 bit address pointer which
+points to the memory it will use or modify.  The least significant bit
+of the low order word is ignored.  Enough high bits are ignored so only
+CHIP memory can be accessed; the current chip ignores the top 13 bits.
+Each channel also has an independent sixteen bit
+signed modulo (in bytes, with the least significant bit again ignored.)
+For the three source DMA channels, there is also a data register which
+you can preload with constant data if the DMA channel is turned off.
+
+The DMA channels share a width and a height register.  The
+width is in 16 bit words, and can take a value from 1 to 64.  The height
+is in pixels, and can take a value from 1 to 1024.  Thus, the largest
+rectangular field on which the blitter can directly operate is 1024 by
+1024.  However, larger fields can be handled by splitting a blit into
+smaller blits, and using the modulo fields appropriately.
+
+A key thing to remember here is that the width is in words, the modulos
+and pointers are in bytes, and the height is in pixels.  This is the
+most common error made when using BlitLab and the blitter, so remember!
+
+\section Block Clear\\
+
+The destination can receive any logical combination of its three source
+operands.  Let's start experimenting.
+First we will try to clear memory.  The large rectangle in the upper
+left hand corner of the BlitLab window is the bit region we can experiment with.
+Let's set some random bits for the blitter to clear.  Move
+the mouse into the black rectangle, hold down the left mouse button, and
+move the mouse around.  Set pixels until you tire of the novelty.  Note
+that as you move the mouse, the Adrs and Shift fields change; these will
+be useful in a second.  To clear pixels, hold down the right mouse button
+instead of the left.
+
+Once you have a reasonable number of pixels on the screen, you are ready
+to begin.  To enter data into a string gadget, select the string gadget,
+backspace over the old data,
+type new data, and then hit return.  First, in the gadget marked W,
+enter the number \.{6}.  The field we are working on is 96 pixels wide by
+32 pixels high; that is six words by 32 rows.  Enter \.{32} into the H gadget.
+Now, turn on the D DMA channel by selecting the gadget marked `N' in
+the D row; it should toggle and show `Y'.  Enter \.{M} into the PT column
+on the D row; this is the
+symbolic name for the address of the rectangle we are experimenting
+with.  Enter \.{0} into the `Function' gadget near the center of the window.
+We are ready to go.  At this point, select the `Calc' gadget.
+BlitLab will read the values you have entered and make sure that you
+are not going to clobber the system.  If the blit is safe, it will say
+so; otherwise it will print an error message on the window title
+bar.  If you get the error message, it is likely that your machine will
+crash if you ask it to perform the blit.
+
+Otherwise, go ahead and select the `GO' gadget.  The pixels you so
+laboriously set should disappear.  Congratulations, you have performed
+your first blit!
+
+You may have noticed that the pixels actually disappeared rather
+slowly.  If this is the case, you have a defective Amiga.  No, actually
+this is an artifact of the program; BlitLab is performing the blits
+in some other memory somewhere, and then copying and expanding the bits
+to the rectangle displayed on the screen.  It is this updating and
+expanding that is slow, not the blit.  So don't be alarmed.
+
+Before we get steeped in explanations, let's experiment some more.
+Set the `Function' to \.{255}, and hit `GO' again.  This should set all of
+the pixels in our rectangle.  Set it back to \.{0}, and set the height to
+\.{16}.  Now, only half of the rectangle is cleared.  Set the modulo (for
+the D channel) to \.{6} (bytes), and reduce the width to \.{3} (words,
+remember?)  Set the `Function'
+back to \.{255}, and `GO'.  Now the upper left corner of the rectangle is
+cleared.
+
+Oops, we are probably getting ahead of ourselves here.  For now, just
+take my word for the fact that setting the function to \.{0} clears the
+destination, and setting the function to \.{255} sets all of the bits in
+the destination.  I am sure the width and height (that's the W and H
+gadgets) explain themselves well enough, as does the address pointer
+(that's PT.)  But, how is the modulo interpreted?
+
+The algorithm the blitter uses to do a blit looks something like this:
+
+\bv
+doblit(daddress, height, width, dmodulo)
+char *daddress ;
+int height, width, dmodulo ;
+{
+   int h, v ;
+   for (v=0; v<height; v++) {
+      for (h=0; h<width; h++) {
+         *daddress = function() ;
+         daddress += 2 ;
+      }
+      daddress += dmodulo ;
+   }
+}
+$endverb
+\noindent
+(See the appendix for a more detailed blitter emulator.)
+Here \b function() calculates the data to be stored; it will be described
+later.  A row consists of \.{width} 16 bit words, each of which are modified
+in turn, incrementing the address pointer to the next word.
+After a row, the value \.{dmodulo} is added to the address.  Thus, if your
+bitmap is \.{n} words wide, \.{2*width+dmodulo} should always equal \.{n}.
+
+\section Memory Copy\\
+
+Clear the rectangle again.  This time do it with the mouse; select the
+gadget marked `Point', it should toggle to `Box'.  Move the mouse
+to the upper left corner of the rectangle, press the right mouse button,
+and drag the mouse to the lower right corner of the rectangle, holding
+the mouse button down.  Then release the mouse button; the rectangle
+should clear.  If it doesn't clear, do it again, being careful where you
+press and release the mouse.  Now we are going to start experimenting
+with using multiple DMA channels.
+
+Turn on the A DMA channel, and set its pointer to \.{M}.  Set the D
+channel pointer to \.{M+192}; this is the bottom half of the rectangle.
+If you move the mouse to the middle of the left edge of the rectangle,
+within the rectangle, the Adrs field should display \.{M+192}; this is
+an easy way to find the address of a particular portion of the
+rectangle.  Set the modulus of the D channel back to \.{0}, set the W field
+to \.{6}, and the H field to \.{16}.  Set the `Function' to \.{A}.  Now, draw
+some random pixels in the upper half of the rectangle.  (You will need
+to toggle the `Box' gadget to do this.)  Then, hit
+`GO'.  The upper half of the rectangle should be duplicated in the
+lower half!  Try setting the function to \.{~A}, and see what happens.
+You are actually copying memory!
+
+\section Setting Memory to a Particular Value\\
+
+You can also set memory to a particular value.
+Turn off the A DMA channel, but leave the
+function set to \.{A}.  Now put the value \.{\$5555} in the ADAT gadget (type
+the dollar sign, please.)  Hit `GO'.  You should get stripes in the
+lower portion of the rectangle.  What is happening here is that the
+A DMA channel is turned off, so no memory is being loaded into the A
+channel.  Instead, the value in the A data register is being used.
+This is a quick way to set a memory region to a particular value.
+The important point to remember here is that you can use a
+channel as a constant if you turn it off and preload its data register.
+
+\section More Complex Operations\\
+
+Let's try some more complex operations on memory, now.  We are going
+to divide our rectangular region into four areas, one for A, one for
+B, one for C, and one for D.  Set W to \.{3}, all four modulus values to
+\.{6}, and the PT gadgets for A, B, C, and D to \.{M}, \.{M+6}, \.{M+192},
+and \.{M+198},
+respectively.  Now draw some random things in the regions corresponding
+to A, B, and C.  I recommend, for instance, filling the left half of
+A, the top half of B, and a smaller rectangle in the middle of C.
+You should use the `Box' drawing mode.  Turn all four DMA
+channels on, and set the function to 
+\.{ABC+A~B~C+~AB~C+~A~BC}.  Execute `GO'; there
+should be eight distinct regions.  (The function is equivalent to
+A\xor B\xor C).
+
+Now you can experiment with the various possible functions.  Try the
+function \.{AB}; is the result only those bits that have both A and B set?
+(The quickest way to clear a string gadget is to hold down the right
+Amiga key and `X'.)
+Now try \.{A+B}, this time either A or B set should result in a destination
+bit on.  And so on and so forth.
+
+So how are these function codes computed?  Actually, it is quite simple.
+As you enter a new function, note how the least significant four nybbles
+of CON0 (lower left box on the display) change; this is the hexadecimal
+representation of the equation you entered.  You must write your function
+as a sum of products; the products have the values:
+
+$$\vbox{\catcode`\~=\active\let~=\not
+\halign{\hfil#\quad&{\tt #}\qquad&\hfil#\quad&{\tt #}\qquad&
+\hfil#\quad&{\tt #}\cr
+A&F0&B&CC&C&AA\cr
+~A&0F&~B&33&~C&55\cr
+AB&C0&AC&A0&BC&88\cr
+A~B&30&A~C&50&B~C&44\cr
+~AB&0C&~AC&0A&~BC&22\cr
+~A~B&03&~A~C&05&~B~C&11\cr
+AB~C&40&A~BC&20&~ABC&08\cr
+A~B~C&10&~AB~C&04&~A~BC&02\cr
+ABC&80&~A~B~C&01\cr}}$$
+
+To sum them, simply `or' them.  (Do not add them.)  Thus, A\xor B is
+A\not B+\not AB or {\tt 30}$\vee${\tt 0C} or {\tt 3C}.  It is usually easier
+just to enter the equation into BlitLab and read the result, however.
+
+\section Shifts and Masks\\
+
+After you have had your fill of experimenting with the logic equations, we
+can proceed to shifts and masks.  Both the A and B DMA channel have
+independent shifts.  In addition, the A channel has a first word and last
+word mask.  These are essential in making our word blitter appear to
+be an actual bit blitter.  First, using the same set-up you had for the
+previous experiment, set the A shift to \.{3}.  (The left half of the A
+region, top half of the B region, and a middle section of the C region
+should be set at this point.)  Shifts values are always to the
+right.  Set the function to our good old \.{ABC+A~B~C+~AB~C+~A~BC}, and `GO'.
+You should notice the shift of the A operand, and also notice that zeros
+are shifted in from the left.  Now reset the A shift to \.{0}, and set the
+B shift to \.{3}.  You should get some strange results; there are a few pixels
+that should be set, but aren't, and a few set that should be clear.
+Yes, your Amiga is
+working.  Let's examine exactly what's happening here.  (We are also going
+to update our blitter algorithm.)
+
+To illustrate the `problem' best, fill the top half of the A region, and
+clear the bottom half.  Set the function equal to `A', and set the A shift
+to 3.  Hit `GO', and let me explain what you have on your screen.
+The destination looks exactly like the source, except the first three pixels
+in the top row are clear, and the first three pixels in the first row
+which is supposed to be totally clear are set!  This is because of the way
+the blitter shifts.
+
+There is an internal register which holds bits between data fetches for
+the A and B registers.  This register is initialized to all zeros at the
+beginning of a blit (it is not the Data register, which is ignored on
+all blits with that particular DMA channel turned on.)  As a word is fetched,
+it is shifted to the right by the number of bits in the shift count.
+The high bits come from this internal data register, and the low bits
+are shifted out into the internal data register.  In other words, the
+algorithm looks something like this:
+
+\bv
+doblit(aaddress, height, width, amodulo, sh)
+char *aaddress ;
+int height, width, amodulo, sh ;
+{
+   int h, v ;
+   int prev_data, data ;
+   prev_data = 0 ;
+   for (v=0; v<height; v++) {
+      for (h=0; h<width; h++) {
+         data = ((prev_data << 16)
+                | *aaddress) >> sh ;
+         prev_data = *aaddress ;
+         function(data) ;
+         aaddress += 2 ;
+      }
+      aaddress += amodulo ;
+   }
+}
+$endverb
+\noindent
+So, as you can see, things work nicely along the row.  The first time
+around, the most significant bits of the data word get shifted right
+and used.  The next operation uses the least significant bits of the previous
+data word and the most significant bits of the current word, as it is
+supposed to.  The only difficulty appears across rows.  For the first
+word in a subsequent row, the low order bits of the last word in the
+previous row are used, rather than shifting in zeros as happens on the first
+row.  Things start to get a bit hairier.
+
+But all is not lost.  Using the A register's ability to mask the first
+and last word in a row, we can zero out any bits we want, even if we
+turn off the A DMA channel.  For instance, using the current settings of
+BlitLab, set the least significant three bits of the ALWM to \.{0}.  (Note
+that {\it these} are the bits we need to mask out; the masks are applied before
+the shifting.  In addition, the FWM is applied only to the first word in
+each row; the LWM is applied only to the last word; if they are the same
+word, both masks are applied.)  Redo the blit, and now things
+appear to be working correctly.
+
+\section Zero Flag\\
+
+You might have noticed that after each blit, BlitLab writes
+\.{Zero Flag SET} or \.{Zero Flag CLEAR} on the title bar.  As the
+blitter runs, it looks at the result values that it would write to
+the D channel, if the D channel were on.  If any of these values are
+non-zero, then the zero flag is cleared at the end of the blit.
+Otherwise, the zero flag is set.  This can be useful for collision
+detection, for instance; simply `and' together your object and the
+background, and if the zero flag is clear, there was a collision.
+
+\section Decrement Mode\\
+
+Sometimes the source and destination of your blits will overlap.  If
+the destination starts at a lower memory address than the source, everything
+will work fine.  However, if the destination starts at a higher memory
+address and overlaps a source, a portion of the source will be overwritten
+by the destination before it can be used as source, so the blit will not
+perform as expected.  The blitter has a special flag which solves this
+problem.  This flag puts the blitter in the decrement mode, where addresses
+are decremented instead of incremented as the blit proceeds.
+Toggle the gadget `(desc)', it should become
+`DESC', indicating that it is set.  If you use this mode, you must
+initialize the addresses to the end of the source or destination block,
+and use negative modulo values.  The W and H must stay positive.
+Try it.  Turn on the A and D channels, and turn off the B and C.
+Set the A channel to \.{M+190}, and the D channel to \.{M+382}.  Set the
+function to \.{A}, the modulos to \.{0}, the width to \.{6}, and the height
+to \.{16}.  Set the FWM and LWM back to \.{\$FFFF}.
+Draw some random pattern in the upper half of the rectangle,
+insure that the DESC flag is set, and `GO'.  It should work as before.
+Now set D to \.{M+202}, and watch the pattern step down with each blit.
+
+Note that the blitter actually has a single-stage pipeline on its
+output.  All of the sources for the {\it next\/} operation are fetched
+before the result of the current operation is written to memory.  This
+makes it possible, for instance, to move a bit field eight bits left,
+without using descending mode.  Be sure to toggle DESC back to (desc)
+before proceeding.
+
+\section Copying Arbitrary Regions\\
+
+We will now attempt to move a rectangular array of bits from one random
+bit location to another.
+To set things up, clear out the entire rectangle.  Now, draw an ellipse
+in the upper half region; try to get it close to the four borders.
+Set the entire lower region, and clear an X across the entire region.
+We shall attempt to
+move the portion of the ellipse from bit positions 2 through 28 to bit
+positions 13 through 39 in the destination, leaving all the other bits
+in the destination unchanged.  The source spans only two words, but
+the destination spans three, so the blit width must be 3.  For some
+other blits, the source might span more words than the destination;
+the width must always be the maximum of the two.  So set the width to
+\.{3}, and all modulos to \.{6}.
+
+The A channel is going to function as a mask.  Wherever the bit in the
+A channel is set, we will copy the source to the destination; where the
+bits are clear, the destination must not be changed.
+The B channel will be used to actually fetch the source bits,
+the C channel will
+read the destination, because we will need to merge the destination
+with the new source before writing, and the D channel will do the writing.
+So, set the B address to \.{M} and the C and D addresses to \.{M+192}.  Turn
+off the A channel, but turn all three others on.  Set the A data to
+\.{\$FFFF} and the B shift to \.{11}.  Note that we are using the A channel
+as a constant; even though it is a constant, the mask registers will
+still mask out bits of that constant.
+
+Now we need to figure out how we are going to get A to mask out only
+those bits we need to change.  Since our destination is the one which
+spans three words, A must track it, so set the shift of A to \.{0},
+and the FWM to zero for those bits of the first word of the destination
+which are to be left alone.  In our case, we wish to leave the first 13
+bits alone, so we use a value of \.{\$0007}.  The LWM gets set to zero for
+the bits of the last word, similarly, yielding a value of \.{\$FF00}.
+Note that if the source were three words and the destination two, the
+A channel would have to track B.  In this case, you would set the shift
+for A the same as the shift for B, and set the masks to mask out the
+particular bits in B which will not be used.  We are almost ready.
+
+Let's think about the function we need now.  For where the A bits are
+masked out, or zero, we need to leave the destination alone; this gives
+us the minterm \.{~AC}.  Where A bits are set, we pass B through unchanged;
+this gives us \.{AB}.  Summing these, we enter \.{AB+~AC} for our function, and
+hit `GO'.  Carefully check out the picture; it should have worked.
+We can also complement on the copy using the function \.{A~B+~AC}.  The
+function \.{AB+C} provides an `or' draw, and the function \.{AB~C+A~BC+~AC}
+provides an exclusive or copy.  You might try these.
+
+Whew!  That's a lot.  You might take a breather here.  Then, later,
+come back and reread the previous paragraphs, and play with BlitLab
+some more.  It's really quite simple once you get the hang of it.
+It is interesting to note that it required the full functionality of
+the blitter---all four channels, shifts and masks---just to do an
+arbitrary bit rectangle copy.  These are the difficulties you run into
+when trying to make a word blitter perform as a bit blitter.
+
+\section Copying Arbitrary Regions---Continued\\
+
+Now we'll illustrate how to blit from a source of three words to a
+destination of only two words.  Undo your last blit with the `Undo'
+gadget, or, if this doesn't work, redraw the ellipse and reverse
+video cross.  This time we will move the portion of the ellipse from
+bit position 13 through 39, to bit position 2 through 28 of the
+destination.  Again, our width is \.{3}, and our modulos are \.{6}.
+
+Our shift this time is --11.  The blitter cannot do negative shifts, so
+we need to set the destination back one word, and use a shift of
+(--11 + 16) or 5.  So set the C and D pointers to \.{M+190} instead of
+\.{M+192}.  Set the B shift to \.{5}, and since A will mask B, set the A
+shift to \.{5} as well.
+
+This time, our A channel will track B, so we need to determine which
+bits of B need to be masked out.  The first 13 bits will be masked, so
+our FWM must only have the last three bits set, so give it a value of
+\.{\$0007}.  We need the last eight bits of B, so the LWM gets a value of
+\.{\$FF00}.  Hit `GO', and watch it work!
+
+This technique will work in general, but we haven't covered all the
+cases yet.  One particularly difficult case occurs, for instance, when
+we want to move bits 8 through 19 to bits 7 through 18 of the source.
+Both source and destination span two words.  The shift is --1, so we
+decrement the destination pointer, and use a shift of 15.  Now,
+however, we need to use a width of three!  The first word of the
+destination will be masked out so it will be unchanged, and we need
+to write the next two words.
+
+But even this is not sufficient.  The A data channel cannot mask
+the source, because now the source must be three words wide as well,
+and there is no way to mask the middle word.  The A data channel
+cannot mask the destination either, for the same reason.
+
+The solution to this little problem is to use the descending mode
+of the blitter.  The shifts work backwards in descending mode, so we
+simply use a shift of 1, and everything works fine.  Our width is \.{2},
+and our modulos are \.{8}.  Our B pointer should be initialized to the
+last source word, which is \.{M+182}; our C and D pointers should be initialized
+to the last destination word, or \.{M+374}.  The A data channel can mask either
+the source or the destination; we shall use the source.  Set the shift the
+same as B (\.{1}).  Note that in
+this case, the FWM actually masks the last word in a row, and the LWM
+masks the first!  Thus, the FWM should mask off the last 12 bits, and
+should thus be given a value of \.{\$F000}; the LWM should mask off the first
+eight, and get a value of \.{\$00FF}.  Try it!
+
+\section Area Fill\\
+
+Everything we have dealt with so far has been strictly data movement
+and strict logical equations.  Now we examine one of the more esoteric
+abilities of the blitter---area fills.  This feature is actually quite
+easy to demonstrate, but it only works in the descending mode.  Set
+up BlitLab as follows:  Channels A, D on; A address of \.{M+190}, D
+address of \.{M+382}; W of \.{6}, H of \.{16}, modulos of \.{0}, function
+of \.{A}, DESC on.  Clear the rectangular array, and draw two vertical lines
+in the top half of the rectangle, separated by at least one pixel.
+If the lines are not exactly straight up and down, that's okay, just
+insure that there is only one pixel set per row per line.  (You might
+clear out a few pixels for this.)
+Turn on the `(ife)' flag (inclusive fill enable), and `GO'.  The area
+between the two lines should be filled in the lower portion of the
+rectangle.
+
+Now turn on the `(fci)' flag (fill carry in), and `GO'.  This time,
+the area outside the two lines are filled.  The fill carry flag is
+toggled for each bit seen, and if it is set, the bits in the destination
+are set.  Now, turn off the `(fci)' flag, and turn on the `(efe)' flag
+(exclusive fill enable.)  The area between the two lines is again filled,
+but this time the line on the trailing edge of the fill was deleted.
+This is useful for narrower fills.
+
+Now draw a third vertical line between the previous two, and hit `GO'.
+Note how the fill is indeed performed correctly, and the FCI bit is
+restored to its set value at the beginning of each row.  Accidentally
+set a random bit somewhere in A, and observe the effect is has on the
+fill.  Now you know why each line must be only one pixel wide.
+
+You can still perform any operation on the A, B, and C sources before
+the area fill; the lines in the result will be used.  For instance,
+you can area fill based on only a particular color of line, by setting
+A, B, and C to the bit planes of the display, and setting the function
+to one which selects only the appropriate color.
+
+\section Line Drawing\\
+
+This area is the sketchiest part of my knowledge.  I have actually gotten
+the blitter to draw lines, but it took a lot of time and effort.  The
+Hardware and ROM Kernel Manuals are incorrect in some of their assertions;
+I had to disassemble part of the ROM to determine exactly how to draw
+lines.  For
+brevity, the following is an algorithm which will draw a line from
+\.{x1}, \.{y1} to \.{x2}, \.{y2} on a window at \.{m} which is \.{wx} by
+\.{wy} pixels.  \.{X} and \.{Y}
+are used to hold the slope values for the line, and assist in finding
+the quadrant the line is to be drawn in.  Note how the flags (fci),
+(ife), and (efe) are used to select the particular quadrant.
+
+\bv
+doline(x1, y1, x2, y2)
+int x1, y1, x2, y2 ;
+{
+   int x, y, X, Y ;
+   int q = 0, t ;
+
+   x = x2 - x1 ;
+   y = y2 - y1 ;
+   if (x < 0) X = - x ;
+   else X = x ;
+   if (y < 0) Y = -y ;
+   else Y = y ;
+   if (x > 0) {
+      if (y > 0) q = (X > Y ? 1 : 0) ;
+      else q = (X > Y ? 3 : 4) ;
+   } else {
+      if (y > 0) q = (X > Y ? 5 : 2) ;
+      else q = (X > Y ? 7 : 6) ;
+   }
+   if (Y > X) {
+      t = X ; X = Y ; Y = t ;
+   }
+   blit.height = X + 1 ;
+   blit.apt = 4 * Y - 2 * X ;
+   if (2 * Y - X < 0) blit.sign = 1 ;
+   else blit.sign = 0 ;
+   blit.amod = 4 * (Y - X) ;
+   blit.bmod = 4 * Y ;
+   blit.line = 1 ;
+   blit.efe = (q & 1) ;
+   blit.ife = (q & 2) >> 1 ;
+   blit.fci = (q & 4) >> 2 ;
+   blit.adat = 0x8000 ;
+   blit.bdat = 0xffff ;
+   blit.ash = x1 & 15 ;
+   blit.cpt = blit.dpt = m + ((x1 >> 3) & ~1) + y * (wx >> 3) ;
+   blit.cmod = blit.dmod = wx >> 3 ;
+   blit.width = 2 ;
+   blit.usea = 1 ;
+   blit.useb = 0 ;
+   blit.usec = 1 ;
+   blit.used = 1 ;
+}
+$endverb
+All of these calculations and initializations are done automatically by
+BlitLab.  All you need do is enter the starting x and y and ending x
+and y values into SX, SY, EX, and EY, respectively, and then hit `SETUP'.
+(The x values can range from 0 to 95; the y values from 0 to 31.  If you
+exceed these ranges, you will walk on system memory, and BlitLab won't
+check line mode!)
+We do not set the `function' variable in the above routine or in
+BlitLab, because there
+is more than one way to draw a line.  As the line is being drawn, the
+bit set in the A register moves across and wraps around; this is the bit
+that might be set.  The original destination is available from the C
+channel, and the B channel provides a mask.  Thus, to just draw a solid
+line, you would use the equation \.{A+~AC} (if A is set, draw a bit, otherwise
+pass the destination through unchanged.)  Try it.  To draw an exclusive
+or line, use \.{A~C+~AC}.  To draw a textured line, use \.{AB+~AC}, and put your
+texture in B.  Note how the A and B address registers are used as
+accumulators instead of address registers.
+
+There is also an option to draw a line with only one bit set per horizontal
+row; this is essential for drawing polygons to be filled later.  If you
+set the `(desc)' flag, the lines will be drawn this way.
+
+\section Speed\\
+
+So, all of those fancy operations are fine and dandy, but just how fast
+is the blitter, anyway?  This depends entirely on which DMA channels
+are turned on.  You might be using a DMA channel as a constant, but unless
+it is turned on, it does not count against you.  The minimum blitter
+cycle is four clocks; the maximum is eight.  Use of the A register is
+always free.  Use of the B register always adds two clocks to the
+blitter cycle.  Use of either C or D is free, but use of both adds
+another two clocks.  Thus, a copy cycle, using A and D, takes four
+clocks per cycle; a copy cycle using B and D takes six clocks per
+cycle, and a generalized bit copy using B, C, and D takes eight clocks.
+When in line mode, each pixel takes eight clocks.
+
+The clock is the 7.18 MHz system clock.  To calculate the total time
+for the blit in microseconds, after setup, you use the equation
+$$t={nHW\over 7.18}$$
+where $t$ is the time in microseconds, $n$ is the number of clocks
+per cycle, and $H$ and $W$ are the height and width of the blit,
+respectively.
+
+Actually, this is a minimum time, which is strictly impossible.
+Display data fetches, 68000 cycles, and other operations can steal
+cycle bandwidth away from the blitter.  One way to eliminate most of
+this overhead is to call the macro {\tt OFF\_DISPLAY}
+which turns off the display; this is not a friendly thing to do,
+however.  Don't forget to call {\tt ON\_DISPLAY} after the blit
+is finished!
+
+\section Blitter Registers\\
+
+So far we've discussed virtually every aspect of the blitter, except
+exactly how its registers are organized, and how one actually stuffs
+these registers.  Well, the blitter is accessible from the custom
+hardware include file {\tt hardware/custom.h}, and makes available
+20 write-only 16 bit registers, eight of which are organized as four
+32 bit registers.  Full documentation is in the Hardware
+Reference Manual, but I've summarized them here, as they are available
+from C.  You might have noticed how the register contents block on
+the lower left hand portion of the window changes as you set various
+blitter parameters; this is an easy way to calculate register settings.
+\vb{\leftskip=\parindent\parindent=-\parindent
+\reg custom.bltcon0/  This sixteen bit register contains the A shift
+value in its top four bits and the function code in its low eight bits.
+Bits 8 through 11 are used to indicate which DMA channels are on; 8,
+9, 10, and 11 correspond to DMA channels D, C, B, and A, respectively.
+
+\reg custom.bltcon1/  This sixteen bit register holds the B shift in
+its top four bits and five flags in its lower five bits.  Bits 0, 1,
+2, 3, and 4 are (line), (desc), (fci), (ife), and (efe), respectively.
+In the line mode, bits 5 and 6 are (ovf) and (sign), respectively.
+
+\reg custom.bltafwm/  This sixteen bit register holds the first word
+mask for the A DMA channel.
+
+\reg custom.bltalwm/  This sixteen bit register holds the last word mask
+for the A DMA channel.
+
+\reg custom.bltapt/  This thirty-two bit register holds the address of the
+A DMA channel; its value is in bytes, but the least significant
+bit is ignored, as are the most significant thirteen bits.
+
+\reg custom.bltbpt/  This thirty-two bit register serves as the address for
+the B DMA channel.
+
+\reg custom.bltcpt/  This thirty-two bit register provides the address for
+the C DMA channel.
+
+\reg custom.bltdpt/  This thirty-two bit register is the destination or D
+channel address.
+
+\reg custom.bltsize/  This sixteen bit register gets the height
+in rows, in the most significant ten bits, and the width in words, in the
+least significant six bits.  Note that assigning to this register starts
+the blitter, so it should be the last register initialized.
+
+\reg custom.bltamod/  This sixteen bit signed register holds the modulo
+value for the A DMA channel.  The value written is in bytes, but the least
+significant bit is ignored.  The most significant bit is used as a sign
+bit.
+
+\reg custom.bltbmod/  This sixteen bit register serves a similar function
+for the B DMA channel.
+
+\reg custom.bltcmod/  This sixteen bit register provides the modulus for
+the C DMA channel.
+
+\reg custom.bltdmod/  This sixteen bit register holds the modulus for the
+D channel.
+
+\reg custom.bltadat/  This sixteen bit preloadable data register holds
+data for the A DMA channel.
+
+\reg custom.bltbdat/  This sixteen bit preloadable data register holds
+data for the B DMA channel.
+
+\reg custom.bltcdat/  This sixteen bit preloadable data register holds
+data for the C DMA channel.
+
+\reg custom.dmaconr/  This is the system DMA register.  Two bits are
+of concern when using the blitter.  Bit 14 (BBUSY) indicates that the
+blitter is busy.  Bit 13 (BZERO) is the blitter zero flag described above.
+\par}
+
+\section Missing Sections\\
+
+The things we have neglected to talk about, which should be included,
+are listed here.  We need to describe \b QBSBlit() and \b QBlit().
+We also need to discuss the dirty mode of the blitter.
+It would be nice to have some
+empirical timings comparing \b QBlit() with \b OwnBlitter() methods
+of obtaining the blitter.
+
+\section Plug for Amiga\TeX\\
+
+These docs were typeset on the Amiga using Amiga\TeX, previewed
+on the screen, and printed on a QMS-Kiss at 300 dots per inch.
+For a demonstration disk and more information, contact Radical Eye Software,
+Box 2081, Stanford, CA\ \ 94309.
+
+\vfill\eject
+\centerline{\bbf Appendex A:  A Blitter Simulator}
+\smallskip
+\centerline{This code is in {\tt blitsim.c} of the BlitLab source.}
+\vb\vb
+\verbfile{blitsim.c}
+\bye

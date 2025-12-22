@@ -1,0 +1,351 @@
+DEFINITION FOR LIBRARY MODULE Utility ;
+
+FROM SYSTEM IMPORT ADDRESS, STRING, LONGWORD, LONGSET ;
+IMPORT Exec ;
+
+CONST
+  UTILITYNAME = "utility.library";
+
+TYPE
+  ClockDataPtr	 = POINTER TO ClockData	       ;
+  HookPtr	 = POINTER TO Hook	       ;
+  TagPtr	 = POINTER TO Tag	       ;
+  NamedObjectPtr = POINTER TO NamedObject      ;
+  UtilityBasePtr = POINTER TO UtilityBaseRec   ;
+
+TYPE
+  ClockData = RECORD
+    sec , min , hour , mday , month , year , wday : CARDINAL ;
+  END ;
+
+(* Useful definition for casting function pointers: *)
+(* hook.h_SubEntry := HOOKFUNC(AFunction)	    *)
+
+  HOOKFUNC = PROCEDURE( ) : LONGINT ;
+
+  Hook = RECORD
+    h_MinNode  : Exec.MinNode ;
+    h_Entry    : HOOKFUNC ;	(* assembler entry point *)
+    h_SubEntry : HOOKFUNC ;	(* often HLL entry point *)
+    h_Data     : ADDRESS  ;	(* owner specific	 *)
+  END ;
+
+(* Hook calling conventions.
+ *
+ * The function pointed to by Hook.h_Entry is called with the following
+ * parameters:
+ *
+ *	A0 - pointer to hook data structure itself
+ *	A1 - pointer to parameter structure ("message")
+ *	A2 - Hook specific address data ("object")
+ *
+ * Control will be passed to the routine h_Entry.  For many
+ * High-Level Languages (HLL), this will be an assembly language
+ * stub which pushes registers on the stack, does other setup,
+ * and then calls the function at h_SubEntry.
+ *
+ * The standard C receiving code is:
+ *
+ *  C:HookFunc(struct Hook *hook, APTR object, APTR message)
+ * M2:HookFunc( hook : HookPtr ; object : ADDRESS ; message : ADDRESS ) ;
+ *
+ * Note that register natural order differs from this convention for C/M2
+ * parameter order, which is A0,A2,A1.
+ *
+ * The assembly language stub for "vanilla" C/M2 parameter conventions
+ * could be:
+ *
+ * _hookEntry:
+ *	move.l	a1,-(sp)		; push message packet pointer
+ *	move.l	a2,-(sp)		; push object pointer
+ *	move.l	a0,-(sp)		; push hook pointer
+ *	move.l	h_SubEntry(a0),a0	; fetch C/M2 entry point ...
+ *	jsr	(a0)			; ... and call it
+ *	lea	12(sp),sp		; fix stack
+ *	rts
+ *
+ * With this function as your interface stub, you can write a Hook setup
+ * function as:
+ *
+ * PROCEDURE InitHook( hook: HookPtr ; m2_func: HookFunc ; userdata: ADDRESS );
+ * BEGIN
+ *   hook^.h_Entry    := hookEntry ;
+ *   hook^.h_SubEntry := m2_func   ;
+ *   hook^.h_Data     := userdata  ;
+ * END InitHook ;
+ *
+ *)
+
+(* Tags are a general mechanism of extensible data arrays for parameter	     *)
+(* specification and property inquiry. In practice, tags are used in arrays, *)
+(* or chain of arrays.							     *)
+
+TYPE
+  Tag = LONGINT ;
+  TagArrayPtr = POINTER TO ARRAY OF Tag ;
+
+  TagItem = RECORD
+    ti_Tag : Tag ; (* identifies the type of data *)
+    CASE :INTEGER OF
+    |1: ti_Any  : LONGWORD ;
+    |2: ti_Data : LONGINT  ; (* type-specific data *)
+    |3: ti_Set  : LONGSET  ;
+    |4: ti_Adr  : ADDRESS  ;
+    END ;
+  END ;
+  TagItemPtr = POINTER TO ARRAY OF TagItem ;
+
+CONST
+(* constants for Tag.ti_Tag, control tag values *)
+  TAG_DONE   = 0 ; (* terminates array of TagItems. ti_Data unused    *)
+  TAG_END    = 0 ; (* synonym for TAG_DONE			      *)
+  TAG_IGNORE = 1 ; (* ignore this item, not end of array	      *)
+  TAG_MORE   = 2 ; (* ti_Data is pointer to another array of TagItems *)
+		   (* note that this tag terminates the current array *)
+
+  TAG_SKIP   = 3 ; (* skip this and the next ti_Data items *)
+
+  TAG_USER   = LONGINT({31}) ;
+
+(* If the TAG_USER bit is set in a tag number, it tells utility.library that  *)
+(* the tag is not a control tag (like TAG_DONE, TAG_IGNORE, TAG_MORE) and is  *)
+(* instead an application tag. "USER" means a client of utility.library in    *)
+(* general, including system code like Intuition or ASL, it has nothing to do *)
+(* with user code.							      *)
+
+(*---------------------------------------------------------------------------*)
+
+(* Tag filter logic specifiers for use with FilterTagItems() *)
+  TAGFILTER_AND = 0 ; (* exclude everything but filter hits	*)
+  TAGFILTER_NOT = 1 ; (* exclude only filter hits		*)
+
+(*---------------------------------------------------------------------------*)
+
+(* Mapping types for use with MapTags() *)
+  MAP_REMOVE_NOT_FOUND = 0 ; (* remove tags that aren't in mapList *)
+  MAP_KEEP_NOT_FOUND   = 1 ; (* keep tags that aren't in mapList   *)
+
+(*---------------------------------------------------------------------------*)
+
+(* The named object structure *)
+TYPE
+  NamedObject = RECORD
+    no_Object : ADDRESS ; (* Your pointer, for whatever you want *)
+  END ;
+
+(* Tags for AllocNamedObject() *)
+CONST
+  ANO_NameSpace	= 4000 ; (* Tag to define namespace	*)
+  ANO_UserSpace	= 4001 ; (* tag to define userspace	*)
+  ANO_Priority	= 4002 ; (* tag to define priority	*)
+  ANO_Flags	= 4003 ; (* tag to define flags		*)
+
+(* Flags for tag ANO_Flags *)
+  NSB_NODUPS = 0 ;
+  NSB_CASE   = 1 ;
+
+  NSF_NODUPS = {NSB_NODUPS} ; (* Default allow duplicates *)
+  NSF_CASE   = {NSB_CASE}   ; (* Default to caseless...   *)
+
+TYPE
+  PackArrayPtr = POINTER TO ARRAY OF LONGINT ;
+
+(* PackTable definition:
+ *
+ * The PackTable is a simple array of LONGWORDS that are evaluated by
+ * PackStructureTags() and UnpackStructureTags().
+ *
+ * The table contains compressed information such as the tag offset from
+ * the base tag. The tag offset has a limited range so the base tag is
+ * defined in the first longword.
+ *
+ * After the first longword, the fields look as follows:
+ *
+ *	+--------- 1 = signed, 0 = unsigned (for bits, 1=inverted boolean)
+ *	|
+ *	|  +------ 00 = Pack/Unpack, 10 = Pack, 01 = Unpack, 11 = special
+ *	| / \
+ *	| | |  +-- 00 = Byte, 01 = Word, 10 = Long, 11 = Bit
+ *	| | | / \
+ *	| | | | | /----- For bit operations: 1 = TAG_EXISTS is TRUE
+ *	| | | | | |
+ *	| | | | | | /-------------------- Tag offset from base tag value
+ *	| | | | | | |		      \
+ *	m n n o o p q q q q q q q q q q r r r s s s s s s s s s s s s s
+ *					\   | |		      |
+ *	Bit offset (for bit operations) ----/ |		      |
+ *					      \ 		      |
+ *	Offset into data structure -----------------------------------/
+ *
+ * A -1 longword signifies that the next longword will be a new base tag
+ *
+ * A 0 longword signifies that it is the end of the pack table.
+ *
+ * What this implies is that there are only 13-bits of address offset
+ * and 10 bits for tag offsets from the base tag.  For most uses this
+ * should be enough, but when this is not, either multiple pack tables
+ * or a pack table with extra base tags would be able to do the trick.
+ * The goal here was to make the tables small and yet flexible enough to
+ * handle most cases.
+ *)
+
+CONST
+  PSTB_SIGNED = 31 ;
+  PSTB_UNPACK = 30 ; (* Note that these are active low... *)
+  PSTB_PACK   = 29 ; (* Note that these are active low... *)
+  PSTB_EXISTS = 26 ; (* Tag exists bit true flag hack...  *)
+
+  PSTF_SIGNED = LONGINT({PSTB_SIGNED}) ;
+  PSTF_UNPACK = LONGINT({PSTB_UNPACK}) ;
+  PSTF_PACK   = LONGINT({PSTB_PACK})   ;
+  PSTF_EXISTS = LONGINT({PSTB_EXISTS}) ;
+
+(*----------------------------------------------------------------------------*)
+
+  PKCTRL_PACKUNPACK = 000000000H ;
+  PKCTRL_PACKONLY   = 040000000H ;
+  PKCTRL_UNPACKONLY = 020000000H ;
+
+  PKCTRL_BYTE = 080000000H ;
+  PKCTRL_WORD = 088000000H ;
+  PKCTRL_LONG = 090000000H ;
+
+  PKCTRL_UBYTE = 000000000H ;
+  PKCTRL_UWORD = 008000000H ;
+  PKCTRL_ULONG = 010000000H ;
+
+  PKCTRL_BIT	  = 018000000H ;
+  PKCTRL_FLIPBIT  = 098000000H ;
+
+CONST
+  SHIFT_16 = 65536 ;
+  SHIFT_13 = 8192  ;
+
+(* Example: (Ga_Left-GA_Dummy)*SHIFT_16+PKCTRL_UBYTE+OFFSET(Gagdet,Hieght) *)
+
+  PACK_NEWOFFSET = -1 ;
+  PACK_ENDTABLE	 =  0 ;
+
+TYPE
+  UtilityBaseRec = RECORD (* M2: name clash with library base name *)
+    ub_LibNode : Exec.Library  ;
+    ub_Language: SHORTCARD ;
+    ub_Reserved: SHORTCARD ;
+  END ;
+
+VAR
+  UtilityBase : UtilityBasePtr ;
+
+(* HookEntry is an assembler stub (see above comment) it should not be called *)
+(* directly, its only use is an assigment to the Hook.h_Entry field           *)
+
+PROCEDURE HookEntry( ) : LONGINT ;
+
+PROCEDURE FindTagItem( tagVal : Tag ; tagList : TagItemPtr ) : TagItemPtr ;
+
+PROCEDURE GetTagData( tagVal     : Tag ;
+		      defaultVal : LONGINT ;
+		      tagList    : TagItemPtr ) : LONGINT ;
+
+PROCEDURE PackBoolTags( initialFlags : LONGINT ;
+		        tagList      : TagItemPtr ;
+			boolMap      : TagItemPtr ) ;
+
+PROCEDURE NextTagItem( VAR tagListPtr : TagItemPtr ) : TagItemPtr ;
+
+PROCEDURE FilterTagChanges( changeList , originalList: TagItemPtr ;
+			    apply : LONGINT ) ;
+
+PROCEDURE MapTags( tagList , mapList : TagItemPtr ; mapType : LONGINT ) ;
+PROCEDURE AllocateTagItems( numTags : LONGINT ) : TagItemPtr ;
+PROCEDURE CloneTagItems( tagList : TagItemPtr ) : TagItemPtr ;
+PROCEDURE FreeTagItems( tagList : TagItemPtr ) ;
+PROCEDURE RefreshTagItemClones( clone , original : TagItemPtr ) ;
+PROCEDURE TagInArray( tagValue : Tag ; tagArray : TagArrayPtr ) : BOOLEAN ;
+
+PROCEDURE FilterTagItems( tagList     : TagItemPtr ;
+			  filterArray : TagArrayPtr ;
+			  logic       : LONGINT ) : LONGINT ;
+
+(* Hook functions *)
+
+PROCEDURE CallHookPkt( hook : HookPtr ; object , paramPacket : ADDRESS ) ;
+
+(* Date functions *)
+
+PROCEDURE Amiga2Date( seconds : LONGINT ; VAR result : ClockData ) ;
+
+PROCEDURE Date2Amiga( date : ClockDataPtr ) : LONGINT ;
+PROCEDURE CheckDate ( date : ClockDataPtr ) : LONGINT ;
+
+(* 32 bit integer muliply functions *)
+
+PROCEDURE SMult32( arg1 , arg2 : LONGINT ) : LONGINT ;
+PROCEDURE UMult32( arg1 , arg2 : LONGINT ) : LONGINT ;
+
+(* 32 bit integer division functions. The quotient and the remainder are      *)
+(* returned respectively in d0 and d1.					      *)
+(* Cast the result to an ARRAY [0..1]OF LONGINT to get the quotient/remainder *)
+
+PROCEDURE SDivMod32( dividend, divisor : LONGINT ) : LONGREAL ;
+PROCEDURE UDivMod32( dividend, divisor : LONGINT ) : LONGREAL ;
+
+(*--- functions in V37 or higher (Release 2.04) ---*)
+
+(* International string routines *)
+
+PROCEDURE Stricmp ( string1, string2 : STRING ) : LONGINT ;
+PROCEDURE Strnicmp( string1, string2 : STRING ; length : LONGINT ) : LONGINT ;
+
+PROCEDURE ToUpper( ch : CHAR ) : CHAR ;
+PROCEDURE ToLower( ch : CHAR ) : CHAR ;
+
+(*--- functions in V39 or higher (Release 3) ---*)
+
+(* More tag Item functions *)
+
+PROCEDURE ApplyTagChanges( list, changeList : TagItemPtr ) ;
+
+(* 64 bit integer muliply functions. The results are 64 bit quantities        *)
+(* The result type is not is really LONGREAL, cast the result to the type you *)
+(* need.								      *)
+
+PROCEDURE SMult64( arg1, arg2 : LONGINT ) : LONGREAL ;
+PROCEDURE UMult64( arg1, arg2 : LONGINT ) : LONGREAL ;
+
+(* Structure to Tag and Tag to Structure support routines *)
+
+PROCEDURE PackStructureTags( pack      : ADDRESS ;
+			     packTable : PackArrayPtr ;
+			     tagList   : TagItemPtr ) ;
+
+PROCEDURE UnpackStructureTags( pack      : ADDRESS ;
+			       packTable : PackArrayPtr ;
+			       tagList   : TagItemPtr ) : LONGINT ;
+
+(* New, object-oriented NameSpaces *)
+
+PROCEDURE AddNamedObject( nameSpace , object : NamedObjectPtr ) ;
+
+PROCEDURE AllocNamedObjectA( name    : STRING ;
+			     tagList : TagItemPtr ) : NamedObjectPtr ;
+
+PROCEDURE AllocNamedObject ( name : STRING ;
+			     tag1 : Tag ; .. ) : NamedObjectPtr ;
+
+PROCEDURE AttemptRemNamedObject( object : NamedObjectPtr ) : LONGINT ;
+
+PROCEDURE FindNamedObject( nameSpace  : NamedObjectPtr ;
+			   name       : STRING ;
+			   lastObject : NamedObjectPtr ) : NamedObjectPtr ;
+
+PROCEDURE FreeNamedObject( object : NamedObjectPtr );
+PROCEDURE NamedObjectName( object : NamedObjectPtr ) : STRING ;
+PROCEDURE ReleaseNamedObject( object : NamedObjectPtr ) ;
+PROCEDURE RemNamedObject( object : NamedObjectPtr ; message : Exec.MessagePtr );
+
+(* Unique ID generator *)
+
+PROCEDURE GetUniqueID( ) : LONGINT ;
+
+END Utility.

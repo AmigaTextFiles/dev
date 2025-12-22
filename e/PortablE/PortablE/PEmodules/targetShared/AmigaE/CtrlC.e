@@ -1,0 +1,3 @@
+OPT INLINE, NATIVE
+
+PROC CtrlC() IS {CtrlC()} !!BOOL

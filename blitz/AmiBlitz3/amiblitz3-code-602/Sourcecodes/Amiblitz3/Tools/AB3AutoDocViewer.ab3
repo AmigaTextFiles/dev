@@ -1,0 +1,667 @@
+; XTRA
+; Embedded .xtra Header
+; 
+; General Info
+; -------------------------------------------------------
+; ExePath         = "///Tools"
+; ExeFile         = "AB3AutodocViewer"
+; CreateIcon      = 0
+; Residents       = "all.res"
+; 
+; Compiler
+; -------------------------------------------------------
+; StringBuffer    = 10240
+; MakeSmallest    = 1
+; FuncOptimize    = 1
+; Version         = 2.0.0
+; NumberOfBuilds  = 10
+; 
+; Debugger
+; -------------------------------------------------------
+; CliArgs         = "dir autodocs: file intuition_os4"
+; StackSize       = 8191
+; RuntimeDebug    = 0
+; DebugInfo       = 0
+; CreateDbgFile   = 1
+; OverflowCheck   = 0
+; AssemblerCheck  = 0
+; InterruptCheck  = 1
+; AutoRun         = 1
+; 
+; Editor
+; -------------------------------------------------------
+; CursorLine      = 12
+; CursorColumn    = 33
+; LabelSearch     = "directory"
+; LabelRemark     = 0
+; LabelAll        = 1
+; LabelPosition   = 0
+; 
+; Blitz Objects
+; -------------------------------------------------------
+; Max IconInfo    = 1
+; Max NChunky     = 50
+; Max MUIObject   = 50
+; Max PTModule    = 5
+; Max AsyncReq    = 4
+; Max Req-Lib     = 5
+; Max GTMenuList  = 5
+; Max Console     = 5
+; Max TCPSock     = 5
+; Max XBSound     = 10
+; Max Chunky      = 20
+; Max File        = 5
+; Max GadgetList  = 5
+; Max Queue       = 10
+; Max Screen      = 5
+; Max Shape       = 100
+; Max CopList     = 10
+; Max Sprite      = 20
+; Max Stencil     = 5
+; Max Module      = 5
+; Max Window      = 20
+; Max Anim        = 10
+; Max Sound       = 10
+; Max Bank        = 5
+; Max Buffer      = 10
+; Max BitMap      = 10
+; Max Slice       = 10
+; Max Page        = 4
+; Max Tape        = 5
+; Max IntuiFont   = 5
+; Max MedModule   = 8
+; Max Palette     = 4
+; Max MenuList    = 5
+; Max BlitzFont   = 4
+; Max GTList      = 20
+; /XTRA
+; AB3 - AutoDocViewer
+; 2.0: by tomsmart1
+; + change the detection of the function nodes end
+; + renamed variables to get rid of $ in the name
+; + fixed the count of the function indexnode to support the full 256
+;   possible nodes entrys
+; + change the node scan that only the known nodes are tested
+; + remove double scan for the entry if it selected via GUI
+; + added scan of the complete file for function nodes that are NOT in
+;   the TABLE OF CONTENTS and if there is no table
+; + made the autoscan switchable via Tooltype and cli arg
+; + change the detection of the keywords and expand the keyword list
+; + added the (un)lock of the window
+; + removed double versionstrings
+; + moved code to subroutines to remove double code
+; + fixed the use of the windowsettings via CLI
+; + fixed app drop
+;
+; 1.08: by tomsmart1
+; + replaced reqtools commands with error.include Function calls
+;
+; 1.07:  by tomsmart1
+; + fixed the size of the array
+; + made the sourcecode Syntax 6 compatible
+; + convert the source to ".ab3" format
+; + replaced file and Path string magic with proper dos.include functions
+; + fixed a possible endless loop with files that are not in autodoc format
+; + added exe Versionstring
+; + recompile with the latest AB3
+;
+; 1.06:
+; + recompiled with latest AB3beta
+;
+; 1.05:
+; + Tooltype for Standardpath added
+;
+; 1.04:
+; + ???
+;
+; 1.03:
+; + window position and size will be stored to tolltypes on exit
+; + textviewgadget has greater priority when resizing window
+; + Requester when no autodoc loaded removed
+;
+; 1.02:
+; + fixed slow reaction time
+;
+; 1.01:
+; + added appWindowsupport
+; + fixed some little errors (as always!)
+;
+;
+Syntax 6            ; changed to 6  tomsmart1
+optimize 5          ; chanded to 5  tomsmart1
+
+
+JMP skipvers:
+Dc.b "$VER: "
+.version
+Dc.b "AB3AutoDocViewer \\__VER_MAJOR.\\__VER_MINOR (\\__DATE_GER__))",0
+Even
+skipvers:
+
+
+versionmessageStr.s = "AB3AutoDocViewer Version \\__VER_MAJOR.\\__VER_MINOR\\n\\n"
+versionmessageStr   + "written in 2008 by Sven Dröge for AmiBlitz3-IDE\\n"
+versionmessageStr   + "updated 2009-2014 by The Opensource Team\\n"
+;versionmessageStr   + "http://www.programmed-excellence.de"
+
+
+filepatternStr.s       = "#?"
+autodoc_extensionStr.s = "doc"
+fileID.l               = -1                                        ; set we have no file open  tomsmart1
+
+autoscanByte.b         = True                                      ; set new autoscanByte of the complete file on it is switchable via cliarg and tooltype
+
+
+#MAX_NODES = 256                                                   ; fix size because we use entry 0-255  tomsmart1
+
+#WZLISTNOSORT = -2
+#WZLISTAZSORT = -1
+
+;WBStartup
+FindScreen 0
+
+
+#CLIARGMODE = 1
+XINCLUDE "file.include.ab3"
+XINCLUDE "PE/wizard_Tools.include.ab3"                             ; renamed to the new name  tomsmart1
+WZLoadGUI ?wzgui
+
+Dim autodoc_nodesStrArray.s(#MAX_NODES)
+DEFTYPE.w winx,winy,winw,winh
+
+; --
+; -- get the Tooltypes
+default_path.s = dos_GetToolString{"PATH","Blitz3:Docs/"}
+
+; --
+; -- get the CLI args ...
+If dos_GetNumArgs{} = 0
+  wbmode.b = True
+  If dos_GetToolSwitch{"AUTOSCANOFF"}
+    autoscanByte = False
+  EndIf
+Else
+  Repeat
+    ioptionStr.s = dos_GetNextArg{}
+    optionStr.s = LCase$(ioptionStr)
+    If Peek.b(&optionStr) = @"-" Then optionStr = Right$(optionStr,FLen(optionStr)-1)
+    Select UCase$(optionStr)
+
+      Case "DIR"
+        default_path = dos_GetNextArg{}                            ; replaces directoryStr with default_path  tomsmart1
+
+      Case "FILE"
+        autodocStr.s  = dos_GetNextArg{}
+        libraryStr.s  = dos_FilePart{autodocStr}
+        libraryStr    = dos_RemExt{libraryStr}
+        temppathStr.s = dos_PathPart{autodocStr}                   ; added to set the correct path  tomsmart1
+        If temppathStr <> ""
+          directoryStr.s = temppathStr
+        EndIf
+
+      Case "FUNCTION"
+        selfuncStr.s = dos_GetNextArg{}
+
+      Case "PUBSCREEN"
+        pubscreenStr.s = dos_GetNextArg{}
+
+      Case "WX"
+        winx = Vallong(dos_GetNextArg{})
+
+      Case "WY"
+        winy = Vallong(dos_GetNextArg{})
+
+      Case "WW"
+        winw = Vallong(dos_GetNextArg{})
+
+      Case "WH"
+        winh = Vallong(dos_GetNextArg{})
+
+      Case "AUTOSCANOFF"
+        autoscanByte = False                                       ; deactivate new auto scan
+
+    End Select
+  Until (optionStr = "")
+
+  If (directoryStr = "") AND (autodocStr = "")
+    NPrint "No valid data for mandatory options FILE and/or DIR set."
+    Gosub autodoc_writeinfos
+    End
+  Else
+    If (dos_Exist{dos_AddPart{directoryStr,autodocStr} } = 0)  AND (dos_Exist{dos_AddPart{directoryStr,dos_SetExt{libraryStr,autodoc_extensionStr} } } = 0)
+      NPrint "File " + dos_AddPart{directoryStr,autodocStr} + " has not been found."
+      End
+    EndIf
+  EndIf
+EndIf
+
+
+; --
+; -- check of PubScreen with the given PubScreenname exists
+If pubscreenStr <> ""
+  GetPubScreen 0,pubscreenStr
+  If Peek.l(Addr Screen(0))=0
+    WbToScreen 0
+  Else
+    Use Screen 0
+  EndIf
+EndIf
+
+; --
+; -- display the window with the selected node and goto the main loop
+If ( (wbmode = True) OR (winw = 0) OR (winh=0) )                   ; test if we run form workbench or if the winsize is not set form cli
+  Gosub get_windowsettings
+EndIf
+WZWindow WZID("WIN_AUTODOC"),?wzgui,128,winx,winy,winw,winh,WZID("WIN_AUTODOC")
+AddAppWindow WZID("WIN_AUTODOC")
+
+Gosub lock_window
+Gosub autodoc_open
+Gosub unlock_window
+
+wbmode = True                                                      ; because we have now a open window so error messages can show up
+;start of the main loop
+exit.b = False
+Repeat
+  Delay_ 2
+  ev.l = Event : appev.l = AppEvent
+  Select ev
+
+    Case #IDCMP_IDCMPUPDATE
+      Select WZGadName
+
+        Case "LISTVIEW_FUNCTIONS"
+          Gosub lock_window
+          selfuncStr = WZListString(entriesWZList.List,WZInput,1)
+          Gosub autodoc_findnode
+          Gosub unlock_window
+
+        Case "AUTODOC_OPENFILE"
+          Gosub lock_window
+          aslfr_SetRequesterTitle{2,"Select autodoc-file","Ok","Cancel"}
+          If directoryStr=""
+            aslfr_SetPath{2,default_path,"",dos_SetExt{filepatternStr,autodoc_extensionStr} }
+          Else
+            aslfr_SetPath{2,directoryStr,libraryStr,dos_SetExt{filepatternStr,autodoc_extensionStr} }
+          EndIf
+          If aslfr_Request{2,False,False,False}
+            directoryStr = aslfr_GetPath{2}
+            libraryStr   = aslfr_GetFile{2}
+            a.s = dos_AddPart{directoryStr,libraryStr}
+            If (a <> "")
+              selfuncStr = ""
+              act_entryWord.w = 0
+              autodocStr = a
+              Gosub autodoc_open
+            EndIf
+          End If
+          Gosub unlock_window
+
+      End Select
+
+    Case #IDCMP_VANILLAKEY
+      If EventCode = 27
+        exit = True
+      EndIf
+
+    Case #IDCMP_MENUPICK
+      Select WZMenuName
+
+        Case "MENU_ABOUT"
+          Gosub lock_window
+
+          FindScreen 0
+          message{versionmessageStr,"About"} ; Request replaced with a error.include function call  tomsmart1
+          Gosub unlock_window
+
+        Case "MENU_EXIT"
+          exit = True
+
+      End Select
+
+    Case #IDCMP_CLOSEWINDOW
+      exit = True
+
+  End Select
+  Select appev
+
+    Case $800000
+      If AppNumFiles > 0
+        Gosub lock_window
+        a = NextAppFile
+        If (a <> "")
+          directoryStr  = dos_PathPart{a}
+          libraryStr    = dos_FilePart{a}
+          selfuncStr    = ""
+          act_entryWord = 0
+          autodocStr    = a
+          Gosub autodoc_open
+        EndIf
+        Gosub unlock_window
+      EndIf
+
+  End Select
+
+Until (exit = True)
+
+Gosub put_windowsettings
+Gosub autodoc_close
+End
+
+
+.autodoc_open
+  ; -- clear windowgadgets
+  For i.w = 0 To (#MAX_NODES-1)                                      ; fixed loop because we use 0-255 makes 256 entry  tomsmart1
+    autodoc_nodesStrArray(i) = "HONITOS"
+  Next i
+  WZListRemove entriesWZList
+  WZPrint "LISTVIEW_FUNCTIONS",0,&entriesWZList
+  WZListRemove infoWZList.List                                     ; added to clear the right listview  tomsmart1
+  WZPrint "LISTVIEW_INFO",0,&infoWZList                            ;   "
+  displaystringStr.s = ""                                          ; set default
+
+  ; check for file
+  If (fileID <> -1) Then file_Close{fileID}
+  If autodocStr <> ""
+
+    If dos_Exist{dos_AddPart{directoryStr,libraryStr} } = 0
+      If dos_Exist{dos_AddPart{directoryStr,dos_SetExt{libraryStr,autodoc_extensionStr} } }= 0
+        Gosub autodoc_error
+        Return
+      Else
+        libraryStr = dos_SetExt{libraryStr,autodoc_extensionStr}
+      EndIf
+    EndIf
+
+    fileID = file_Open{dos_AddPart{directoryStr,libraryStr},#file_read}
+  Else
+    fileID = -1
+  EndIf
+  ; begin of the scan and display the document
+  If (fileID <> -1)
+    WZPrint "AUTODOC_LIBNAME",&autodocStr
+    ; begin scan
+    file_Cache{fileID}
+    filelengthLong.l = file_GetLength{fileID}
+    content_begin.w = 0
+    fcounter.w = 0  ; changed Fcounter to 0 because array starts with index 0  tomsmart1
+    zeileStr.s = file_ReadLine{fileID}
+    If zeileStr = "TABLE OF CONTENTS"
+
+      While ( (file_GetSeekPos{fileID} < filelengthLong) AND (content_begin = 0) )
+        zeileStr = file_ReadLine{fileID}
+
+        While (fcounter = 0) AND (zeileStr = "")                   ; add check for multiple empty line at the start of the table
+          zeileStr = file_ReadLine{fileID}                         ; get only a new if it the ond are empty
+        Wend
+
+        char.w = Asc( Left$(zeileStr,1) )
+        If (char = -1) OR (char = 12)                              ; check for end of the content table
+          content_begin = file_GetSeekPos{fileID} - FLen(zeileStr) ; save the file position of the beginof the nodes
+
+          If autoscanByte = True                                   ; check if we do the autoscan of the complete file
+            tempfcount.w = fcounter -1                             ; save the max nodes we have allready for the autoscan test loop of double nodes
+            Gosub autoscan_completefile
+          EndIf
+
+        Else
+          If (zeileStr <> "")
+            Gosub added_node2list
+          EndIf
+        EndIf
+      Wend
+      fcounter - 1                                                 ; added to set the max used index for the array because by save a new node we incement the counter
+    ;end of the scan
+
+    Else ; we have to build a TOC for ourselves
+
+      If autoscanByte = True                                       ; check if we do the autoscan of the complete file
+        displaystringStr = "No table of contents found try to autobuild it !"
+        WZPrint "AUTODOC_LIBNAME",&displaystringStr
+        tempfcount = 0                                             ; set it to 0 for the autoscan test loop of double nodes because we have no nodes
+        Gosub autoscan_completefile
+      EndIf
+      If fcounter > 0                                              ; test if we are able to build a table
+        fcounter - 1                                               ; added to set the max used index for the array because by save a new node we incement the counter
+        WZPrint "AUTODOC_LIBNAME",&autodocStr                      ; show the name of the autodoc file
+      Else                                                         ; no
+        error{"This is not a AutoDoc file!"}
+        libraryStr = ""                                            ; added to not run in a endless loop  tomsmart1
+        displaystringStr = "*** No autodoc loaded ***"             ; added to print the status  tomsmart1
+        file_Close{fileID}                                         ; close file
+        WZPrint "AUTODOC_LIBNAME",&displaystringStr
+      EndIf
+
+    EndIf
+    ; begin of initial display the content
+    If (libraryStr <> "")                                          ; test if we have something to show
+      If (selfuncStr <> "")                                        ; test if we have a function to find
+        Gosub autodoc_findnode                                     ; test if we fine the function in the nodes
+      Else
+        act_entryWord = 0                                          ; no function to find  select first entry
+        Gosub autodoc_showentry                                    ; to show
+      EndIf
+      WZPrint "LISTVIEW_FUNCTIONS",act_entryWord ,entriesWZList,0  ; show all available nodes
+    EndIf
+    ; end of initial display
+  Else
+    Gosub autodoc_error
+  EndIf
+Return
+
+.added_node2list
+  If fcounter <= (#MAX_NODES-1)                                    ; check if we have a free place for the node
+    WZListAdd entriesWZList,dos_FilePart{zeileStr},#WZLISTNOSORT   ; save to the display list
+    autodoc_nodesStrArray(fcounter) = zeileStr                     ; save it to the indentify array
+    fcounter +1                                                    ; increment node counter
+  Else
+    error{"Only autodocs with up to 256 functions are supported."} ; fixed max notes tomsmart1 ; Request replaced with a error.include function call  tomsmart1
+    file_Seek{fileID,filelengthLong}                               ; go to the end of file to end the check loop
+  EndIf
+Return
+
+.autoscan_completefile
+  Repeat                                                           ; start the big loop to test te rest of the file
+    If (Asc( Left$(zeileStr,1) ) = 12)                             ; check if we have a node
+      zeileStr     = Replace$(zeileStr,Chr$(9)," ")                  ; convert tab to spaces
+      lengthWord.w = Instr(zeileStr," ")                           ; get first space because this is the end of the nodename
+      zeileStr     = Left$(zeileStr,lengthWord-1)                  ; remove all chars start a the space to right end
+      zeileStr     = Right$(zeileStr,lengthWord-2)                 ; remove 1 left char of the string becauce it is the identifer
+
+      nodenotknown.b = True                                        ; set it to unknown
+      If FLen(zeileStr) > 0                                        ; check if we have a vaild node
+        For i = 0 To tempfcount                                    ; begin of the loop to the if we know th node from the content table
+          If (zeileStr = autodoc_nodesStrArray(i))                 ; check if we know the node
+            nodenotknown = False                                   ; yes set it known
+            i = tempfcount                                         ; set it to the max to quick leave the loop
+          EndIf                                                    ; end check
+        Next i                                                     ; end of the loop
+        If (nodenotknown = True)                                   ; check if the new node is unkonwn
+          Gosub added_node2list
+        EndIf
+      EndIf
+    EndIf
+    zeileStr = file_ReadLine{fileID}                               ; read a new line of the file
+  Until (file_GetSeekPos{fileID} >= filelengthLong)                ; end of the big loop with the check if we reached the end of the file
+Return
+
+.autodoc_error
+  If wbmode = False                                                ; indecates if we start form cli and have no open autodoc file
+    Gosub autodoc_writeinfos
+    NPrint "ERROR: unkown or missing autodoc-file."
+    NPrint ""
+    End
+  Else
+    libraryStr = ""                                                ; changed to not run in a endless loop  tomsmart1
+    displaystringStr = "*** No autodoc loaded ***"                 ; added to print the status  tomsmart1
+    WZPrint "AUTODOC_LIBNAME",&displaystringStr
+  EndIf
+Return
+
+
+.autodoc_findnode
+  act_entryWord.w = 0                                              ; (re)set default number of the function to show
+  CaseSense Off
+  For i = 0 To fcounter                                            ; begin of the loop to test all known function nodes
+    If dos_FilePart{autodoc_nodesStrArray(i)} = selfuncStr         ; check if list contains the function
+      act_entryWord = i                                            ; yes set number of the list
+      i = fcounter                                                 ; set it to the max to stop the loop
+    EndIf
+  Next i                                                           ; end of the loop
+  Gosub autodoc_showentry                                          ; show default or find function node
+  CaseSense On
+Return
+
+
+.autodoc_close
+  file_Close{fileID}
+  WZCloseWindow WZID("WIN_AUTODOC")
+  DelAppWindow WZID("WIN_AUTODOC")
+  ReleasePubScreen 0
+Return
+
+
+.autodoc_showentry:
+  If (fileID = -1) OR (libraryStr="") Then Return                  ;added the test of the libraryStr to prevent a possible endless loop if the file is not a Autodoc  tomsmart1
+  WZListRemove infoWZList
+  ;
+  ; seek until die function name comes up ...
+  ;
+  file_Seek{fileID,content_begin}
+
+  Repeat
+    zeileStr = file_ReadLine{fileID}
+  Until ( (Instr(zeileStr,autodoc_nodesStrArray(act_entryWord) ) > 0) OR (file_GetSeekPos{fileID} >= filelengthLong) )
+
+  If file_GetSeekPos{fileID} >= filelengthLong
+    WZPrint "LISTVIEW_INFO",-1,infoWZList
+    Return
+  EndIf
+  ;
+  ; print all the infos until the next function is described...
+  ;
+  firstline.b = True                                               ; set that we start with the first line of the node
+  exitnote.b = False                                               ; set exit for the loop of no
+  Repeat
+
+    If ( (Instr(zeileStr,Chr$(12) ) > 0) AND (firstline = False) ) ; check if we have a node indificater and we are not in the first line of the node
+      For i = 0 To fcounter                                        ; begin loop of the test of the end of the node it is needed because some docs have a different node order that the have in content table
+        If (Instr(zeileStr,autodoc_nodesStrArray(i) ) > 0)         ; test if we know this node
+          exitnote = True                                          ; yes set the condition that we have reach the end of the node
+          i = fcounter                                             ; for direct exit of the loop
+        EndIf
+      Next i                                                       ; end of the test loop
+    EndIf
+    firstline = False                                              ; next line are not the first line of the node so we can test for the end
+
+    If exitnote = False                                            ; check if we have reach the end of the node
+      CaseSense On                                                 ; no we have to interpret the line
+      key_found.b = False
+      Restore key_words
+
+      Repeat
+        Read keywordStr.s
+        tempzeileStr.s = StripLead$(zeileStr,09)                   ; remove tap in front
+        tempzeileStr   = StripTrail$(zeileStr,09)                  ; remove tap after
+        tempzeileStr   = StripLead$(tempzeileStr,32)               ; remove space in front
+        tempzeileStr   = StripTrail$(tempzeileStr,32)              ; remove space after
+        If keywordStr = tempzeileStr
+          key_found = True
+        EndIf
+      Until (keywordStr = "###")
+
+      If key_found = True
+        WZTags #WENTRYA_FormatStyle,2
+        WZTags #WENTRYA_TextStyle,6
+        WZTags #WENTRYA_TextPen,3
+        zeileStr = tempzeileStr
+      Else
+        WZTags #WENTRYA_TextPen,1
+      EndIf
+      zeileStr = Replace$(zeileStr,Chr$(9),"  ")                     ; replace tab with 2 spaces
+      zeileStr = Replace$(zeileStr,Chr$(12),"")                      ; remove indicater of a function
+      WZListAdd infoWZList,zeileStr,-2
+
+      zeileStr = file_ReadLine{fileID}
+      CaseSense Off
+    EndIf
+
+  Until ( (exitnote = True) OR (file_GetSeekPos{fileID} >= filelengthLong) )
+
+  WZPrint "LISTVIEW_INFO",-1,infoWZList
+Return
+
+
+.get_windowsettings
+  winx = dos_GetToolValue {"winx",-2}
+  winy = dos_GetToolValue {"winy",-2}
+  winw = dos_GetToolValue {"winw",-2}
+  winh = dos_GetToolValue {"winh",-2}
+Return
+
+
+.put_windowsettings
+  dos_SetToolValue {"winx",WindowX}
+  dos_SetToolValue {"winy",WindowY}
+  dos_SetToolValue {"winw",WindowWidth}
+  dos_SetToolValue {"winh",WindowHeight}
+Return
+
+
+.lock_window
+  Use Window WZID("WIN_AUTODOC")
+  WZ_LockWindow_ WZHandle
+Return
+
+.unlock_window
+  Use Window WZID("WIN_AUTODOC")
+  WZ_UnlockWindow_ WZHandle
+Return
+
+
+.autodoc_writeinfos
+    NPrint ""
+    NPrint versionmessageStr
+    NPrint "Parameters: "
+    NPrint "FILE <autodoc>"
+    NPrint "FUNCTION <functionname>"
+    NPrint "PUBSCREEN <screenname>"
+    NPrint "DIR <path>"
+    NPrint "WX <windowtopleft>"
+    NPrint "WY <windowtopoff>"
+    NPrint "WW <windowwidth>"
+    NPrint "WH <windowheight>"
+    NPrint "AUTOSCANOFF"
+    NPrint ""
+Return
+
+
+key_words:
+  Data$ "NAME"
+  Data$ "SYNOPSIS"
+  Data$ "FUNCTION"
+  Data$ "FUNCTIONS"
+  Data$ "INPUT"
+  Data$ "INPUTS"
+  Data$ "RESULT"
+  Data$ "RESULTS"
+  Data$ "SEE ALSO"
+  Data$ "BUGS"
+  Data$ "PURPOSE"
+  Data$ "TAGS"
+  Data$ "EXAMPLE"
+  Data$ "EXAMPLES"
+  Data$ "NOTE"
+  Data$ "NOTES"
+  Data$ "RETURNS"
+  Data$ "OUTPUTS"
+  Data$ "WARNING"
+  Data$ "ARGUMENTS"
+  Data$ "EXCEPTIONS"
+  Data$ "###"
+
+
+wzgui:
+IncBin "AB3AutoDocViewer.wizard"
+wzguiend:
+

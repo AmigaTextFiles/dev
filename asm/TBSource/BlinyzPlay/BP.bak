@@ -1,0 +1,1190 @@
+*************************************************
+*						*
+*		 (C)opyright 1992		*
+*						*
+*		by  Tomi Blinnikka		*
+*						*
+*	Don´t try to understand the code	*
+*						*
+* Version 0.01	14/04/1992			*
+*	 -0.99ö					*
+*						*
+* BUGS: No menus. Didn't work from WB.		*
+*						*
+* Version 1.00	19/04/1992			*
+*						*
+* BUGS: Har har har... Menu problem fixed:	*
+*	the mouse wasn't connected properly...	*
+*	Iconify from WB didn't work.		*
+*						*
+* Version 1.01	07/05/1992			*
+*						*
+* BUGS:	Version string incompatible.		*
+*						*
+* Version 1.02	05/06/1992			*
+*						*
+* BUGS:						*
+*						*
+* Version 1.03	10/06/1992			*
+*						*
+* BUGS:						*
+*						*
+*************************************************
+
+	INCLUDE	"JMPLibs.i"
+	INCLUDE	"exec/types.i"
+	INCLUDE	"exec/memory.i"
+	INCLUDE	"exec/tasks.i"
+	INCLUDE	"libraries/dosextens.i"
+	INCLUDE	"libraries/dos.i"
+	INCLUDE	"libraries/gadtools.i"
+	INCLUDE "workbench/startup.i"
+
+	INCLUDE	"XREF:2.0.xref"
+	INCLUDE	"XREF:intuition.xref"
+	INCLUDE	"XREF:exec.xref"
+	INCLUDE	"XREF:dos.xref"
+	INCLUDE	"XREF:icon.xref"
+
+	XREF	_CreatePort
+	XREF	_DeletePort
+	XREF	_CreateExtIO
+	XREF	_DeleteExtIO
+
+	XDEF	_DOSBase
+	XDEF	_SysBase
+
+DIntuition	set	1
+
+DirTop:		EQU	1
+ListTop:	EQU	14
+OptionTop:	EQU	96
+
+TRUE:		EQU	1
+
+		section	RD,CODE
+
+		push	d2-d7/a2-a6
+		push	d0/a0
+
+		sub.l	a1,a1			;Find our task
+		lib	Exec,FindTask
+		move.l	d0,OurTask
+		move.l	d0,a4
+		move.l	pr_CLI(a4),d0
+		bne	OpenDos
+
+		add.l	#8,sp
+		lea.l	pr_MsgPort(a4),a0
+		lib	Exec,WaitPort
+		lea.l	pr_MsgPort(a4),a0
+		lib	Exec,GetMsg
+		move.l	d0,WBMsg
+
+OpenDos:	openlib	Dos,NoDos		;Keep at beginning
+
+		tst.l	WBMsg
+		beq	CLIStart
+
+		lea.l	NILName,a0
+		move.l	a0,d1
+		move.l	#MODE_NEWFILE,d2
+		lib	Dos,Open
+		move.l	d0,NILFile
+		beq	ShutDown
+		move.l	NILFile,_stdout
+		beq	NoNIL
+
+		openlib	Icon,NoIcon
+
+		move.l	WBMsg,a0
+		move.l	sm_ArgList(a0),a1
+		move.l	wa_Lock(a1),d1
+		lib	Dos,CurrentDir
+		move.l	d0,OldLock
+
+		move.l	WBMsg,a0
+		move.l	sm_ArgList(a0),a1
+		move.l	wa_Name(a1),a0
+		lib	Icon,GetDiskObject
+		move.l	d0,DiskObject
+		beq	MainStart
+
+		move.l	DiskObject,a4
+		move.l	$36(a4),a0		;do_ToolTypes
+		lea.l	ICONIFYText1,a1
+		lib	Icon,FindToolType
+		tst.l	d0
+		beq	DoToolType3
+		move.l	d0,a0
+		lea.l	YESText1,a1
+		lib	Icon,MatchToolValue
+		tst.l	d0
+		beq	DoToolType3
+		move.w	#1,Iconify
+
+DoToolType3:	bra	MainStart
+
+CLIStart:	lib	Dos,Output
+		move.l	d0,_stdout
+		pull	d0/a0
+		clr.b	-1(a0,d0.l)
+		cmp.b	#"?",(a0)
+		beq	Usage
+		cmp.w	#'-h',(a0)
+		beq	Usage
+		cmp.w	#'-i',(a0)
+		bne	MainStart
+		move.w	#1,Iconify
+		add.l	#2,a0
+
+MainStart:	move.l	_DosBase,_DOSBase	;need this also to check
+		move.l	$4,_SysBase		;so don't quit MPlay
+						;when looking at usage...
+		move.l	#37,d0
+		move.l	$4,a6
+		lea.l	_IntuitionLib,a1
+		jsr	_LVOOpenLibrary(a6)
+		move.l	d0,_IntuitionBase
+		beq	NoKS20
+
+		openlib	GadTools,NoGadTools
+
+		bsr	LockPubScr
+		tst.l	PubScreen
+		beq	NoPubScreen
+
+;Get visualinfo
+
+		move.l	PubScreen,a0
+		sub.l	a1,a1
+		lib	GadTools,GetVisualInfoA
+		move.l	d0,vi
+
+;Make gadget stuff
+
+		lea.l	glist,a0
+		lib	GadTools,CreateContext
+		move.l	d0,ContextGad2
+		beq	NoContextGad
+
+		move.l	glist,a0
+		lea.l	NGDirGad,a1
+		move.l	#CYCLE_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	DirGadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,DirGad1
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGFirstGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,FirstGad1
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGSecondGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,SecondGad1
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGThirdGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,ThirdGad1
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGFourthGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,FourthGad1
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGFifthGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,FifthGad1
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGSixthGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,SixthGad1
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGSeventhGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,SeventhGad1
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGEighthGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,EighthGad1
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGQuitGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,QuitGad1
+		or.w	#GRELRIGHT,gg_Flags(a0)
+		add.w	d5,gg_TopEdge(a0)
+
+		move.b	#1,GadMagic		;Make worked OK
+
+;New style menu stuff
+
+		lea.l	MNProjectMenu1,a0
+		lea.l	MenuTagList,a1
+		lib	GadTools,CreateMenusA
+		move.l	d0,mlist
+		beq	NoMenus
+
+		move.l	mlist,a0
+		move.l	vi,a1
+		lea.l	MenuTagList,a2
+		lib	GadTools,LayoutMenusA
+		move.b	#1,MenuMagic
+
+		bsr	OpenWin1
+		tst.l	Window1
+		beq	NoWindow1
+
+;Unlock PubScreen
+
+		sub.l	a0,a0
+		move.l	PubScreen,a1
+		lib	Intuition,UnlockPubScreen
+		clr.l	PubScreen
+
+Window1IDCMP:	move.l	Window1,a0
+		bsr	CheckIDCMP
+		cmp.l	#CLOSEWINDOW,d2
+		beq	ShutDown
+		cmp.l	#GADGETUP,d2
+		beq	DoGads
+		cmp.l	#MENUPICK,d2
+		beq	Win1Menus
+		cmp.l	#VANILLAKEY,d2
+		beq	VanillaKeys
+		bra	Window1IDCMP
+
+Win1Menus:	bsr	MenuNull
+		cmp.w	#$00,d6
+		beq	Win1Menus1
+		bra	Window1IDCMP
+Win1Menus1:	cmp.w	#$00,d5
+		beq	About
+		cmp.w	#$02,d5
+		beq	ShutDown
+		bra	Window1IDCMP
+
+VanillaKeys:	cmp.w	#$1b,d3
+		beq	ShutDown
+		cmp.w	#'Q',d3		;upper case
+		beq	ShutDown
+		cmp.w	#'L',d3
+		beq	DoFirst
+		cmp.w	#'W',d3
+		beq	DoSecond
+		cmp.w	#'I',d3
+		beq	DoThird
+		cmp.w	#'B',d3
+		beq	DoFourth
+		cmp.w	#'S',d3
+		beq	DoFifth
+		cmp.w	#'T',d3
+		beq	DoSixth
+		cmp.w	#'E',d3
+		beq	DoSeventh
+		cmp.w	#'N',d3
+		beq	DoEighth
+;		cmp.w	#'',d3
+;		beq	DoNinth
+;		cmp.w	#'',d3
+;		beq	DoTenth
+
+		cmp.w	#'q',d3		;lower case
+		beq	ShutDown
+		cmp.w	#'l',d3
+		beq	DoFirst
+		cmp.w	#'w',d3
+		beq	DoSecond
+		cmp.w	#'i',d3
+		beq	DoThird
+		cmp.w	#'b',d3
+		beq	DoFourth
+		cmp.w	#'s',d3
+		beq	DoFifth
+		cmp.w	#'t',d3
+		beq	DoSixth
+		cmp.w	#'e',d3
+		beq	DoSeventh
+		cmp.w	#'n',d3
+		beq	DoEigth
+;		cmp.w	#'',d3
+;		beq	DoNinth
+;		cmp.w	#'',d3
+;		beq	DoTenth
+		bra	Window1IDCMP
+
+DoGads:		cmp.w	#99,$26(a5)
+		beq	ShutDown
+		cmp.w	#1,$26(a5)
+		beq	ChangeDirMode
+		cmp.w	#10,$26(a5)
+		beq	DoFirst
+		cmp.w	#20,$26(a5)
+		beq	DoSecond
+		cmp.w	#30,$26(a5)
+		beq	DoThird
+		cmp.w	#40,$26(a5)
+		beq	DoFourth
+		cmp.w	#50,$26(a5)
+		beq	DoFifth
+		cmp.w	#60,$26(a5)
+		beq	DoSixth
+		cmp.w	#70,$26(a5)
+		beq	DoSeventh
+		cmp.w	#80,$26(a5)
+		beq	DoEighth
+;		cmp.w	#90,$26(a5)
+;		beq	DoNinth
+;		cmp.w	#100,$26(a5)
+;		beq	DoTenth
+		bra	Window1IDCMP
+
+DoFirst:	clr.l	d2
+		clr.l	d3
+
+		cmp.w	#00,DirMode
+		bne	DoFirst2
+		lea	FirstCmd1,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+DoFirst2:	lea	FirstCmd2,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+
+DoSecond:	clr.l	d2
+		clr.l	d3
+
+		cmp.w	#00,DirMode
+		bne	DoSecond2
+		lea	SecondCmd1,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+DoSecond2:	lea	SecondCmd2,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+
+DoThird:	clr.l	d2
+		clr.l	d3
+
+		cmp.w	#00,DirMode
+		bne	DoThird2
+		lea	ThirdCmd1,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+DoThird2:	lea	ThirdCmd2,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+
+DoFourth:	clr.l	d2
+		clr.l	d3
+
+		cmp.w	#00,DirMode
+		bne	DoFourth2
+		lea	FourthCmd1,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+DoFourth2:	lea	FourthCmd2,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+
+DoFifth:	clr.l	d2
+		clr.l	d3
+
+		cmp.w	#00,DirMode
+		bne	DoFifth2
+		lea	FifthCmd1,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+DoFifth2:	lea	FifthCmd2,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+
+DoSixth:	clr.l	d2
+		clr.l	d3
+
+		cmp.w	#00,DirMode
+		bne	DoSixth2
+		lea	SixthCmd1,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+DoSixth2:	lea	SixthCmd2,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+
+DoSeventh:	clr.l	d2
+		clr.l	d3
+
+		cmp.w	#00,DirMode
+		bne	DoSeventh2
+		lea	SeventhCmd1,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+DoSeventh2:	lea	SeventhCmd2,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+
+DoEighth:	clr.l	d2
+		clr.l	d3
+
+		cmp.w	#00,DirMode
+		bne	DoEighth2
+		lea	EighthCmd1,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+DoEighth2:	lea	EighthCmd2,a0
+		move.l	a0,d1
+		lib	Dos,Execute
+		bra	Window1IDCMP
+
+About:		bsr	SleepPointer
+		bsr	MenusOff
+		bsr	RemGads
+
+		move.l	Window1,a0
+		lea.l	AboutTxt1,a1
+		move.l	#$00,a2		;positive text
+		lea.l	OKTxt,a3	;a bit the wrong way around but...
+		move.l	#$00,d0
+		move.l	#$00,d1
+		move.l	#320,d2
+		move.l	#$50,d3
+		lib	Intuition,AutoRequest
+		bsr	AddGads
+		bsr	MenusOn
+		bsr	NormalPointer
+		bra	Window1IDCMP
+
+Break:		lea.l	BreakText1,a0
+		bsr	Printer
+		move.l	#CLOSEWINDOW,d2		;fake closewindow...
+		move.l	#-1,d0
+		rts
+
+ShutDown:
+ShutDown7000:	tst.l	PubScreen
+		beq	ShutDown6000
+		sub.l	a0,a0
+		move.l	PubScreen,a1
+		lib	Intuition,UnlockPubScreen
+
+ShutDown6000:	bsr	CloseWin1
+		bsr	Clean2.0Magic
+
+ShutDown4000:	tst.l	NILFile
+		beq	ShutDown3000
+		move.l	NILFile,d1
+		lib	Dos,Close
+
+ShutDown3000:	tst.l	DiskObject
+		beq	ShutDown2000
+		move.l	DiskObject,a0
+		lib	Icon,FreeDiskObject
+
+ShutDown2000:	move.l	OldLock,d1
+		beq	ShutDown1050
+		lib	Dos,CurrentDir
+
+ShutDown1050:	move.l	WBMsg,d2
+		beq	ShutDown1010
+		lib	Exec,Forbid
+		move.l	d2,a1
+		flib	Exec,ReplyMsg
+
+ShutDown1010:	tst.l	_DOSBase		;transfered after '?' check
+		beq	ShutDown1000
+		lea.l	QuitCmd,a0		;Quit MPlay too..
+		move.l	a0,d1
+		clr.l	d2
+		clr.l	d3
+		lib	Dos,Execute
+
+ShutDown1000:	closlib	Icon
+		closlib	Intuition
+		closlib	GadTools
+		closlib	Dos
+		pull	d2-d7/a2-a6
+		clr.l	d0
+		rts
+
+;CheckIDCMP keyboard (CTRL_C) and Intuition.
+;Give it the window structure in a0
+
+CheckIDCMP:	move.l	$56(a0),a2		;Get window's port
+		clr.l	d1			;Set signals for
+		clr.l	d0
+		move.b	$0f(a2),d1		;IntuiMessages,
+		bset.l	d1,d0
+		bset.l	#SIGBREAKB_CTRL_C,d0	;and CTRL_C
+		lib	Exec,Wait
+
+		cmp.l	#SIGBREAKF_CTRL_C,d0	;If CTRL_C
+		beq	Break			;go break
+
+C2GetMsg1:	move.l	a2,a0	
+		lib	GadTools,GT_GetIMsg
+		tst.l	d0
+		beq	C2GetMsg2
+	
+		move.l	d0,a1 
+		move.l	$14(a1),d2		;answers with Class in d2,
+		move.w	$18(a1),d3		;Code in d3 and
+		move.w	$1a(a1),a4		;Qualifier in a4
+		move.l	$1c(a1),a5		;IAddress in a5
+		lib	GadTools,GT_ReplyIMsg
+		bra	C2GetMsg1
+C2GetMsg2:	move.l	#-1,d0
+		rts
+
+;Newer MenuNull subroutine
+
+MenuNull:	move.w	d3,d0
+		and.w	#$1f,d0
+		move.w	d0,d6
+		move.w	d3,d0
+		lsr.w	#5,d0
+		move.w	d0,d1
+		and.w	#$3f,d0
+		move.w	d0,d5
+		lsr.w	#6,d1
+		move.w	d1,d4
+		rts
+
+ChangeDirMode:	add.w	#$01,DirMode
+		cmp.w	#$02,DirMode
+		bne	Window1IDCMP
+		move.w	#$00,DirMode
+		bra	Window1IDCMP
+
+SleepPointer:	move.l	Window1,a0
+		lea.l	ClockPointer1,a1
+		move.l	#16,d0
+		move.l	#16,d1			;WHAT-THE-HECK IS THIS FOR?
+		move.l	#-6,d2
+		move.l	#0,d3
+		lib	Intuition,SetPointer
+		rts
+
+NormalPointer:	move.l	Window1,a0
+		lib	Intuition,ClearPointer
+		rts
+
+MenusOn:	move.l	Window1,a0
+		move.l	mlist,a1
+		lib	Intuition,SetMenuStrip
+		rts
+
+MenusOff:	move.l	Window1,a0
+		lib	Intuition,ClearMenuStrip
+		rts
+
+RemGads:	move.l	Window1,a0
+		move.l	DirGad1,a1
+		sub.l	a2,a2
+		move.l	#-1,d0
+		lib	Intuition,RemoveGList
+		rts
+
+AddGads:	move.l	Window1,a0
+		move.l	DirGad1,a1
+		sub.l	a2,a2
+		move.l	#-1,d0
+		move.l	#-1,d1
+		lib	Intuition,AddGList
+
+		move.l	DirGad1,a0
+		move.l	Window1,a1
+		sub.l	a2,a2
+		move.l	#-1,d0
+		lib	Intuition,RefreshGList
+
+		move.l	Window1,a0
+		sub.l	a1,a1
+		lib	GadTools,GT_RefreshWindow
+		rts
+
+;Lock PublicScreen
+
+LockPubScr:	sub.l	a0,a0
+		lib	Intuition,LockPubScreen
+		move.l	d0,PubScreen
+		beq	LockPubScr_OUT
+
+;Get some sizes
+
+		move.l	PubScreen,a0
+		move.b	sc_BarHeight(a0),d0
+		add.b	#1,d0
+		move.b	d0,BHeight+1
+		move.w	BHeight,d5
+		add.w	d5,SmallYSize
+		add.w	d5,WinYSize
+LockPubScr_OUT:	rts
+
+;Open Window
+
+OpenWin1:	tst.w	Iconify
+		beq	OpenWin1.01
+		lea.l	NewWindow1,a0
+		and.l	#~ACTIVATE,nw_Flags(a0)
+		move.l	NewWindow1,ZoomXY
+		move.l	NewWindow1+4,ZoomXY+4
+		move.l	Alt1XY,nw_LeftEdge(a0)
+		move.w	#160,nw_Width(a0)
+		move.w	BHeight,nw_Height(a0)
+OpenWin1.01:	lea.l	NewWindow1,a0
+		lea.l	Win1TagList,a1
+		lib	Intuition,OpenWindowTagList
+		move.l	d0,Window1
+		beq	OpenWin1_ERR1
+		bsr	AddGads
+OpenWin1.1:	move.l	Window1,a0
+		move.l	mlist,a1
+		lib	Intuition,SetMenuStrip
+		move.l	#-1,d0
+		rts
+OpenWin1_ERR1:	clr.l	d0
+		rts		
+
+CloseWin1:	tst.l	Window1
+		beq	CloseWin1_OUT
+		bsr	RemGads
+CloseWin1.1:	move.l	Window1,a0
+		lib	Intuition,ClearMenuStrip
+		move.l	Window1,a3
+		bsr	ClearMSGs
+CloseWin1_OUT:	clr.l	Window1
+		rts
+
+;ClearMsgs subroutine
+;a3 = window structure
+
+ClearMSGs:	lib	Exec,Forbid
+		move.l	Window1,a3
+		move.l	$56(a3),a2
+ClearMsg1:	move.l	a2,a0	
+		flib	Exec,GetMsg
+		tst.l	d0
+		beq	ClearMsg2
+		move.l	d0,a1 
+		flib	Exec,ReplyMsg
+		bra	ClearMsg1
+ClearMsg2:	move.l	a3,a0
+		lib	Intuition,CloseWindow
+		lib	Exec,Permit
+ClearMsg3:	rts
+
+Clean2.0Magic:	tst.b	GadMagic
+		beq	Clean2.0M2
+		move.l	glist,a0
+		lib	GadTools,FreeGadgets
+
+Clean2.0M2:	tst.b	MenuMagic
+		beq	Clean2.0M3
+		move.l	mlist,a0
+		lib	GadTools,FreeMenus
+
+Clean2.0M3:	tst.l	vi
+		beq	Clean2.0_OUT
+		move.l	vi,a0
+		lib	GadTools,FreeVisualInfo
+
+Clean2.0_OUT:	rts
+
+;Error etc. messages
+
+Usage:		lea.l	UsageText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoDos:		add.l	#8,sp
+		pull	d2-d7/a2-a6
+		move.l	#RETURN_FAIL,d0
+		rts
+
+NoKS20:		lea.l	NoKS20Text1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoGadTools:	lea.l	NoGTText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoNIL:		lea.l	NoNILText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoIcon:		lea.l	NoIconText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoPubScreen:	lea.l	NoPubScrText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoWindow1:	lea.l	NoWindowText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoContextGad:	lea.l	NoContextText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoMenus:	lea.l	NoMenusText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+Printer:	printa	a0,_stdout
+		rts
+
+DoAutoRequest:	move.l	#$00,a2		;positive text
+		lea.l	OKTxt(pc),a3	;a bit the wrong way around but...
+		move.l	#$00,d0
+		move.l	#$00,d1
+		move.l	#$00,d2
+		move.l	#$00,d3
+		sub.l	a0,a0
+		lib	Intuition,AutoRequest
+		rts
+
+;Structures
+
+;GadTools stuff
+
+vi:		dc.l	0		;Visual Info
+mlist:		dc.l	0
+ContextGad2:	dc.l	0
+GadMagic:	dc.b	0
+MenuMagic:	dc.b	0
+
+;Gadgets
+
+DirGad1:	dc.l	0
+FirstGad1:	dc.l	0
+SecondGad1:	dc.l	0
+ThirdGad1:	dc.l	0
+FourthGad1:	dc.l	0
+FifthGad1:	dc.l	0
+SixthGad1:	dc.l	0
+SeventhGad1:	dc.l	0
+EighthGad1:	dc.l	0
+QuitGad1:	dc.l	0
+
+;display stuff
+
+PubScreen:	dc.l	0
+Window1:	dc.l	0
+BHeight:	dc.w	0
+Iconify:	dc.w	0		;(1 = Yes, please)
+
+;lib stuff
+
+_SysBase:	dc.l	0
+_DOSBase:	dc.l	0
+
+		libnames
+
+;Other stuff, part I
+
+OurTask:	dc.l	0
+NILFile:	dc.l	0
+_stdout:	dc.l	0
+WBMsg:		dc.l	0
+DiskObject:	dc.l	0
+OldLock:	dc.l	0
+DirMode:	dc.w	0
+
+;Strings, AREXX filenames
+
+FirstCmd1:	dc.b	"SYS:REXXC/RX REXX2:MP1st",0
+FirstCmd2:	dc.b	"SYS:REXXC/RX REXX2:MP1st2",0
+SecondCmd1:	dc.b	"SYS:REXXC/RX REXX2:MP2nd",0
+SecondCmd2:	dc.b	"SYS:REXXC/RX REXX2:MP2nd2",0
+ThirdCmd1:	dc.b	"SYS:REXXC/RX REXX2:MP3rd",0
+ThirdCmd2:	dc.b	"SYS:REXXC/RX REXX2:MP3rd2",0
+FourthCmd1:	dc.b	"SYS:REXXC/RX REXX2:MP4th",0
+FourthCmd2:	dc.b	"SYS:REXXC/RX REXX2:MP4th2",0
+FifthCmd1:	dc.b	"SYS:REXXC/RX REXX2:MP5th",0
+FifthCmd2:	dc.b	"SYS:REXXC/RX REXX2:MP5th2",0
+SixthCmd1:	dc.b	"SYS:REXXC/RX REXX2:MP6th",0
+SixthCmd2:	dc.b	"SYS:REXXC/RX REXX2:MP6th2",0
+SeventhCmd1:	dc.b	"SYS:REXXC/RX REXX2:MP7th",0
+SeventhCmd2:	dc.b	"SYS:REXXC/RX REXX2:MP7th2",0
+EighthCmd1:	dc.b	"SYS:REXXC/RX REXX2:MP8th",0
+EighthCmd2:	dc.b	"SYS:REXXC/RX REXX2:MP8th2",0
+QuitCmd:	dc.b	"SYS:REXXC/RX REXX2:MPQuit",0
+
+;Strings, error
+
+BreakText1:	dc.b	"***Break",10,0
+NoKS20Text1:	dc.b	"ERROR: You need Kickstart 2.0 or higher!",10,0
+NoGTText1:	dc.b	"ERROR: Couldn't open gadtools.library!",10,0
+NoNILText1:	dc.b	"ERROR: Couldn't open device NIL:!",10,0
+NoIconText1:	dc.b	"ERROR: Couldn't open icon.library!",10,0
+NoPubScrText1:	dc.b	"ERROR: Couldn't lock PublicScreen",10,0
+NoContextText1:	dc.b	"ERROR: Couldn't create context gadget",10,0
+NoMenusText1:	dc.b	"ERROR: Couldn't allocate menus structure",10,0
+NoWindowText1:	dc.b	"ERROR: Couldn't open Window",10,0
+
+;Strings, names
+
+RDVersion:	dc.b	"$VER: "
+UsageText1:	dc.b	"BlinyzPlay 1.03 (10.6.92). (C)opyright Tomi Blinnikka 1992",10,10
+		dc.b	10,"          !!! PRIVATE VERSION !!!",10,10,10
+		dc.b	"USAGE: BlinyzPlay [-i]",10,10
+		dc.b	"       Where: [-i] iconify on startup",10,10
+		dc.b	"Plays my own tunes from MODULES: or MODULES2:",10
+		dc.b	"Needs special AREXX-scripts and Juha Koivisto's",10
+		dc.b	"MPlay. Not much use to anyone else but me.",10,10
+		dc.b	"See docs for more information.",10,0
+RDName1:	dc.b	"BlinyzPlay",0
+OKText1:	dc.b	"OK",0
+NILName:	dc.b	"NIL:",0
+ICONIFYText1:	dc.b	"ICONIFY",0
+YESText1:	dc.b	"YES",0
+AboutText1:	dc.b	"Name   : BlinyzPlay",0
+AboutText2:	dc.b	"Version: 1.03",0
+AboutText3:	dc.b	"Author : Tomi Blinnikka",0
+AboutText4:	dc.b	"   (C)opyright  1992",0
+		ds.l	0
+
+;New screen & new window structures
+
+NewWindow1:	dc.w	470,35			;X,Y POS
+		dc.w	160			;WIDTH
+WinYSize:	dc.w	112			;HEIGHT
+		dc.b	0,1			;PENS
+		dc.l	CLOSEWINDOW!VANILLAKEY!MENUPICK!GADGETUP	;IDCMP FLAGS
+		dc.l	NOCAREREFRESH!WINDOWDRAG!WINDOWDEPTH!WINDOWCLOSE!ACTIVATE	;FLAGS
+		dc.l	0,0			;GADGETS, CHECKMARK
+		dc.l	RDName1			;TITLE
+		dc.l	0			;SCREEN ADDRESS
+		dc.l	0			;BITMAP			
+		dc.w	0,0,0,0			;MIN/MAX SIZE
+		dc.w	PUBLICSCREEN		;TYPE
+
+Win1TagList:	dc.l	WA_AutoAdjust,TRUE
+		dc.l	WA_Zoom,ZoomXY
+		dc.l	TAG_DONE,0
+
+ZoomXY:
+SmallXPos:	dc.w	470
+SmallYPos:	dc.w	35
+SmallXSize:	dc.w	160
+SmallYSize:	dc.w	0
+
+Alt1XY:
+Alt1XPos:	dc.w	470
+Alt1YPos:	dc.w	35
+
+;Fonts
+
+Topaz:		dc.l	TopazName
+		dc.w	8
+		dc.b	0
+		dc.b	0
+TopazName:	dc.b	"topaz.font",0
+		ds.l	0
+
+
+;ITextStructures
+
+OKTxt:		dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	6,3			;LEFT+TOPEDGE
+		dc.l	0			;FONT
+		dc.l	OKText1			;TEXT
+		dc.l	0			;NEXTTEXT
+
+AboutTxt1:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	0,0			;LEFT+TOPEDGE
+		dc.l	0			;FONT
+		dc.l	AboutText1		;TEXT
+		dc.l	AboutTxt2		;NEXTTEXT
+
+AboutTxt2:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	0,10			;LEFT+TOPEDGE
+		dc.l	0			;FONT
+		dc.l	AboutText2		;TEXT
+		dc.l	AboutTxt3		;NEXTTEXT
+
+AboutTxt3:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	0,20			;LEFT+TOPEDGE
+		dc.l	0			;FONT
+		dc.l	AboutText3		;TEXT
+		dc.l	AboutTxt4		;NEXTTEXT
+
+AboutTxt4:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	0,30			;LEFT+TOPEDGE
+		dc.l	0			;FONT
+		dc.l	AboutText4		;TEXT
+		dc.l	0 ;AboutTxt5		;NEXTTEXT
+
+;Gadgets
+
+DirLabels:	dc.l	DirLabel1,DirLabel2,0
+DirLabel1:	dc.b	"MODULES:",0
+DirLabel2:	dc.b	"MODULES2:",0
+FirstGadText1:	dc.b	"_Live2Dance",0
+SecondGadText1:	dc.b	"_WTTJ",0
+ThirdGadText1:	dc.b	"_It's My Country",0
+FourthGadText1:	dc.b	"_BlinyzQ51",0
+FifthGadText1:	dc.b	"_Spanish Fly",0
+SixthGadText1:	dc.b	"_Track51 - Remix",0
+SeventhGadText1: dc.b	"B_eyond Life",0
+EighthGadText1: dc.b	"Wi_nner",0
+QuitGadText1:	dc.b	"_Quit",0
+		ds.l	0
+
+glist:		dcb.b	gg_SIZEOF,0
+
+NGDirGad:	dc.w	30		;gng_LeftEdge
+		dc.w	DirTop		;gng_TopEdge
+		dc.w	100		;gng_Width
+		dc.w	12		;gng_Height
+		dc.l	0		;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	1		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGFirstGad:	dc.w	4		;gng_LeftEdge
+		dc.w	ListTop		;gng_TopEdge
+		dc.w	160-8		;gng_Width
+		dc.w	10		;gng_Height
+		dc.l	FirstGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	10		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGSecondGad:	dc.w	4		;gng_LeftEdge
+		dc.w	ListTop+10	;gng_TopEdge
+		dc.w	160-8		;gng_Width
+		dc.w	10		;gng_Height
+		dc.l	SecondGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	20		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGThirdGad:	dc.w	4		;gng_LeftEdge
+		dc.w	ListTop+20	;gng_TopEdge
+		dc.w	160-8		;gng_Width
+		dc.w	10		;gng_Height
+		dc.l	ThirdGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	30		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGFourthGad:	dc.w	4		;gng_LeftEdge
+		dc.w	ListTop+30	;gng_TopEdge
+		dc.w	160-8		;gng_Width
+		dc.w	10		;gng_Height
+		dc.l	FourthGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	40		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGFifthGad:	dc.w	4		;gng_LeftEdge
+		dc.w	ListTop+40	;gng_TopEdge
+		dc.w	160-8		;gng_Width
+		dc.w	10		;gng_Height
+		dc.l	FifthGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	50		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGSixthGad:	dc.w	4		;gng_LeftEdge
+		dc.w	ListTop+50	;gng_TopEdge
+		dc.w	160-8		;gng_Width
+		dc.w	10		;gng_Height
+		dc.l	SixthGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	60		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGSeventhGad:	dc.w	4		;gng_LeftEdge
+		dc.w	ListTop+60	;gng_TopEdge
+		dc.w	160-8		;gng_Width
+		dc.w	10		;gng_Height
+		dc.l	SeventhGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	70		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGEighthGad:	dc.w	4		;gng_LeftEdge
+		dc.w	ListTop+70	;gng_TopEdge
+		dc.w	160-8		;gng_Width
+		dc.w	10		;gng_Height
+		dc.l	EighthGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	80		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGQuitGad:	dc.w	-110		;gng_LeftEdge
+		dc.w	OptionTop	;gng_TopEdge
+		dc.w	60		;gng_Width
+		dc.w	12		;gng_Height
+		dc.l	QuitGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	99		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+;Gadget TagLists
+
+GadTagList:	dc.l	GT_Underscore,'_'
+		dc.l	TAG_DONE,0
+DirGadTagList:	dc.l	GTCY_Labels,DirLabels
+		dc.l	TAG_DONE,0
+;Menus
+
+Menu1Name:	dc.b	"Project",0
+AboutMenuText1:	dc.b	"About...",0
+AboutCommKey:	dc.b	"?",0
+QuitMenuText1:	dc.b	"Quit",0
+QuitCommKey:	dc.b	"Q",0
+		ds.l	0
+
+MNProjectMenu1:	dc.b	NM_TITLE		;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	Menu1Name		;gnm_Label
+		dc.l	0			;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+MNAbout1:	dc.b	NM_ITEM			;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	AboutMenuText1		;gnm_Label
+		dc.l	AboutCommKey		;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+MNP1SepMenu1:	dc.b	NM_ITEM			;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	NM_BARLABEL		;gnm_Label
+		dc.l	0			;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+MNQuit1:	dc.b	NM_ITEM			;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	QuitMenuText1		;gnm_Label
+		dc.l	QuitCommKey		;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+		dc.w	0			;NM_END?
+
+;Menu TagList(s)
+
+MenuTagList:	dc.l	GTMN_Menu,MNProjectMenu1
+		dc.l	TAG_DONE,0
+
+		Section	RD,DATA,CHIP
+
+		ds.w	0
+
+ClockPointer1:	dc.w	$0000,$0000
+		dc.w	$0400,$07C0,$0000,$07C0,$0100,$0380,$0000,$07E0
+		dc.w	$07C0,$1FF8,$1FF0,$3FEC,$3FF8,$7FDE,$3FF8,$7FBE
+		dc.w	$7FFC,$FF7F,$7EFC,$FFFF,$7FFC,$FFFF,$3FF8,$7FFE
+		dc.w	$3FF8,$7FFE,$1FF0,$3FFC,$07C0,$1FF8,$0000,$07E0
+		dc.w	$0000,$0000
+
+		end
+

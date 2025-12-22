@@ -1,0 +1,8 @@
+#ifndef DIALOG_GTSUP_H
+
+#include <libraries/gadtools.h>
+
+#define PLACETEXT_MASK\
+	( PLACETEXT_LEFT | PLACETEXT_RIGHT | PLACETEXT_ABOVE | PLACETEXT_BELOW | PLACETEXT_IN )
+
+#endif

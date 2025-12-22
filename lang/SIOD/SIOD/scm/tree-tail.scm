@@ -1,0 +1,12 @@
+(define (pre-order tree)
+        (define (preorder-it tree pila out)
+                (if (and (empty-tree? tree)(empty-pila? pila))
+                    out
+                    (if (empty-tree? tree)
+                        (preorder-it (top pila)
+                                     (pop pila)
+                                     out)
+                        (preorder-it (left-branch tree)
+                                     (push (right-branch tree) pila)
+                                     (append out (list (entry tree)))))))
+        (preorder-it tree make-pila '()))

@@ -1,0 +1,20 @@
+#include </classes/object.ins>
+#include </classes/displayobject.ins>
+#include </classes/checkbox.ins>
+#include </classes/group.ins>
+#include </classes/space.ins>
+#include </classes/text.ins>
+#include </classes/line.ins>
+#include </classes/button.ins>
+#include </classes/framebox.ins>
+#include </classes/dropbox.ins>
+#include </classes/listview.ins>
+#include </classes/palette.ins>
+#include </classes/slider.ins>
+#include </classes/scroller.ins>
+#include </classes/cycle.ins>
+#include </classes/string.ins>
+#include </classes/progress.ins>
+#include </classes/image.ins>
+/*include </classes/dragitem.ins>*/
+

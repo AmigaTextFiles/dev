@@ -1,0 +1,157 @@
+; --------------------------------------------------------------------------------------
+;
+; This source file is part of PureBasic
+; For the latest info, see http://www.purebasic.com/
+; 
+; Copyright (c) 1998-2006 Fantaisie Software
+;
+; This program is free software; you can redistribute it and/or
+; modify it under the terms of the GNU General Public License
+; as published by the Free Software Foundation; either version 2
+; of the License, or (at your option) any later version.
+;
+; This program is distributed in the hope that it will be useful,
+; but WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+; GNU General Public License for more details.
+;
+; You should have received a copy of the GNU General Public License
+; along with this program; if not, write to the Free Software
+; Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+;
+; --------------------------------------------------------------------------------------
+;
+
+NEWTYPE .GuideContext
+   *guidecontext.l
+   guidesignal.l
+   *guidebase.Library
+;  struct execbase   *SysBase;
+End NEWTYPE
+
+DEFTYPE .GuideContext *HelpGuide
+
+;------------------------------------------------------------------------------
+
+Statement HandleAmigaGuide{*guide.GuideContext}
+
+  If *guide
+    Repeat
+      *agm.AmigaGuideMsg = AmigaGuideSignal_(*guide\guidecontext)
+      If *agm
+        GetAmigaGuideMsg_ *agm
+      EndIf
+    Until *agm=0
+  EndIf
+
+End Statement
+
+;------------------------------------------------------------------------------
+
+
+Statement PB_CloseHelp{*guide.GuideContext}
+
+  ;- Should add clearing of pending messages !
+  HandleAmigaGuide{*guide}
+
+  If *guide
+
+    If *guide\guidecontext
+      OpenAmigaGuideAsyncA_(*guide\guidecontext)
+    EndIf
+
+    If *guide\guidebase
+      CloseLibrary_(*guide\guidebase)
+    EndIf
+    FreeVec_ *guide
+  EndIf
+
+End Statement
+
+
+;------------------------------------------------------------------------------
+
+Function.l  PB_OpenHelp{HelpFile.s,Node.s}
+ SHARED nag,*HelpGuide,SigMask,DefSigMask
+
+  DEFTYPE .AmigaGuideMsg *agm
+  DEFTYPE .GuideContext  *guide
+
+  If Node="" Then Node="MAIN"
+
+  ;- Check if guide is open, and is the same helpfile...
+  If *HelpGuide
+    If Peek$(nag\nag_Name)<>HelpFile
+      !DPrint{4,"Closing old help"}
+      PB_CloseHelp{*HelpGuide}
+      *HelpGuide=0
+      SigMask=DefSigMask    ;- Reset the wait signals.
+      *guide=*HelpGuide
+    EndIf
+  Else
+    *guide=0
+  EndIf
+
+
+
+  If *guide=0
+    nag\nag_Name=&HelpFile
+    OPEN.b   = 0
+    ACTIVE.b = 0
+    *guide = AllocVec_(SizeOf .GuideContext, #MEMF_CLEAR)
+
+    If *guide
+
+        *guide\guidecontext = OpenAmigaGuideA_(&nag,0)
+        If(*guide\guidecontext)
+
+          *guide\guidesignal = CloseAmigaGuide_(*guide\guidecontext)
+          If *guide\guidesignal
+            OPEN = 1
+
+            While(ACTIVE =0)
+
+              Wait_ *guide\guidesignal
+              *agm = AmigaGuideSignal_(*guide\guidecontext)
+
+              If *agm
+
+                ; Ok startup of the guide File
+                If(*agm\agm_Type = #ActiveToolID)
+                    ACTIVE = 1
+                EndIf
+
+                ; Opening the guide File failed For some reason, continue as usual
+                If((*agm\agm_Type = #ToolStatusID) AND  *agm\agm_Pri_Ret)
+                  ACTIVE = 1
+                EndIf
+
+                GetAmigaGuideMsg_(*agm)
+              EndIf
+            Wend
+
+          EndIf
+        EndIf
+
+      If(OPEN =0)
+        If *guide
+          PB_CloseHelp{*guide}
+          *guide = 0
+        EndIf
+      EndIf
+
+    EndIf
+  EndIf
+
+  ;- Now Open the correct node..
+  If *guide
+     !DPrint{4,"OPEN>"+Peek$(nag\nag_Name)}
+     SigMask=DefSigMask | *guide\guidesignal
+     res.l=SendAmigaGuideContextA_(*guide\guidecontext,"LINK "+Node,0)
+     !DPrint{4,"SENDCMD>"+Str$(res)}
+  EndIf
+
+  Function Return *guide
+End Function
+
+

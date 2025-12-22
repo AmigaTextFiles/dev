@@ -1,0 +1,1020 @@
+
+
+            PCQ - ILBM - Kurs                       (aus AmigaGadget #21)
+
+
+    wie man IFF-ILBM-Grafiken problemlos in PCQ-Programmen einlesen kann
+
+Es ist mal wieder Zeit für einen kleinen Ausflug in das Land von
+PCQ-Pascal. Und wie schon beim letzten Mal kam die Anregung zu diesem
+neuen Kursteil von
+
+
+                              Dennis Müller.
+
+
+Thema des Kurses ist diesmal das Einladen von Grafiken im IFF-ILBM-Format
+per PCQ-Programmcode. Im Prinzip braucht sich dank hervorragender
+Library-Lösungen wie der SuperView-Library von Andreas R. Kleinert
+eigentlich kein Programmierer mehr mit den doch nicht ganz einfachen
+Detailfragen des IFF-Formates herumzuquälen. Dennoch kann man in
+Situationen kommen, in denen man sich nicht auf externe Lösungen verlassen
+kann. Darüberhinaus bietet das ILBM-Format auch einen kurzen Einblick in
+einfachste Kompressionsverfahren und eine Wiederholung der Grafikdarstellung
+des Amigas [siehe dazu auch schon den PCQ-Intuition-Kurs in früheren
+Gadget-Ausgaben]. Bevor an das Programmieren gedacht werden kann, müssen
+zunächst einige theoretische Grundlagen geklärt werden.
+
+1. Das IFF-Format
+
+IFF steht für "Interchange File Format", also für ein "Format zum
+Datenaustausch". Idee war es, verschiedenste Datentypen (Sound, Grafik,
+Text) in einem genormten Dateiformat anzubieten, so daß man problemlos
+eine Applikation an neue Formate anpassen kann. Prinzipiell funktioniert
+das IFF-Format so, daß die Daten in sogenannten "Chunks" zur Verfügung
+gestellt werden. Dabei können auch bei unterschiedlichen Datentypen
+gleiche Chunks verwendet werden - beispielsweise existiert ein "AUTH"-Chunk,
+in dem Hinweise zum Urheber des Datenfiles vermerkt sein können, unabhängig
+davon, ob es sich dabei um einen Text oder eine Grafik handelt.
+
+Gemeinsam sind allen IFF-Dateien die ersten vier Bytes, die als Zeichen
+dargestellt die Information "FORM" beinhalten. Es folgt eine Integer-Zahl
+(vier Byte), die die Länge der gesamten nachfolgenden Chunks beinhaltet.
+Diese Zahl entspricht somit der Dateilänge abzüglich der ersten acht Byte.
+Um es zu veranschaulichen - ein Hexdump eines IFF-Files beginnt somit
+folgendermaßen (praktisch nachzuvollziehen durch "type Filename opt h") :
+
+
+0000: 464F524D xxxxxxxx .....               FORMxxxx...
+
+      F O  R M Bytezahl
+
+Nun folgt eine Kennung, um was für ein Datenpaket es sich handelt (etwa
+"8SVX" für ein Soundsample), in unserem Fall handelt es sich um eine
+"Interleaved Bitmap", kurz "ILBM" [näheres dazu im 3.Kapitel]. Direkt
+an diese 4 Byte-Kennung schließen sich die einzelnen Datenchunks an, wobei
+man sich besser nicht auf irgendeine Reihenfolge verlassen sollte. Ein Chunk
+selbst ist dabei so aufgebaut, daß genau wie bei "FORM" zunächst die 4 Byte
+lange Kennung angegeben wird, gefolgt von einem Integer-Wert, der die Länge
+des Chunks in Byte angibt. Das hat den nicht zu verachtenden Vorteil, daß
+ein Programm auch beim Auftauchen unbekannter Chunks nicht hilflos dasteht.
+Ist nämlich dank des Integer-Wertes bekannt, wie lang der unbekannte Chunk
+ist, kann er zur Not einfach überlesen werden und das Programm beim nächsten
+Chunk weitermachen. Das IFF-File endet abrupt mit dem Ende des letzten
+Chunks. Es gibt keine gesonderte Schlußkennung, so daß man immer auch die
+Position im File im Auge haben sollte.
+
+2. Ein kleiner Trick
+
+Man sieht bereits jetzt, daß das Programm sich quasi wie ein Parser
+durch die Chunk-Reihen hangeln muß. Das geht natürlich auch von Diskette,
+man kann selbstverständlich ein IFF-File direkt vom Datenträger laden.
+Dabei besteht aber der Nachteil, daß das ganze spätestens bei gepackten
+Grafikdaten ziemlich langsam wird. Also lädt man - mit der Bytezahl-
+Information hinter "FORM" ausgestattet - einfach das ganze File in den
+Speicher und arbeitet es dort ab. Gerade in Pascal erreicht man so eine
+deutliche Leistungssteigerung. Das Problem dabei ist natürlich der
+Speicherplatz. Bei normalen Bildern der Auflösung 320*256 geht das
+noch, aber ein Bild in SuperHighRes mit 256 Farben verbraucht so selbst
+gepackt enorm viele Systemressourcen. Man muß sich also fragen, wozu man die
+IFF-Laderoutine einsetzen will. Sind Ressourcen vorhanden oder geht es nur
+um IFF-Dateien, die maximal 100 KByte groß sind, so empfiehlt es sich
+auf jeden Fall, das Bild zunächst in den Speicher zu laden. Ansonsten muß
+man eine Abwägung vornehmen und vielleicht die Daten vom Datenträger
+runterschauffeln. Im Rahmen dieses Kurses wird davon ausgegangen, daß sich
+die IFF-Datei im Speicher befindet. Doch auch da nutzen sie einem noch
+nicht allzu viel, hat man doch nur einen Address-Zeiger auf sie. Hier
+greift nun folgende Überlegung : wie wäre es, wenn wir so tun, als hätten
+wir nicht einfach eine Adresse, sondern - zumindest für die Bytezahlen -
+einen Zeiger auf einen Integerwert ? Also : statt einfach nur
+
+[...]
+VAR
+    datenbuffer :   Address;
+
+[...]
+ datenbuffer:=AllocMem (filelength,MEMF_CLEAR+MEMF_PUBLIC);
+[...]
+ i:=DOSRead (fh,datenbuffer,filelength);
+[...]
+
+zu verwenden, einen zusätzlichen Zeiger, mit dem Integer-Werte leicht
+auszulesen sind, einzuführen. Und zwar zunächst so :
+
+[...]
+VAR
+    datenbuffer     :   Address;
+    integerbuffer   :   ^Integer;
+
+[...]
+ datenbuffer:=AllocMem (filelength,MEMF_CLEAR+MEMF_PUBLIC);
+[...]
+ i:=DOSRead (fh,datenbuffer,filelength);
+ integerbuffer:=datenbuffer;
+[...]
+
+Jetzt kann man mit                den ersten 32 Bit-Wert des Datenpakets
+
+                   integerbuffer^
+
+auslesen. Doch da steht nun nur "ILBM", was als Integerwert eine völlig
+unbrauchbare Zahl ergibt. Praktischer wäre es, wenn man einen beliebigen
+Abstand zu Beginn des Datenpaketes wählen könnte. Dazu muß man wissen, daß
+das IFF-Format so aufgebaut ist, daß Integer-Werte stets an durch vier
+teilbaren Adressen stehen, eine Kombination "Integer, Short, Integer" kann
+somit nicht vorkommen. Wenn man aber mehrere Integer-Werte direkt
+hintereinander hat, hat man nichts anderes, als ein Array von Integer-
+Werten. In der Realität besteht natürlich kein Chunk nur aus Integer-Werten,
+vielmehr wird es auch Bytes und Shorts geben. Das ist jedoch unschädlich,
+da diese dann einfach überlesen werden, d.h. bei einer Kombination
+"Integer, Short, Short, Integer" spricht man zum Erreichen des zweiten
+Integer-Wertes einfach das dritte Element des Integer-Arrays an. Das zweite
+Element des Arrays besteht dabei aus zwei Short-Werten. Um auch diese
+korrekt lesen zu können, muß man sich neben dem Integer-Array auch eines
+Short- und bei entsprechendem Bedarf natürlich auch eines Byte-Arrays
+bedienen. Um das am Beispiel eines komplexeren Chunks darzustellen :
+
+Integer Short Short Integer Short Byte Byte Short Short Integer
+
+mit den Beispielwerten :
+
+100000  20000 10000 200000  5000  10   20   2500  1250  400000
+
+Dieser experimentelle Chunk ist 24 Bytes lang. Die Variable
+
+                                                            datenbuffer
+
+zeige auf den Anfang des Chunks. Nun richten wir uns ein Byte-, ein Short-
+und ein Integer-Array ein - wobei das Byte-Array maximal 24 Elemente
+enthalten muß, das Short-Array 12 (24/2) Elemente und das Integer-Array
+6 (24/4) Elemente. Prinzipiell ist es völlig egal, ob man nun den
+Array-Bereich von 1 bis 24 (bzw. bis 12 oder 6) oder von 0 bis 23 (bzw. bis
+11 oder 5) wählt, es hat sich aber eingebürgert, in solchen Fällen bei 0 zu
+beginnen. Somit sehen unseren Variablendefinitionen wie folgt aus :
+
+VAR
+    integerbuffer   :   ^ARRAY [0..5] OF INTEGER;
+    shortbuffer     :   ^ARRAY [0..11] OF SHORT;
+    bytebuffer      :   ^ARRAY [0..23] OF BYTE;
+
+Jeder Zeiger auf ein Array wird dann auf den Beginn des Chunks justiert :
+
+ integerbuffer:=datenbuffer;
+ shortbuffer:=datenbuffer;
+ bytebuffer:=datenbuffer;
+
+Und jetzt können ganz bequem die einzelnen Werte ausgelesen werden. Will
+man zum Beispiel den Wert der ersten Integer-Variable auslesen, erhält man
+mit                       für i den Wert 100000.                   liefert
+
+    i:=integerbuffer^[0];                        integerbuffer^[5]
+
+den Wert 400000. Bei Short- und Byte-Werte funktioniert das genauso, nur
+daß man sich hier vor Augen halten muß, daß ein Integer-Wert zwei (fiktiven)
+Short-Werten im Short-Array entspricht. Will man also den ersten im
+Beispielchunk vorkommenden Short-Wert, vor dem sich nur ein Integer-Wert
+befindet, abfragen, so muß man einen Offset von 3 annehmen. Da unsere
+Tabelle aber bei 0 anfängt, bekommt man den Wert 20000 aus                .
+
+                                                           shortbuffer^[2]
+
+Die nachfolgende 10000 erhält man mit Offset 4 (real : 4-1=3), also per
+
+shortbuffer^[3]      shortbuffer^[9]
+
+               . Und                 ergibt natürlich 1250. Bei den
+Bytewerten funktioniert das alles analog, deshalb nur noch ein Beispiel
+zum Abschluß. Der Wert 10, der bytemäßig den Offset 14 hat, wird mit
+                ausgelesen. Ist der Chunk dann komplett mittels dieses
+
+bytebuffer^[13]
+
+kleinen Tricks analysiert, verschiebt man den datenbuffer um die Länge des
+Chunks (die man ja aus den zweiten 4 Byte bekommen hat), und wiederholt
+das Spielchen für den nächsten Chunk.
+
+3. Das IFF-ILBM-Format
+
+Nachdem sich bis jetzt alles auf einem ziemlich hohen Abstraktionsgrad
+abgespielt hat, wird es nun etwas konkreter. Wie aus dem 1.Kapitel bekannt
+ist, beginnt ein IFF-ILBM-File im Hexdump folgendermaßen :
+
+0000: 464F524D xxxxxxxx 494C424D .....      FORMxxxxILBM...
+
+      F O  R M Bytezahl I L  B M
+
+Damit alleine kann natürlich noch kein Bild dargestellt werden. Die
+Informationen dazu stehen in eigenen Chunks, von denen es inzwischen
+Dutzende gibt - u.a. mehrere, die die Informationen für ColorCycling
+enthalten, den schon angesprochenen "AUTH"-Chunk und noch viel mehr
+oder weniger wichtige Chunks für andere Informationen zum Bild. Richtig
+wichtig sind für die simple Darstellung eines ILBM-Bildes eigentlich
+nur die folgenden :
+
+3. a) Der BMHD-Chunk
+
+Der "BitMapHeader"-Chunk enthält alle Informationen, die zum Öffnen
+eines Screens, bzw. eines RastPorts für das Bild notwendig sind, also
+Screenhöhe und -breite, die Anzahl der Bitplanes, usw. . Dieser Chunk
+ist unbedingt notwendig, damit das Bild dargestellt werden kann und
+er ist auch sinvollerweise der erste innerhalb der Datei - aber wie
+schon oben erwähnt sollte man sich nicht darauf verlassen. Nach der
+Kennung und dem Integer-Wert, der die Länge des Chunks angibt (im
+Normalfall $00000014 = 20 Bytes), folgen zunächst in Short-Länge
+die Breite und die Höhe des Bildes, gefolgt von einem Koordinatenpaar
+(immer noch jeweils in Short-Länge), das die linke obere Ecke des
+Ausschnitts kennzeichnet. Nun folgt die Tiefe des Screens als 1 Byte lange
+Variable. Das nächste Byte ist weniger interessant - ist es 1, wird eine
+"MaskPlane" den Grafikdaten angeschlossen. Weitaus wichtiger ist das nächste
+Byte, das festlegt, ob die Grafikdaten komprimiert oder unkomprimiert
+vorliegen. Ersteres ist der Fall, wenn das Byte den Wert eins hat. Zu den
+Unterschieden kommen wir im entsprechenden Kapitel. Das waren nun 3 Bytes
+in Folge, damit die nächste Short-Variable auf einer gerade Adresse liegen
+kann, folgt nun ein FÜllbyte. Die nun gerade Adresse enthält eine
+Short-Variable, die die Palette-Nummer der als "Hintergrund" zu verwendenden
+Farbe enthält. Das entspräche in einem Grafikprogramm wie DPaint etwa der
+Farbe, mit der man mit dem rechten Mausdruck zeichnet und ist in der Praxis
+normalerweise 0. Die nächsten beiden Bytes enthalten Werte, die das
+Größenverhältnis eines Pixels in x- und y-Richtung darstellen. Kann
+normalerweise auch völlig ignoriert werden. Last but not least folgen zwei
+Short-Variablen, die die Breite und die Höhe des Screens beinhalten. Somit
+sieht der BMHD-Chunk wie folgt aus :
+
+xxxx: 424D4844 00000014 aaaabbbb ccccdddd   BMHD....xxxxxxxx
+
+      B M  H D Bytezahl < x><y > <le><te>
+
+xxyy: eeffgghh iiiijjkk llllmmmm            xxxxxxxxxxxx
+
+      DeMaCoPa TColXAYA <sx><sy>
+
+Damit die Informationen auch bequem ausgelesen werden können, empfiehlt
+es sich, auf den oben vorgestellten kleinen Trick zu rekurrieren. Zunächst
+einmal gilt es, die Identität und die Länge des Chunks zu ermitteln. Dazu
+verwenden wir die ebenfalls oben eingeführten Variablen. Zunächst zeigt der
+datenbuffer auf die Chunk-Kennung und ermöglicht es uns so auch, die Länge
+zu ermitteln (für ein eventuelles Überlesen).
+
+ integerbuffer:=datenbuffer;
+ datenbuffer:=Address(Integer(datenbuffer)+8);
+ { die 4-Byte-Kennung und die Bytezahl in Integerlänge überlesen }
+ bytebuffer:=datenbuffer;
+ shortbuffer:=datenbuffer;
+ datenbuffer:=Address(Integer(datenbuffer)+integerbuffer^[1]);
+ { den Chunk nun selbst überlesen, die Einsprungadressen stehen bereits in
+   bytebuffer und shortbuffer }
+ IF StrNEq (integerbuffer,"BMHD",4) THEN
+ BEGIN
+
+   integerbuffer:=shortbuffer;
+   { nun wird auch der integerbuffer auf den eigentlichen Beginn des Chunks
+     (also hinter die Chunklänge) justiert }
+
+  { Analyse des BMHD-Buffers }
+ END;
+
+Die Informationen des Chunks kann man nun aus folgenden Variablen
+auslesen :
+
+Breite der Grafik   :
+Höhe der Grafik     :
+X-Wert der Ecke     :
+Y-Wert der Ecke     :
+Tiefe der Bitmap    :
+MaskPlane           :
+Kompression         :
+Hintergrundfarbe    :
+X-Aspekt            :
+Y-Aspekt            :
+Breite des Screens  :
+Höhe des Screens    :
+
+                        shortbuffer^[0]
+                        shortbuffer^[1]
+                        shortbuffer^[2]
+                        shortbuffer^[3]
+                        bytebuffer^[8]
+                        bytebuffer^[9]
+                        bytebuffer^[10]
+                        shortbuffer^[6]
+                        bytebuffer^[14]
+                        bytebuffer^[15]
+                        shortbuffer^[8]
+                        shortbuffer^[9]
+
+Mit diesen Werten ausgerüstet kann man rein theoretisch den Screen
+öffnen, es empfiehlt sich jedoch, damit bis zur Analyse des Chunks mit
+den eigentlichen Grafikdaten zu warten, da man vorher eventuell noch
+weitere Informationen - etwa zum verwendeten Viewmode - enthält.
+
+3. b) Der CAMG-Chunk
+
+Dieser Chunk enthält nur eine Information, nämlich einen eventuellen
+besonderen Viewmode des Screens. D.h. wenn die Grafik nicht im normalen
+Modus aufzubauen ist, sondern sich eines speziellen Grafikmodus wie
+HAM oder EXTRAHALFBRITE bedient, steht es hier oder sollte zumindest hier
+stehen. Manche ältere Grafikprogramme verfügen nicht über diesen Chunk,
+so daß man dann etwa eine 6-Plane-Grafik geliefert bekommt, ohne zu wissen,
+ob es sich jetzt um HAM oder Halfbrite handelt. Doch glücklicherweise
+speichern zumindest die heute gebräuchlichen Grafikprogramme diesen Chunk
+mit ab. Seine einzige Information :
+
+Screen-Viewmode     :
+
+                        integerbuffer^[0]
+
+3. c) Der CMAP-Chunk
+
+Langsam aber sicher tasten wir uns an wirklich direkt die Grafik betreffende
+Informationen heran, nachdem nun erst der äußere Rahmen abgesteckt wurde.
+Der CMAP-Chunk enthält Informationen über die ColorMap, d.h. über die
+Farben der Grafik. Dabei gibt es zwei Möglichkeiten, die Zahl der
+verwendeten Farben zu berechnen :
+
+ - einmal über die CAMG- und BMHD-Informationen unter Berücksichtigung der
+   Besonderheiten des HAM- und des EXTRAHALFBRITE-Modus, was bei ersterem
+   bedeutet, daß die letzten beiden Bitplanes der Bitmap keine originären
+   Farbinformationen sondern nur Modulationen der vorhandenen Farben
+   beinhalten (die Zahl der Farben entspricht hier also nicht 2^Depth
+   sondern 2^(Depth-2)), und bei letzterem, daß die letzte Bitplane nur die
+   Information beinhaltet, ob der an dieser Koordinate gesetzte Pixel in
+   voller und nur in halber Helligkeit gesetzt werden soll (Farbzahl =
+   2^(Depth-1))
+ - zum anderen über die Länge des Chunks, aus der, durch vier geteilt, man
+   die Farbzahl sicher errechnen kann
+Bis auf die Farbinformationen enthält dieser Chunk absolut nichts. Die
+einzelnen Farben werden dabei im betriebssystemtypischen RGB-Format
+kodiert. Das bedeutet, daß man je ein Byte für den Rot-, den Grün- und
+den Blau-Anteil der Farbe erhält. Damit die Adresse jeweils durch 4
+teilbar bleibt, ist der RGB-Kombination jeder Farbe ein Füllbyte
+vorangestellt, so daß eine Farbinformation das Format      hat. "f" steht
+
+                                                      fRGB
+
+für das Füllbyte, die anderen Buchstaben jeweils für die ein Byte lange
+Farbanteilinformation. Die gewonnenen Werte können nun entweder um 4 Bit
+nach links verschoben                        der        Routine übergeben
+
+                      (bytebuffer^[x] shr 4)     SetRGB-
+
+werden oder um 24 Bit nach links verschoben der          Routine von
+
+                                                SetRGB32-
+
+Kickstart 2.0.
+
+3. d) Der BODY-Chunk
+
+Die eigentlichen Grafikdaten findet man in diesem Chunk. Doch bevor man das
+gespeicherte Bild endlich auf den Screen bringen kann, gilt es erst
+herauszufinden, wie die Daten abgelegt sind - denn das ist im Gegensatz
+zu den anderen Chunks nicht einfach durch die Analysierung des Chunks selbst
+feststellbar. Vielmehr benötigt man die Informationen aus dem BMHD-Chunk.
+Ohne diese ist eine sinnvolle Verwertung der BODY-Daten unmöglich.
+Wichtigste Information ist das Byte, das festlegt, ob die Daten komprimiert
+sind oder nicht. Sind sie nicht komprimiert, ist das Einlesen einfach.
+Zunächst sollte man natürlich den Bildschirm nach den Vorgaben des BMHD- und
+des CAMG-Chunks zu öffnen. Dann muß man sich vor Augen halten, wie eine
+Grafik vom Computer aufgebaut wird. Dazu sei nochmals auf ältere Kursfolgen
+verwiesen. An dieser Stelle nur eine kurze Zusammenfassung : ein
+Bildschirm setzt sich aus mehreren übereinandergelegten Bitplanes zusammen.
+Die Zahl der Bitplanes bestimmt die Zahl der Farben (Farbzahl = 2^Zahl der
+Bitplanes). Dabei wird die Farbe eines Bildschirmpunktes (Pixel) durch die
+Kombination eines Bits an jeweils der gleichen Stelle der einzelnen
+Bitplanes bestimmt. Als Beispiel diene ein Screen mit 3 Bitplanes und damit
+8 Farben. Das erste Byte der ersten Bitplane sehe (im Dualsystem notiert) so
+aus :
+
+                            %00100111
+
+Das erste der zweiten :
+
+                            %01000100
+
+Und der dritten :
+
+                            %11000110
+
+Der erste Bildschirmpixel, also der an der Koordinate 0/0, hat nun den
+Farbwert %100 - das entsprechende Bit der dritten Bitplane zuerst, gefolgt
+von den anderen beiden. D.h. der Rechner setzt an 0/0 die Farbe, die mit
+                         definiert wurde. Der zweite Pixel hat die Farbe in
+
+SetRGB (ViewPort,4,....)
+
+Palettennummer %110 (=6), der dritte die aus %001 (=1) und so weiter und so
+fort. Im unkomprimierten BODY-Chunk sind nun die Bytes der einzelnen
+Bitplanes "roh" abgelegt. Dabei kommen zunächst die Bytes der ersten
+Bildschirmzeile - und zwar zunächst die der ersten Bitplane, dann die
+der zweiten, etc. Es folgen die - ebenfalls nach Bitplanes sortierten -
+Bytes der zweiten Bildschirmzeile, dann die der dritten und so weiter bis
+zur Gesamthöhe der Grafik. Um die Daten auf den Bildschirm zu bringen, muß
+man somit nichts weiter tun, als zunächst den datenbuffer auf den Beginn
+der BODY-Daten zeigen zu lassen und dann nacheinander jeweils eine
+Bildschirmzeile dahin zu übertragen, wo sie in der Bitmap (nennen wir sie
+"bm^") unseres Screens hingehört. Dabei gilt für die Zieladresse des
+Datenschaufelns :
+
+datenziel:=Address(Integer(bm^.Planes[PlaneNr-1]+(BytesPerRow*(YOffset-1))));
+
+Übertragen werden müssen dabei                          Bytes pro Zeile.
+
+                               RASSIZE (Grafikbreite,1)
+
+Nach Abschluß dieses Vorgangs befindet sich die Grafik auf dem Bildschirm,
+der Ladevorgang ist abgeschlossen. Komplizierter wird es nun natürlich
+bei komprimierten BODY-Daten. Dabei ist das Packverfahren denkbar simpel.
+Es basiert auf der Überlegung, daß in Grafiken sehr häufig einfarbige
+Flächen zu finden sind. Diese Flächen (beispielsweise in der Hintergrund-
+farbe 0) sehen nun nach dem oben dargestellten Darstellungsverfahren wie
+eine lange Abfolge des selben Bytes aus :
+
+%00000000 %00000000 %00000000 %00000000 %00000000 %00000000 %00000000
+
+Und das für jede Bitplane einmal. Diese Information sinnvoller und kürzer
+zu verpacken ist nun das Ziel des Packens und dafür hat man ein Verfahren
+entwickelt, das einfach und schnell zu handhaben ist und dennoch eine ganz
+gute Leistungsfähigkeit aufweist. Die Idee ist die, daß man zwischen
+Passagen, die in gepackter Form und Passagen, die in ungepackter Form
+vorliegen, unterscheidet. In der Praxis geschieht das durch ein
+Identifikationsbyte, das zum einen festlegt, ob die nachfolgenden Bytes
+gepackte oder ungepackte Informationen enthalten und das zum anderen auch
+die Länge des nachfolgenden Abschnittes (und damit auch den Abstand bis zum
+nächsten Identifikationsbyte) festlegt. Dabei muß man unterscheiden, ob
+der Wert des Identifikationsbytes kleiner oder größer als 128 ist (der Wert
+128 selbst ist ohne Funktion). Ist er kleiner, indiziert das, daß die
+nachfolgenden Bytes nicht komprimiert sind, also direkt an ihr Ziel
+übertragen werden können. Die Bildschirmzeilen und Bitplanes sind übrigens
+genau wie im unkomprimierten BODY-Format angeordnet. Die Zahl, der dabei
+unverändert zu übernehmenden Bytes entspricht dem Wert des Identifikations-
+bytes+1. Liest man also etwa den Wert 40 aus, so gilt es, die nachfolgenden
+41 Byte an das Ziel zu schaufeln. Danach folgt bis zum Ende der jeweiligen
+Bildschirmzeile ein neues Identifikationsbyte. Hat das Identifikations-
+byte nun einen Wert, der größer als 128 ist, so gilt es, den simplen
+Entpackvorgang durchzuführen. Dem Identifikationsbyte folgt nun nämlich
+ein einziges Informationsbyte. Dieses folgt an der momentanen Stelle
+des Grafik mehr als zweimal direkt aufeinander, um genau zu sein entspricht
+die Häufigkeit, mit der das Byte nun direkt nacheinander an die aktuelle
+Position in der Bildschirmgrafik anzuhängen ist, der Differenz zwischen
+257 und dem Wert des Identifikationsbytes. Hat also das Identifikationsbyte
+den Wert 140, so hängt man an die aktuelle Position der Bildschirmgrafik
+117mal das nachfolgende Informationsbyte an. Um es an einem weiteren
+Beispiel zu verdeutlichen, ein fiktiver Ausschnitt aus einem
+BODY-Chunk :
+
+... %11011011 %00000000 %00000001 %00100110 %01110001 ...
+
+Das erste Identifikationsbyte hat den Wert 219, somit muß man den Wert des
+nachfolgenden Informationsbytes (=0) (257-219=) 38mal an die aktuelle
+Position anhängen. Es folgt ein weiteres Identifikationsbyte, das kleiner
+als 128 ist und somit aussagt, daß die beiden (1+1) nachfolgenden Bytes
+direkt übernommen werden sollen.
+
+Dieses Spielchen geht solange, bis eine Bildschirmzeile abgearbeitet ist.
+Danach folgt dieselbe Zeile der nächsten Plane, etc. etc. Nun ist die Grafik
+komplett dargestellt.
+
+4. Listing
+
+Wie immer in diesem Kurs gibt es auch diesmal ein kleines Listing zur
+praktischen Demonstration des Stoffes. Es sei jedoch darauf hingewiesen, daß
+ich das Programm aus uralten Routinen zusammengestöpselt habe, die vor
+langer, langer Zeit einmal auf der Basis einer PD-Veröffentlichung von
+Fritjof Siebert und den Informationen der IFF-Entwickler-Disk von Commodore
+(u.a. Fish-Disk 185) entstanden sind. Die Routine "OpenScrn" dient vor allem
+der korrekten Darstellung älterer Grafiken, bei denen kein CAMG-Chunk
+vorhanden war. Bei neueren kann sich die mehr oder weniger ungefragte
+Bestimmung des Viewmodes manchmal kontrakproduktiv auswirken. Wie für das
+ganze Listing gilt : es ist ein Beispiel und es geht sicherlich alles
+optimaler und eleganter ....
+
+PROGRAM LoadIFF;
+
+{
+  Demoprogramm für den IFF-PCQ-Kurs im AmigaGadget
+
+  Funktion : kann vom CLI aus mit "IFFKurs Filename" aufgerufen werden
+             und zeigt dann das File "Filename" an, sofern es sich dabei
+             um ein IFF-ILBM-Bild handelt
+             es werden nur die allernotwendigsten Chunks unterstützt,
+             Overscan-Support oder ähnliches fehlt ebenso
+
+  © 1995 by Andreas Neumann basierend auf einer Veröffentlichung von
+            Fritjof Siebert und den Informationen auf den
+            CATS-IFF-Entwickler-Disks
+}
+
+{$I "Include:Exec/Exec.i" }
+{$I "Include:Hardware/IntBits.I" }
+{$I "Include:libraries/Dosextens.I" }
+{$I "Include:Graphics/Graphics.I" }
+{$I "Include:Graphics/Blitter.i" }
+{$I "Include:Graphics/GfxBase.i" }
+{$I "Include:Graphics/View.i" }
+{$I "Include:graphics/Pens.i" }
+{$I "Include:Graphics/Rastport.i" }
+{$I "Include:Intuition/intuition.i" }
+{$I "Include:Intuition/Intuitionbase.i" }
+{$I "Include:Utils/StringLib.i" }
+{$I "Include:Utils/Parameters.I" }
+
+
+TYPE
+    IFFTitles = (BMHD_f,CMAP_f,CAMG_f,BODY_f);
+
+    BMHD = RECORD
+            width,
+            height      : SHORT;
+            depth       : BYTE;
+            left,
+            top         : SHORT;
+            masking     : BYTE;
+            transCol    : SHORT;
+            xAspect,
+            yAspect     : BYTE;
+            scrnWidth,
+            scrnHeight  : SHORT;
+           END;
+
+    CMAP = RECORD
+            colorcnt    : SHORT;
+            red,
+            green,
+            blue        : ARRAY [0..255] OF BYTE;
+           END;
+
+    CAMG = RECORD
+            viewType    : INTEGER;
+           END;
+
+    IFFInfoType = RECORD
+                   IFFBMHD  : BMHD;
+                   IFFCMAP  : CMAP;
+                   IFFCAMG  : CAMG;
+                   IFFTitle : IFFTitles;
+                  END;
+
+    IFFInfoTypePtr = ^IFFInfoType;
+
+    IFFErrors = (iffNoErr,iffOutOfMem,iffOpenScreenfailed,
+                 iffOpenWindowFailed,iffOpenFailed,iffWrongIff,
+                 iffReadWriteFailed);
+
+
+CONST
+
+    gfxname : String = ("graphics.library");
+
+    { IFFError-Strings }
+
+    IFFErrorStrings : ARRAY [iffNoErr..iffReadWriteFailed] OF String =
+                        ("No Error","Out of Memory","OpenScreen failed",
+                         "OpenWindow failed","Open Failed","Wrong Iff",
+                         "ReadWrite failed");
+
+
+VAR
+    IFFError    :   IFFErrors;
+    IFFInfo     :   IFFInfoType;
+    IFFName     :   String;
+    IFFScreen   :   ScreenPtr;
+    IFFWindow   :   WindowPtr;
+    IFFMes      :   IntuiMessagePtr;
+
+{$A     XREF    _p%IntuitionBase    }
+
+
+FUNCTION Hoch (basis : INTEGER; exp : INTEGER) : INTEGER;
+
+VAR h1 : INTEGER;
+    h2 : INTEGER;
+
+BEGIN
+ h1:=1;
+ IF exp>0 THEN
+  FOR h2:=1 TO exp DO
+   h1:=h1*basis;
+ Hoch:=h1;
+END;
+
+
+FUNCTION GetIBase : IntuitionBasePtr;
+
+BEGIN
+{$A
+        move.l  _p%IntuitionBase,d0
+}
+END;
+
+
+FUNCTION IsAGA (gb : GfxBasePtr) : BOOLEAN;
+
+BEGIN
+ IF (gb^.ChipRevBits0 AND %100)=%100 THEN
+  IsAGA:=TRUE
+ ELSE
+  IsAGA:=FALSE;
+END;
+
+
+PROCEDURE MySetRGB (vp : ViewPortPtr ; nr , r , g , b : INTEGER ;
+                    gb : GfxBasePtr);
+
+BEGIN
+ IF IsAGA (gb) THEN
+  SetRGB32 (vp,nr,r shl 24,g shl 24,b shl 24)
+ ELSE
+ SetRGB4 (vp,nr,(r shr 4),(g shr 4),(b shr 4));
+END;
+
+PROCEDURE BufSkip (VAR bufptr : Address ; bytes : INTEGER);
+
+BEGIN
+ bufptr:=Address(Integer(bufptr)+bytes);
+END;
+
+
+FUNCTION ReadILBM (name : String; VAR myscreen : ScreenPtr ;
+                   VAR mywindow : WindowPtr) : BOOLEAN;
+
+VAR Compression,
+    MaskPlane,
+    contload        :   BOOLEAN;
+    LineLength,
+    LineWidth,
+    i,
+    j,
+    k,
+    len,
+    PictureLength   :   INTEGER;
+    PictureBuffer,
+    WorkBuffer,
+    HeaderBuffer    :   Address;
+    TextBuffer      :   String;
+    LONGBuffer      :   ^ARRAY [0..63] OF INTEGER;
+    SHORTBuffer     :   ^ARRAY [0..127] OF SHORT;
+    BYTEBuffer      :   ^ARRAY [0..255] OF BYTE;
+    InH             :   FileHandle;
+    IFFBitMap       :   BitMapPtr;
+
+
+PROCEDURE OpenScrn;
+
+VAR nuscreen    :   NewScreen;
+    nuwindow    :   NewWindow;
+    i           :   INTEGER;
+
+BEGIN
+ WITH NuScreen DO
+ BEGIN
+  width:=IFFInfo.IFFBMHD.scrnWidth;
+  IF width<IFFInfo.IFFBMHD.width THEN
+   width:=IFFInfo.IFFBMHD.width;
+  height:=IFFInfo.IFFBMHD.scrnHeight;
+  IF height<IFFInfo.IFFBMHD.height THEN
+   height:=IFFInfo.IFFBMHD.height;
+
+  leftEdge:=IFFInfo.IFFBMHD.left;
+  topEdge:=IFFInfo.IFFBMHD.top;
+
+  depth:=IFFInfo.IFFBMHD.depth;
+  viewModes:=0;
+  IF width>=640 THEN ViewModes:=ViewModes OR HIRES;
+  IF height>=400 THEN ViewModes:=ViewModes OR LACE;
+
+  WITH IFFInfo.IFFCAMG DO
+   ViewModes:=ViewModes OR ViewType;
+
+  IF ((depth=6) OR (depth=8)) AND (ViewModes=0) THEN
+  IF (IFFInfo.IFFCMAP.colorcnt=Hoch(2,depth-2)) THEN
+   ViewModes:=HAM;
+
+  IF ((ViewModes AND HAM)=HAM) AND
+     (IFFInfo.IFFCMAP.colorcnt>Hoch(2,depth-2)) THEN
+   IFFInfo.IFFCMAP.colorcnt:=Hoch(2,depth-2);
+
+  detailPen:=0;
+  blockPen:=0;
+  stype:=CUSTOMSCREEN_f+SCREENQUIET_f+SCREENBEHIND_f;
+  font:=NIL;
+  defaultTitle:=NIL;
+  gadgets:=NIL;
+  customBitMap:=NIL;
+ END;
+ myscreen:=OpenScreen (Adr(nuscreen));
+ IF myscreen=NIL THEN
+  IFFError:=iffOpenScreenfailed
+ ELSE
+ BEGIN
+
+  WITH IFFInfo.IFFCMAP DO
+  BEGIN
+   FOR i:=0 TO (colorCnt-1) DO
+    MySetRGB (Adr(myscreen^.SViewPort),i,red[i],green[i],blue[i],GfxBase);
+  END;
+
+  WITH nuwindow DO
+  BEGIN
+   leftEdge:=0;
+   topEdge:=0;
+   width:=IFFInfo.IFFBMHD.width;
+   height:=IFFInfo.IFFBMHD.height;
+   detailPen:=1;
+   blockPen:=0;
+   idcmpFlags:=MOUSEBUTTONS_f;
+   flags:=BORDERLESS+NOCAREREFRESH+RMBTRAP+ACTIVATE;
+   firstGadget:=NIL;
+   checkMark:=NIL;
+   title:=NIL;
+   screen:=myscreen;
+   bitMap:=NIL;
+   wtype:=CUSTOMSCREEN_F;
+  END;
+  mywindow:=OpenWindow (Adr(nuwindow));
+  IF mywindow=NIL THEN
+  BEGIN
+   CloseScreen (myscreen);
+   myscreen:=NIL;
+   IFFError:=iffOpenWindowFailed;
+  END;
+ END;
+END;
+
+
+PROCEDURE ReadQuick (mto : ADDRESS; Count : SHORT ; fake : BOOLEAN);
+
+BEGIN
+ IF fake=FALSE THEN
+  CopyMem (WorkBuffer,mto,Count);
+ BufSkip (WorkBuffer,Count);
+END;
+
+
+PROCEDURE ReadSlow (ato : ADDRESS; Count : SHORT);
+
+VAR kk,
+    scrRow,
+    bCnt    :   INTEGER;
+    inCode  :   BYTE;
+    ToPtr   :   ^ARRAY [0..9999] OF BYTE;
+    DPtr    :   ^ARRAY [0..254] OF BYTE;
+    RQBuf   :   BYTE;
+    j       :   SHORT;
+
+BEGIN
+ ToPtr:=ato;
+ bCnt:=0;
+ WHILE bCnt<Count DO
+ BEGIN
+  DPtr:=WorkBuffer;
+  inCode:=DPtr^[0];
+  BufSkip (WorkBuffer,1);
+  IF inCode<128 THEN
+  BEGIN
+   CopyMem (WorkBuffer,Address(Integer(ato)+bCnt),inCode+1);
+   BufSkip (WorkBuffer,inCode+1);
+   Inc(bCnt,inCode+1);
+  END
+  ELSE
+   IF inCode>128 THEN
+   BEGIN
+    DPtr:=WorkBuffer;
+    RQBuf:=DPTr^[0];
+    BufSkip(WorkBuffer,1);
+    FOR j:=bCnt TO (bCnt+257-inCode-1) DO
+     ToPtr^[j]:=RQBuf;
+    Inc(bCnt,257-inCode);
+   END;
+ END;
+END;
+
+
+PROCEDURE CheckILBM;
+
+BEGIN
+ IF StrNEq (TextBuffer,"FORM",4)=FALSE THEN
+  IFFError:=iffOpenFailed;
+
+ IF (StrNEq (TextBuffer,"FORM",4)=TRUE) AND
+    (StrNEq(Address(Integer(TextBuffer)+8),"ILBM",4)=FALSE) THEN
+  IFFError:=iffWrongIFF;
+END;
+
+
+BEGIN
+ IFFInfo.IFFTitle:=IFFTitles(0);
+ IFFError:=iffnoErr;
+ myscreen:=NIL;
+ mywindow:=NIL;
+ PictureBuffer:=NIL;
+ PictureLength:=0;
+ contload:=FALSE;
+ InH:=DOSOpen (name,MODE_OLDFILE);
+ IF InH=NIL THEN
+  IFFError:=iffOpenfailed
+ ELSE
+ BEGIN
+  HeaderBuffer:=AllocMem (12,MEMF_CLEAR+MEMF_PUBLIC);
+  IF HeaderBuffer<>NIL THEN
+  BEGIN
+   len:=DOSRead (InH,HeaderBuffer,12);
+   IF len<>12 THEN IFFError:=iffReadWriteFailed;
+   TEXTBuffer:=HeaderBuffer;
+   LONGBuffer:=HeaderBuffer;
+   CheckILBM;
+
+   PictureLength:=LONGBuffer^[1]-4;
+   FreeMem (HeaderBuffer,12);
+
+   IF IFFError=iffNoErr THEN
+   BEGIN
+
+    PictureBuffer:=AllocMem(PictureLength,MEMF_CLEAR+MEMF_PUBLIC);
+
+    IF PictureBuffer=NIL THEN
+     IFFError:=iffOutofmem
+    ELSE
+    BEGIN
+     len:=DOSRead (InH,PictureBuffer,PictureLength);
+     IF InH<>NIL THEN BEGIN DOSClose (InH); InH:=NIL; END;
+     IF len<>PictureLength THEN
+      IFFError:=iffReadWritefailed
+     ELSE
+       contload:=TRUE;
+     WorkBuffer:=PictureBuffer;
+    END;
+   END;
+  END;
+ END;
+ IF contload THEN
+ BEGIN
+  WHILE (IFFError=iffNoErr) AND (contload) DO
+  BEGIN
+   TextBuffer:=WorkBuffer;
+   BufSkip(WorkBuffer,4);
+   IF StrNEq (TextBuffer,"BMHD",4) THEN
+   BEGIN
+    IFFInfo.IFFTitle:=IFFInfo.IFFTitle OR BMHD_f;
+    LONGBuffer:=WorkBuffer;
+    BufSkip(WorkBuffer,4);
+    j:=LONGBuffer^[0];
+    SHORTBuffer:=WorkBuffer;
+    BYTEBuffer:=WorkBuffer;
+    BufSkip(WorkBuffer,j);
+    WITH IFFInfo.IFFBMHD DO
+    BEGIN
+     width:=SHORTBuffer^[0];
+     height:=SHORTBuffer^[1];
+     left:=SHORTBuffer^[2];
+     top:=SHORTBuffer^[3];
+     depth:=BYTEBuffer^[8];
+     masking:=BYTEBuffer^[9];
+     MaskPlane:=(masking=1);
+     Compression:=(ByteBuffer^[10]=1);
+     transCol:=SHORTBuffer^[6];
+     xAspect:=BYTEBuffer^[14];
+     yAspect:=BYTEBuffer^[15];
+     scrnWidth:=SHORTBuffer^[8];
+     scrnHeight:=SHORTBuffer^[9];
+    END;
+   END
+   ELSE
+   BEGIN
+    IF StrNEq (TextBuffer,"CMAP",4) THEN
+    BEGIN
+     IFFInfo.IFFTitle:=IFFInfo.IFFTitle OR CMAP_f;
+     LONGBuffer:=WorkBuffer;
+     BufSkip(WorkBuffer,4);
+     i:=LONGBuffer^[0];
+     BYTEBuffer:=WorkBuffer;
+     BufSkip(WorkBuffer,i);
+     WITH IFFInfo.IFFCMAP DO
+     BEGIN
+      colorcnt:=i DIV 3;
+      j:=0;
+      FOR k:=0 TO colorcnt-1 DO
+      BEGIN
+       red[k]:=BYTEBuffer^[j];
+       green[k]:=BYTEBuffer^[j+1];
+       blue[k]:=BYTEBuffer^[j+2];
+       Inc(j,3);
+      END;
+     END;
+    END
+    ELSE
+    BEGIN
+     IF StrNEq (TextBuffer,"CAMG",4) THEN
+     BEGIN
+      IFFInfo.IFFTitle:=IFFInfo.IFFTitle OR CAMG_f;
+      LONGBuffer:=WorkBuffer;
+      BufSkip(WorkBuffer,8);
+      IFFInfo.IFFCAMG.viewType:=LONGBuffer^[1];
+     END
+     ELSE
+     BEGIN
+      IF StrNEq (TextBuffer,"BODY",4) THEN
+      BEGIN
+       IFFInfo.IFFTitle:=IFFInfo.IFFTitle OR BODY_f;
+
+       OpenScrn;
+
+       IF IFFError=iffNoErr THEN
+       BEGIN
+
+        BufSkip (WorkBuffer,4);
+
+        IFFBitMap:=myscreen^.SRastPort.BitMap;
+        LineLength:=RASSIZE(IFFInfo.IFFBMHD.width,1);
+        LineWidth:=IFFBitMap^.BytesPerRow;
+
+        IF Compression THEN
+        BEGIN
+         FOR i:=0 TO (IFFInfo.IFFBMHD.height-1) DO
+         FOR j:=0 TO (IFFBitMap^.Depth-1) DO
+          ReadSlow (Address(Integer(IFFBitMap^.Planes[j])+(LineWidth*i)),
+                    LineLength);
+        END
+        ELSE
+        BEGIN
+         FOR i:=0 TO (IFFInfo.IFFBMHD.height-1) DO
+         FOR j:=0 TO (IFFBitMap^.Depth-1) DO
+          ReadQuick (Address(Integer(IFFBitMap^.Planes[j])+(LineWidth*i)),
+                     LineLength,FALSE);
+         IF MaskPlane THEN
+          ReadQuick (NIL,LineLength,TRUE);
+        END;
+
+       END;
+       contload:=FALSE;
+      END
+      ELSE
+      BEGIN
+       LONGBuffer:=WorkBuffer;
+       BufSkip (WorkBuffer,4);
+       i:=LONGBuffer^[0];
+       BufSkip (WorkBuffer,i);
+      END;
+     END;
+    END;
+   END;
+  END;
+ END;
+ IF InH<>NIL THEN
+  DOSClose (InH);
+ IF PictureBuffer<>NIL THEN FreeMem (PictureBuffer,PictureLength);
+ IF IFFError<>iffNoErr THEN
+ BEGIN
+  IF mywindow<>NIL THEN CloseWindow (mywindow);
+  IF myscreen<>NIL THEN CloseScreen (myscreen);
+  mywindow:=NIL;
+  myscreen:=NIL;
+ END;
+ ReadILBM:=(iffError=iffNoErr);
+END;
+
+
+BEGIN
+ IFFName:=AllocString(255);
+ IF IFFName<>NIL THEN
+ BEGIN
+
+  GetParam(1,IFFName);
+
+  IF StrLen (IFFName)>0 THEN
+  BEGIN
+   GfxBase := OpenLibrary(gfxname, 0);
+   WRITELN ("\nIFF-Kurs für AmigaGadget - ein Demo-IFF-Lader");
+   WRITELN ("written 1995 by Andreas Neumann":65,"\n");
+   IF ReadILBM (IFFName,IFFScreen,IFFWindow) THEN
+   BEGIN
+    ScreenToFront (IFFScreen);
+    REPEAT
+     IFFMes:=Address(WaitPort(IFFWindow^.UserPort));
+     IFFMes:=Address(GetMsg(IFFWindow^.UserPort));
+    UNTIL IFFMes<>NIL;
+    ReplyMsg (Address(IFFMes));
+    ScreenToBack (IFFScreen);
+   END;
+
+   IF IFFWindow<>NIL THEN CloseWindow (IFFWindow);
+   IF IFFScreen<>NIL THEN CloseScreen (IFFScreen);
+   CloseLibrary (GfxBase);
+   IF IFFError<>iffNoErr THEN
+    WRITELN ("\n",IFFErrorStrings[IFFError],"\n");
+  END;
+  FreeString (IFFName);
+ END;
+END.
+
+So, das war's - in der Hoffnung, daß das Thema vielleicht den einen oder
+anderen interessiert hat und ihm durch meine mehr oder weniger instruktiven
+Ausführungen der Einstieg in die Welt der ILBM- und IFF-Files erleichtert
+wurde. Wie immer gilt auch hier, daß Mitmenschen, die von der Materie
+Ahnung haben, sich aufgefordert fühlen dürfen, mich auf Fehler, Unstimmig-
+keiten und Falschinformationen hinzuweisen. Und für die, die noch Fragen zu
+diesem oder einem anderen Thema haben, gilt natürlich, daß ich bemüht sein
+werde, es im Rahmen meiner Möglichkeiten darzustellen und jedenfalls immer
+eine offenes Ohr (und Nasenloch) für Fragen zu haben versuche. Bis dahin....
+
+
+                    Pascalcompiler haben kurze Beine.

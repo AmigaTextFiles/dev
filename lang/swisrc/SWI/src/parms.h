@@ -1,0 +1,8 @@
+#define PLHOME       "/staff/jan/lib/pl-2.0.6"
+#define DEFSTARTUP   ".plrc"
+#define PLVERSION    "2.0.6"
+#define ARCH	    "sparc-sunos4.1.3"
+#define C_LIBS	    "-lreadline -ltermcap -lm -ldl"
+#define C_STATICLIBS "/usr/lib/libc.a"
+#define C_CC	    "gcc"
+#define C_LDFLAGS    ""

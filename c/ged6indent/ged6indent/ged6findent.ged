@@ -1,0 +1,192 @@
+/*
+ * $VER: ged4findent 1.3 (5.8.99)
+ *
+ * ged4findent - indent current context in a C sourcefile
+ *               in GoldEd, using GNUindent
+ *
+ * Written by Thomas Aglassinger <agi@giga.or.at>
+ *
+ * This is Public Domain, refer to ReadMe for usage.
+ */
+
+OPTIONS RESULTS                             /* enable return codes     */
+
+if (LEFT(ADDRESS(), 6) ~= "GOLDED") then    /* not started by GoldEd ? */
+    address 'GOLDED.1'
+
+'LOCK CURRENT RELEASE=5'                    /* lock GUI, gain access   */
+OPTIONS FAILAT 6                            /* ignore warnings         */
+SIGNAL ON SYNTAX                            /* ensure clean exit       */
+
+/* temporary filenames to store block in */
+srcfname = 't:ged6sfindent.' || PRAGMA('ID')
+indfname = 't:ged6ifindent.' || PRAGMA('ID')
+
+/* Give some feedback to the user */
+'REQUEST STATUS="Reformatting..."'
+
+/* remember current position and find string */
+'QUERY ABSLINE VAR oldLine'
+'QUERY FIND VAR oldFindString'
+
+/*
+ * find top of current function
+ */
+foundFunc = 0                               /* Found beginning of function? */
+quitLoop = 0                                /* Quit loop (because of any reason)? */
+
+/* if not currently above a "{", search for the previous one */
+DO WHILE ~quitLoop
+    'QUERY CODE VAR ch'
+    'QUERY COLUMN VAR col'
+
+    IF ((ch = 123) & (col = 1)) THEN DO
+        /* begining of function found */
+        foundFunc = 1
+        quitLoop = 1
+    END
+    ELSE DO
+        /* search for previous "{" */
+        'FIND STRING="{" PREV QUIET'
+        IF (RC ~=0 ) THEN DO
+            /* error, if none found */
+            quitLoop = 1
+            'REQUEST TITLE="Indent function" PROBLEM="No `{` at beginning of line found"'
+        END
+    END
+END /* while */
+
+/*
+ * mark whole function
+ */
+IF foundFunc THEN DO
+   'MARK HIDE'
+   'MARK SET'
+
+   'BRACKET MATCH'
+    if (RC = 0) THEN DO
+        /* mark end of block */
+        'MARK SET'                            
+    END
+    ELSE DO
+        /* error, if no matching "}" found */
+        foundFunc = 0
+        'MARK HIDE'
+        'REQUEST TITLE="Indent function" PROBLEM="No corresponding `}` found"'
+    END
+END
+
+/*
+ * save block and indent it
+ */
+IF foundFunc THEN DO
+
+    /* save block */
+    'SAVE BLOCK FORCE NAME="' || srcfname || '"'
+
+    /* determine which options to use for indent:
+     * tries to read the environmental variable `ged6indent.prefs';
+     * if it can't be found, default options matching the style of
+     * GoldEd will be used */
+    indentOpts = GetEnv('ged6indent.prefs')
+    IF indentOpts = '' THEN DO
+        indentOpts = '-br -ce -i4 -sob -sc -npsl -npcs -lp'
+    END
+
+    /* invoke indent */
+    indentCommand = 'indent' indentOpts '-o "' || indfname || '" "' || srcfname || '"'
+    ADDRESS COMMAND indentCommand
+
+    IF (RC = 0) THEN DO
+        /* move to begin of function, remember line number */
+        'BRACKET MATCH'
+        'QUERY ABSLINE VAR beforeDelBlkLine'
+
+        /* delete old block */
+        'DELETE BLOCK'
+
+        /* if at a different line now, insert CR; otherwise for
+         * functions at end of file, the function declaration
+         * would end up after the actual function text */
+        'QUERY ABSLINE VAR afterDelBlkLine'
+        if (beforeDelBlkLine ~= afterDelBlkLine) THEN DO
+            'GOTO EOL'
+            'CR'
+        END
+
+        /* insert new data from file */
+        'OPEN FORCE INSERT NAME="' || indfname || '"'
+    END
+    ELSE DO
+        /* error message */
+        SAY ''
+        SAY 'error calling indent; file left untouched'
+    END
+END
+
+/* restore position and find string */
+'GOTO LINE=' || oldLine
+'GOTO INDENT'
+'SET NAME=FIND VALUE="' || GedEscaped(oldFindString) || '"'
+
+CALL DelFileExists(srcfname)   /* remove temporary file */
+CALL DelFileExists(indfname)
+
+'REQUEST STATUS=""'
+
+'UNLOCK' /* VERY important: unlock GUI */
+EXIT
+
+/***************
+ * subroutines *
+ ***************/
+
+/*
+ * handle syntax errors
+ */
+SYNTAX:
+
+SAY "Sorry, error line" SIGL ":" ERRORTEXT(RC) ":-("
+'UNLOCK'
+EXIT
+
+/*
+ * GedEscaped: escape string so that it makes sense after ReadArgs()
+ * is finished with it
+ */
+GedEscaped: procedure
+    PARSE ARG text
+    escaped = ''
+    DO i=1 FOR Length(text)
+        letter = SubStr(text, i, 1)
+        IF letter = '"' THEN DO
+            escaped = escaped || '*"'
+        END
+        ELSE DO
+            escaped = escaped || letter
+        END
+    END
+    RETURN escaped
+
+/*
+ * GetEnv: return the value of an environmental variable
+ */
+GetEnv: procedure
+    IF Open(Env, 'env:' || arg(1), 'R') THEN DO
+        EnvVar = ReadLn(Env)
+        CALL Close Env
+    END
+    ELSE DO
+        EnvVar = ''
+    END
+    RETURN EnvVar
+
+/*
+ * DelFileExists: delete a file if it exists
+ */
+DelFileExists: procedure
+    IF Exists(arg(1)) THEN DO
+        ADDRESS COMMAND 'delete QUIET "' || arg(1) || '"'
+    END
+    RETURN
+

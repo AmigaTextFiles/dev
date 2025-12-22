@@ -1,0 +1,143 @@
+
+; WBstartup ]III[ routine  for WB1.3+, Classic Blitz and New Blitz.
+
+; (C) 2014  Lorence Lombardo
+
+; Date commenced:-  7-Mar-2014
+
+; This should work fine under the AB2 environment from here:-
+; http://www.amiforce.de/amiblitz/ab_downloads.php
+
+; Also tested under AB3.
+
+; NB: testing has been limited.
+
+; replace "PeekS" with "Peeks$" if you dont have it.
+
+; Known problems with "ROM 1.3":-
+;
+; Crashes with reqtools in program if started from WB.
+; Seems to be a conflict with the WB startup code & reqtools.
+; But if you run some other reqtools program first, then
+; there is no conflict.
+
+
+*proc.Process=FindTask_(0) : wb.l=0   ; <- WB start code,
+If *proc\pr_CLI=0                     ;    optionally u can use "wb.l=NWbStartup"
+   WaitPort_( *proc\pr_MsgPort)       ;    instead.
+   wb=GetMsg_(*proc\pr_MsgPort)       ;
+EndIf                                 ;
+
+
+; New NameFromLock{} 1st ever released here in this package for WB1.3+
+; Please quote origin if used in open work.  ;)
+
+Function.s NameFromLock{lock.l}
+   nm$="" : newlok.l=0
+   If Examine_ (lock, &fib.FileInfoBlock)
+      nm$=Peek$(&fib\fib_FileName) : newlok=ParentDir_( lock )
+      If newlok=0 AND fib\fib_DirEntryType>0 Then nm$=nm$+":"
+   EndIf
+   Repeat
+      If newlok
+         If Examine_ (newlok, &fib)
+            dir$=Peek$(&fib\fib_FileName) : lock=newlok
+            newlok=ParentDir_( lock ) : UnLock_ lock
+            If newlok=0 Then nm$=dir$+":"+nm$ Else nm$=dir$+"/"+nm$
+         Else
+            UnLock_ newlok : newlok=0
+         EndIf
+      EndIf
+   Until newlok=0
+   Function Return nm$
+End Function
+
+
+; NameFromLock_ wrapper which can be used if compiling with AB2/3
+; since WB2+ will be required anyway.
+; OR if you are just coding for WB2+ with Classic Blitz anyway.
+
+Function.s NameFromLock2{lock.l}
+   nm$="" : str.l=AllocMem_(4096, #MEMF_PUBLIC)
+   If str
+      NameFromLock_ lock, str, 4096
+      nm$=Peek$(str) : FreeMem_ str, 4096
+   EndIf
+   Function Return nm$
+End Function
+
+
+; The following function has been taken from "cli_args13.ab2" from here:-
+; http://aminet.net/package/dev/basic/cli_args
+
+; NB:  "arg_ptr.l" can also be obtained like so:-
+;      "arg_ptr.l=GetArgStr_", without the quotes on WB2+ .
+
+maxargs.l=5000 : Dim arg$(maxargs)
+
+Function.l NumArgs{}
+   SHARED arg$(), maxargs
+   c.l=0: qt.b=0: qt$=Chr$(34): b$=" ": sc.l=0: l$=Chr$(10)
+   *fh.FileHandle = Input_ * 4 : arg_ptr.l = *fh\fh_Buf * 4
+   Repeat
+      a$=PeekS(arg_ptr+sc,1): sc+1
+      If a$=qt$
+         If qt=0 Then qt=1: c=c+1 Else qt=0: b$=" "
+      Else
+         If b$=" " AND a$<>" " AND a$<>l$ AND qt=0 Then c=c+1
+         b$=a$: If a$=" " AND qt=0 Then a$=""
+         If a$<>l$ AND c<=maxargs Then arg$(c)=arg$(c)+a$
+      EndIf
+   Until a$=l$ OR c>maxargs
+   If c>maxargs Then c=maxargs
+   Function Return c
+End Function
+
+
+Function.l NumArgsWB{}
+   SHARED arg$(), wb, maxargs
+   *wbmsg.WBStartup=wb : numargs.l=*wbmsg\sm_NumArgs-1
+   wb_sz.l=SizeOf.WBArg : *arg.WBArg=*wbmsg\sm_ArgList+wb_sz
+   If numargs>maxargs Then numargs=maxargs
+   For x.l=1 To numargs
+      dir$=NameFromLock{*arg\wa_Lock}
+      If Right$(dir$,1)<>":" AND dir$<>"" Then dir$=dir$+"/"
+      arg$(x)=dir$+Peek$(*arg\wa_Name) : *arg+wb_sz
+   Next x
+   Function Return numargs
+End Function
+
+
+;=======================================================================================
+
+
+If wb=0 Then numargs.l=NumArgs{} Else numargs.l=NumArgsWB{}
+
+lib.l = OpenLibrary_("reqtools.library",0)
+If lib CloseLibrary_ lib Else Goto exit
+
+msg$="WB = "+Str$(wb)+Chr$(10)+"Args = "+Str$(numargs)
+
+#RT_Underscore=$8000000B : #RT_ReqPos=$80000003 : but$="_ok"
+#REQPOS_CENTERSCR=2 : #RTEZ_ReqTitle=$80000014 : tit$=" WB5/CLI"
+
+ttags$=Mkl$(#RT_Underscore)+Mkl$(95)+Mkl$(#RT_ReqPos)+Mkl$(#REQPOS_CENTERSCR)
+ttags$=ttags$+Mkl$(#RTEZ_ReqTitle)+Mkl$(&tit$)+Mkl$(#TAG_DONE)+Mkl$(0)
+
+ret.b=rtEZRequestA_ (&msg$, &but$, 0, 0 , &ttags$) : but$="_Next|_Quit"
+
+For i.l=1 To numargs
+   msg$=Str$(i)+" - "+arg$(i)
+   ret.b=rtEZRequestA_ (&msg$, &but$, 0, 0 , &ttags$)
+   If ret=0 Then i=numargs
+Next i
+
+exit:
+
+If wb Then Forbid_ : ReplyMsg_ wb : Permit_  ; <- need this on all exit points.
+                                             ;    do not do this if using "wb.l=NWbStartup"
+
+
+End
+
+

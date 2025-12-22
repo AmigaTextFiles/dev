@@ -1,0 +1,319 @@
+/*
+**     $VER: LoadSavePicture.c V0.01 (19-06-95)
+**
+**     Author:  Gerben Venekamp
+**     Updates: 19-06-95  Version 0.01       Intial module
+**
+**  LoadSavePicture.c this is where a picture gets loaded or pictures
+**  get loaded. Also saving picture/pictures is handled here.
+**
+*/
+
+
+#include <datatypes/pictureclass.h>
+#include <exec/execbase.h>
+#include <exec/memory.h>
+#include <exec/libraries.h>
+#include <proto/asl.h>
+#include <proto/dos.h>
+#include <proto/iffparse.h>
+
+#include "IFFConverter.h"
+
+
+// Defining variables
+char * FileName;
+struct ExecBase *SysBase;
+BPTR LoadFileName_lock;
+
+
+// Defining prototypes
+void LoadPicture(enum FileModeType);
+static void GetAslFileNameLength(struct FileRequester *, ULONG *);
+BOOL GetFileName(char *, enum);
+
+
+/*
+**  LoadPicture(fm_FileMode)
+**
+**     Loads one or more pictures. When 'FileMode' is 'Single',
+**     'LoadPicture' will load a single picture and displays it. In all
+**     other cases 'LoadPicture' will load the pictures, ask the place
+**     to save them, convert and save them one by one.
+**
+**  pre:  fm_FileMode - Depending on 'fm_FileMode', 'LoadPicture' acts
+**                      differently. When 'fm_FileMode' equals:
+**                        Single   - An IFF ILBM picture is loaded and
+**                                   displayed. User is able to adjust the
+**                                   clipping reagon and then save the
+**                                   clipped picture.
+**                        Sequence - Loads a sequence of IFF ILBM pictures.
+**                                   File name is determined by a basename
+**                                   followed by a dot and then a number
+**                                   consisting out of 4 digits. You can
+**                                   select a clipping reagon for the first
+**                                   picture. All other pictures will use
+**                                   this clipping.
+**                        Multiple - Loads one or more IFF ILBM pictures
+**                                   and saves them automaticly. No clipping
+**                                   is possible.
+**                        Dir      - All files in a particular directory
+**                                   are tested for IFF ILBM. If so, then
+**                                   the picture is automaticly saved. So,
+**                                   no clipping is possible.
+**  post: None.
+**
+*/
+void LoadPicture(enum FileModeType fm_FileMode)
+{
+   UWORD register Temp_Width;
+   UWORD register Temp_Height;
+   UWORD register Temp_Depth;
+   ULONG register Temp_Size;
+
+   LONG rc;
+   struct IFFHandle *iff = NULL;
+
+   if( GetFileName(FileName) )
+      {
+         if(iff = AllocIFF())
+         {
+            if(iff->iff_Stream = OpenFromLock(LoadFileName_lock))
+            {
+               InitIFFasDOS(iff);
+               if(!OpenIFF(iff, IFFF_READ))
+               {
+                  if(!ParseIFF(iff, IFFPARSE_STEP))
+                  {
+                     struct ContextNode *cn = NULL;
+                     
+                     if((cn = CurrentChunk(iff)) && (cn->cn_ID == ID_FORM))
+                     {
+                        long propArray[] = { ID_ILBM, ID_CAMG,
+                                             ID_ILBM, ID_BMHD,
+                                             ID_ILBM, ID_CMAP,
+                                             ID_ILBM, ID_BODY
+                        };
+                        
+                        if(!PropChunks(iff, propArray, 4))
+                        {
+                           if(!StopOnExit(iff, ID_ILBM, ID_FORM))
+                           {
+                              rc = ParseIFF(iff, IFFPARSE_SCAN);
+                              if(rc==0 || rc==IFFERR_EOC)
+                              {
+                                 struct StoredProperty *sp;
+                                 
+                                 if(sp = FindProp(iff, ID_ILBM, ID_BMHD))
+                                 {
+                                    struct BitMapHeader *BitMapHdr = sp->sp_Data;
+                                    
+                                    if(sp = FindProp(iff, ID_ILBM, ID_CAMG))
+                                    {
+                                       ULONG DisplayMode = *(ULONG *) sp->sp_Data;
+                                       
+                                       if(sp = FindProp(iff, ID_ILBM, ID_CMAP))
+                                       {
+                                          APTR CMapData = sp->sp_Data;
+                                          
+                                          if(sp = FindProp(iff, ID_ILBM, ID_BODY))
+                                          {
+                                             switch( RebuildViewScreen(BitMapHdr, DisplayMode, CMapData, sp->sp_Data) )
+                                             {
+                                                case RVS_Okay:
+                                                   PictureValid = TRUE;
+                                                   
+                                                   Temp_Width  = BitMapHdr->bmh_Width;
+                                                   Temp_Height = BitMapHdr->bmh_Height;
+                                                   Temp_Depth  = BitMapHdr->bmh_Depth;
+                                                   Temp_Size   = ((Temp_Width + 7) >> 3) * Temp_Height * Temp_Depth;
+                                                   
+                                                   PicWidth  = Temp_Width;
+                                                   PicHeight = Temp_Height;
+                                                   PicSize   = ClipSize   = Temp_Size;
+                                                   PicDepth  = Temp_Depth;
+                                                   ClipLeft  = 0;
+                                                   ClipTop   = 0;
+                                                   
+                                                   ClipWidth  = Temp_Width  - 1;
+                                                   ClipHeight = Temp_Height - 1;
+                                                   
+                                                   // Mark as first clipping
+                                                   OldClipLeft = -1;
+                                                   
+                                                   UpdateDimentions(GD_PicWidth,   PicWidth,
+                                                                    GD_PicHeight,  PicHeight,
+                                                                    GD_PicDepth,   PicDepth,
+                                                                    GD_PicSize,    PicSize,
+                                                                    GD_ClipWidth,  ClipWidth + 1,
+                                                                    GD_ClipHeight, ClipHeight + 1,
+                                                                    GD_ClipLeft,   ClipLeft,
+                                                                    GD_ClipTop,    ClipTop,
+                                                                    GD_ClipSize,   ClipSize,
+                                                                    GD_Sentinal);
+                                                   
+                                                   UpdateGadgets(GD_Save,       &EnableGadget,
+                                                                 GD_ClipWidth,  &EnableGadget,
+                                                                 GD_ClipHeight, &EnableGadget,
+                                                                 GD_ClipLeft,   &EnableGadget,
+                                                                 GD_ClipTop,    &EnableGadget,
+                                                                 TAG_DONE);
+                                                   break;
+                                                case RVS_PictureFailure:
+                                                case RVS_NoWindow_PictureOkay:
+                                                case RVS_NoWindow_PictureFailure:
+                                                case RVS_BlackScreen:
+                                                case RVS_NoScreen:
+                                                case RVS_NoColourMap:;
+                                             }
+                                          }
+                                          else
+                                             ErrorHandler( IFFerror_NotFound, "BODY Chunk" );
+                                       }
+                                       else
+                                          ErrorHandler( IFFerror_NotFound, "CMAP Chunk" );
+                                    }
+                                    else
+                                       ErrorHandler( IFFerror_NotFound, "CMAG Chunk" );
+                                 }
+                                 else
+                                    ErrorHandler( IFFerror_NotFound, "BitMapHeader" );
+                              }
+                              else
+                                 ErrorHandler( IFFerror_Fail, "IFFParse" );
+                           }
+                           else
+                              ErrorHandler( IFFerror_Fail, "StopOnExit" );
+                        }
+                        else
+                           ErrorHandler( IFFerror_Fail, "PropChunks" );
+                     }
+                     else
+                        ErrorHandler( IFFerror_NoIFFErr, NULL );
+                  }
+                  else
+                     ErrorHandler( IFFerror_Fail, "ParseIFF" );
+                  
+                  CloseIFF(iff);
+               }
+               else
+                  ErrorHandler( IFFerror_Fail, "OpenIFF" );
+               
+               Close(iff->iff_Stream);
+            }
+            else
+               ErrorHandler( IFFerror_Fail, "OpenFromLock" );
+            
+            FreeIFF(iff);
+         }
+         else
+            ErrorHandler( IFFerror_Fail, "AllocIFF" );
+      }
+   // Remember that when a 'FileName' could not been gotten, a message
+   // has been displayed to notify the user. So no addtional actions
+   // are required at this stage.
+   
+}
+
+
+/*
+**  succes = GetFileName(FileName, gfn_Mode)
+**
+**     Gets the file name through an Asl requester. If 
+**
+**  pre:  gfn_Mode - Determine to get the load or save file name.
+**                   gfn_Load - Get the load file name.
+**                   gfn_Save - Get the save file name.
+**  post: FileName - Pointer to the FileName.
+**        succes - TRUE  if 'FileName' has been gotten,
+**                 FALSE if 'FileName' hasn't been gotten.
+**
+*/
+BOOL GetFileName(char * FileName, enum gfn_Mode)
+{
+   BOOL Retry;
+   char * Source;
+   STRPTR Destination;
+   
+   do {
+      Retry = FALSE;
+      
+      if(AslRequest(Asl_FRLoad, NULL))
+      {
+         // Free possible allocated memory.
+         FreeThisMem(&LoadFileName, LoadFileNameSize);
+         
+         // Get the filename length inorder to create a buffer which
+         // will hold the entier filename, including its path.
+         GetAslFileNameLength(Asl_FRLoad, &LoadFileNameSize);
+         
+         // Allocate appropiate memory for filename buffer.
+         AllocThisMem(&LoadFileName, LoadFileNameSize, MEMF_CLEAR);
+         
+         // Setup 'Source' and 'Destination' for copying path.
+         Source = Asl_FRLoad->fr_Drawer;
+         Destination = LoadFileName;
+         
+         // Copy path of FileName.
+         while(* Destination++ = * Source++);
+         
+         // Concatenate 'Path' and 'FileName' to make one name.
+         AddPart( (STRPTR)LoadFileName, Asl_FRLoad->fr_File, LoadFileNameSize);
+         
+         if(!(LoadFileName_lock = Lock( (STRPTR)LoadFileName, ACCESS_READ)))
+            Retry=DisplayError(PanelWindow, NULL, ESW_Title, EST_LockErr, ESG_RetryCancel, LoadFileName);
+      }
+      else
+      {
+         // AslRequest returnd FALSE. Check for KickStart Version for addition checking.
+         if( SysBase->LibNode.lib_Version >= 38)
+         {
+            // KickStart V38+. Now we can check whether the user cancelled
+            // the job, or a problem caused AlsRequest to return FALSE.
+            switch( IoErr() )
+            {
+               case 0:
+                  // User cancelled the job.
+                  break;
+               case ERROR_NO_FREE_STORE:
+                  DisplayError(PanelWindow, NULL, ESW_Title, EST_AslNoFreeStore, ESG_Okay, NULL);
+                  CleanExit(RETURN_FAIL);
+                  break;
+               case ERROR_NO_MORE_ENTRIES:
+                  DisplayError(PanelWindow, NULL, ESW_Title, EST_AslNoMoreEntries, ESG_Okay, NULL);
+                  break;
+            }
+         }
+         // AslRequest just returned FALSE and pre V38 there's nothing we can do.
+         return(FALSE);
+      }
+   } while(Retry);
+
+   return(TRUE);
+}
+
+
+/*
+**  GetAslFileNameLength(Asl_FileRequester, FileNameLength)
+**
+**     Calculate the length of a filename from an Asl_Requester.
+**
+**  pre:  Asl_FileRequester - Asl_FileRequester structure from which
+**                            to calculate the FileNameLength.
+**  post: FileNameLength - Calculated FileName length.
+**
+*/
+static void GetAslFileNameLength(struct FileRequester *Asl_FileRequester, ULONG *FileNameLength)
+{
+   register UWORD i = 2;
+   char *Source = Asl_FRLoad->fr_File;
+
+   while(*Source++ != 0)
+      i++;
+   
+   Source = Asl_FRLoad->fr_Drawer;
+   while(*Source++ != 0)
+      i++;
+   
+   *FileNameLength = (ULONG) i;
+}

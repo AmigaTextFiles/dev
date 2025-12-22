@@ -1,0 +1,352 @@
+                                   Chapter 13
+
+                            USING J : TACIT DEFINITION
+
+
+      function dependencies and tacit definitions
+      J tacit conversion; Let's talk about it
+
+
+*========================================
+# function dependencies and tacit definitions
+
++------------------
+| Raul Rockwell
+| <ROCKWELL.91Aug17163940@socrates.umd.edu>
+
+[[The code is short, but the article is long -- well over 200 lines.]]
+
+For quite a while I've been frustrated at my inability to figure out
+how to deal with indirection via names.  If I have a function
+definition like foo =. foo1 foo2 foo3, will the definition of 'foo'
+change if I redefine the function 'bar'?
+
+Well, it's not really that hard to come up with something to diplay
+function dependencies so, here's one way to do it:
+
+data_type       =. 3!:0
+boxed_type      =. 32&= @: data_type
+character_type  =. 2&=  @: data_type
+
+name_class      =. 4!:0
+function_class  =. 3&=  @: name_class
+
+representation  =. 5!:2
+
+list            =. 1: = #@:$
+
+Ok, so far these are just aliases for built in commands.  For those
+people not familiar with J, the & is a currying operator, and @:
+is a function composition operator.  "list" is an example of something
+which I've not seen in any other functional language, (Iverson calls
+them "forks"), but I'll leave that for another article.
+
+Yes, yes, I know, programming using functional techniques looks quite
+a bit different from programming using more algorithmic data
+manipulation techniques.  On the other hand, once you get used to it,
+program analysis becomes much simpler.
+
+flatten         =. ;    @: ( <`flatten@.boxed_type &. > )
+select_fn_names =. #~      0:`function_class@.((list *. character_type)@>)
+children        =. select_fn_names @: ~. @: flatten @: representation @: ]
+
+Ok, 'children' is intended to select all function names refered to by
+some parent function.  Instead of using the structural properties of a
+function representation to distinguish between functions and
+non-functions, I cheat and decide that any object which looks like a
+symbolic name and is currently bound to a function will be used as a
+function.
+
+I suppose I ought to describe some of the other functions and
+operators I'm using, but I'll leave that for the end.
+
+To see what's going on, here's some sample usages of the above
+functions:
+   representation ;:'flatten'
++-+--+----------------------------------+
+|;|@:|+---------------------------+--+-+|
+| |  ||+-----------+--+----------+|&.|>||
+| |  |||+-+-------+|@.|boxed_type||  | ||
+| |  ||||<|flatten||  |          ||  | ||
+| |  |||+-+-------+|  |          ||  | ||
+| |  ||+-----------+--+----------+|  | ||
+| |  |+---------------------------+--+-+|
++-+--+----------------------------------+
+This is a "parsed tree" representation of the functional definition.
+
+   flatten representation ;:'flatten'
++-+--+-+-------+--+----------+--+-+
+|;|@:|<|flatten|@.|boxed_type|&.|>|
++-+--+-+-------+--+----------+--+-+
+As you can see, 'flatten' removes all nesting except for that which is
+necessary to preserve the identity of the the individual (parsed or
+possibly pre-evaluated) objects.
+
+   select_fn_names flatten representation ;:'flatten'
++-------+----------+
+|flatten|boxed_type|
++-------+----------+
+And, hopefully it's obvious that 'select_fn_names' is a data-selection
+function which eliminates every parse token which isn't the name of a
+function.
+
+The only other function used in the definition of 'children' is the
+primitive '~.' which eliminates duplicate items.  This doesn't come
+into play in the above example, but consider for instance:
+   ~. 'this';'is';'a';'test';'but';'is';'it';'a';'good';'test';'?'
++----+--+-+----+---+--+----+-+
+|this|is|a|test|but|it|good|?|
++----+--+-+----+---+--+----+-+
+
+I'm not really interested in how many times a name is used in a
+function's definition, only that it is used.
+
+--------
+
+Now for the dirty work:  constructing a tree which represents
+functional dependencies.  I decided to represent dependencies as a two
+element array.  The first element is the function name.  The second is
+an array of children functions (with their dependencies).  For
+recursive cases I'll use an asterisk in place of an explicit list of
+dependencies (the _second_ time around, so you can still see all the
+dependencies).
+
+leaf            =. '] , x.&[@:] ' : 1
+parent_node     =.  ] , <@:(   ,    depend_tree children)
+build_tree      =.  parent_node ` ((<'')  leaf) @. (0&= @: # @: children)
+depend_tree     =.  build_tree  ` ((<'*') leaf) @. (] e. [) " 1 0
+
+Ok, first off, does it work?  Second off, how?
+
+Here's a couple samples:
+
+   build_tree ;:'flatten'
++-------+-------------------------+
+|flatten|+----------+------------+|
+|       ||flatten   |*           ||
+|       |+----------+------------+|
+|       ||boxed_type|+---------++||
+|       ||          ||data_type||||
+|       ||          |+---------++||
+|       |+----------+------------+|
++-------+-------------------------+
+   build_tree ;:'children'
++--------+------------------------------------------------+
+|children|+---------------+------------------------------+|
+|        ||select_fn_names|+--------------+-------------+||
+|        ||               ||function_class|+----------++|||
+|        ||               ||              ||name_class|||||
+|        ||               ||              |+----------++|||
+|        ||               |+--------------+-------------+||
+|        ||               ||list          |             |||
+|        ||               |+--------------+-------------+||
+|        ||               ||character_type|+---------++ |||
+|        ||               ||              ||data_type|| |||
+|        ||               ||              |+---------++ |||
+|        ||               |+--------------+-------------+||
+|        |+---------------+------------------------------+|
+|        ||flatten        |+----------+------------+     ||
+|        ||               ||flatten   |*           |     ||
+|        ||               |+----------+------------+     ||
+|        ||               ||boxed_type|+---------++|     ||
+|        ||               ||          ||data_type|||     ||
+|        ||               ||          |+---------++|     ||
+|        ||               |+----------+------------+     ||
+|        |+---------------+------------------------------+|
+|        ||representation |                              ||
+|        |+---------------+------------------------------+|
++--------+------------------------------------------------+
+
+I hope it's obvious that an empty box indicates that the corresponding
+name has no dependencies?
+
+Now, all of the names 'leaf';'parent_node';'build_tree';'depend_tree'
+use the calling convention that the argument on the left is a list of
+"parent function names" (for detecting recursion) an the argument on
+the right is the function name (or names) currently of interest.  At
+two points I need to know a third distinct piece of information (the
+children of the current function), but I decided that the easiest way
+of dealing with this is to just compute that result twice.
+
+Since all of these functions are pure (no assignments or environmental
+effects) there is no reason an optimizer couldn't recognize this dual
+usage of the same function on the same argument and only apply the
+function once.
+
+The name 'leaf' is actually not a function but a macro.  It takes as
+an argument a data object and returns as a result a function which
+will construct a "leaf node" for my tree.  The derived function
+constructs a node consisting of a function name followed by the
+constant data object originally passed to the macro.  Roughly.
+
+'parent_node' is a function similar to that created by 'leaf' except
+that instead of creating a 'name';constant structure, the right side
+is computed recursively.
+
+'build_tree' and 'depend_tree' are the recursive control structure
+which detect recursion and detect the case of a leaf function.  I
+broken them up onto two lines partially because they were testing for
+two separate cases and partially because the line would have been too
+long otherwise.  'build_tree' detects leaf functions and 'depend_tree'
+detects recursion.  And 'build_tree' can be used by itself (without
+giving any parents) because 'parent_node' will duplicate its right
+argument as its left argument if it is given only the one.
+
+--------
+
+I sorta promised a glossary here at the end, didn't I?
+
+*sigh*  A person could get old doing this kind of thing.  Well, if
+I leaves holes which you don't understand, you have no one to blame
+but yourself if you don't ask for an explanation.  With that caution,
+here's the primitive gloss:
+
+"conjunctions" (these are meta-functions)
+  !:    references to the system library
+  &     curry
+  @:    compose
+  @     compose and map (e.g. apply left fn to each result of right fn)
+  &.    compose and map with inverse (apply inverse of right fn to result)
+   :    define (allows expressions with dummy variables, 'x.' is the left arg)
+  `     catenate data (e.g. turns functions to data before catenating)
+  @.    conditional (uses selection function to decide what to do)
+  "     map (right argument is the left & right granularity of mapping)
+
+"adverbs" (these meta-functions take only one argument and tend to be macros)
+  ~     applys the right argument to a function to its left side
+
+"verbs" (these are functions, infix notation, left argument is optional)
+  =     transitive -- 1 if equal, 0 if not  (maps onto atoms)
+  ;     transitive -- catenate ("boxed") atoms,
+        intransitive -- raze (remove all multi-dimensional array axes,
+        and remove one level of indirection ("boxing") (if any).
+  <     intransitive -- turn into (a "boxed") atom
+  >     intransitive -- recover object stored as atom ("unbox")
+  ~.    intransitive -- selects only unique items from right arg
+  #     transitive -- selects from right arg depending on left argument
+  *.    transitive -- logical and (maps onto atoms)
+  [     transitive -- returns left arg
+  ]     transitive -- returns right arg
+  ,     transitive -- catenate
+  e.    transitive -- returns 1 where right arg is an element of left arg
+  ;:    intransitive -- tokenizes a flat string
+
+Finally, hooks and forks:
+  if f g and h are nouns, then x (f g h) y is the same as
+((x f y) g (x f y).  Similarly, x (g h) y is the same as
+(x g (x h y)).  So, for instance, 'parent_node' looks like this:
++-+-+-------------------------------+
+|]|,|+-+--+------------------------+|
+| | ||<|@:|+-+-----------+--------+||
+| | || |  ||,|depend_tree|children|||
+| | || |  |+-+-----------+--------+||
+| | |+-+--+------------------------+|
++-+-+-------------------------------+
+and if the left arg is PARENTS and the right arg is FUN, it evaluates as:
+((PARENTS ] FUN) , <@:( (PARENTS , FUN) depend_tree (PARENTS children FUN)))
+
+Or, since 'children' has as it's first function on the right ], this
+is equivalent to:
+(FUN , <@:( (PARENTS, FUN) depend_tree (children FUN)))
+
+I think I'd better stop here.  I just did a line count, and I'm
+already over 200.
+
+One final note: you can capture the definitions in this news article
+directly into J with the )sscript command.  (I just tested it -- took
+six seconds to load in on a sun4 (J version 3.2), and 'build_tree'
+worked fine.  Could be faster, but this definitely beats trimming the
+lines off by hand.)
+
+
+
+*========================================
+# J tacit conversion; Let's talk about it
+
++------------------
+| Tom Affinito
+| <2092@rosie.NeXT.COM> 22 Oct 91 17:52:27 GMT
+
+I've started playing with the :11 tacit conversion and have a number
+of questions:
+
+1) seemingly :11 only works with string list or boxed string left
+arguments; I can convert singly either a monadic or dyadic
+definition, but can't seem to get a complete conversion of a given
+function at once. Ex: the verb test is previously defined to have
+both monadic and dyadic cases. I would like 'test':11 to produce
+tacit definitions for both the monadic and dyadic cases, but this
+doesn't work. As it is, I have to create my newtest =. (original test
+left side string : 11) : (original test right side string : 11). Is
+there a better way?
+
+2) Small test expressions like '+' : 11 don't work on my NeXT/Unix
+version 3.2. I must be missing the boat on this one, but the doc on
+:11 is only one line long. Help!
+
+and Thanks!
+
+
++------------------
+| Raul Deluth Miller-Rockwell
+| <ROCKWELL.91Oct22234235@socrates.umd.edu>
+
+Tom Affinito;
+   As it is, I have to create my newtest =. (original test left side
+   string : 11) : (original test right side string : 11). Is there a
+   better way?
+
+Well, you could automate the process, with something like
+   taci =. ('r=. 5!:2<''x.''';' (,>0{r) :11 : ((,>2{r) :11)') : 1
+or, slightly fancier:
+c=. '$.=. 4!:0 <''x.'''
+d=. ' x. : 11'
+e=. ' (,>0{r) :11 : ((,>2{r=. 5!:2<''x.'') :11)'
+taci2 =. ('';c;d;e) : 1
+
+That ought to be bug free, but I'm having communications problems
+right now, so I'm gonna forgo hooking up to the machine where I
+normally run J.
+
+   2) Small test expressions like '+' : 11 don't work on my NeXT/Unix
+   version 3.2. I must be missing the boat on this one, but the doc on
+   :11 is only one line long. Help!
+
+'+' is not an expression which can resolve to a noun.  '+y.'  and
+'x.+y.' should both work, however.  If you don't want to have the [ or
+] in there, forcing monadic or dyadic behavior, you can always forgo
+using :11 (e.g. look at the result, and then build the desired
+expression by hand).
+
+Hope this helps..
+
+
++------------------
+| Roger Hui
+| <1991Oct23.153322.20562@yrloc.ipsa.reuter.COM>
+
+s : 11 accepts a string list s or a 2- or 3-element list of boxes
+of a sentence and initial values for x. and y.  For example:
+   'x.+y.' : 11
+   ('3 4$y.';1234) : 11
+   (_3 4;'x.{.y.';'abcd') : 11
+
+[[NB. sws.  the second and third expressions above doesn't work. I assume
+            the initialization idea has been removed.
+]]
+The string is a sentence to be translated, specifying a verb
+on nouns x. and y. and resulting in a noun.  The translator
+works by executing the sentence.  If no initial values are specified
+for x. and y. (s is a string alone), x. and y. are initialized to 1
+before the execution.  Non-default initial values must be supplied
+if 1 were inadequate.
+
+(monad_sentence : 11) : (dyad_sentence : 11)  is the way to translate
+both a monadic defn and a dyadic defn.  There is currently no better way.
+
+The sentence to be translated must specify a verb on nouns x. and y.,
+resulting in a noun; therefore  '+' : 11  is rejected because the result
+of the sentence '+' is a verb.  ('x.+y.' : 11  would work.)
+
+
+ 

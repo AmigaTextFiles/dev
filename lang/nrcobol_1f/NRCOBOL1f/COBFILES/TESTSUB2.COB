@@ -1,0 +1,27 @@
+       IDENTIFICATION DIVISION.
+       PROGRAM-ID.   TESTSUB2.
+      *AUTHOR.        cHArRiOTt.
+       ENVIRONMENT DIVISION.
+
+       CONFIGURATION SECTION.
+       SOURCE-COMPUTER.   AMSTRAD 1512.
+       OBJECT-COMPUTER.
+      *
+       DATA DIVISION.
+       FILE SECTION.
+      *
+       WORKING-STORAGE SECTION.
+       01 WS-TEST PIC X(10) VALUE SPACES.
+      *
+       LINKAGE SECTION.
+       01 TEST-NUMBER1 PIC 99.
+       01 TEST-NUMBER2 PIC 99.
+      *
+       PROCEDURE DIVISION USING TEST-NUMBER1 TEST-NUMBER2.
+
+      *
+       0000-MAIN.
+           DISPLAY "now in test2 program , test ok!".
+           ADD TEST-NUMBER1 TO TEST-NUMBER2 GIVING TEST-NUMBER2.
+           EXIT PROGRAM.
+      *

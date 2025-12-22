@@ -1,0 +1,708 @@
+@database
+@$VER: DepthMenuAPI_pl.guide V3 (03.12.2002)
+@author "Arkadiusz [Yak] Wahlig"
+@node main "API programu DepthMenu"
+
+
+    @{b}API programu DepthMenu@{ub}
+
+    Wersja 3 (03-12-2002)
+    Copyright © 2001-2002 Arkadiusz [Yak] Wahlig
+
+
+    @{"  " LINK docz} Do czego sîuûâ moduîy?
+    @{"  " LINK wyma} Co bëdzie potrzebne?
+    @{b}---@{ub}
+    @{"  " LINK stat} Moduîy statyczne
+    @{"  " LINK dyna} Moduîy dynamiczne
+    @{b}---@{ub}
+    @{"  " LINK tagi} Dostëpne tagi
+    @{"  " LINK bibl} depthmenu.library
+    @{b}---@{ub}
+    @{"  " LINK zale} Zalecenia
+    @{"  " LINK kont} Kontakt
+
+@endnode
+@node docz "Do czego sîuûâ moduîy?"
+
+Moduîy mogâ peîniê nastëpujâce funkcje:
+
+@{b}1.@{ub} Wpîywaê na nazwy okien/ekranów pojawiajâce sië w menu.
+@{b}2.@{ub} Dodawaê opcje oraz podmenu do menu okien/ekranów.
+@{b}3.@{ub} Wpîywaê na sposób wyciâgania okien/ekranów na wierzch.
+
+  Nie  jest  jednak  wykluczone,  ûe  kolejne wersje DepthMenu bëdâ udostëpniaê
+wiëksze  moûliwoôci. API jest na tyle elastyczne, ûe dodanie nowych funkcji nie
+wpîynie na dotychczasowe moduîy.
+
+  Jeôli  stwierdzisz  ûe  wiesz, jak ciekawie wykorzystaê moûliwoôci jakie dajâ
+powyûsze  punkty,  zapoznaj  sië  z  tâ  dokumentacjâ. API jest bardzo proste w
+programowaniu  i  jeôli  nie sâ ci obce takie pojëcia jak taglista czy hooki to
+nie powinieneô mieê problemów w zaimplementowaniu swoich pomysîów. Jeôli jednak
+byô miaî, @{"skontaktuj" link kont} sië ze mnâ - sîuûë pomocâ.
+
+@endnode
+@node wyma "Co bëdzie potrzebne?"
+
+  Aby  stworzyê wîasny moduî musisz mieê kompilator jëzyka C (na razie tylko do
+tego  jëzyka stworzyîem inkludy), pliki z katalogu 'include/' (znajdujâcego sië
+w  tym  archiwum)  oraz trochë wiedzy na temat programowania pod AmigaOS (swojâ
+drogâ to sama przyjemnoôê :)).
+
+Ja osobiôcie testowaîem wszystko z kompilatorem SAS/C 6.50.
+
+@endnode
+@node stat "Moduîy statyczne"
+
+  Moduîy  statyczne  to  pliki  umieszczane  w katalogu "Modules". Sâ to zwykîe
+pliki  wykonywalne  (tworzone przez kompilator) zawierajâce w sobie odpowiednio
+zainicjalizowanâ strukturë  @{b}DM_Module@{ub}. Poîoûenie struktury w programie nie jest
+waûne  -  DepthMenu  przeszukuje caîy plik. Moduî powinien zostaê zabezpieczony
+przed  omyîkowym  bezpoôrednim  uruchomieniem go jako zwykîego programu poprzez
+umieszczenie na poczâtku pierwszego hunka instrukcji asemblera:
+
+moveq #-1,d0
+rts
+
+
+Struktura DM_Module w module statycznym wyglâda nastëpujâco:
+
+struct DM_Module
+{
+ UWORD MatchWord;		/* zawsze DM_MATCHWORD, po tym i kolejnym polu
+				   DepthMenu znajduje strukturë w pliku */
+
+ struct DM_Module *MatchTag;	/* wskazuje na poczâtek struktury */
+
+ UBYTE APIVersion;		/* wersja API wymagana przez moduî */
+
+ BYTE Priority;			/* priorytet moduîu w liôcie moduîów,
+				   im wyûszy tym wczeôniej zostanâ
+				   wywoîane funkcje moduîu i tym samym
+				   wyûej w menu znajdâ sië dodawane opcje */
+
+ STRPTR IDString;		/* ciâg znaków identyfikujâcy moduî,
+				   zazwyczaj zawiera nazwë, wersjë,
+				   datë kompilacji i nazwisko autora */
+
+ struct TagItem *TagList;	/* lista @{"tagów" link tagi} moduîu, patrz niûej */
+
+ BPTR SegList;			/* lista segmentów moduîu,
+				   pole to wypeîniane jest przez DepthMenu,
+				   jego wartoôê poczâtkowa jest niewaûna */
+
+ STRPTR ModulePath;		/* peîna ôcieûka dostëpu do pliku z moduîem,
+				   pole to wypeîniane jest przez DepthMenu,
+				   jego wartoôê poczâtkowa jest niewaûna */
+};
+
+  Myôlë, ûe podane po prawej stronie objaônienia sâ zrozumiaîe. Wyjâtek stanowi
+pole  TagList.  Jest  to  bardzo  waûne  pole,  gdyû  to  wîaônie  poprzez @{"tagi" link tagi}
+definiowane sâ hooki... choê nie tylko...
+
+@endnode
+@node dyna "Moduîy dynamiczne"
+
+  Moduîy  dynamiczne  sâ  dodawane oraz usuwane przez inne programy podczas ich
+dziaîania.   Gîównym elementem takich moduîów jest odpowiednio zainicjalizowana
+struktura  @{b}DM_Module@{ub}.   Dodawanie  oraz  usuwanie  moduîu z listy odbywa sië za
+pomocâ  odwoîaï  do  biblioteki  @{"depthmenu.library" link bibl}.   Moduî dodawany jest przez
+funkcjë @{"DM_AddModule()" link dm_addmodule()} a usuwany przez @{"DM_RemModule()" link dm_remmodule()}.
+
+
+Struktura DM_Module w module dynamicznym wyglâda nastëpujâco:
+
+struct DM_Module
+{
+ UWORD MatchWord;		/* zawsze DM_MATCHWORD, po tym i kolejnym polu
+				   DepthMenu rozpoznaje moduî */
+
+ struct DM_Module *MatchTag;	/* wskazuje na poczâtek struktury */
+
+ UBYTE APIVersion;		/* wersja API wymagana przez moduî */
+
+ BYTE Priority;			/* priorytet moduîu w liôcie moduîów,
+				   im wyûszy tym wczeôniej zostanâ
+				   wywoîane funkcje moduîu i tym samym
+				   wyûej w menu znajdâ sië dodawane opcje */
+
+ STRPTR IDString;		/* ciâg znaków identyfikujâcy moduî,
+				   zazwyczaj zawiera nazwë, wersjë,
+				   datë kompilacji i nazwisko autora */
+
+ struct TagItem *TagList;	/* lista @{"tagów" link tagi} moduîu, patrz niûej */
+
+ BPTR SegList;			/* zerowane przez DepthMenu, nie ruszaê */
+
+ STRPTR ModulePath;		/* nie uûywane */
+};
+
+  Myôlë, ûe podane po prawej stronie objaônienia sâ zrozumiaîe. Wyjâtek stanowi
+pole  TagList.  Jest  to  bardzo  waûne  pole,  gdyû  to  wîaônie  poprzez @{"tagi" link tagi}
+definiowane sâ funkcje... choê nie tylko...
+
+@endnode
+@node zale "Zalecenia"
+
+Oto kilka zaleceï dotyczâcych tworzenia moduîów:
+
+  Jeôli moûesz, uûyj wîasnego kodu startowgo przy tworzeniu moduîu statycznego,
+gdyû  zostanie on wykonany tylko w przypadku omyîkowego uruchomienia moduîu jak
+programu  (tak  jak  przy  pisaniu  bibliotek),  a  duûy  moduî startowy bëdzie
+niepotrzebnie zabieraî cennâ pamiëê.
+
+  Hook'i  DM_Hook_#?Attrs  wywoîywane sâ dla kaûdego okna/ekranu, które pojawia
+sië  w  menu.  Dlatego waûne jest, aby dla jak najwiëkszej iloôci okien/ekranów
+wykonywaîy  sië  moûliwie  krótko,  gdyû  przy  wiëkszej  iloôci moduîów dîugie
+wykonywanie tych funkcji moûe znacznie spowolniê pojawianie sië menu.
+
+  Archiwum  z moduîem statycznym nazwij DM_#?.lha dla îatwiejszej identyfikacji
+i   (jeôli  chcesz  rozpowszechniê  program  jako  freeware)  wyôlij  na  adres
+yak@depthmenu.prv.pl, aby moduî mógî byê zamieszczony na stronie programu.
+
+  Umieôê  informacjë  w  dokumentacji  swojego  programu,  ûe  tworzy  on moduî
+dynamiczny (umieôê tam takûe adres www.depthmenu.prv.pl).
+
+  Nie  wymagaj  bez  powaûnej przyczyny biblioteki depthmenu.library (po prostu
+uûyj  jej,  jeôli  jest  dostëpna)  i  umoûliwij inny sposób uruchomienia opcji
+dodawanych przez twój moduî.
+
+@endnode
+@node kont "Kontakt"
+
+  Jeôli masz jakieô pytania odnoônie programowania moduîów to skontaktuj sië ze
+mnâ na jeden z nastëpujâcych sposobów:
+
+- @{b}E-MAIL@{ub} (zalecany)
+  yak@depthmenu.prv.pl
+
+- @{b}SNAIL MAIL@{ub}
+  Arkadiusz Wahlig
+  os. 22 Lipca 3/16
+  67-416 Konotop
+  Polska
+
+  Zapraszam  takûe  na stronë @{b}http://www.depthmenu.prv.pl@{ub}, gdzie moûesz znaleúê
+najôwieûsze informacje oraz najnowszâ wersjë programu i moduîów.
+
+@endnode
+@node tagi "Dostëpne tagi"
+
+    Oto tagi dostëpne w tej wersji API:
+
+
+    @{b}Hooki:@{ub}
+
+    @{" DM_Hook_Setup          " link dm_hook_setup         }  @{" DM_Hook_Cleanup        " link dm_hook_cleanup}
+    @{" DM_Hook_WindowAttrs    " link dm_hook_windowattrs   }  @{" DM_Hook_ScreenAttrs    " link dm_hook_screenattrs}
+    @{" DM_Hook_WindowItems    " link dm_hook_windowitems   }  @{" DM_Hook_ScreenItems    " link dm_hook_screenitems}
+    @{" DM_Hook_WindowSelected " link dm_hook_windowselected}  @{" DM_Hook_ScreenSelected " link dm_hook_screenselected}
+    @{" DM_Hook_ItemsHandler   " link dm_hook_itemshandler  }
+
+
+    @{b}Bazy bibliotek:@{ub}
+
+    @{" DM_Get_CxBase          " link dm_get_cxbase            }  @{" DM_Get_DepthMenuBase   " link dm_get_depthmenubase}
+    @{" DM_Get_DOSBase         " link dm_get_dosbase           }  @{" DM_Get_IconBase        " link dm_get_iconbase}
+    @{" DM_Get_IntuitionBase   " link dm_get_intuitionbase     }  @{" DM_Get_LayersBase      " link dm_get_layersbase}
+    @{" DM_Get_LocaleBase      " link dm_get_localebase        }  @{" DM_Get_SysBase         " link dm_get_sysbase}
+    @{" DM_Get_UtilityBase     " link dm_get_utilitybase       }
+
+
+    @{b}Pozostaîe:@{ub}
+
+    @{" DM_Get_Language        " link dm_get_language          }
+
+@endnode
+@node "DM_Hook_Setup"
+									   (V1)
+@{u}DM_Hook_Setup@{uu} - inicjalizacja moduîu
+
+  Argument   tego  taga  (ti_Data)  wskazuje  na  odpowiednio  zainicjalizowanâ
+strukturë  Hook.  Bëdzie on wywoîany jednorazowo po wczytaniu moduîu do pamiëci
+(lub  po  dodaniu  go  funkcjâ  DM_AddModule()). Hook zwraca argument typu BOOL
+informujâcy czy inicjalizacja sië powiodîa.
+
+@endnode
+@node "DM_Hook_Cleanup"
+									   (V1)
+@{u}DM_Hook_Cleanup@{uu} - zwolnienie zasobów moduîu
+
+  Argument   tego  taga  (ti_Data)  wskazuje  na  odpowiednio  zainicjalizowanâ
+strukturë  Hook.  Bëdzie  on  wywoîany  jednorazowo  przed  usuniëciem moduîu z
+pamiëci  (lub przed usuniëciem go funkcjâ DM_RemModule()). Hook zwraca argument
+typu BOOL informujâcy czy zwolnienie zasobów sië powiodîo.
+
+@endnode
+@node "DM_Hook_WindowAttrs"
+									   (V1)
+@{u}DM_Hook_WindowAttrs@{uu} - okreôlanie atrybutów okna
+
+  Argument   tego  taga  (ti_Data)  wskazuje  na  odpowiednio  zainicjalizowanâ
+strukturë  Hook.  Bëdzie  on  wywoîany  dla  kaûdego  okna  na  ekranie podczas
+tworzenia  menu  okien. Argumentami hook'a sâ wskaúnik na strukturë Window okna
+(w rejestrze A2) oraz wskaúnik na strukturë DM_AttrsMessage (w rejestrze A1).
+
+Struktura DM_AttrsMessage ma nastëpujâcâ postaê:
+
+struct DM_AttrsMessage
+{
+ struct Process *Process;	/* stâd moûna pobraê adres procesu
+				   wîaôciciela okna */
+
+ STRPTR ProcessName;		/* stâd moûna pobraê nazwë procesu
+				   wîaôciciela okna */
+
+ BOOL Remove;			/* ustaw na TRUE, jeôli chcesz, aby
+				   okno nie pojawiîo sië w menu */
+
+ STRPTR TitleHead;		/* tutaj moûna wstawiê tekst, który pojawi
+				   sië w menu przed nazwâ okna */
+
+ STRPTR Title;			/* tutaj moûna wstawiê tekst, który pojawi
+				   sië w menu zamiast nazwy okna */
+
+ STRPTR TitleTail;		/* tutaj moûna wstawiê tekst, który pojawi
+				   sië w menu za nazwâ okna */
+};
+
+  Pole  Process  moûe mieê wartoôê NULL, jeôli znalezienie wîaôciciela okna nie
+powiodîo sië.
+
+  Nazwa wîaôciciela znajdujâca sië w polu ProcessName w przypadku tasku zawiera
+nazwë  zadania  (z pola ln_Name systemowego node'a) a w przypadku procesu nazwë
+uruchomionego pliku (z dokîadnym odwzorowaniem wielkoôci liter).
+
+  Hook  wywoîywany  jest dla wszystkich okien - takûe dla tych, które normalnie
+nie  pojawiajâ  sië  w  menu.  Moûna  wtedy je tam dodaê nadajâc im nazwë (pole
+Title).
+
+  Hook  zwraca  argument  typu  BOOL  informujâcy  czy dokonano jakichô zmian w
+strukturze DM_AttrsMessage.
+
+@endnode
+@node "DM_Hook_ScreenAttrs"
+									   (V1)
+@{u}DM_Hook_ScreenAttrs@{uu} - okreôlanie atrybutów ekranu
+
+  Argument   tego  taga  (ti_Data)  wskazuje  na  odpowiednio  zainicjalizowanâ
+strukturë  Hook.  Bëdzie  on wywoîany dla kaûdego ekranu podczas tworzenia menu
+ekranów. Argumentami hook'a sâ wskaúnik na strukturë Screen ekranu (w rejestrze
+A2) oraz wskaúnik na strukturë DM_AttrsMessage (w rejestrze A1).
+
+Struktura DM_AttrsMessage ma nastëpujâcâ postaê:
+
+struct DM_AttrsMessage
+{
+ struct Process *Process;	/* nie uûywane */
+
+ STRPTR ProcessName;		/* nie uûywane */
+
+ BOOL Remove;			/* ustaw na TRUE, jeôli chcesz, aby
+				   ekran nie pojawiî sië w menu */
+
+ STRPTR TitleHead;		/* tutaj moûna wstawiê tekst, który pojawi
+				   sië w menu przed nazwâ ekranu */
+
+ STRPTR Title;			/* tutaj moûna wstawiê tekst, który pojawi
+				   sië w menu zamiast nazwy ekranu */
+
+ STRPTR TitleTail;		/* tutaj moûna wstawiê tekst, który pojawi
+				   sië w menu za nazwâ ekranu */
+};
+
+  Hook  zwraca  argument  typu  BOOL  informujâcy  czy dokonano jakichô zmian w
+strukturze DM_AttrsMessage.
+
+@endnode
+@node "DM_Hook_WindowItems"
+									   (V1)
+@{u}DM_Hook_WindowItems@{uu} - dodanie opcji do menu okien
+
+  Argument   tego  taga  (ti_Data)  wskazuje  na  odpowiednio  zainicjalizowanâ
+strukturë  Hook.  Bëdzie  on wywoîany jednorazowo podczas tworzenia menu okien.
+Argumentami  hook'a  sâ  wskaúnik  na strukturë Window okna nad którym wywoîano
+menu  (w  rejestrze A2) oraz wskaúnik na strukturë DM_ItemsMessage (w rejestrze
+A1).
+
+Struktura DM_ItemsMessage na nastëpujâcâ postaê:
+
+struct DM_ItemsMessage
+{
+ struct Process *Process;	/* stâd moûna pobraê adres procesu
+				   wîaôciciela okna */
+
+ STRPTR ProcessName;		/* stâd moûna pobraê nazwë procesu
+				   wîaôciciela okna */
+
+ APTR Items;			/* tutaj moûna wstawiê menu/itemy stworzone
+				   za pomocâ funkcji biblioteki
+				   @{"depthmenu.library" link bibl}, które majâ byê dodane
+				   do menu */
+
+ BOOL Reusable;			/* (V3) ustaw na TRUE, jeôli chcesz, aby
+				   podane menu/itemy nie zostaîy zwolnione
+				   po zamkniëciu menu (naleûy zrobiê to
+				   rëcznie) */
+};
+
+  Pole  Process  moûe mieê wartoôê NULL, jeôli znalezienie wîaôciciela okna nie
+powiodîo sië.
+
+  Nazwa wîaôciciela znajdujâca sië w polu ProcessName w przypadku tasku zawiera
+nazwë  zadania  (z pola ln_Name systemowego node'a) a w przypadku procesu nazwë
+uruchomionego pliku (z dokîadnym odwzorowaniem wielkoôci liter).
+
+  Bazë    biblioteki   depthmenu.library   moûna   uzyskaê   za   pomocâ   taga
+@{"DM_Get_DepthMenuBase" link dm_get_depthmenubase}.
+
+  Do   obsîugi   dodanych   itemów  sîuûy  hook  zdefiniowany  za  pomocâ  taga
+@{"DM_Hook_ItemsHandler" link dm_hook_itemshandler}.
+
+  Hook  zwraca  argument  typu  BOOL  informujâcy  czy dokonano jakichô zmian w
+strukturze DM_ItemsMessage.
+
+@endnode
+@node "DM_Hook_ScreenItems"
+									   (V1)
+@{u}DM_Hook_ScreenItems@{uu} - dodanie opcji do menu ekranów
+
+  Argument   tego  taga  (ti_Data)  wskazuje  na  odpowiednio  zainicjalizowanâ
+strukturë  Hook. Bëdzie on wywoîany jednorazowo podczas tworzenia menu ekranów.
+Argumentami  hook'a  sâ wskaúnik na strukturë Screen ekranu nad którym wywoîano
+menu  (w rejestrze  A2) oraz wskaúnik na strukturë DM_ItemsMessage (w rejestrze
+A1).
+
+Struktura DM_ItemsMessage na nastëpujâcâ postaê:
+
+struct DM_ItemsMessage
+{
+ struct Process *Process;	/* nie uûywane */
+
+ STRPTR ProcessName;		/* nie uûywane */
+
+ APTR Items;			/* tutaj moûna wstawiê menu/itemy stworzone
+				   za pomocâ funkcji biblioteki
+				   @{"depthmenu.library" link bibl}, które majâ byê dodane
+				   do menu */
+
+ BOOL Reusable;			/* (V3) ustaw na TRUE, jeôli chcesz, aby
+				   podane menu/itemy nie zostaîy zwolnione
+				   po zamkniëciu menu (naleûy zrobiê to
+				   rëcznie) */
+};
+
+  Bazë    biblioteki   depthmenu.library   moûna   uzyskaê   za   pomocâ   taga
+@{"DM_Get_DepthMenuBase" link dm_get_depthmenubase}.
+
+  Do   obsîugi   dodanych   itemów  sîuûy  hook  zdefiniowany  za  pomocâ  taga
+@{"DM_Hook_ItemsHandler" link dm_hook_itemshandler}.
+
+  Hook  zwraca  argument  typu  BOOL  informujâcy  czy dokonano jakichô zmian w
+strukturze DM_ItemsMessage.
+
+@endnode
+@node "DM_Hook_WindowSelected"
+									   (V3)
+@{u}DM_Hook_WindowSelected@{uu} - wysuwanie okna do przodu
+
+  Argument  tego  taga (ti_Data) wskazuje na odpowiednio zainicjowanâ strukturë
+Hook. Bëdzie on wywoîany jednorazowo zaraz po wybraniu okna z menu. Argumentami
+hook'a  sâ  wskaúnik  na  strukturë Window wybranego okna (w rejestrze A2) oraz
+wskaúnik na strukturë DM_SelectedMessage (w rejestrze A1).
+
+Struktura DM_SelectedMessage na nastëpujâcâ postaê:
+
+struct DM_SelectedMessage
+{
+ struct Process *Process;	/* stâd moûna pobraê adres procesu
+				   wîaôciciela okna */
+
+ STRPTR ProcessName;		/* stâd moûna pobraê nazwë procesu
+				   wîaôciciela okna */
+};
+
+  Pole  Process  moûe mieê wartoôê NULL, jeôli znalezienie wîaôciciela okna nie
+powiodîo sië.
+
+  Nazwa wîaôciciela znajdujâca sië w polu ProcessName w przypadku tasku zawiera
+nazwë  zadania  (z pola ln_Name systemowego node'a) a w przypadku procesu nazwë
+uruchomionego pliku (z dokîadnym odwzorowaniem wielkoôci liter).
+
+Hook zwraca argument typu BOOL informujâcy czy wysuniëto okno.
+
+  Hook  jest uûywany, aby wysuwaê okna w niestandardowy sposób. Przykîadem jest
+wysuwanie okna blokujâcego (requester) nad wybrane.
+
+@endnode
+@node "DM_Hook_ScreenSelected"
+									   (V3)
+@{u}DM_Hook_ScreenSelected@{uu} - wysuwanie ekranu do przodu
+
+  Argument  tego  taga (ti_Data) wskazuje na odpowiednio zainicjowanâ strukturë
+Hook.  Bëdzie  on  wywoîany  jednorazowo  zaraz  po  wybraniu  ekranu  z  menu.
+Argumentami  hook'a  sâ  wskaúnik  na  strukturë  Screen  wybranego  ekranu  (w
+rejestrze A2) oraz wskaúnik na strukturë DM_SelectedMessage (w rejestrze A1).
+
+Struktura DM_SelectedMessage na nastëpujâcâ postaê:
+
+struct DM_SelectedMessage
+{
+ struct Process *Process;	/* nie uûywane */
+
+ STRPTR ProcessName;		/* nie uûywane */
+};
+
+Jak widaê na razie struktura nie jest uûywana.
+
+Hook zwraca argument typu BOOL informujâcy czy wysuniëto ekran.
+
+Hook jest uûywany, aby wysuwaê ekrany w niestandardowy sposób.
+
+@endnode
+@node "DM_Hook_ItemsHandler"
+									   (V3)
+@{u}DM_Hook_ItemsHandler@{uu} - obsîuga opcji
+
+  Argument  tego  taga (ti_Data) wskazuje na odpowiednio zainicjowanâ strukturë
+Hook.  Bëdzie on wywoîany po wybraniu opcji dodanej przez moduî (za pomocâ taga
+@{"DM_Hook_WindowItems" link dm_hook_windowitems} lub @{"DM_Hook_ScreenItems" link dm_hook_screenitems}). Argumentami hook'a sâ wskaúnik na
+strukturë Window okna lub Screen ekranu (w zaleûnoôci, czy opcje dodane byîy do
+menu okien czy ekranów) nad którym wywoîano menu (w rejestrze A2) oraz wskaúnik
+na strukturë DM_ItemsHandlerMessage (w rejestrze A1).
+
+Struktura DM_ItemsHandlerMessage ma nastëpujâcâ postaê:
+
+struct DM_ItemsHandlerMessage
+{
+ APTR UserData;		/* wartoôê UserData wybranej opcji
+			   (pole nm_UserData struktury NewMenu) */
+};
+
+@endnode
+@node "DM_Get_CxBase"
+									   (V1)
+@{u}DM_Get_CxBase@{uu} - automatyczne otwieranie commodities.library V39.
+
+  Sîuûy  do  automatycznego  inicjalizowania  zmiennej bazowej biblioteki. Jako
+argument  (ti_Data)  naleûy  podaê  _wskaúnik_  na  zmiennâ bazowâ. Dziëki temu
+tagowi nie trzeba samemu otwieraê oraz zamykaê biblioteki.
+
+@endnode
+@node "DM_Get_DepthMenuBase"
+									   (V1)
+@{u}DM_Get_DepthMenuBase@{uu} - automatyczne otwieranie @{"depthmenu.library" link bibl}.
+
+  Sîuûy  do  automatycznego  inicjalizowania  zmiennej bazowej biblioteki. Jako
+argument  (ti_Data)  naleûy  podaê  _wskaúnik_  na  zmiennâ bazowâ. Dziëki temu
+tagowi nie trzeba samemu otwieraê oraz zamykaê biblioteki.
+
+@endnode
+@node "DM_Get_DOSBase"
+									   (V1)
+@{u}DM_Get_DOSBase@{uu} - automatyczne otwieranie dos.library V39.
+
+  Sîuûy  do  automatycznego  inicjalizowania  zmiennej bazowej biblioteki. Jako
+argument  (ti_Data)  naleûy  podaê  _wskaúnik_  na  zmiennâ bazowâ. Dziëki temu
+tagowi nie trzeba samemu otwieraê oraz zamykaê biblioteki.
+
+@endnode
+@node "DM_Get_IconBase"
+									   (V1)
+@{u}DM_Get_IconBase@{uu} - automatyczne otwieranie icon.library V39.
+
+  Sîuûy  do  automatycznego  inicjalizowania  zmiennej bazowej biblioteki. Jako
+argument  (ti_Data)  naleûy  podaê  _wskaúnik_  na  zmiennâ bazowâ. Dziëki temu
+tagowi nie trzeba samemu otwieraê oraz zamykaê biblioteki.
+
+@endnode
+@node "DM_Get_IntuitionBase"
+									   (V1)
+@{u}DM_Get_IntuitionBase@{uu} - automatyczne otwieranie intuition.library V39.
+
+  Sîuûy  do  automatycznego  inicjalizowania  zmiennej bazowej biblioteki. Jako
+argument  (ti_Data)  naleûy  podaê  _wskaúnik_  na  zmiennâ bazowâ. Dziëki temu
+tagowi nie trzeba samemu otwieraê oraz zamykaê biblioteki.
+
+@endnode
+@node "DM_Get_LayersBase"
+									   (V1)
+@{u}DM_Get_LayersBase@{uu} - automatyczne otwieranie layers.library V39.
+
+  Sîuûy  do  automatycznego  inicjalizowania  zmiennej bazowej biblioteki. Jako
+argument  (ti_Data)  naleûy  podaê  _wskaúnik_  na  zmiennâ bazowâ. Dziëki temu
+tagowi nie trzeba samemu otwieraê oraz zamykaê biblioteki.
+
+@endnode
+@node "DM_Get_LocaleBase"
+									   (V1)
+@{u}DM_Get_LocaleBase@{uu} - automatyczne otwieranie locale.library V38.
+
+  Sîuûy  do  automatycznego  inicjalizowania  zmiennej bazowej biblioteki. Jako
+argument  (ti_Data)  naleûy  podaê  _wskaúnik_  na  zmiennâ bazowâ. Dziëki temu
+tagowi nie trzeba samemu otwieraê oraz zamykaê biblioteki.
+
+@endnode
+@node "DM_Get_SysBase"
+									   (V1)
+@{u}DM_Get_SysBase@{uu} - automatyczne otwieranie exec.library V0.
+
+  Sîuûy  do  automatycznego  inicjalizowania  zmiennej bazowej biblioteki. Jako
+argument  (ti_Data)  naleûy  podaê  _wskaúnik_  na  zmiennâ bazowâ. Dziëki temu
+tagowi nie trzeba samemu otwieraê oraz zamykaê biblioteki.
+
+@endnode
+@node "DM_Get_UtilityBase"
+									   (V1)
+@{u}DM_Get_UtilityBase@{uu} - automatyczne otwieranie utility.library V39.
+
+  Sîuûy  do  automatycznego  inicjalizowania  zmiennej bazowej biblioteki. Jako
+argument  (ti_Data)  naleûy  podaê  _wskaúnik_  na  zmiennâ bazowâ. Dziëki temu
+tagowi nie trzeba samemu otwieraê oraz zamykaê biblioteki.
+
+@endnode
+@node "DM_Get_Language"
+									   (V3)
+@{u}DM_Get_Language@{uu} - pobieranie nazwy jëzyka.
+
+  Sîuûy  do  pobierania  nazwy jëzyka uûywanego aktualnie przez DepthMenu. Jako
+argument  (ti_Data) naleûy podaê _wskaúnik_ na zmiennâ typu STRPTR. Wynik moûna
+podaê  jako wartoôê taga OC_Language do funkcji locale.library/OpenCatalog() co
+spowoduje,  ûe  moduî bëdzie uûywaî tego samego jëzyka (jeôli jest dostëpny) co
+program gîówny.
+
+@endnode
+@node bibl "depthmenu.library"
+
+  Biblioteka  @{b}depthmenu.library@{ub}  jest  dynamicznie  tworzona  w pamiëci podczas
+uruchamiania DepthMenu. Zawiera ona nastëpujâce funkcje:
+
+
+    @{b}Funkcje obsîugujâce moduîy dynamiczne:@{ub}
+
+    @{" DM_AddModule()           " link dm_addmodule()          }  @{" DM_RemModule()           " link dm_remmodule()}
+
+
+    @{b}Funkcje obsîugujâce menu/itemy:@{ub}
+
+    @{" DM_CreateItemsNewMenuA() " link dm_createitemsnewmenua()}  @{" DM_FreeItems()           " link dm_freeitems()}
+
+
+  Dodatkowo  poprzez  bazë  tej  biblioteki moûna dostaê sië do kilku ciekawych
+informacji. Oto struktura bazy depthmenu.library:
+
+struct DepthMenuBase
+{
+ struct Library Library;     /* pole lib_Version zawiera maksymalnâ wersjë
+				obsîugiwanego API */
+
+ struct MinList *Modules;    /* (V3) lista struktur @{b}DM_ModuleNode@{ub} (patrz niûej)
+				opisujâcych wszystkie aktualnie wczytane bâdú
+				dodane moduîy */
+
+ UWORD DynamicModulesCnt;    /* (V3) liczba aktualnie dodanych moduîów
+				@{"dynamicznych" link dyna} */
+};
+
+struct DM_ModuleNode
+{
+ struct Node Node;           /* pole ln_Pri zawiera priorytet moduîu */
+
+ struct DM_Module *Module;   /* wskaúnik na gîównâ strukturë moduîu */
+};
+
+@{b}UWAGA!@{ub}
+  Przy otwieraniu biblioteki naleûy jako argument version funkcji OpenLibrary()
+podaê  numer  wymaganej wersji API (w zaleûnoôci od tego, z jakich funkcji chce
+sië skorzystaê).
+
+@endnode
+@node "DM_AddModule()"
+									   (V1)
+@{u}DM_AddModule()@{uu} - dodawanie nowego moduîu do listy moduîów
+
+ULONG DM_AddModule(struct DM_Module *module);
+ D0                          A0
+
+
+  Sîuûy  do  dodawania  nowego  moduîu  do  listy  moduîów  DepthMenu.  Jedynym
+argumentem   jest  wskaúnik  na  odpowiednio  wypeînionâ  @{"strukturë  DM_Module" link dyna}.
+Funkcja zwraca NULL w przypadku powodzenia lub kod bîëdu:
+
+@{b}DM_ERROR_NOT_A_MODULE@{ub}
+argument podany do funkcji nie wskazuje na moduî,
+
+@{b}DM_ERROR_BAD_API_VERSION@{ub}
+wersja API obsîugiwana przez DepthMenu jest zbyt stara dla tego moduîu,
+
+@{b}DM_ERROR_SETUP_FAILED@{ub}
+hook zdefiniowany za pomocâ taga @{"DM_Hook_Setup" link dm_hook_setup} zwróciî wartoôê FALSE,
+
+@{b}DM_ERROR_ALREADY_EXISTS@{ub} (V3)
+próbowano dodaê ten sam moduî po raz drugi, 
+
+@{b}DM_ERROR_OUT_OF_MEMORY@{ub} (V3)
+zbyt maîo wolnej pamiëci do wykonania operacji.
+
+
+@{b}UWAGA!@{ub}  Nie  wolno  zamykaê  biblioteki  depthmenu.library  dopóki nie @{"usuniemy" link dm_remmodule()}
+wszystkich dodanych przez siebie moduîów.
+
+@endnode
+@node "DM_RemModule()"
+									   (V1)
+@{u}DM_RemModule()@{uu} - usuwanie moduîu z listy moduîów
+
+ULONG DM_RemModule(struct DM_Module *module);
+ D0                          A0
+
+
+  Sîuûy  do usuwania moduîu z listy moduîów DepthMenu.  Jedynym argumentem jest
+wskaúnik na @{"strukturë DM_Module" link dyna} wczeôniej dodanego moduîu.  Funkcja zwraca NULL
+w przypadku powodzenia lub kod bîëdu:
+
+@{b}DM_ERROR_CLEANUP_FAILED@{ub}
+hook zdefiniowany za pomocâ taga @{"DM_Hook_Cleanup" link dm_hook_cleanup} zwróciî wartoôê FALSE,
+
+@{b}DM_ERROR_DOESNT_EXISTS@{ub}
+podany moduî nie zostaî dodany wczeôniej funkcjâ @{"DM_AddModule()" link dm_addmodule()}.
+
+@endnode
+@node "DM_CreateItemsNewMenuA()"
+									   (V3)
+@{u}DM_CreateItemsNewMenuA()@{uu} - tworzenie menu/itemów ze struktur NewMenu
+
+APTR DM_CreateItemsNewMenuA(struct NewMenu *newmenu, struct TagItem *tags);
+ D0                          A0                       A1
+
+APTR DM_CreateItemsNewMenu(struct NewMenu *newmenu, ULONG tag1, ...);
+
+
+  Sîuûy do tworzenia menu, które nastëpnie moûna uûyê w hook'u zdefiniowanym za
+pomocâ taga  @{"DM_Hook_WindowItems" link dm_hook_windowitems} lub  @{"DM_Hook_ScreenItems" link dm_hook_screenitems}. Funkcja posiada dwa
+argumenty.  Jako pierwszy (newmenu) podaje sië wskaúnik na tablicë wypeînionych
+struktur  NewMenu.   Nie  opisujë  tu  wyglâdu  tej  struktury poniewaû jest to
+standardowa   struktura  uûywana  do  tworzenia  menu.   Wiëcej  na  jej  temat
+znajdziesz  w  dokumentacji  @{b}gadtools.library@{ub}.   Drugi argument (tags) to lista
+tagów. W tej wersji zdefiniowano nastëpujâce tagi:
+
+@{u}DM_RootItemLabel@{uu}
+Umoûliwia  umieszczenie  stworzonego  menu  w  podmenu. Jako argument (ti_Data)
+podaje sië nazwë tego podmenu.
+
+  Funkcja  zwraca  wskaúnik  na  stworzone  menu  (czarna  skrzynka) lub NULL w
+przypadku braku pamiëci.
+
+@endnode
+@node "DM_FreeItems()"
+									   (V3)
+@{u}DM_FreeItems()@{uu} - usuwanie menu/itemów
+
+void DM_FreeItems(APTR items);
+                      A0
+
+
+  Sîuûy  do  usuwania  z pamiëci stworzonego wczeôniej menu. Jedynym argumentem
+jest wartoôê zwrócona przez funkcjë tworzâcâ menu.
+
+@endnode

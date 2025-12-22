@@ -1,0 +1,3 @@
+#define WINDOW_MAIN 0x1
+#define WINDOW_MAIN_GADGETS 0x3
+#define TEST1 0x2

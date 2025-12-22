@@ -1,0 +1,2 @@
+CONST RESERVE=4,
+      VSIZE=6

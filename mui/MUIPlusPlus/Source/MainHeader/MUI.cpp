@@ -1,0 +1,4 @@
+#define MUIPP_NOINLINES
+#define MUI_OBSOLETE
+#include <libraries/mui.hpp>
+

@@ -1,0 +1,431 @@
+
+INCLUDE "opt_inc.bb2"
+!opt_val{5}
+
+qt$=Chr$(34) : l$=Chr$(10) : sfl.b=0 : r$=Chr$(13) : np.b=NumPars : div.l=1
+intel.b=0 : fm.b=0 : out_buff.l=0 : hedlen.b=0 : amon$="" : fre_max.l=96000
+
+msg$=l$+" mp3_dec v3.0  (C) 2006-2014  Lorence Lombardo."+l$+l$
+
+sv.b=0 : ae.b=0 : fx.b=0 : If np>0 Then f$=Par$(1)
+If np>1 Then out$=Par$(2) : amon$=UCase$(out$) : If amon$="!AMON" Then fm=1
+
+If np=0 OR (np=1 AND f$="?")
+   NPrint msg$+" Usage:-"+l$+" mp3_dec <mp3_file> <output_file> [fre_div] [F]"+l$
+   NPrint " Provide no <output_file> to play via AHI."+l$
+   NPrint " Extensions can be used to save in various formats."
+   NPrint " Use `!EXT' for the <mp3_file> for an extensions list."
+   NPrint " To play in mono only, provide `!AMON' for the <output_file>"
+   NPrint " name. `!AHI' for the <output_file> name allows you to play"
+   NPrint " via AHI and access the [fre_div] option."+l$
+   NPrint " `!PAS' for the <output_file> name allows"
+   NPrint " you to play with the PAS audio system."+l$
+   NPrint " fre_div = frequency divide, can be 1, 2 or 4 (default=1)"
+   NPrint " The letter F forces mono."+l$
+   End
+EndIf
+
+If np=1 AND UCase$(f$)="!EXT"
+   NPrint l$+" Extensions list:-"+l$+" ==============="+l$
+   NPrint " Inbuilt:-"+l$+l$+" MAUD = IFF-MAUD"+l$+" MAES = MAESTRO"
+   NPrint " 16SV = IFF-16SV mono"
+   NPrint "  RAW = RAW Motorolla format"+l$+" INTL = RAW Intel format"
+   NPrint l$+" Via `aw2sv':-"+l$+l$+" 16SV = IFF-16SV stereo"
+   NPrint l$+" Via the `sndfile.library':-"+l$
+   NPrint " AIFF = AIFF"+l$+"  WAV = RIFF-WAV"+l$+"  SUN = SUN-AU"
+   NPrint "  DEC = DEC-AU"+l$+"  PAF = Paris Motorolla format"
+   NPrint " PAF2 = Paris Intel format"+l$+"  IMA = RIFF-WAVE-IMA-ADPCM"
+   NPrint "  GSM = RIFF-WAVE-GSM6.10"
+   NPrint " WVUL = RIFF-WAVE-ULAW"+l$+" WVAL = RIFF-WAVE-ALAW"
+   NPrint " SAUL = SUN-AU-ULAW"+l$+" SAAL = SUN-AU-ALAW"
+   NPrint " DAUL = DEC-AU-ULAW"+l$+" DAAL = DEC-AU-ALAW"
+   NPrint " SA21 = SUN-AU-G721"+l$+" SA23 = SUN-AU-G723"
+   NPrint " DA21 = DEC-AU-G721"+l$+" DA23 = DEC-AU-G723"
+   NPrint l$+" 8bit formats via `ADPCM_enc':-"+l$
+   NPrint "    2 = ADPCM2 mono"+l$+"    3 = ADPCM3 mono"
+   NPrint "   82 = 8SVX-ADPCM2"+l$+"   83 = 8SVX-ADPCM3"
+   NPrint "   8F = 8SVX-FDC"+l$+"   8E = 8SVX-EDC"
+   NPrint "   L2 = LLADPCM2"+l$+"   L3 = LLADPCM3"
+   NPrint "   L4 = LLADPCM4-FDC"+l$+"   L5 = LLADPCM5-EDC"
+   NPrint " 8SVX = IFF-8SVX"+l$ : End
+EndIf
+
+If np>2
+   div=Vallong(Par$(3)) : If div<1 Then div=1
+   If div>2 Then div=4
+EndIf
+
+If np>3 Then If UCase$(Par$(4))="F" Then fm=1
+
+; "sndfile.library" stuff
+
+NEWTYPE .SF_INFO
+
+   samplerate.l
+   samples.l
+   channels.l
+   pcmbitwidth.l
+   form.l
+   sections.l
+   seekable.l
+
+End NEWTYPE
+
+DEFTYPE .SF_INFO wfinfo
+
+; End "sndfile.library" stuff
+
+
+
+Statement lib_check{lib$}
+
+   lib.l = OpenLibrary_(lib$,0): SHARED l$, qt$
+   If lib
+      CloseLibrary_ lib
+   Else
+      NPrint l$+" "+qt$+lib$+qt$+" not found."+l$: End
+   EndIf
+
+End Statement
+
+
+lib_check{"mpega.library"}
+
+exten$=UCase$(Right$(out$,5)) : exten2$=Right$(exten$,4)
+exten3$=Right$(exten2$,3) : exten4$=Right$(exten3$,2)
+If exten$=".8SVX" Then sv=1 : ae=1 : exten$="8"
+If exten$=".AIFF" Then sfl=1: wfinfo\form = $20001
+If exten$=".PAF2" Then sfl=1: wfinfo\form = $60008 : intel=1
+If exten$=".INTL" Then intel=1
+If exten$=".WVUL" Then sfl=2: wfinfo\form = $10003
+If exten$=".WVAL" Then sfl=2: wfinfo\form = $10004
+If exten$=".SAUL" Then sfl=2: wfinfo\form = $30003
+If exten$=".SAAL" Then sfl=2: wfinfo\form = $30004
+If exten$=".DAUL" Then sfl=2: wfinfo\form = $40003
+If exten$=".DAAL" Then sfl=2: wfinfo\form = $40004
+If exten$=".SA21" Then sfl=2: wfinfo\form = $3000E : fm=1
+If exten$=".SA23" Then sfl=2: wfinfo\form = $3000F : fm=1
+If exten$=".DA21" Then sfl=2: wfinfo\form = $4000E : fm=1
+If exten$=".DA23" Then sfl=2: wfinfo\form = $4000F : fm=1
+If exten2$=".WAV" Then sfl=1: wfinfo\form = $10001 : intel=1
+If exten2$=".SUN" Then sfl=1: wfinfo\form = $30001
+If exten2$=".DEC" Then sfl=1: wfinfo\form = $40001 : intel=1
+If exten2$=".PAF" Then sfl=1: wfinfo\form = $60007
+If exten2$=".IMA" Then sfl=2: wfinfo\form = $10005
+If exten2$=".GSM" Then sfl=2: wfinfo\form = $1000D : fm=1
+If exten3$=".82" Then sv=1 : ae=1 : exten$="82"
+If exten3$=".83" Then sv=1 : ae=1 : exten$="83"
+If exten3$=".8F" Then sv=1 : ae=1 : exten$="8F"
+If exten3$=".8E" Then sv=1 : ae=1 : exten$="8E"
+If exten3$=".L2" Then ae=1 : exten$="L2"
+If exten3$=".L3" Then ae=1 : exten$="L3"
+If exten3$=".L4" Then ae=1 : exten$="L4"
+If exten3$=".L5" Then ae=1 : exten$="L5"
+If exten4$=".2" Then ae=1 : exten$="2"
+If exten4$=".3" Then ae=1 : exten$="3"
+If sv=1 OR exten$=".16SV" Then fre_max=65535
+
+If sfl>0 Then lib_check{"sndfile.library"}
+
+
+NEWTYPE .MPEGA_STREAM
+   ; Public Data (Read only) */
+   ; Stream info */
+
+   norm.w        ;    /* 1 or 2 */
+   layer.w       ;    /* 1..3 */
+   mode.w        ;    /* 0..3  (MPEGA_MODE_xxx) */
+   bitrate.w     ;    /* in kbps */
+   frequency.l   ;    /* in Hz */
+   channels.w    ;    /* 1 or 2 */
+   ms_duration.l ;    /* stream duration in ms */
+   private_bit.w ;    /* 0 or 1 */
+   copyright.w   ;    /* 0 or 1 */
+   original.w    ;    /* 0 or 1 */
+
+   ; Decoding info according To MPEG control */
+
+   dec_channels.w   ;  /* decoded channels 1 or 2 */
+   dec_quality.w    ;  /* decoding quality 0..2 */
+   dec_frequency.l  ;  /* decoding frequency in Hz */
+
+   ; Private Data
+
+   *_handle.l
+
+End NEWTYPE
+
+NEWTYPE .MPEGA_OUTPUT
+   freq_div.w     ;    /* 1, 2 or 4 */
+   quality.w      ;    /* 0 (low) .. 2 (high) */
+   freq_max.l     ;    /* for automatic freq_div (if mono_freq_div == 0) */
+End NEWTYPE
+
+
+NEWTYPE .MPEGA_LAYER
+   force_mono.w          ;    /* 1 to decode stereo stream in mono, 0 otherwise */
+   mono.MPEGA_OUTPUT     ;    /* mono settings */
+   stereo.MPEGA_OUTPUT   ;    /* stereo settings */
+End NEWTYPE
+
+
+NEWTYPE .MPEGA_CTRL
+
+   bs_access.l; Hook   /* NULL for default access (file I/O) or give your own bitstream access */
+   layer_1_2.MPEGA_LAYER  ;  /* Layer I & II settings */
+   layer_3.MPEGA_LAYER    ;  /* Layer III settings */
+   check_mpeg.w           ;  /* 1 to check for mpeg audio validity at start of stream, 0 otherwise */
+   stream_buffer_size.l   ;  /* size of bitstream buffer in bytes (0 -> default size) */
+
+End NEWTYPE
+
+
+;consts
+
+#MPEGA_MAX_CHANNELS = 2
+#MPEGA_PCM_SIZE = 1152
+
+;vars
+
+DEFTYPE .MPEGA_STREAM *mympeg  ; mpeg stream pointer
+DEFTYPE .MPEGA_CTRL pegcontrol ; mpeg control structure
+
+
+Dim pcm.l(1)    ; an array of two pointers to buffers for each channel (left/right).
+                ; each buffer is MPEGA_PCM_SIZE*2 bytes
+
+;statements
+
+Statement exit{}
+   SHARED pcm.l(), outfile.l, *mympeg, out_buff, #MPEGA_PCM_SIZE, sfl
+
+   For dealloc = 0 To 1
+      If pcm(dealloc) Then FreeMem_ pcm(dealloc), #MPEGA_PCM_SIZE*2
+   Next dealloc
+
+   If out_buff Then FreeMem_ out_buff, #MPEGA_PCM_SIZE*4
+
+   If *mympeg Then MPEGA_close_(*mympeg)
+
+   If sfl>0
+      If outfile Then SF_Close_(outfile)
+   Else
+      If outfile Then Close_(outfile)
+   EndIf
+
+   End
+
+End Statement
+
+
+;initstructs
+
+pegcontrol\bs_access = 0
+pegcontrol\layer_1_2\mono\freq_div = div
+pegcontrol\layer_1_2\mono\quality  = 2
+pegcontrol\layer_1_2\mono\freq_max = fre_max
+
+pegcontrol\layer_3\mono\freq_div = div
+pegcontrol\layer_3\mono\quality  = 2
+pegcontrol\layer_3\mono\freq_max = fre_max
+
+pegcontrol\layer_1_2\stereo\freq_div = div
+pegcontrol\layer_1_2\stereo\quality  = 2
+pegcontrol\layer_1_2\stereo\freq_max = fre_max
+
+pegcontrol\layer_3\stereo\freq_div = div
+pegcontrol\layer_3\stereo\quality  = 2
+pegcontrol\layer_3\stereo\freq_max = fre_max
+
+pegcontrol\layer_1_2\force_mono = fm
+pegcontrol\layer_3\force_mono = fm
+
+pegcontrol\check_mpeg = 1           ; check mpega validity
+pegcontrol\stream_buffer_size = 0
+
+
+For alloc=0 To #MPEGA_MAX_CHANNELS-1
+   pcm(alloc) = AllocMem_(#MPEGA_PCM_SIZE*2, #MEMF_PUBLIC)
+   If pcm(alloc) = 0 Then exit{}
+Next alloc
+
+
+;openmpeg
+
+*mympeg = MPEGA_open_(&f$, &pegcontrol)
+
+If *mympeg
+
+   USEPATH *mympeg : If fm=1 Then \channels=1
+
+   mode$=" Unknown "
+   If \mode=0 Then mode$=" Stereo "
+   If \mode=1 Then mode$=" J-Stereo "
+   If \mode=2 Then mode$=" Dual "
+   If \mode=3 Then mode$=" Mono "
+
+   NPrint msg$+" Mpeg type: ",\norm," layer-",\layer,mode$,\bitrate,"kbps ",\frequency,"Hz"+l$
+
+   mpts.l= \ms_duration / 1000 : mptm.l=0 : mpts_bk.l=-1 : perc.l = 0
+
+   If mpts>59 Then mptm=mpts/60 : mpts=mpts-(mptm*60)
+
+   NPrint " Duration:  ",mptm,":",mpts,l$ : mptm=0
+
+   \frequency = \frequency / div
+
+   If \frequency>fre_max Then \frequency=fre_max
+
+   If \channels=2
+      out_buff = AllocMem_(#MPEGA_PCM_SIZE*4, #MEMF_PUBLIC)
+      If out_buff = 0 Then exit{}
+   EndIf
+
+   If np<2 OR amon$="!AMON" OR amon$="!AHI"
+      out$="AUDIO:B/16/F/"+Str$(\frequency)+"/C/"+Str$(\channels)
+      out$=out$+"/BUFFER/"+Str$(\frequency * 4 * \channels)
+   EndIf
+
+   If amon$="!PAS"
+      en$="PAS" : Gosub getpath
+      out$="APIPE:"+qt$+enc$+qt$+" 16 "+Str$(\frequency)+" "+Str$(\channels)
+   EndIf
+
+   If exten$=".16SV" AND \channels=2
+      en$="aw2sv" : exten$="" : Gosub getpath
+      exe$="run >nil: "+qt$+enc$+qt$+" "+out$+" "+f2$+" 16 "+Str$(\frequency)+" 2"
+      Execute_ &exe$,0,0
+   EndIf
+
+   If ae=1
+      en$="ADPCM_enc" : Gosub getpath
+      exe$="run >nil: "+qt$+enc$+qt$+" "+out$+" "+f2$+" "+exten$+" 16 "
+      exe$=exe$+Str$(\frequency)+" "+Str$(\channels) : Execute_ &exe$,0,0
+   EndIf
+
+   If sfl>0
+
+      wfinfo\samplerate = \frequency
+      wfinfo\channels = \channels
+      wfinfo\pcmbitwidth = 16
+
+      outfile.l = SF_OpenWrite_(&out$, wfinfo)
+
+   Else
+
+      outfile.l = Open_(&out$, #MODE_NEWFILE)
+
+   EndIf
+
+   If outfile=0 Then NPrint l$+" Unable to create output."+l$ : exit{}
+
+   If exten$=".MAUD"
+      hed$="FORM"+Mkl$(0)+"MAUDMHDR"+Mkl$(32)+Mkl$(0)+Mki$(16)+Mki$(16) : hedlen=60
+      hed$=hed$+Mkl$(\frequency)+Mki$(1)+Mki$(\channels-1)+Mki$(\channels)+Mki$(0)
+      hed$=hed$+Mkl$(0)+Mkl$(0)+Mkl$(0)+"MDAT"+Mkl$(0) : Write_ outfile, &hed$, 60 : fx=1
+   EndIf
+
+   If exten$=".16SV"
+      hed$="FORM"+Mkl$(0)+"16SVVHDR"+Mkl$(20)+Mkl$(0)+Mkl$(0)+Mkl$(0)
+      hed$=hed$+Mki$(\frequency)+Chr$(1)+Chr$(0)+Mkl$(65536)+"BODY"+Mkl$(0)
+      Write_ outfile, &hed$, 48 : hedlen=48 : fx=1
+   EndIf
+
+   If exten$=".MAES"
+      hedlen=24 : fx=1 : ftyp.b=0 : If \channels=1 Then ftyp=2
+      hed$="MAESTRO"+Chr$(0)+Mki$(0)+Chr$(2)+Chr$(0)+Mki$(ftyp)+Mki$(0)
+      hed$=hed$+Mkl$(0)+Mkl$(\frequency) : Write_ outfile, &hed$, 24
+   EndIf
+
+
+   While decoded_samples >= 0
+
+      decoded_samples = MPEGA_decode_frame_(*mympeg, &pcm(0))  ; decode a frame into pcm buffer (both buffers in stereo)
+      decoded_bytes = decoded_samples*2
+
+      If decoded_bytes > 0    ; successfully decoded a frame
+
+         If \channels = 1  ; not stereo, don't need to interleave left/write samples
+
+            If intel=1
+               For x.l=0 To decoded_bytes-2 Step 2
+                  bword.w=FPeekW(pcm(0)+x) : Poke.w(pcm(0)+x), bword
+               Next x
+            EndIf
+
+            out_ptr.l=pcm(0) : out_len.l=decoded_bytes
+
+         Else
+
+            For x.l=0 To decoded_bytes-2 Step 2  ; stereo, so write l/r/l/r etc
+
+               If intel=1
+                  bword0.w=FPeekW(pcm(0)+x) : bword1.w=FPeekW(pcm(1)+x)
+               Else
+                  bword0.w=Peek.w(pcm(0)+x) : bword1.w=Peek.w(pcm(1)+x)
+               EndIf
+
+               Poke.w (out_buff+(x*2)), bword0 : Poke.w (out_buff+(x*2)+2), bword1
+
+            Next x
+
+            out_ptr.l=out_buff : out_len.l=decoded_bytes * 2
+
+         EndIf
+
+         If sfl=0 Then Write_ outfile, out_ptr, out_len
+
+         If sfl=1 Then SF_WriteRaw_ outfile, out_ptr, out_len
+
+         If sfl=2 Then SF_WriteShort_ outfile, out_ptr, out_len/2
+
+         bla = MPEGA_time_( *mympeg, &mst.l ) : mpts=mst/1000
+
+         If mpts>mpts_bk OR perc>98
+            mpts_bk=mpts : perc = mst * 100.0 / \ms_duration
+            If mpts>59 Then mptm=mpts/60 : mpts=mpts-(mptm*60)
+            Print "   ",mptm,":",mpts,"   ",perc," % "+r$
+         EndIf
+
+      EndIf
+
+      If SetSignal_(0,#SIGBREAKF_CTRL_C) & #SIGBREAKF_CTRL_C
+         NPrint l$+l$+" Break...!!!"+l$ : If fx=1 Then Gosub fix_hed
+         exit{}
+      EndIf
+   Wend
+
+   If fx=1 Then Gosub fix_hed
+
+   NPrint "   ",mptm,":",mpts,"   100 % "+l$
+
+Else
+
+   NPrint l$+" No mp3 file found."+l$
+
+EndIf
+
+exit{}
+
+fix_hed:
+ExamineFH_ outfile, fib.FileInfoBlock : nl.l = fib\fib_Size - hedlen
+nsam.l = nl / \channels / 2 : hed.l=nl+hedlen-8
+If exten$=".MAES"
+   Seek_ outfile, 16, #OFFSET_BEGINNING : Write_ outfile, &nsam, 4
+   Return
+EndIf
+Seek_ outfile, 4 , #OFFSET_BEGINNING : Write_ outfile, &hed, 4
+Seek_ outfile, 20, #OFFSET_BEGINNING : Write_ outfile, &nsam, 4
+Seek_ outfile, hedlen-4, #OFFSET_BEGINNING : Write_ outfile, &nl, 4
+Return
+
+getpath:
+str.l = AllocMem_(2048, #MEMF_PUBLIC) : If str=0 Then exit{}
+NameFromLock_ GetProgramDir_, str, 2048 : pth$=Peek$(str)
+FreeMem_ str, 2048 : If Right$(pth$,1)<>":" Then pth$=pth$+"/"
+f2$=qt$+out$+qt$ : out$="pipe:enc" : enc$=pth$+en$
+exist.l=Open_(&enc$, #MODE_OLDFILE)
+If exist=0 Then NPrint " "+en$+" not found...!!!"+l$ : exit{}
+Close_(exist) : Return
+
+

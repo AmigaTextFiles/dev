@@ -1,0 +1,9 @@
+OPT MODULE
+OPT EXPORT
+
+CONST ID_LCLE=$4C434C45,
+      ID_CTRY=$43545259
+
+OBJECT countryprefs
+  reserved[4]:ARRAY OF LONG
+  countrycode:L

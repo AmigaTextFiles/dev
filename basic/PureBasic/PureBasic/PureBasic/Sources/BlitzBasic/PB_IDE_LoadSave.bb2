@@ -1,0 +1,414 @@
+; --------------------------------------------------------------------------------------
+;
+; This source file is part of PureBasic
+; For the latest info, see http://www.purebasic.com/
+; 
+; Copyright (c) 1998-2006 Fantaisie Software
+;
+; This program is free software; you can redistribute it and/or
+; modify it under the terms of the GNU General Public License
+; as published by the Free Software Foundation; either version 2
+; of the License, or (at your option) any later version.
+;
+; This program is distributed in the hope that it will be useful,
+; but WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+; GNU General Public License for more details.
+;
+; You should have received a copy of the GNU General Public License
+; along with this program; if not, write to the Free Software
+; Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+;
+; --------------------------------------------------------------------------------------
+;
+; PB Editor Load/Save sources..
+
+
+
+Statement SaveSourceQuick{SaveFileName.s}
+  SHARED PBGlobals,Language(),Source(),PBCompiler
+
+  SaveFileNameBak.s = SaveFileName+".bak"
+
+  DeleteFile_ &SaveFileNameBak
+  Rename_ &SaveFileName, &SaveFileNameBak
+
+
+  If NCreateFile(0,SaveFileName)
+
+    PBGlobals\Modified = 0
+    PBGlobals\Saved    = 1
+
+    UpdateStatus{Language(74)+"'"+SaveFileName$+"'..."}
+
+    PushItem Source()
+
+    ResetList Source()
+
+    While NextItem(Source())
+     NWriteStringN Source()\Text
+    Wend
+
+    NWriteStringN ("; MainProcessor="  +Str$(PBCompiler\MainProcessor))
+    NWriteStringN ("; Optimizations="  +Str$(PBCompiler\Optimizations))
+    NWriteStringN ("; CommentedSource="+Str$(PBCompiler\CommentedSource))
+    NWriteStringN ("; CreateIcon="     +Str$(PBCompiler\CreateIcon))
+    NWriteStringN ("; NoCliOutput="    +Str$(PBCompiler\NoCliOutput))
+    NWriteStringN ("; Executable="     +PBCompiler\Executable)
+    NWriteStringN ("; Debugger="       +Str$(PBCompiler\Debugger))
+    NWriteStringN ("; EnableASM="      +Str$(PBCompiler\EnableASM))
+
+    NCloseFile 0
+
+    PopItem Source()
+  Else
+    a.w = MessageBox{Language(75), Language(76), 0, Language(77)}
+  EndIf
+
+End Statement
+
+;--------------------------------------------------------------------
+
+Statement SaveSourceAs{}
+  SHARED SaveFileName.s,*TagList,*MyScreen
+  SHARED PBMetrics,PBGlobals,PathPart.s,FilePart.s
+
+  CutPath{PBGlobals\SaveFileName}
+
+  SourcePattern.s = "#?.pb"
+
+  NResetTagList #ASLFR_InitialTopEdge , NWindowY+PBMetrics\WTitleHeight
+        NAddTag #ASLFR_InitialLeftEdge, NWindowX
+        NAddTag #ASLFR_InitialWidth   , PBGlobals\ASLWidth
+        NAddTag #ASLFR_InitialHeight  , PBGlobals\ASLHeight
+        NAddTag #ASLFR_InitialDrawer  , &PathPart
+        NAddTag #ASLFR_InitialFile    , &FilePart
+        NAddTag #ASLFR_InitialPattern , &SourcePattern
+        NAddTag #ASLFR_DoPatterns     , 1
+        NAddTag #ASLFR_Screen         , *MyScreen
+
+  FileName.s = NASLFileRequest(*TagList)
+
+
+  CutPath{FileName}
+
+  If Instr(FilePart,".",1) =0
+   FileName+".pb"
+  EndIf
+
+  If FilePart<>""
+    PBGlobals\SaveFileName = FileName
+
+    If ReadFile(0, PBGlobals\SaveFileName)    ; Doobrey: Change this for lock/exists?
+      CloseFile 0
+
+      Result.w = MessageBox{"Request", "Do you want to overwrite the existing file ?", 0, "Yes|No"}
+    Else
+      Result.w = 1
+    EndIf
+
+    If Result
+      SaveSourceQuick{PBGlobals\SaveFileName}
+    EndIf
+  EndIf
+End Statement
+
+;----------------------------------------------------------------------------------------
+
+
+
+Statement SaveSource{}
+  SHARED FilePart.s,PBGlobals
+
+  NBusyPointer 1
+
+
+  CutPath{PBGlobals\SaveFileName}
+
+  If FilePart<> ""
+     SaveSourceQuick{PBGlobals\SaveFileName}
+
+    ; Doobrey: The rest of this is moved to SaveSourceQuick,
+    ; Cos both the other save functions call each other..
+
+;    Error = 0
+;
+;    SaveFileNameBak.s = SaveFileName+".bak"
+;
+;    DeleteFile_ &SaveFileNameBak
+;    Rename_ &SaveFileName, &SaveFileNameBak
+;
+;
+;    If NCreateFile(0,SaveFileName)
+;
+;      PBGlobals\Modified = 0
+;      PBGlobals\Saved    = 1
+;
+;      UpdateStatus{Language(74)+"'"+SaveFileName$+"'..."}
+;
+;      PushItem Source()
+;
+;      ResetList Source()
+;
+;      While NextItem(Source())
+;       NWriteStringN Source()\Text
+;      Wend
+;
+;      NWriteStringN ("; MainProcessor="  +Str$(PBCompiler\MainProcessor))
+;      NWriteStringN ("; Optimizations="  +Str$(PBCompiler\Optimizations))
+;      NWriteStringN ("; CommentedSource="+Str$(PBCompiler\CommentedSource))
+;      NWriteStringN ("; CreateIcon="     +Str$(PBCompiler\CreateIcon))
+;      NWriteStringN ("; NoCliOutput="    +Str$(PBCompiler\NoCliOutput))
+;      NWriteStringN ("; Executable="     +PBCompiler\Executable)
+;      NWriteStringN ("; Debugger="       +Str$(PBCompiler\Debugger))
+;      NWriteStringN ("; EnableASM="      +Str$(PBCompiler\EnableASM))
+;
+;      NCloseFile 0
+;
+;      PopItem Source()
+;    Else
+;      a = MessageBox{Language(75), Language(76), 0, Language(77)}
+;    EndIf
+
+  Else
+    SaveSourceAs{}
+  EndIf
+
+  NBusyPointer 0
+
+End Statement
+
+
+
+;------------------------------------------------------------------------------------
+
+Statement LoadSourceQuick{LFileName.s}
+  SHARED FilePart.s,Source(),Language(),PBMainWindow,Old_Cursor.s
+  SHARED PBCursor,SelectedZone,PBCompiler,PBGlobals
+
+  !DPrint {1,"LoadQuick>>"+LFileName}
+
+  If LFileName
+
+    CutPath{LFileName}
+
+    If FilePart <> ""
+
+    If ReadFile(0,LFileName)
+
+      !DPrint{1,"Reading>>"+LFileName}
+
+      PBGlobals\Modified  = 0
+      PBGlobals\ReCompile = 1
+      PBGlobals\Saved     = 1
+
+      UpdateStatus{"Loading "+LFileName+"..."}
+      FileLength.l  = Lof(0)
+
+      !DPrint{1,"FileLength>>"+Str$(FileLength)}
+
+      FileBuffer.l = AllocVec_(FileLength,0)
+
+      ReadMem 0, FileBuffer, FileLength
+      CloseFile 0
+
+      !DPrint{2,"Closed source"}
+
+      EndBuffer.l = FileBuffer+FileLength
+
+      NBusyPointer 1
+
+      PBGlobals\SaveFileName = LFileName
+      PBGlobals\FileName=LFileName
+
+      If PBGlobals\InsertMode = 1
+        If PrevItem(Source())
+        Else
+          ResetList Source()
+        EndIf
+
+        *Old_Item.l = Source()
+      Else
+        ClearList Source()
+        PBMainWindow\NbLines   = 0
+        PBMainWindow\MaxNbChars = 0
+      EndIf
+
+
+      *a.l = FileBuffer
+      Repeat
+       !DPrint{4,"Read loop"}
+        AddItem Source()
+        PBMainWindow\NbLines+1
+
+        ; Doobrey: Added my own routine to search.. must stop on 0 or 10.
+
+        Source()\Text=PeekNL{*a}
+        !DPrint{5,"SRC>"+Source()\Text
+        a.l =Len(Source()\Text)
+        *a+a+1
+
+        If Right$(Source()\Text,1)=Chr$(13)                          ; Removes the 'CR' from PC sources !
+         Source()\Text=Left$(Source()\Text,Len(Source()\Text)-1)     ;
+         a-1  ; From the removed chr(13)
+        EndIf
+
+
+        If a>PBMainWindow\MaxNbChars
+          PBMainWindow\MaxNbChars = a
+        EndIf
+
+      Until *a >= EndBuffer
+      !DPrint{2,"End of read loop"}
+      LastItem Source()
+
+      Quit.b = 0
+      Repeat
+        Position.w = Instr(Source()\Text, "=", 0)
+        If Position
+
+          Keyword.s  = Left$   (Source()\Text, Position)
+          Argument.s = UnRight$(Source()\Text, Position)
+
+          Select Keyword
+            Case "; MainProcessor="
+              PBCompiler\MainProcessor = Val(Argument)
+
+
+            Case "; Optimizations="
+              PBCompiler\Optimizations = Val(Argument)
+
+
+            Case "; CommentedSource="
+              PBCompiler\CommentedSource = Val(Argument)
+
+
+            Case "; CreateIcon="
+              PBCompiler\CreateIcon = Val(Argument)
+
+
+            Case "; NoCliOutput="
+              PBCompiler\NoCliOutput = Val(Argument)
+
+
+            Case "; Executable="
+              PBCompiler\Executable = Argument
+
+
+            Case "; Debugger="
+              PBCompiler\Debugger = Val(Argument$)
+
+            Case "; EnableASM="
+              PBCompiler\EnableASM = Val(Argument)
+
+            Default
+              Quit = 1
+
+          End Select
+
+
+          If Quit = 0
+            KillItem Source()
+            PBMainWindow\NbLines-1
+          EndIf
+        Else
+          Quit = 1
+        EndIf
+
+      Until Quit = 1 OR (PBMainWindow\NbLines <= 0)
+
+
+      !DPrint{2,"End of setting loop"}
+
+      FreeVec_ FileBuffer
+
+      If PBGlobals\InsertMode = 1
+        SetItem Source(), *Old_Item
+        NextItem Source()
+      Else
+        FirstItem Source()
+
+        PBCursor\X = 0
+        PBCursor\Y = 0
+        PBCursor\OffsetX = 0
+        PBCursor\OffsetY = 0
+      EndIf
+
+      SelectedZone\EndY = -1  ; No Selected zone...
+      Old_Cursor=" "
+      DeleteOldCursor{}
+      RefreshLines{0, 1}
+
+      NBusyPointer 0
+
+
+      Repeat          ; Doobrey: Hmmmm... busy wait ????
+      Until NWindowEvent = 0
+      !DPrint{1,"Loaded OK..I hope"}
+    Else
+      !DPrint{1,"Load Failed #1"}
+      a = MessageBox{Language(102), Language(103), 0, Language(77)}
+    EndIf
+    Else
+    !DPrint{1,"Load Failed #2"}
+    EndIf
+  Else
+  !DPrint{1,"Load Failed #3"}
+  EndIf
+
+
+End Statement
+
+;------------------------------------------------------------------------
+
+Statement LoadSource{}
+  SHARED Source(),Language(),PBGlobals,*TagList,PathPart.s,FilePart.s
+  SHARED PBMetrics,*MyScreen
+  NoLoad.b = 0
+
+  If PBGlobals\Modified = 1
+    a.w = MessageBox{Language(68), Language(69)+Chr$(10)+Language(70), 0, Language(83)+"|"+Language(84)+"|"+Language(27)}
+
+    Select a
+      Case 0
+        NoLoad = 1
+
+      Case 2
+        If PBGlobals\Saved
+          SaveSource{}
+        Else
+          SaveSourceAs{}
+        EndIf
+
+    End Select
+  EndIf
+
+
+  If NoLoad = 0
+
+    ;-- Error = 0   ; Doobrey: is this used?
+
+    CutPath{PBGlobals\SaveFileName}
+
+    SourcePattern.s = "#?.pb"
+
+    NResetTagList #ASLFR_InitialTopEdge , NWindowY+PBMetrics\WTitleHeight
+          NAddTag #ASLFR_InitialLeftEdge, NWindowX
+          NAddTag #ASLFR_InitialWidth   , PBGlobals\ASLWidth
+          NAddTag #ASLFR_InitialHeight  , PBGlobals\ASLHeight
+          NAddTag #ASLFR_InitialDrawer  , &PathPart
+          NAddTag #ASLFR_InitialFile    , &FilePart
+          NAddTag #ASLFR_InitialPattern , &SourcePattern
+          NAddTag #ASLFR_DoPatterns     , 1
+          NAddTag #ASLFR_Screen         , *MyScreen
+
+    FileName.s = NASLFileRequest(*TagList)
+    !DPrint{1,"ASL>>"+FileName}
+    ;FileName = "PureBasic:Examples/Sources/WildManager.pb"
+    ;FileName = "Atelier:QuickSort.pb"
+    LoadSourceQuick{FileName}
+  EndIf
+
+End Statement
+
+

@@ -1,0 +1,6 @@
+OPT	PPC,NOEXE,NOSTD
+
+PROC Inp(fh:PTR)(LONG)
+	DEF	field:PTR TO CHAR
+	IFN Read(fh,field:=[0,0]:CHAR,1) THEN RETURN -1
+ENDPROC field[0]

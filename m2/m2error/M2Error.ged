@@ -1,0 +1,157 @@
+/* $VER: M2Error V 0.9 © 1994 Fin Schuppenhauer                   */
+/* 14. März 1994                                                  */
+/* Lädt die Fehlerdatei zum aktuellen Text und zeigt den nächsten */
+/* Fehler an.                                                     */
+/* Dieses Skript benötigt außerdem das Skript ResetM2Error.ged    */
+
+
+
+OPTIONS RESULTS                             /* enable return codes     */
+
+if (LEFT(ADDRESS(), 6) ~= "GOLDED") then    /* not started by GoldEd ? */
+    address 'GOLDED.1'
+
+'LOCK CURRENT'                              /* lock GUI, gain access   */
+OPTIONS FAILAT 6                            /* ignore warnings         */
+SIGNAL ON SYNTAX                            /* ensure clean exit       */
+
+
+/* ------------------------ INSERT YOUR CODE HERE: ------------------- */
+
+/* If you don't use the german version of M2Amiga replace the     */
+/* following assignment with the filename of your error message   */
+/* file (I don't know, how it's called).                          */
+msgfile = 'M2:Fehler-Meldungen'
+
+'QUERY DOC VAR FILENAME'
+fname = filename'E'
+
+/* Gibt es eine zugehörige Fehlerdatei ? */
+if (exists(fname)) then do
+   call open('ErrorFile', fname, 'R')
+   errfile = readch('ErrorFile', 4)
+
+   /* Hat die Datei auch das richtige Format ? (vgl. Handbuch zu M2Amiga */
+   /* Abschnitt 7.1, Seite 7-13ff) */
+   if c2d(errfile) = 3 then do
+      /* Nächsten Fehler berechnen: */
+      nexterr = getclip('nextm2err')
+      nexterr = nexterr+1
+
+      /* In der Fehlerdatei die Fehlercodierung suchen: */
+      abbrechen = 0
+      /*say nexterr*/
+      do i=1 to nexterr while ~(abbrechen)
+         /*say i*/
+         err = readch('ErrorFile', 4)
+         if compare(err,'ÁERR') = 0 then do
+            byteoffset = readch('ErrorFile', 4)
+            errornum = readch('ErrorFile', 2)
+
+            if c2d(errornum,1) = 194 then do
+               say 'Als Zeichenkette'
+               /* Fehlermeldung ist direkt als Zeichenkette hier */
+               /* abgelegt. */
+               if c2d(errornum,2) ~= 49664 then do
+                  /* Die Zeichenkette ist nicht leer */
+                  j = 1
+                  do until ch = 0
+                     ch = readch('ErrorFile', 1)
+                     j = j + 1
+                  end
+                  if (j // 2) = 1 then
+                     ch = readch('ErrorFile', 1)
+               end
+            end
+            else do
+               /* Es könnte noch ein weiterer ErrorPart kommen: */
+               /* Wenn doch, geht dieses Skript bisher davon aus, */
+               /* das es sich dabei um eine ErrorNum und nicht um */
+               /* einen String handelt - das kann natürlich irgend- */
+               /* wann mal schiefgehen... */
+               dummy = readch('ErrorFile', 2)
+               if compare(dummy, 'ÁE') = 0 then do
+                  /* Nein, doch nicht; zurücksetzen */
+                  call seek('ErrorFile', -2)
+               end
+            end
+         end
+         else do
+            abbrechen = 1
+            'REQUEST BODY="Fehlerdatei hat falsches Format." BUTTON=Abbrechen'
+         end
+         if eof('ErrorFile') then
+            abbrechen = 1
+      end
+      /*say i*/
+      if (i-1) ~= nexterr then
+         'REQUEST BODY="Kein weiterer Fehler." BUTTON=Ok.'
+      else do
+         if c2d(errornum, 1) ~= 194 then do
+            /* Fehler durch Nummer codiert. */
+            errnumdez = c2d(errornum)
+            byteoffsetdez = c2d(byteoffset)
+            'GOTO TOP'
+            'GOTO BYTE='byteoffsetdez
+            'ENDWORD'
+            call GetErrMsg(errornum)
+
+            'REQUEST BODY "Fehler Nr.: 'errnumdez'|'errmsg' " BUTTON=Ok.'
+            call setclip('nextm2err', nexterr)
+         end
+         else
+            'REQUEST BODY="Fehler." BUTTON=Ok.'
+      end
+   end
+   else
+      'REQUEST BODY="Fehlerdatei hat falsches Format." BUTTON=Ok.'
+   call close('ErrorFile')
+end
+else
+   'REQUEST BODY="Keine Fehlerdatei gefunden!" BUTTON=Ok.'
+
+
+/* ---------------------------- END OF YOUR CODE --------------------- */
+
+'UNLOCK' /* VERY important: unlock GUI */
+EXIT
+
+SYNTAX:
+
+SAY "Sorry, error line" SIGL ":" ERRORTEXT(RC) ":-("
+'UNLOCK'
+EXIT
+
+/* ----- GetErrorMessage --------------------------------------------- */
+
+GetErrMsg:
+
+   arg errnum
+   /* Wieso ist errnum nicht der gleiche Wert, den ich auch übergebe? */
+   /* Ok, benutzen wir eben errornum... */
+
+   if exists(msgfile) then do
+      call open('MsgFile', msgfile, 'R')
+      next = d2c(0)
+      do until (eof('MsgFile') | currerrnum = errornum)
+         call seek('MsgFile', c2d(next), 'B')
+         next = readch('MsgFile', 4)
+         currerrnum = readch('MsgFile', 2)
+      end
+      if currerrnum = errornum then do
+         errmsg = ''
+         do until c2d(ch) = 0
+            ch = readch('MsgFile', 1)
+            errmsg = errmsg || ch
+         end
+      end
+      else
+         errmsg = 'Fehlerbeschreibung nicht gefunden.'
+      call close('MsgFile')
+      errmsg = left(errmsg, length(errmsg)-1)
+   end
+   else do
+      'REQUEST BODY="Datei M2:Fehler-Meldungen nicht gefunden!" BUTTON=Ok'
+      errmsg = ''
+   end
+

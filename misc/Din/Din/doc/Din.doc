@@ -1,0 +1,771 @@
+
+TABLE OF CONTENTS
+
+din.library/NotifyDinLinks
+din.library/ResetDinLinkFlags
+din.library/MakeDinObject
+din.library/EnableDinObject
+din.library/DisableDinObject
+din.library/PropagateDinObject
+din.library/RemoveDinObject
+din.library/LockDinObject
+din.library/UnlockDinObject
+din.library/FindDinObject
+din.library/MakeDinLink
+din.library/RemoveDinLink
+din.library/ReadLockDinObject
+din.library/ReadUnlockDinObject
+din.library/WriteLockDinObject
+din.library/WriteUnlockDinObject
+din.library/LockDinBase
+din.library/UnlockDinBase
+din.library/InfoDinObject
+din.library/FreeInfoDinObject
+
+
+din.library/NotifyDinLinks			din.library/NotifyDinLinks
+
+    NAME
+	NotifyDinLinks -- Notify all links for a DinObject.
+
+    SYNOPSIS
+	Tasks = NotifyDinLinks(DinObject, Flags)
+	D0			 A0	    D0
+
+	ULONG Tasks;
+	struct DinObject *DinObject;
+	ULONG Flags;
+
+    FUNCTION
+	Sends a signal to all tasks linked to this DinObject.
+
+	The only flag you can safely use is LNK_CHANGE. This function
+	will fill in the Flags field for all the DinLinks linked to this
+	DinObject and send a signal to the corresponding task.
+
+	Use this function to tell everyone that you have changed something
+	to your physical object.
+
+    INPUTS
+    	DinObject = pointer to a DinObject (normally created by you).
+    	Flags = at this moment only LNK_CHANGE is appropriate.
+
+    RESULT
+    	This function will return the number of tasks signaled.
+
+    BUGS
+
+    SEE ALSO
+    	ResetDinLinkFlags
+	
+
+din.library/ResetDinLinkFlags			din.library/ResetDinLinkFlags
+
+    NAME
+	ResetDinLinkFlags  --  Clear all the notify flags for a DinLink.
+
+    SYNOPSIS
+	ResetDinLinkFlags(DinLink)
+			    A0
+
+	struct DinLink *DinLink;
+
+    FUNCTION
+	Clears all notify flags in the DinLink Flags field.
+
+	Use this function after you have examined the DinLink flags.
+	If you forget to do this you will not be able to distinguish
+	between different notify signals.
+
+	Note! The only flag not cleared is the LNK_KILLED flag.
+
+    INPUTS
+    	DinLink = a pointer to a DinLink structure
+
+    RESULT
+    	None
+
+    BUGS
+
+    SEE ALSO
+    	NotifyDinLinks
+
+
+din.library/MakeDinObject			din.library/MakeDinObject
+
+    NAME
+	MakeDinObject  --  Make a DinObject.
+
+    SYNOPSIS
+	DinObject = MakeDinObject(Name,Type,Flags,PhysicalObject,Size)
+	D0			   A0	D0    D1	A1	   D2
+
+	struct DinObject *DinObject;
+	char *Name;
+	UWORD Type;
+	ULONG Flags;
+	APTR PhysicalObject;
+	ULONG Size;
+
+    FUNCTION
+    	Make a DinObject available to all possible linkers.
+
+	There are three possible actions for this function:
+	- There is already an object with this name.
+	  Return NULL, this is an error.
+	- There is no one waiting for this object to arrive.
+	  The object is created.
+	- There are already links to this object.
+	  Create the object and send a LNK_NEW signal to all linked tasks.
+
+	'Name' is copied to an internal buffer, so you don't need to worry
+	about this one.
+
+	It is perfectly legal to make an object and exit. This is called a
+	resident object. Because it would be nice if you could remove this
+	object later on, you should Propagate the ownership of the object
+	to nobody before you exit (with PropagateDinObject). This is
+	because only the owner can remove a DinObject.
+
+	What this function does:
+	- Allocate the object structure.
+	- Initialize the two semaphores.
+	- Initialize the DinLink list.
+	- Set the owner pointer to the current task.
+	- Set the pointer to the Physical object. (Note that you don't
+	  have to initialize the physical object before you create the
+	  DinObject. You can do this later. You should, however, do this
+	  before you enable the DinObject.
+	- The DinObject is disabled by default. Enable it with EnableDinObject.
+	- Link the DinObject in the library list.
+	- If the DinObject had some links, notify signals are send (LNK_NEW).
+
+	A DinObject corresponds directly with a physical object. The physical
+	objects that are supported at this moment are:
+	- OBJECTDATA :
+	    Binary data.
+	    struct ObjectData
+	    	{
+	    	  ULONG Size;
+	    	  APTR Data;
+	    	}
+	    Data must be allocated with 'AllocMem (Size,MEMF...)'.
+	    If you use this object type you are responsible for your own
+	    physical object interpretation. The din library only knows how
+	    to deallocate your 'Data'.
+	- OBJECTTEXT :
+	    Text data.
+	    struct ObjectText
+	    	{
+	    	  ULONG Lines;
+	    	  struct ObjectLine *FirstLine;
+	    	}
+	    struct ObjectLine
+	    	{
+	    	  struct ObjectLine *Next;
+	    	  char FirstByte;
+	    	}
+	    Lines is the number of lines in the text.
+	    FirstLine points to the first line of text (pffh, how difficult :-)
+	- OBJECTIMAGE :
+	    Image data.
+	    struct ImageData
+	    	{
+	    	  struct RastPort *rp;
+	    	  struct Rectangle Rect;
+	    	}
+	    RastPort is ofcourse the RastPort for the drawing.
+	    Rect is a rectangle describing the image in this RastPort. If all
+	    values in the rectangle are ~0, the image corresponds with the
+	    complete RastPort.
+	- OBJECTACK :
+	    Acknowledgement object.
+	    There is no structure for this object.
+	    It is simply a way to let someone know that you are here.
+	    PhysicalObject is NULL and Size is 0.
+
+    INPUTS
+    	Name = pointer to a unique name. If the name already exists, you will
+    	  get an error.
+    	Type = the physical object type. Supported physical objects at this moment
+    	  are:
+    	    - OBJECTDATA : Binary data, for own interpretation.
+    	    - OBJECTTEXT : Text data.
+    	    - OBJECTIMAGE : RastPort.
+    	    - OBJECTACK : Acknowledgement.
+    	Flags = OB_READONLY if only the owner may write on this object.
+    	PhysicalObject = pointer to the physical object. You may initialize this
+    	  later.
+    	Size = size of the physical object structure.
+
+    RESULT
+    	Pointer to the freshly created DinObject or NULL if no success.
+
+    BUGS
+
+    SEE ALSO
+	RemoveDinObject
+
+
+din.library/EnableDinObject			din.library/EnableDinObject
+
+    NAME
+	EnableDinObject  --  Make a DinObject available for use.
+
+    SYNOPSIS
+	Success = EnableDinObject(DinObject)
+	D0			     A0
+
+	BOOL Success;
+	struct DinObject *DinObject;
+
+    FUNCTION
+    	Make a DinObject available for use.
+
+	Only the owner of the DinObject can enable it.
+	This function sends a LNK_ENABLE signal to all linked tasks.
+
+    INPUTS
+    	DinObject = pointer to a DinObject.
+
+    RESULT
+    	FALSE if you are not allowed to enable this DinObject.
+
+    BUGS
+
+    SEE ALSO
+	DisableDinObject
+
+
+din.library/DisableDinObject			din.library/DisableDinObject
+
+    NAME
+	DisableDinObject  --  Make a DinObject unavailable for use.
+
+    SYNOPSIS
+	Success = DisableDinObject(DinObject)
+	D0			      A0
+
+	BOOL Success;
+	struct DinObject *DinObject;
+
+    FUNCTION
+    	Make a DinObject unavailable for use.
+
+	Only the owner of the DinObject can disable it.
+	This function sends a LNK_DISABLE signal to all linked tasks.
+	When someone is still writing or reading on the physical object for
+	this DinObject, this function will block.
+
+    INPUTS
+    	DinObject = pointer to a DinObject.
+
+    RESULT
+    	FALSE if you are not allowed to disable this DinObject.
+
+    BUGS
+
+    SEE ALSO
+	EnableDinObject
+
+
+din.library/PropagateDinObject			din.library/PropagateDinObject
+
+    NAME
+	PropagateDinObject  --  Change the ownership of a DinObject.
+
+    SYNOPSIS
+	Success = PropagateDinObject(DinObject,Task)
+	D0				A0	A1
+
+	BOOL Success;
+	struct DinObject *DinObject;
+	struct Task *Task;
+
+    FUNCTION
+    	Change the ownership of a DinObject.
+
+	Only the owner of the DinObject can change the ownership.
+	If task == NULL no one will be the owner.
+
+	The owner of a DinObject can:
+	- Remove, Disable and Enable it.
+	- Change the ownership.
+	- Write on a READ ONLY physical object.
+
+    INPUTS
+    	DinObject = pointer to a DinObject.
+    	Task = pointer to a task or NULL for no one.
+
+    RESULT
+    	FALSE if you are not the owner of this DinObject.
+
+    BUGS
+	Does not check for ownership.
+
+    SEE ALSO
+
+
+din.library/RemoveDinObject			din.library/RemoveDinObject
+
+    NAME
+	RemoveDinObject  --  Remove a DinObject.
+
+    SYNOPSIS
+	Success = RemoveDinObject(DinObject)
+	D0			     A0
+
+	BOOL Success;
+	struct DinObject *DinObject;
+
+    FUNCTION
+    	Remove a DinObject.
+
+	Only the owner of the DinObject can remove a DinObject.
+
+	This function will send a LNK_KILLED signal to all tasks still linked
+	to this DinObject. Note that this function will NOT remove the links
+	attached to this DinObject. The linkers themselves are responsible for
+	removing their DinLinks after they received a LNK_KILLED signal.
+
+	This function will NOT deallocate the physical object. You are
+	responsible for that. Note that if you want to deallocate the
+	physical object before you remove the DinObject, you MUST disable
+	the DinObject first.
+
+    INPUTS
+    	DinObject = pointer to a DinObject. You can safely pass a NULL pointer.
+
+    RESULT
+    	FALSE if you are not the owner of this DinObject.
+
+    BUGS
+
+    SEE ALSO
+    	MakeDinObject
+
+
+din.library/LockDinObject			din.library/LockDinObject
+
+    NAME
+	LockDinObject  --  Lock the DinObject structure.
+
+    SYNOPSIS
+	Success = LockDinObject(DinObject)
+	D0			   A0
+
+	BOOL Success;
+	struct DinObject *DinObject;
+
+    FUNCTION
+	Lock The DinObject structure.
+
+	Use this function if you want to look at the fields in the DinObject
+	structure.
+	Always pair a LockDinObject with an UnlockDinObject.
+
+	Locks can be nested.
+
+    INPUTS
+    	DinObject = pointer to a DinObject.
+
+    RESULT
+    	FALSE if the DinObject is not ready (if it is a Dummy object).
+
+    BUGS
+	Avoid these functions if possible. Use InfoDinObject instead.
+
+    SEE ALSO
+    	UnlockDinObject, InfoDinObject
+
+
+din.library/UnlockDinObject			din.library/UnlockDinObject
+
+    NAME
+	UnlockDinObject  --  Lock the DinObject structure.
+
+    SYNOPSIS
+	UnlockDinObject(DinObject)
+			   A0
+
+	BOOL Success;
+	struct DinObject *DinObject;
+
+    FUNCTION
+	Unlock The DinObject structure.
+
+	Only use this function if you have Locked the DinObject first.
+	Always pair a LockDinObject with an UnlockDinObject.
+
+	Locks can be nested.
+
+    INPUTS
+    	DinObject = pointer to a DinObject.
+
+    RESULT
+	None.
+
+    BUGS
+	Avoid these functions if possible. Use InfoDinObject instead.
+
+    SEE ALSO
+    	LockDinObject, InfoDinObject
+
+
+din.library/FindDinObject			din.library/FindDinObject
+
+    NAME
+	FindDinObject  --  Search a named DinObject.
+
+    SYNOPSIS
+	DinObject = FindDinObject(Name)
+	D0			   A0
+
+	struct DinObject *DinObject;
+	char *Name;
+
+    FUNCTION
+	Search a DinObject in the DinObject list.
+
+	This function arbitrates for access to the DinObject list.
+
+    INPUTS
+    	Name = pointer to a NULL-terminated name.
+
+    RESULT
+	Pointer to a DinObject or NULL if not found.
+
+    BUGS
+
+    SEE ALSO
+
+
+din.library/MakeDinLink				din.library/MakeDinLink
+
+    NAME
+	MakeDinLink  --  Create a link to a DinObject.
+
+    SYNOPSIS
+	DinLink = MakeDinLink(DinObject,[Name])
+	D0			  A0	  A1
+
+	struct DinLink *DinLink;
+	struct DinObject *DinObject;
+	char *Name;
+
+    FUNCTION
+	Create a DinLink to a DinObject.
+
+	There are three scenarios:
+	- The DinObject exists.
+	  The Link is immediate, no LNK_NEW will be send.
+	- The DinObject does not exist.
+	  This Function will create a dummy DinObject with the name you
+	  specified. The LNK_WAITING4OB flag is set. When the object
+	  is created you will get a LNK_NEW signal.
+	- The DinObject does exist as a dummy.
+	  The LNK_WAITING4OB flag is set. When the object is created
+	  you will get a LNK_NEW signal.
+
+	This means that a link will almost always succeed (except when
+	there is not enough memory) even if the object does not exist.
+	If you only want to link to an existing DinObject you should use
+	the following code (or something equivalent):
+
+	  link = MakeDinLink (0,"Object");
+	  if (!link)
+	    {
+	      printf ("Not enough memory\n");
+	      exit (1);
+	    }
+	  if (link->Flags & LNK_WAITING4OB)
+	    {
+	      RemoveDinLink (link);
+	      printf ("Object does not exist\n");
+	      exit (1);
+	    }
+
+	Note that you MUST check the LNK_WAITING4OB flag and handle
+	this situation correctly.
+	Also note that your program must be able to respond to all
+	available signals correctly:
+	- LNK_CHANGE :
+	  The physical object has changed.
+	- LNK_NEW :
+	  The object has just been made.
+	- LNK_DISABLE :
+	  The object has been disabled.
+	- LNK_ENABLE :
+	  The object has been enabled.
+	- LNK_KILLED :
+	  The object has been killed. You should remove your DinLink as
+	  soon as possible.
+
+	This function allocates a Signal.
+
+    INPUTS
+    	DinObject = pointer to a DinObject. if NULL Name is used.
+    	Name = pointer to a NULL-terminated name.
+
+    RESULT
+	Pointer to a DinLink or NULL if an error occured.
+
+    BUGS
+	Future plans incorporate a system to share a signal for several links.
+
+    SEE ALSO
+    	RemoveDinLink
+
+
+din.library/RemoveDinLink			din.library/RemoveDinLink
+
+    NAME
+	RemoveDinLink  --  Remove a link to a DinObject.
+
+    SYNOPSIS
+	RemoveDinLink(DinLink)
+			 A0
+
+	struct DinLink *DinLink;
+
+    FUNCTION
+    	Remove a link to a DinObject.
+
+	If the link is the last link in a dummy object, this dummy object
+	is removed.
+	If the DinObject is waiting to be deleted and your link is the
+	last to be removed, the dummy object is removed.
+
+    INPUTS
+    	DinLink = pointer to a DinLink. It is safe to call this routine with
+    	  a NULL pointer.
+
+    RESULT
+	None.
+
+    BUGS
+
+    SEE ALSO
+    	MakeDinLink
+
+
+din.library/ReadLockDinObject			din.library/ReadLockDinObject
+
+    NAME
+	ReadLockDinObject  --  Lock a DinObject for reading.
+
+    SYNOPSIS
+	Success = ReadLockDinObject(DinObject)
+	D0				A0
+
+	BOOL Success;
+	struct DinObject *DinObject;
+
+    FUNCTION
+	Lock the physical object of a DinObject for reading.
+
+	Note that there can be more readers at the same time, but only
+	one writer.
+
+    INPUTS
+    	DinObject = pointer to a DinObject.
+
+    RESULT
+	FALSE if object is disabled.
+
+    BUGS
+
+    SEE ALSO
+	ReadUnlockDinObject, WriteLockDinObject, WriteUnlockDinObject
+
+
+din.library/ReadUnlockDinObject			din.library/ReadUnlockDinObject
+
+    NAME
+	ReadUnlockDinObject  --  Unlock a DinObject for reading.
+
+    SYNOPSIS
+	ReadUnlockDinObject(DinObject)
+				A0
+
+	struct DinObject *DinObject;
+
+    FUNCTION
+	Unlock the physical object of a DinObject for reading.
+
+	Note that there can be more readers at the same time, but only
+	one writer.
+
+    INPUTS
+    	DinObject = pointer to a DinObject.
+
+    RESULT
+	None.
+
+    BUGS
+
+    SEE ALSO
+	ReadLockDinObject, WriteLockDinObject, WriteUnlockDinObject
+
+
+din.library/WriteLockDinObject			din.library/WriteLockDinObject
+
+    NAME
+	WriteLockDinObject  --  Lock a DinObject for writing.
+
+    SYNOPSIS
+	Success = WriteLockDinObject(DinObject)
+	D0				A0
+
+	BOOL Success;
+	struct DinObject *DinObject;
+
+    FUNCTION
+	Lock the physical object of a DinObject for writing.
+
+	Note that there can be more readers at the same time, but only
+	one writer.
+
+    INPUTS
+    	DinObject = pointer to a DinObject.
+
+    RESULT
+	FALSE if object is disabled.
+
+    BUGS
+
+    SEE ALSO
+	ReadLockDinObject, ReadUnlockDinObject, WriteUnlockDinObject
+
+
+din.library/WriteUnlockDinObject		din.library/WriteUnlockDinObject
+
+    NAME
+	WriteUnlockDinObject  --  Unlock a DinObject for writing.
+
+    SYNOPSIS
+	WriteUnlockDinObject(DinObject)
+				A0
+
+	struct DinObject *DinObject;
+
+    FUNCTION
+	Unlock the physical object of a DinObject for writing.
+
+	Note that there can be more readers at the same time, but only
+	one writer.
+
+    INPUTS
+    	DinObject = pointer to a DinObject.
+
+    RESULT
+	None.
+
+    BUGS
+
+    SEE ALSO
+	ReadUnlockDinObject, ReadLockDinObject, WriteLockDinObject
+
+
+din.library/LockDinBase				din.library/LockDinBase
+
+    NAME
+	LockDinBase  --  Lock DinBase for reading.
+
+    SYNOPSIS
+	LockDinBase()
+
+    FUNCTION
+	Lock DinBase for reading.
+
+    INPUTS
+	None.
+
+    RESULT
+	None.
+
+    BUGS
+
+    SEE ALSO
+	UnlockDinBase
+
+
+din.library/UnlockDinBase			din.library/UnlockDinBase
+
+    NAME
+	UnlockDinBase  --  Unlock DinBase for reading.
+
+    SYNOPSIS
+	UnlockDinBase()
+
+    FUNCTION
+	Unlock DinBase for reading.
+
+    INPUTS
+	None.
+
+    RESULT
+	None.
+
+    BUGS
+
+    SEE ALSO
+	LockDinBase
+
+
+din.library/InfoDinObject			din.library/InfoDinObject
+
+    NAME
+	InfoDinObject  --  Copies readable fields from a DinObject.
+
+    SYNOPSIS
+	InfoDinObject = InfoDinObject(DinObject)
+	D0				  A0
+
+	struct InfoDinObject *InfoDinObject;
+	struct DinObject *DinObject;
+
+    FUNCTION
+	This function copies some readable fields from the DinObject to
+	a InfoDinObject structure (see din.h for details). It is the
+	recommended way to get some information from a DinObject.
+
+	This function allocates a InfoDinObject for you and returns the
+	pointer to it. Use FreeInfoDinObject to free this block.
+
+    INPUTS
+	DinObject = pointer to a DinObject.
+
+    RESULT
+	Pointer to a InfoDinObject structure or NULL if not enough memory.
+
+    BUGS
+
+    SEE ALSO
+	FreeInfoDinObject
+
+
+din.library/FreeInfoDinObject			din.library/FreeInfoDinObject
+
+    NAME
+	FreeInfoDinObject  --  Frees the InfoDinObject created by InfoDinObject.
+
+    SYNOPSIS
+	FreeInfoDinObject(InfoDinObject)
+				A0
+
+	struct InfoDinObject *InfoDinObject;
+
+    FUNCTION
+	Use this function to free the block obtained by InfoDinObject.
+
+    INPUTS
+	InfoDinObject = pointer to a InfoDinObject (can be NULL).
+
+    RESULT
+	None.
+
+    BUGS
+
+    SEE ALSO
+	InfoDinObject

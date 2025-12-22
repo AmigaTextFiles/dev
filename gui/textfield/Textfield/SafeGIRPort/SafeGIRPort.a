@@ -1,0 +1,198 @@
+; SafeGIRPort
+; Patches ObtainGIRPort() to fix MagicMenu
+; and CycleToMenu problem
+;
+; Based heavily on NewObtainGIRPort, but with
+; fixes.  Specifically, the caches weren't
+; being cleared on removal.  Plus, some speed
+; improvements in the patch code.  Hopefully
+; it narrows the gap for someone locking the
+; layer between the patch's unlock and original
+; call.
+
+	INCLUDE	'intuition/cghooks.i'
+
+ObtainGIRPort	EQU	-$22E
+DisplayBeep		EQU	-$60
+
+OpenLibrary		EQU	-$228
+CloseLibrary	EQU	-$19E
+SetFunction		EQU	-$1A4
+Forbid			EQU	-$84
+Permit			EQU	-$8A
+Wait			EQU	-$13E
+CacheClearU		EQU	-$27c
+
+Delay			EQU -$C6
+PutStr			EQU	-$3B4
+
+AttemptLockLayerRom	EQU	-$28E
+UnlockLayerRom	EQU	-$1B6
+	
+SIGBREAKF_CTRL_C	EQU 1<<12
+	
+	section text,code
+	
+_PatchOGR:
+	moveq	#20,d7
+
+	; Open libraries	
+	lea		gfxname(pc),a1
+	moveq	#36,d0
+	move.l	4.w,a6
+	jsr		OpenLibrary(a6)
+	lea		GfxBase(pc),a0
+	move.l	d0,(a0)
+	beq		fail1
+	
+	lea		dosname(pc),a1
+	moveq	#36,d0
+	jsr		OpenLibrary(a6)
+	move.l	d0,d2				; d2 gets DosBase
+	beq		fail2
+	
+	lea		intuiname(pc),a1
+	moveq	#36,d0
+	jsr		OpenLibrary(a6)
+	move.l	d0,d3				; d3 gets IntuitionBase
+	beq		fail3
+	
+	jsr		Forbid(a6)
+
+	; Install patch
+	move.l	d0,a1
+	lea		newObtainGIRPort(pc),a0
+	move.l	a0,d0
+	move.l	#ObtainGIRPort,a0
+	jsr		SetFunction(a6)
+	lea		oldObtainGIRPort(pc),a0
+	move.l	d0,(a0)
+	
+	; Clear CPU caches to flush data/instruction cache incoherence
+	jsr		CacheClearU(a6)
+	
+loop:
+	jsr		Permit(a6)
+
+	; Wait for ctrl-C
+	move.l	#SIGBREAKF_CTRL_C,d0
+	jsr		Wait(a6)
+	
+	jsr		Forbid(a6)
+
+	; Attempt to remove the patch
+	move.l	d3,a1				; a1 gets IntuitionBase
+	move.l	oldObtainGIRPort(pc),d0
+	move.l	#ObtainGIRPort,a0
+	jsr		SetFunction(a6)
+	lea		newObtainGIRPort(pc),a0
+	cmp.l	a0,d0
+	beq.s	ok
+
+	; Oops, someone has patched over, put it back
+	move.l	d3,a1				; a1 gets IntuitionBase
+	move.l	#ObtainGIRPort,a0
+	jsr		SetFunction(a6)
+	
+	; We can't quit, so notify user with a beep
+	exg		d3,a6				; a6 gets IntutionBase
+	move.l	#0,a0
+	jsr		DisplayBeep(a6)		; it's safe to call display beep inside Forbid()
+	exg		d3,a6				; a6 gets ExecBase
+	
+	bra.s	loop
+	
+ok:
+	; Clear CPU caches to flush data/instruction cache incoherence
+	jsr		CacheClearU(a6)
+	jsr		Permit(a6)
+
+	exg		d2,a6				; a6 gets DosBase
+	
+	; Notify user of subsequent quit
+	lea		exitmsg(pc),a0
+	move.l	a0,d1
+	jsr 	PutStr(a6)
+	
+	; Wait a second to let other tasks exit from the patch code
+	; We can't be absolutely sure but this should be enough of a safeguard
+	moveq	#50,d1
+	jsr		Delay(a6)
+
+	exg		d2,a6				; a6 gets ExecBase
+	
+	moveq	#0,d7
+
+	; Close libraries and exit	
+	move.l	d3,a1				; a1 gets IntutionBase
+	jsr		CloseLibrary(a6)
+	
+fail3:
+	move.l	d2,a1				; a1 gets DosBase
+	jsr		CloseLibrary(a6)
+	
+fail2:
+	move.l	GfxBase(pc),a1
+	jsr		CloseLibrary(a6)
+	
+fail1:
+	move.l	d7,d0
+	rts
+
+newObtainGIRPort:
+	; First we should check for valid input
+	move.l	a0,d0				; effective compare
+
+	; We'll call ObtainGIPort anyway, even if the GadgetInfo is NULL..
+	beq.s	null2
+	
+	; save some regs
+	movem.l	a0/a5/a6,-(sp)
+
+	; assume layer is valid (usually is)
+	; try to lock it
+	move.l	GfxBase(pc),a6
+	move.l	ggi_Layer(a0),a5	; only one access of layer ptr
+	move.l	a5,d0				; effective compare, faster than cmpi
+	beq.s	null1				; We'll do old stuff if layer is NULL
+	jsr		AttemptLockLayerRom(a6)
+	ext.l	d0					; effective compare, sets return value
+	beq.s	null3
+
+	; Got a lock, free it (layer already in a5, gfxbase in a6)
+	jsr		UnlockLayerRom(a6)
+	
+null1:
+	; layer is null
+	movem.l	(sp)+,a0/a5/a6
+
+null2:
+	; call original function
+	move.l	oldObtainGIRPort(pc),a1
+	jmp		(a1)
+
+null3:
+	; Attempt to lock the layer failed, return NULL (set above)
+	movem.l	(sp)+,a0/a5/a6
+	rts
+
+oldObtainGIRPort:
+	dc.l	0
+
+GfxBase:
+	dc.l	0
+
+dosname:
+	dc.b	"dos.library",0
+
+intuiname:
+	dc.b	"intuition.library",0
+
+gfxname:
+	dc.b	"graphics.library",0
+
+exitmsg:
+	dc.b	"SafeGIRPort gone",10,0
+	dc.b	"$VER: SafeGIRPort 1.0 (30.1.95)",0
+
+	END

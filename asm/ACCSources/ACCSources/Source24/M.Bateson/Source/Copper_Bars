@@ -1,0 +1,342 @@
+
+
+***	CODE		ROTATING_COPPER_BARS
+***	CODER		MARC_B
+
+
+***	constants	***
+
+chip		equ	2
+clear		equ	$10000
+Plane_Size	equ	320/8*256
+
+
+*******************************************
+*		INCLUDE FILES		  *
+*******************************************
+
+
+	incdir		sys:include/
+	include		source:include/hardware.i
+	include		exec/exec.i
+	include		exec/exec_lib.i
+
+	lea		$dff000,a5		;custom base address
+
+
+**********************************************************
+*	OPEN GFX LIBRARY AND SAVE SYSTEM COPPER		 *
+**********************************************************
+
+	
+	move.l		#gfxname,a1
+	moveq		#0,d0
+	CALLEXEC	OpenLibrary
+	tst		d0			
+	beq		the_end			
+	move.l		d0,gfxbase		
+	move.l		d0,a0			;put gfxbase in a0 
+	move.l		38(a0),systemcopper	;save the copper address 
+
+
+
+****************************************************
+*	ALLOCATE MEMORY FOR BIT PLANES		   *
+****************************************************
+
+	
+	move.l		#Plane_Size,d0		;memory for 1 bitplanes
+	move.l		#chip+clear,d1		;chip memory and wipe it 
+	CALLEXEC	AllocMem
+	tst		d0			;fail 
+	beq		exit			;yep 
+	move.l		d0,bitbase		;save  pointer
+
+
+*****************************************************************
+*	LOAD BITPLANE AND SPRITE POINTERS INTO COPPER LIST      *
+*****************************************************************
+
+
+	move.l		bitbase,d0
+	lea		copper,a0
+	move.w		d0,6(a0)	
+	swap		d0
+	move.w		d0,2(a0)
+	swap		d0
+	
+
+***************************************************************
+*		START CUSTOM COPPER LIST		      *
+***************************************************************	
+
+	move.l		#copper,COP1LCH(a5)
+	move.l		#0,COPJMP1(a5)
+	CALLEXEC	Forbid
+
+*************************************************************
+*		    MAIN CODE LOOP    			    *
+*************************************************************
+
+	move.l		#table,store
+wait
+	move.l		VPOSR(a5),d0	;read current beam position
+	and.l		#$0001ff00,d0	;mask all but the vertical pos
+	lsr.l		#8,d0		
+	cmp.w		#$0106,d0	;wait for end of display
+	bne		wait
+	btst		#6,CIAAPRA	;check left mouse button
+	beq		clean_up	;end if pressed
+	add.b		#1,counter
+	cmp.b		#12,counter
+	beq		do_loop
+	bra		wait
+
+;this routine is only called every 12 frames at which point the
+;colour cycle routines are called this is done to slow down
+;the effect ,which when called every frame becomes a flicker
+
+do_loop
+	bsr		loop
+	move.b		#0,counter
+	bra		wait
+
+**********************************************************
+*			RESTORE SYSTEM 			 *
+**********************************************************
+
+clean_up
+	move.l		systemcopper,COP1LCH(a5)
+	move.l		#0,COPJMP1(a5)
+	CALLEXEC	Permit
+	
+
+exit1
+	
+	move.l		#Plane_Size,d0
+	move.l		bitbase,a1
+	CALLEXEC	FreeMem
+
+exit
+	move.l		gfxbase,a1		;close the graphics library
+	CALLEXEC	CloseLibrary
+	
+the_end
+	rts					;exit from program
+
+	
+********************************************
+*		CYCLE COLOURS		   *
+********************************************
+
+;this routine first takes the last colour in the buffer (store)
+;and loads it into d1,then it moves all the other entries down
+;one place,when this is complete it then loads d1 into the
+;first entry in the buffer,so rotating the colours through
+;the buffer
+
+loop
+	move.l		store,a0
+	move.w		16(a0),d1
+	move.w		14(a0),16(a0)
+	move.w		12(a0),14(a0)
+	move.w		10(a0),12(a0)
+	move.w		8(a0),10(a0)
+	move.w		6(a0),8(a0)
+	move.w		4(a0),6(a0)
+	move.w		2(a0),4(a0)
+	move.w		(a0),2(a0)
+	move.w		d1,(a0)
+
+
+
+;this routine loads the first bar into a1 and then calls the load_bar
+;routine which loads the colour table in the buffer (store) into a0
+;the contents are then moved into the copper_bar at the 
+;dc.w	COLOR00,$0000 positions,when the routine returns
+;the second copper bar (copper_bar1)is loaded into a1 and the
+;process repeated
+
+	lea		copper_bar,a1
+	bsr		load_bar
+	lea		copper_bar1,a1
+
+load_bar
+	move.l		store,a0
+	move.w		(a0),6(a1)
+	move.w		2(a0),14(a1)
+	move.w		4(a0),22(a1)
+	move.w		6(a0),30(a1)
+	move.w		8(a0),38(a1)
+	move.w		10(a0),46(a1)
+	move.w		12(a0),54(a1)
+	move.w		14(a0),62(a1)
+	move.w		16(a0),70(a1)
+	rts
+
+
+
+
+
+***********************************************************
+*		   CUSTOM COPPER LIST			  *
+***********************************************************
+
+	SECTION		copper.list,CODE_C
+copper
+	dc.w	BPL1PTH,0000		;next 4 blank words
+	dc.w	BPL1PTL,0000		;are where we load
+	dc.w	BPL2PTH,0000		;the bitplane pointers
+	dc.w	BPL2PTL,0000
+	dc.w	SPR0PTH,0000
+	dc.w	SPR0PTL,0000		;sprite 0 pointer
+	dc.w	SPR1PTH,0000
+	dc.w	SPR1PTL,0000		;sprite 1 pointer
+	dc.w	SPR2PTH,0000
+	dc.w	SPR2PTL,0000		;sprite 2 pointer
+	dc.w	SPR3PTH,0000
+	dc.w	SPR3PTL,0000		;sprite 3 pointer
+	dc.w	SPR4PTH,0000
+	dc.w	SPR4PTL,0000		;sprite 4 pointer
+	dc.w	SPR5PTH,0000
+	dc.w	SPR5PTL,0000		;sprite 5 pointer
+	dc.w	SPR6PTH,0000
+	dc.w	SPR6PTL,0000		;sprite 6 pointer
+	dc.w	SPR7PTH,0000
+	dc.w	SPR7PTL,0000		;sprite 7 pointer
+	dc.l 	$2b01fffe		;wait for line 43
+	dc.w	DIWSTRT,$2c81		;where we start displaying
+	dc.w	DIWSTOP,$2cc1		;where we stop!
+	dc.w	BPLCON0,$0200		;this is for Amiga 1000 owners
+	dc.w	BPLCON2,$0024		
+	dc.w	DDFSTRT,$0038		;where to start the horizontal display
+	dc.w	DDFSTOP,$00d0		;and where we stop
+	dc.w	BPLCON1,$0000
+	dc.w	BPL1MOD,$0000		;not a scroller
+	dc.w	BPL2MOD,$0000		;so these are blank
+	dc.w	COLOR00,$0000		;background colour black
+	dc.w	COLOR01,$0fff		;colour 1 
+	dc.w	COLOR02,$0e00		;colour 2 
+	dc.w	COLOR03,$00a1		;colour 3 
+	dc.w	COLOR04,$0d80
+	dc.w	COLOR05,$0c70
+	dc.w	COLOR06,$0c71
+	dc.w	COLOR07,$0b61
+	dc.w	COLOR08,$0b62
+	dc.w	COLOR09,$0a52
+	dc.w	COLOR10,$0a52
+	dc.w	COLOR11,$0fb0
+	dc.w	COLOR12,$000f
+	dc.w	COLOR13,$0f00
+	dc.w	COLOR14,$0f82
+	dc.w	COLOR15,$0ff3
+	dc.w	COLOR16,$0000
+	dc.w	COLOR17,$0d80
+	dc.w	COLOR18,$0b61
+	dc.w	COLOR19,$0a52
+	dc.w	COLOR20,$0333
+	dc.w	COLOR21,$0444
+	dc.w	COLOR22,$0555
+	dc.w	COLOR23,$0666
+	dc.w	COLOR24,$0777
+	dc.w	COLOR25,$0888
+	dc.w	COLOR26,$0999
+	dc.w	COLOR27,$0aaa
+	dc.w	COLOR28,$0ccc
+	dc.w	COLOR29,$0ddd
+	dc.w	COLOR30,$0eee
+	dc.w	COLOR31,$06f8
+
+
+copper_bar
+
+	dc.l	$7001fffe
+	dc.w	COLOR00,$0000		
+	dc.l	$7401fffe
+	dc.w	COLOR00,$0000
+	dc.l	$7801fffe
+	dc.w	COLOR00,$0000
+	dc.l	$7c01fffe
+	dc.w	COLOR00,$0000
+	dc.l	$8001fffe
+	dc.w	COLOR00,$0000
+	dc.l	$8401fffe
+	dc.w	COLOR00,$0000
+	dc.l	$8801fffe
+	dc.w	COLOR00,$0000
+	dc.l	$8a01fffe
+	dc.w	COLOR00,$0000
+	dc.l	$8e01fffe
+	dc.w	COLOR00,$0000
+	dc.l	$9201fffe
+	dc.w	COLOR00,$0000
+	dc.l	$9601fffe
+	dc.w	COLOR00,$0000
+	dc.l	$9a01fffe
+	dc.w	COLOR00,$0000
+	dc.l	$9e01fffe
+	dc.w	COLOR00,$0000
+	dc.l	$9201fffe
+	dc.w	COLOR00,$0000
+bar_end
+
+
+copper_bar1
+
+	dc.l	$b001fffe
+	dc.w	COLOR00,$0000		
+	dc.l	$b401fffe
+	dc.w	COLOR00,$0000
+	dc.l	$b801fffe
+	dc.w	COLOR00,$0000
+	dc.l	$bc01fffe
+	dc.w	COLOR00,$0000
+	dc.l	$c001fffe
+	dc.w	COLOR00,$0000
+	dc.l	$c401fffe
+	dc.w	COLOR00,$0000
+	dc.l	$c801fffe
+	dc.w	COLOR00,$0000
+	dc.l	$ca01fffe
+	dc.w	COLOR00,$0000
+	dc.l	$ce01fffe
+	dc.w	COLOR00,$0000
+	dc.l	$d201fffe
+	dc.w	COLOR00,$0000
+	dc.l	$d601fffe
+	dc.w	COLOR00,$0000
+	dc.l	$da01fffe
+	dc.w	COLOR00,$0000
+	dc.l	$de01fffe
+	dc.w	COLOR00,$0000
+	dc.l	$d201fffe
+	dc.w	COLOR00,$0000
+bar_end1
+
+	dc.l	$2c01fffe		;wait for line 44
+	dc.w	BPLCON0,$1200		;turn on bit planes
+
+	dc.l	$fffffffe		;wait for the impossible
+endcopper
+
+copperlen	equ	endcopper-copper
+
+
+table	dc.w	$f,$d,$b,$a,$9,$a,$b,$d,$f
+	
+************************************************************
+*			VARIABLES	 		   *
+************************************************************
+
+
+gfxbase		dc.l 0
+bitbase		dc.l 0
+systemcopper	dc.l 0
+store		dc.l 0
+counter		dc.b 0
+gfxname		dc.b 'graphics.library',0
+
+
+end
+	
+	

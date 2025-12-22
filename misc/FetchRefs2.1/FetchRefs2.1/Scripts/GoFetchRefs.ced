@@ -1,0 +1,105 @@
+/*  $VER: GoFetchRexx.ced 1.2 (24.2.96)
+**
+**   ARexx script to invoke FetchRefs from CygnusEd.
+**   Thanks to Lars Meldgård for additional code.
+*/
+
+OPTIONS RESULTS
+OPTIONS FAILAT 20
+caller = ADDRESS()
+
+/* Static part of the ARexx port name of the editor. That is, the name before 
+ * any suffixes (like '.1') are appended.
+ */
+editorname = 'rexx_ced'
+
+/* Exit if we are not called from the editor */
+IF (LEFT(caller, LENGTH(editorname)) ~= editorname) then
+    EXIT 10
+
+/* Get the current word from the editor. */
+
+/* Get some data from the editor (line contents and cursor position) */
+Status 55
+line = result
+Status 46
+position = result + 1
+
+/* Account for tabs (replace them with spaces) */
+Status 7
+tabtable = result
+tabchar = '09'X
+i = INDEX(line, tabchar)
+DO WHILE i > 0 & i <= position
+    leftstr = LEFT(line, i - 1)
+    line = LEFT(leftstr, INDEX(tabtable, 'T', i), ' ') || SUBSTR(line, i + 1)
+    i = INDEX(line, tabchar, i)
+END
+
+/* Go left from the cursor */
+left = position
+char = SUBSTR(line, left, 1)
+DO WHILE (DATATYPE(char,'A') | char = '_') & (left > 0)
+   left = left - 1
+   IF left > 0 THEN 
+      char = SUBSTR(line, left, 1) 
+END
+
+/* Now go right from the cursor */
+right = position
+char = SUBSTR(line, right, 1)
+DO WHILE (DATATYPE(char, 'A') | char = '_')
+   right = right + 1
+   char = SUBSTR(line, right, 1)
+END
+
+IF right = left THEN
+   function = ''
+ELSE
+   function = SUBSTR(line, left + 1, right - (left + 1))
+
+/* It doesn't matter whether we want a taglist, varargs og whatever function */
+IF RIGHT(function, 7) = "TagList" THEN
+    function = LEFT(function, LENGTH(function) - 7)
+ELSE IF RIGHT(function, 4) = "Tags" THEN
+    function = LEFT(function, LENGTH(function) - 4)
+ELSE IF RIGHT(function, 1) = "A" THEN
+    function = LEFT(function, LENGTH(function) - 1)
+
+/* Define a temporary filename to put the reference into */
+filename = 'T:FR_' || function
+
+/* Call FetchRefs to get the reference cut out to a temporary file */
+ADDRESS 'FETCHREFS'
+FR_GET function || '(%|Tags|TagList|A)' filename FILEREF
+gotoline = rc2
+
+/* Address editor again to load the file or report error */
+ADDRESS VALUE caller
+
+IF rc ~= 0 THEN DO
+    /* Skip if the error code is less than six. If the "Select reference"
+     * window is cancelled five is returned and as this is no error,
+     * we do not want to report it (uses time to 'Okay' the requester).
+     */
+    IF rc <= 5 THEN
+	EXIT 0
+
+    /* Report the error (obtained from FetchRefs) through the editor. */
+    'okay1' RC2
+
+    EXIT 0 
+END
+ELSE DO
+    /* Make the editor open a new window and load the autodoc into it. */
+    'Open New'
+    'Open' filename
+    'Editable file'
+    IF gotoline ~= 0 THEN
+	'jump to line' gotoline
+
+    /* Delete the autodoc file */
+    ADDRESS COMMAND 'C:Delete >NIL:' filename
+
+    EXIT 0
+END

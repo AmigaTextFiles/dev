@@ -1,0 +1,15 @@
+OPT NATIVE, INLINE
+MODULE 'target/PE/base'
+
+PROC New(size, noClear=FALSE:BOOL) RETURNS mem:ARRAY REPLACEMENT
+	RETURN IF noClear THEN NATIVE {malloc(} size {)} ENDNATIVE !!ARRAY ELSE NATIVE {calloc(} size {, 1)} ENDNATIVE !!ARRAY
+ENDPROC
+
+PROC NewR(size, noClear=FALSE:BOOL) RETURNS mem:ARRAY REPLACEMENT
+	mem := New(size, noClear)
+	IF mem = NIL THEN Raise("MEM")
+ENDPROC
+
+PROC Dispose(mem:ARRAY) REPLACEMENT
+	NATIVE {free(} mem {)} ENDNATIVE
+ENDPROC NILA

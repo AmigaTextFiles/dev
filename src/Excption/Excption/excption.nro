@@ -1,0 +1,657 @@
+.pl 66
+.po  5
+.rm 70
+.fo //- # -//
+.de ma
+.br
+.nj
+.nf
+.en
+.de te
+.ju
+.fi
+.en
+.de cl
+.br
+.en
+
+.ce 8
+EXCEPTION HANDLING ROUTINES
+
+.ul
+Version 0.6
+.br
+July 6th, 1988
+.br
+
+Gerald T HEWES
+.br
+46 Blvd Inkermann
+.br
+92220 NEUILLY S/S
+.br
+FRANCE
+.br
+
+.ce
+I INTRODUCTION
+
+   The purpose of this module is to provide a programmer with a
+set of easy to use routines to handle error conditions.
+The principle of exception handling is inspired
+from Ada(r) exception routines.
+Exception handling helps to solve difficult error handling conditions
+such as
+No more memory, file not open, read/write error.... Usually because of
+the difficulty of handling these errors, not much action is done to
+correct them. How many programmers faithfully test all their
+fread or fwrite results for possible errors?
+
+   Exception may be used by any program either as a
+flow control or either to capture software errors i.e 68000 exceptions and
+Traps. Exception makes the usage of traps very easy from C, since no
+assembly code is required.
+
+   Experienced programmers might not find anything really new about
+these routines and may have already adopted ways to deal with
+error handling but I feel it might help
+recent Amiga programmers and anybody who is not interested in wrinting
+for the (n+1)th time similar procedures.
+
+   These routines are very different from the GOMF software. You may
+have as many "protected code" zones in your program as you want,
+and you dispose of
+a mean to propagate easily errors upward if you cannot fix the problem
+at a low level (usually the case for fwrites's). In any case, no actions
+are taken
+whatsoever, control is simply passed to your local (context wise)
+handling routine. Your task is not suspended. All your handling
+routines are in user mode with multitasking enabled.
+.bp
+1.2 Contents
+.ma
+
+I   INTRODUCTION
+
+II  EXCEPTION HANDLING
+
+     2.1 Introduction to Exception Handling
+      2.1.1 Top Level
+      2.1.2 Resource Protection
+     2.2 How to Use Excption
+      2.2.1 ExcpGlobal
+      2.2.2 MAIN
+      2.2.3 ExcpDeclare
+      2.2.4 BEGIN/EXCEPTION/END
+      2.2.5 Variables
+      2.2.6 Excption Class Numbers
+     2.3 Important Data
+
+III ORGANISATION
+
+     3.1 Files
+     3.2 Macros
+
+IV  IMPROVEMENTS
+
+V   CONCLUSION
+
+VI  BIBLIOGRAPHY
+
+
+.te
+.bp
+.ce
+II EXCEPTION HANDLING
+
+2.1 Introduction to Exception Handling
+
+   Error Management and complexe human interfaces are always a difficult
+problem in a program, and no perfect solution exists. Exception handling
+is one way to alleviate the problem, but does not solve it. These
+techniques were originally applied on a sun workstation for an interactive
+program. Port was then done on the Amiga, with a better interface.
+Originally, the ideas commes from Ada's(r) exception handling but has
+been slightly modified to take into account C's differences. A first
+difference is the use of Macros, these do not have the power of defined
+keywords in Ada. The second major difference stems from
+the fact that Ada(r) protects you from every error condition possible,
+while this library will only recuperate errors which normally give
+birth to "SoftWare Error/Task Held". Thus you still enjoy fireworks
+for fatal errors destroying the operation of the system.
+
+   What is exactly exception programing? In gross terms, algorithms
+usually describe the normal flow of operations. Unfortunately,
+exceptional activities can happen and have to be treated. If nothing
+is provided by the language, the programmer has to introduce many
+control statements to take into account these abnormal conditions.
+The programer usually ends up with a code twice the size of the
+original algorithm. This has two inconvenients: the code is no longer
+clear because of the overhead, and it is hard to follow the flow of
+a normal program. Exception programing tries to solve this problem.
+The principle is clear, write the normal code, and add at the end of
+this code the code describing those exceptional events. Each part
+being separate, programs get much clearer.
+
+   Lets consider a simple problem. You want to translate from cartesian
+coordinates to polar coordinates. The method in the first quadrant is
+theta = atan (y/x). This formula is true for x <> 0, if x = 0, then
+theta = pi/2. With no exceptions this gives:
+
+.ne 30
+.ma
+   if (x != 0)
+    {
+      z     =  y/x;
+      theta = atan(z);
+    }
+   else
+    theta = pi/2;
+.te
+
+   The normal flow is lost in the if condition. Exception programing
+would prefer:
+
+.ma
+ADA:
+  begin
+   z     := y/x;
+   theta := atan(z);
+  exception
+   when NUMERIC_ERROR =>
+    theta = pi/2;
+   when others =>
+    PUT("UNKNOWN ERROR");
+    raise ERROR;
+  end;
+
+This is simply translated into:
+
+C:
+  BEGIN
+   {
+    z     = y/x;
+    theta = atan(z);
+   }
+  EXCEPTION
+   {
+   switch(Eclass)
+    {
+     case ZERO_DIVIDE   : theta = pi/2; break;
+     default            : puts("UNKNOWN ERROR"); RAISE(ERROR);
+    }
+   }
+  END;
+.te
+
+
+   This may not seem remarkable on a simple example, but it can become
+very handy in real life problems which usually are not coded in 6 lines.
+
+   The idea is simple. In a protected region, you describe the
+simple algorithm. Automatic errors, or software detected ones can
+provoke an "Exception" which will cause the program to abandon
+the protected region to execute the handler region instead. Either
+this handler is qualified to handle the exception and thus
+controls resumes after the protected/handler block, or the handler
+can decide to propagate the exception to the next handler.
+
+   This is the second advantage of Exception programing. Protected
+blocks can be inscribed inside each other like russian dolls. An
+exception can thus be handled, at the most convenient level, and
+necessary action while "poping" out can be performed, like liberating
+some resources allocated in the normal flow.
+
+   This is why Exception handling is very practical in riche
+environments like the amiga. For example, you can isolate
+all the function calls in your main Wait loop with a protection zone.
+If anything happens, including an abort request, control resumes
+back to your main loop where you can decide what to do. Thus your
+main Wait loop can be seen as a "top level" for your program. Deep
+in your code, if you get stuck, a raise to the "top level" is always
+available.
+
+  Here are a few possible scenarios:
+
+2.1.1 Top Level
+
+.ma
+   forever
+    {
+      Wait();
+       if (EXIT) break;
+      BEGIN
+       {
+        switch() { Some Dangerous Functions }
+       }
+      EXCEPTION
+       {
+        switch(Eclass) { .... }
+       }
+      END
+    }
+.te
+
+2.1.2 Resource Protection
+
+   In this construction, you cannot leave the area without liberating
+your resource, even if the error will be handled at higher level.
+
+.ma
+   Allocate-Resource
+
+   BEGIN
+    {
+      Use-Resource (Dangerous Area)
+      Liberate-Resource
+    }
+   EXCEPTION
+    {
+      Yell
+      Liberate-Resource
+      Propagate-Error-If-Necessary
+    }
+   END
+.te
+
+2.2 How to Use Excption
+
+   In order to use all the exception handling routines you need to include
+the following file:
+.br
+
+#include "local:excption.h"
+.br
+
+   For examples of the use of the exception handler consult the two
+supplied examples "essai.c" and "fact.c".
+
+2.2.1 ExcpGlobal
+
+   This static definition is needed once in your code. It reserves
+a structure needed by the handling code to operate. ExcpGlobal
+is implemented as a macro.
+
+2.2.2 MAIN
+
+   The first protected block, called throughout this document "top level
+block" is of a particular form. This block does not need a declaration
+statement of the form ExcpDeclare, all relevant data is already declared
+in the ExcpGlobal structure. The format of the first protected is
+MAIN/EXCEPTION/OUT. The form BEGIN/EXCEPTION/END cannot be used.
+This is very important because the MAIN and OUT macro perform the
+necessary initialization and conclusion functions.
+
+   Here is an example:
+.ne 17
+.ma
+  main()
+   {
+     other declarations ...
+
+     some code ...
+
+     MAIN
+      {
+        protected code ...
+      }
+     EXCEPTION
+      {
+        Exception handling code ...
+      }
+     OUT
+
+     yet more code ...
+
+   }
+.te
+
+   Note: the toplevel does not need to be in the main function.
+
+2.2.3 ExcpDeclare
+
+   Declare an exception handling routine in the current function. This
+is a macro which hides the necessary declaration of hidden variables. As
+such it must be used before any program statement. Currently only
+one protected zone may exist in one routine.
+
+2.2.4 BEGIN / EXCEPTION / END
+
+   Exception handling is based on the notion of protected blocks of
+statements. In the current implementation, only one block per function
+is allowed. This in practice has not been an handicap and may be changed
+in future releases. This limitation only stems from the Macros used, not
+from any limitation by the exception handling routines. The syntax is:
+
+.ne 18
+.ma
+  toto()
+   {
+     ExcpDeclare;
+     other declarations ...
+
+     some code ...
+
+     BEGIN
+      {
+        protected code ...
+      }
+     EXCEPTION
+      {
+        Exception handling code ...
+      }
+     END
+
+     yet more code ...
+
+   }
+.te
+
+In the some code block, nothing is changed, so  put your faithful code in
+this area. No niceties are provided.
+
+In the protected code block, you have acces to the following functions:
+
+.ne 4
+.ma
+   RAISE(ExcpClass)     : raise an error.
+   BLOW(ExcpClass)      : raise/blow to top level handler.
+.te
+
+   Control will be  transferred
+to the exception handling block. Your exception will then be handled
+by this code. Either the exception is propagated with a RAISE
+statement to upper levels, or it is handled locally. If it is handled
+locally, execution will resume in the yet more code area. If no
+exception occur in the protected code block, control continues normally
+in the yet more code area.
+
+   These two function may also be called from any subroutines called
+in the protected code block. They may not be called from another task
+if a task is created in the protected code block.
+
+   A return statement is not allowed in the protected code area, and
+the exit function is not recommended. Long Jumps are not recommended:
+Exception handling is long jumping, stay consistent. Goto's
+are not allowed to span in or out of  the protected code block.
+All those limitations come from the fact that you have to execute
+the END code before leaving the function. The END code, disables the
+current context and restores the previous (upper) one. If you want
+to LongJmp, you can modify your code to use instead the propagation
+mechanism.
+
+In the handling code block you should test the exceptions and either
+handle them locally, or propagate them upward. You have access to the
+same functions:
+
+.ne 4
+.ma
+  RAISE(ExcpClass)   : raise an error to the next level
+  BLOW(ExcpClass)    : raise/blow to top level handler.
+.te
+
+   RAISE has the same operation as when employed in
+the protected code block, but will transfer control to the next (upper)level
+handling code, raising the error. Once raised, there is no way to resume
+processing in the yet more code block.
+
+   The same restrictions apply to the handling code block as to the
+protected block concerning: goto,return,exit,_exit,longjmp,...
+
+2.2.5 Variables
+
+   The following variables are defined in the Handler routines:
+
+.ma
+   Eclass    : Exception class of the exception
+.te
+
+   In the exception handling zone, Eclass contains the exception number
+being treated. Be sure to check this number because the system may generate
+numbers that you have not planned for. For example the system traps all
+68000 errors, Eclass is then the Trap number as defined by Motorola.
+This is very useful for program debugging since the code traps bus errors
+which usually indicate pointer troubles.
+   If you do not handle the error locally, the call RAISE(Eclass) is
+a must. By doing this you can correct the exception at a higher level.
+
+2.2.6 Excption Class Numbers
+
+   All exceptions have an exception class number which serves as an
+identification. Numbers from 1-65535 are reserved values which may not
+be used. Under the current version words 1-1023 are reserved for
+68000 related problems. Check the values defined in excption.h
+for more information. This range covers 68000 exception, 68000 traps
+and could cover 68000 interrupts. Range 1024-2047 are global
+types of error which are also declared in exception.h. Most of
+these declarations are inspired from Ada.
+   Range 2048-65535 are reserved for libraries. These values cannot
+be used for an application.
+   Application must use numbers over 65536.
+
+   The programmer must take great care to avoid using the same number
+for two different exception. Unfortunately, this has to be done by
+hand. This is a major difference with Ada. Two, incompatible ways
+can be used for allocating these exception class numbers.
+
+   The first method is to #define all your exception class numbers, in
+a fashion similar to the handler itself. This is the most simple way
+but has the inconvenience of being dangerous. Two exceptions might
+use the same number. Coherence has to be maintained by the programmer.
+This method is not recommended for large programs.
+
+   The second method is to use the allocating function AllocException().
+AllocException returns a unique exception number starting from
+65536. This automatically insures the coherence of all part of a large
+program. Its inconvenient is that it requires more code from the
+programmer point of view.
+
+   The current algorithm for allocation is rudimentary. You can only
+call AllocException with an argument of -1. This means, as for many
+Amiga allocating function, that you have no preference for the number
+allocated. Allocation starts from 65536, and increments by one at
+every call. FreeAllocation is for decoration since it does nothing.
+I might consider providing better allocation mechanism in the future,
+but for the moment I see no use for it.
+
+2.3 Important Data
+
+   I add this paragraph since I do not have the appropriate documentation.
+If you catch an error report it.
+
+   When a 68000 exception occurs, the Amiga OS detects it and treats it.
+The Excption 68000 number is calculated and pushed down on the SSP
+stack after the usual exception frame. Control is then given back, in
+superuser mode, to the code pointed by task->tc_TrapCode. When using
+the exception handling routines, this points to my assembler EIExcpHandler
+routine.
+   This routine tests if the code is running on a 68000. If yes,
+the SSP stack is corrected by 6+4 bytes for simple exception, and
+14+4 bytes for bus or address exceptions. The +4 comes from the
+Long Word pushed by the Amiga Os.
+   If the code is running on a 68010 or +, operations are very different.
+The handler, fetches the format number at SSP+8 and corrects the
+SSP by the following values:
+.br
+Values in 16-bit words
+.ne 8
+.ma
+
+                        Format
+
+0   1   2   3   4   5   6   7   8   9   a   b   c   d   e   f
+-------------------------------------------------------------
+4   4   6   0   0   0   0   0  29  10  16  46   0   0   0   0
+.te
+
+
+   As usual, 4 bytes have to be added to these numbers. These table may
+be inaccurate since I do not have a good documentation on these
+values.
+   After correcting the SSP stack, the handler passes in User Mode,
+and calls the EIEndHandler (a C function) with the exception number
+(provided by Amiga OS) as sole argument.
+.bp
+.ce
+III ORGANISATION
+
+
+3.1 Files
+
+   To compile programs you need to assign local: to contain
+excption.lib, excption.h and boolean.h. You must have directory named
+private with the excppriv.h file in it.
+Your programs
+need to include the definition file "local:excption.h".
+
+   As of version 0.4, all routines are compiled seperately. For Lattice
+users, these object modules are all joined in the excption.lib
+lattice library. To compile your code all you need to do id to add
+.br
+LIB local:excption.lib
+.br
+to your blink command.
+Currently the files are organised as follows:
+
+.ma
+-excption.h   : file which your code needs to include to use the
+                exception routines.
+-boolean.h    : file included by excption.h
+-excption.lib : library file to use with blink.
+-excption.man : this file
+-excption.doc : documentation on defined functions
+-EI*.c        : source for defined functions
+-excphand.a   : assembler handling routine
+-essai.*      : A good example of use of exceptions
+-fact         : A bad example, for different reasons but instructive.
+-README       : text file describing the contents and the version
+                differences.
+.te
+
+3.2 Macros
+
+   This is a resume of the available Macros, Variables and Functions:
+
+.ma
+BEGIN        : M start of a protected block
+
+BLOW         : M give control to outmost handler
+
+Eclass       : V exception class
+
+END          : M end of handler block
+
+ExcpAlloc    : F allocate an unique exception class number
+
+ExcpDeclare  : M declare an excption block in a routine
+
+EXCPDISABLE  : M disable processor error handling
+
+EXCPENABLE   : M enable back processor handling (Default Mode)
+
+ExcpFree     : F free an allocated exception class number
+
+ExcpGlobal   : M declare a global structure needed by exception
+
+EXCEPTION    : M end of protected block, beginning of handler
+
+MAIN         : M start of outmost protected block (replaces BEGIN)
+
+OUT          : M end of outmost  protected block (replaces END)
+
+RAISE        : M Propagate exception to inmost handler
+.te
+.bp
+.ce
+IV IMPROVEMENTS
+
+   The following ideas will be investigated in further releases:
+
+-Signaling to the User that an 68000 exception has occured. Useful
+for debugging.
+
+-Final Catch of 68000 exceptions and user notice at the top level.
+
+-Provide a mean for the program to call a supplied function
+before giving control to the local exception handling code
+
+-Run time library version
+
+-Stack checking before saving context
+
+-Tracing of entrance into protected blocks in a debug version.
+
+   Discussing with some Ada compilers makers was instructive. Their
+point of view was that they do not want exception handling to lose
+time in normal operations. On the other hand they are willing
+to consecrate a big amount of time to solve where the control
+has to resume when an exception is raised. This is radically
+different from my implementation with longjmps. Each
+BEGIN statement needs to save the environment which is slow.
+When an exception is raised, restoring the environment is not
+costly. Those Ada compiler makers have thus used a completely
+different approach. At compile time they note where each
+handler is active. When an exception occurs, the program tests where
+the exception occured, and thus where to branch.
+It is not necessary to save the environment at each begin.
+To achieve this you need to have exception handling defined
+in the language, not out of it. Which is best?
+
+   Performances:
+
+   Version 0.5 seemed to have no bugs. There are two things to watch.
+Bad bugs will crash the system, because they destroy the environment.
+Nothing can be done by software. The exception handler is fairly
+safe since its always checks its data coherence, if an error occurs,
+an exit(200) or exit(201) is performed. These two exits have
+always been due to unmatched BEGIN/EXCEPTION/END statements, even
+in spots far from where the program stopped. Check those if this
+happens to you.
+.bp
+.ce
+V CONCLUSION
+
+
+   Exception programming is a very powerful tool, but should
+be carefully used. 68000 Exceptions should stay exceptional.
+Keep in mind that an exception declaration in a routine
+consumes about 40 bytes in the stack. Recursive functions have
+to be carefully examined. A good knowledge of LongJumping although
+not necessary can help resolve all kinds of conflicts you may run
+into. This code can be particularly helpful in the debugging period,
+but is unfortunately incompatible with Fred Fish DBUG macros. In
+general, this software does not like longjmps.
+
+   Because of its similarity with Ada(r) Exception handling, consulting
+a manual on Ada, and mostly on how to use its exception mechanism is
+a recommended idea.
+
+.bp
+.ce
+VI BIBLIOGRAPHY
+
+.br
+* [ADA 83]
+.br
+REFERENCE MANUAL FOR THE ADA(r) PROGRAMMING LANGUAGE ---
+ANSI/MIL-STD 1815 A
+.br
+* [BEHM 86]
+.br
+NOTES SUR LE TRAITEMENT DES EXCEPTIONS --- Patrick BEHM, BULL, Louveciennes
+
+
+
+
+
+
+
+
+
+
+
+
+
+.br
+(r) ADA is a  registered trademark of the U.S. Government. Ada Joint Program
+Office.

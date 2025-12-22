@@ -1,0 +1,30 @@
+#               Unix Makefile for Bywater BASIC Interpreter
+#
+CC=		sc:c/sc
+
+# 		Some systems, even gcc systems, will complain about
+#		the "-ansi" flag, so you might wish to remove it.
+#
+#CFLAGS=         -O3 -m68060 -s
+#CFLAGS=         -O3 -m68040 -s
+#CFLAGS=         -O3 -m68030 -s
+#CFLAGS=         -O3 -m68020 -s
+CFLAGS=         ANSI CPU=68040 DATA=FAR CODE=FAR MATH=IEEE MAP SAVEDS STACKEXTEND MEMORYSIZE=LARGE GENPROTOSTATICS \
+                COMMENTNEST NOMULTIPLEINCLUDES \
+                GENPROTOPARAMETERS NOGENPROTOTYPEDEFS NOGENPROTODATAITEMS GENPROTOFILE=bwbasic_protos.h \
+                MAPHUNK MAPSYMBOLS MAPLIB MAPFILE=bwbasic.map VERBOSE
+
+
+OFILES=		bwbasic.o bwx_tty.o bwd_fun.o bwd_cmd.o bwb_var.o bwb_tbl.o \
+                bwb_str.o bwb_stc.o bwb_prn.o bwb_int.o bwb_inp.o bwb_fnc.o \
+                bwb_exp.o bwb_dio.o bwb_cnd.o bwb_cmd.o 
+
+HFILES=         bwbasic.h bwd_six.h unixio.h shellattrs.h 
+
+bwbasic:	$(OFILES)
+		$(CC) $(OFILES) LINK TO bwbasic_sc
+
+$(OFILES):	$(HFILES)
+
+clean:  /sys/c/delete #?.o
+

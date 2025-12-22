@@ -1,0 +1,181 @@
+;						Sat Jun 13 15:02:58 1992
+;
+;		********************GOS 1.10***
+;		*******************************
+;		****MATHIS*&*GINNERKS*VARUS****
+;		*******************************
+;		*****Sample-Abspielroutine*****
+;		*******************************
+;		****VON KAJETAN HINNER 28/5****
+;		*******************************
+;		********(C)*ParSec 1992********
+;		*******************************
+;
+;
+; Format: SYS (828), startadresse, abspielrate/sec, offset, länge, routine
+;
+; Startadresse: Sample-Daten; [word Länge], [word Samplerate], Datenbytes
+; Abspielrate:  985247Hz / Abspielrate: Rate/sec
+; offset:       Sound abspielen ab Startadresse+offset
+; länge:	Anzahl abzuspielender Bytes
+; routine:	Zeiger auf Routine, die während des Interrupts ausgeführt wird
+;
+; GR_Start:	Adresse der Sample-Daten
+; GR_Anzahl:	noch zu spielende Bytes
+; GR_Nach:	Abspielrate pro Sekunde (Anzahl Nibbles pro Sekunde)
+;		GR_NachH: Nibble für SID, GR_NachL Nibble-Flag (1=Highnibble)
+
+			.LI 'cv:gos.labels'
+
+		.BA 29000
+
+		JSR @NMI_aus
+
+		JSR @WordHolen_Komma_EVTL	; word nach Y/A
+		BCS AR_StartadrSt
+		STY *GR_StartL
+		STA *GR_StartH
+		ORA *$14	; Startadresse null, d.h. nicht angegeben?
+		BNE AR_StartadrOK
+
+AR_StartadrSt	LDY #GB_LoadAdresseVonL
+		LDA (GBase),Y
+		STA *GR_StartL
+		INY		; GB_LoadAdresseVonH
+		LDA (GBase),Y
+		STA *GR_StartH	; Samples-Startadresse nach GR_Start
+AR_StartadrOK
+
+		JSR @WordHolen_Komma_EVTL	; word nach Y/A
+		STY *GR_NachL
+		STA *GR_NachH
+		BCS AR_AbspielrateSt
+		ORA *$14	; Abspielrate ausgelassen?
+		BNE AR_AbspielrateOK
+AR_AbspielrateSt LDY #2
+		LDA (GR_Start),Y
+		STA *GR_NachL	; Abspielrate nach GR_Nach
+		INY		; 3
+		LDA (GR_Start),Y
+		STA *GR_NachH
+AR_AbspielrateOK		
+
+		JSR @WordHolen_Komma_EVTL	; word nach Y/A
+		BCC AR_offset
+		LDA #0
+		TAY
+AR_offset	PHA
+		TYA
+		PHA		; Offset retten (H-L)
+
+		JSR @WordHolen_Komma_EVTL	; word nach Y/A
+		BCC AR_längeset
+		LDY #0
+		LDA (GR_Start),Y
+		STA *GR_AnzahlL
+		INY		; 1
+		LDA (GR_Start),Y
+		.BY $2C
+AR_längeset	STY *GR_AnzahlL	; Länge in Byte nach GR_Anzahl
+		STA *GR_AnzahlH
+
+		PLA
+		CLC
+		ADC *GR_StartL
+		STA *GR_StartL	; Anfangsadresse errechnen und nach GR_Start
+		PLA
+		ADC *GR_StartH
+		STA *GR_StartH
+
+;		LDA *1			; Speicherkonfiguration retten
+;		PHA
+
+		LDA *GR_NachL
+		STA $DC04		; Abspielrate einstellen
+		LDA *GR_NachH
+		STA $DC05
+
+		LDA #L,AR_IRQ
+		STA $FFFE		; Custom-IRQ-Routine einbinden
+		LDA #H,AR_IRQ
+		STA $FFFF
+
+		LDA #0
+		STA *GR_NachL
+
+		LDA #$35
+		STA *1
+		CLI
+
+AR_L1
+;		JSR @StopTaste?
+;		BEQ AR_Quit
+		LDA *GR_AnzahlH
+		STA 3333
+		CMP #255
+		BNE AR_L1
+
+AR_Quit		SEI
+		LDA #$37	; Speicherkonfiguration wiederherstellen
+		STA *1
+		LDA #L,$4025
+		STA $DC04
+		LDA #H,$4025
+		STA $DC05
+ARQ1		INC $D020
+		LDA $8000
+		CMP #9
+		BNE ARQ1
+		CLI
+		JMP @NMI_ein
+
+; ---- Interrupt-Abspielroutine
+
+AR_IRQ
+		PHA
+		TXA
+		PHA
+		TYA
+		PHA
+
+		LDY #0
+		LDA *GR_NachH		; vorbereitetes Datum abspielen
+		STA $D418
+		LSR *GR_NachL
+		BNE AR_HighNibble	; Highnibble war in GR_Nach
+
+		LDA (GR_Start),Y	; zweites Nibble ausmaskieren
+		LSR
+		LSR
+		LSR
+		LSR
+;		STA *GR_NachH		; für nächsten IRQ vorbereiten
+		INC *GR_NachL		; Highnibble-Flag setzen
+
+		INC *GR_StartL
+		BNE AR_zaehler		; Zähler erhöhen
+		INC *GR_StartH
+
+AR_zaehler	DEC *GR_AnzahlL
+		BNE AR_IRQfertig
+		DEC *GR_AnzahlH		; Zähler erniedrigen
+		LDX *GR_AnzahlH
+		INX
+		BNE AR_IRQfertig	; weiter abspielen
+
+		LDA #L,AR_IRQfertig
+		STA $FFFE
+		LDA #H,AR_IRQfertig
+		STA $FFFF		; IRQ-Zeiger ändern
+
+AR_HighNibble
+		LDA (GR_Start),Y	; 5	; erstes Nibble ausmaskieren
+		AND #$0F		; 2
+AR_IRQfertig	STA *GR_NachH		; 4	; Lownibble vorbereiten
+		LDA $DC0D
+		PLA
+		TAY
+		PLA
+		TAX
+		PLA
+		RTI

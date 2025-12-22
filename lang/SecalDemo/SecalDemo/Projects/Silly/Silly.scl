@@ -1,0 +1,641 @@
+/******************************************************************************\
+**  Silly game (uses the Extension) for Secal                                 **
+**  Requires Kickstart 2                                                      **
+\******************************************************************************/
+
+
+go main;
+
+
+#-------------------------------------------------------------------------------
+
+
+def EVILFIRETEMPOMAX = 3000;
+def EVILFIRETEMPO0 = 800;
+def EVILFIRETEMPOGROW = 100;
+
+def SHIPSPEED = 4;
+def EVILSPEEDX = 1;
+def EVILSPEEDY = 2;
+def EVILFIRESPEED = 4;
+def SHIPFIRESPEED = 4;
+
+
+#-------------------------------------------------------------------------------
+
+
+include "inc/utility/tagitem.inc";
+include "inc/graphics/modeid.inc";
+include "inc/intuition/screens.inc";
+
+include "ext/ext.inc";				# INTERFACE FOR EXTENSION
+inclib "ext/ext.lib";					# USE EXTENSION LIB
+
+
+/******************************************************************************\
+************                      M A I N                           ************
+\******************************************************************************/
+
+
+obj myscr,mymus:ulong;
+
+
+#-------------------------------------------------------------------------------
+
+
+main:
+x_Init;												# INITIALIZE EXTENSION
+if d0 then
+	x_GraphicsStart;						# START GRAPHICS SUBSYSTEM
+	if d0 then
+		x_AudioStart(%1111);			# START AUDIO SUBSYSTEM
+		if d0 then
+			x_Scr_Open(PAL_MONITOR_ID,320,320,4,0,@scrcolors,@scrtags); myscr:=a0;
+			if myscr then
+				x_Scr_AddBmp(myscr);			# ADD ANOTHER BUFFER
+				if d0 then
+					x_Mus_New(@modul,%0011); mymus:=a0;
+					if mymus then
+
+						x_SetTaskPri(0,31);		# CHANGE TASKPRI FOR SMOOTH ACTION
+						call silly;
+						x_RevertTaskPri;		# REVERT TO PREVIOUS PRI
+					;
+				;
+			;
+		;
+	;
+	x_Done;								# SHUT DOWN EXTENSION, LET IT CLEAN UP INSTEAD OF US, TOO
+												# (SCREEN, MUSIC, ETC)
+;
+
+d0.l:=0;
+rts;															# MAIN
+
+
+
+
+scrcolors:
+dc.l $000000,$eeeeee,$cccccc,$aaaaaa,$888888,$666666,$444444,$222222;
+dc.l $eedd22,$ee9911,$dd5511,$dd1100,$003300,$116600,$449900,$88cc00;
+												# SCREEN COLORS IN THE RGB8 FORMAT OF THE EXTENSION
+
+
+scrtags:
+dc.l SA_Height,256;
+dc.l TAG_DONE;							# ADDITIONAL TAG FOR DISPLAY CLIPPING
+
+
+/******************************************************************************\
+**********                          S I L L Y                         **********
+\******************************************************************************/
+
+
+obj sprite[14]:x_spr;					# EXTENSION SPRITES
+
+obj mysprites:ulong;
+
+obj scrphase,scroffset:word;
+obj workbmp:ulong;
+
+
+obj shipexplcount:word;
+obj evildown,evilvx:word;
+obj evilfiretempo:word;
+
+
+#*******************************************************************************
+
+
+silly:
+x_SetFilter(-1);
+
+call sillyinit;
+if d0 then
+	x_Mus_Play(mymus,0);				# START MUSIC
+
+	scrphase:=0; scroffset:=63;
+	x_WaitTOF;
+	repeat
+		call changescreen;
+
+		call doship;							# PROCESS SHIP
+		call doshipfire;					# PROCESS SHIP SHOT
+
+		call arethereevils;
+		if not d0 then
+			call restartevils;
+
+			if evilfiretempo<EVILFIRETEMPOMAX then
+				evilfiretempo:=evilfiretempo+EVILFIRETEMPOGROW;
+			;
+		;													# IF ALL TAKEN DOWN, RESTART
+
+		call doevils;							# PROCESS EVILS
+		call doevilfires;					# PROCESS EVIL SHOTS
+
+
+		x_Spr_Restore(mysprites,workbmp,@backgndscr,40);
+														# RESTORE BACKGND OF ENTIRE SPR GROUP
+		x_Spr_Draw(mysprites,workbmp,0,scroffset);
+														# DRAW ENTIRE SPR GROUP
+
+		if shipexplcount<>-1 then shipexplcount:=shipexplcount+1;;
+	until shipexplcount>90;
+
+	x_Mus_Stop(mymus);
+
+	call sillydone;
+;
+rts;															# SILLY
+
+
+#*******************************************************************************
+
+
+#																	D0=SUCCESS
+
+sillyinit:
+push d2\d3\d4\a2\a3;
+
+x_Randomize;
+
+x_Spr_NewGrp(@sprite[0],14,XSF_BGIMAGE|XSF_MPLANEMASK,4); mysprites:=a0;
+														# INIT SPRITE GROUP
+if mysprites then
+	x_Spr_PrepGfx(@mysgfx,mysprites,-1);
+	if d0 then
+		x_Scr_GetBmp(myscr,0); a2:=x_bmp(a0).planes;
+		x_Scr_GetBmp(myscr,1); a3:=x_bmp(a0).planes;
+		a1:=@backgndscr; d4.l:=x_bmp(a0).rowwidth-40;
+		for d3:=4 downto 0 do
+			a0:=@backgnd;
+			for d2:=64*4-1 downto 0 do
+				for d1:=40>>2-1 downto 0 do
+					d0.l:=[a0+];
+					[a1+].l:=d0; [a2+].l:=d0; [a3+].l:=d0;
+				;
+				a2:=a2+d4; a3:=a3+d4;
+			;
+		;												# COPY BACKGND IMAGE
+
+		evilfiretempo:=EVILFIRETEMPO0;
+		shipexplcount:=-1;
+
+
+		sprite[0].on:=-1; sprite[0].x:=33*8; sprite[0].y:=27*8;
+		x_Spr_ChngGfx(@shipmsgfx,@sprite[0],0);	# LOAD SHIP GFX INTO SPRITE 0
+
+		x_Spr_ChngGfx(@shipfiresgfx,@sprite[1],0);	# LOAD SHIP FIRE GFX INTO SPR 1
+
+		call restartevils;
+
+		a2:=@sprite[10];
+		for d2:=3 downto 0 do
+			x_Spr_ChngGfx(@evilfiresgfx,a2,0);
+			a2:=a2+sizeof(x_spr);
+		;												# LOAD EVIL FIRE GFX INTO SPR 10-13
+
+		d0:=-1;									# EVERYTHING SUCCESSFULL
+	else
+		x_Spr_DisposeGrp(mysprites);	# INIT FAILED, SO WE CAN IMMEDIATELY
+														# FREE THE SPRITE GROUP
+		d0:=0;
+	;
+else
+	d0:=0;
+;
+
+pop d2\d3\d4\a2\a3;
+rts;															# SILLYINIT
+
+
+#-------------------------------------------------------------------------------
+
+
+sillydone:
+while [$dff016] and $400 do x_Delay(1);;	# DIRTY CHECK FOR RIGHT MOUSE
+
+for d2:=$f800 downto 0 step $800 do
+	x_RGB8Intensity(@scrcolors,16,@colorbuf,d2,$ffffff);
+	x_WaitTOF;
+	x_Scr_LoadRGB8(myscr,@colorbuf,0,16);
+;																# FADE TO WHITE
+for d2:=$f800 downto 0 step $800 do
+	x_RGB8Intensity(@whitecolors,16,@colorbuf,d2,0);
+	x_WaitTOF;
+	x_Scr_LoadRGB8(myscr,@colorbuf,0,16);
+;																# FADE TO BLACK
+rts;															# SILLYDONE
+
+
+
+
+bss;
+
+colorbuf:								ds.l 16;
+
+
+code;
+
+whitecolors:						dcb.l 16,$ffffff;
+
+
+#-------------------------------------------------------------------------------
+
+
+restartevils:
+push d2\a2\a3;
+
+evildown:=0; evilvx:=EVILSPEEDX;
+
+a2:=@evilstartpos; a3:=@sprite[2];
+for d2:=7 downto 0 do
+	x_spr(a3).userdata:=0;
+	x_spr(a3).on:=-1;
+	x_spr(a3).x:=[a2+]*8; x_spr(a3).y:=[a2+]*8;
+
+	x_Rnd; x_Spr_ChngGfx(@evilsgfx,a3,d0 and 31);		# RELOAD EVIL GFX
+
+	a3:=a3+sizeof(x_spr);
+;
+
+pop d2\a2\a3;
+rts;															# RESTARTEVILS
+
+
+
+evilstartpos:
+dc	1,1,  8,1,  15,1,  22,1;
+dc	1,8,  8,8,  15,8,  22,8;
+
+
+#*******************************************************************************
+
+
+changescreen:
+x_Scr_ActivateBmp(myscr,scrphase,-1,scroffset);		# CHANGE SCR BUFS
+scrphase:=scrphase xor 1; scroffset:=(scroffset-1) and 63;
+x_Scr_GetBmp(myscr,scrphase); workbmp:=a0;
+rts;															# CHANGESCREEN
+
+
+#-------------------------------------------------------------------------------
+
+
+doship:
+push d2;
+
+if shipexplcount=-1 then
+	d0:=1; call readjoyport; d2:=d0;
+
+	if d2 and JOYLEFT then
+		x_Spr_ChngGfx(@shiplsgfx,@sprite[0],-1);
+		if sprite[0].x>8 then sprite[0].x:=sprite[0].x-SHIPSPEED;;
+	elif d2 and JOYRIGHT then
+		x_Spr_ChngGfx(@shiprsgfx,@sprite[0],-1);
+		if sprite[0].x<33*8 then sprite[0].x:=sprite[0].x+SHIPSPEED;;
+	else
+		x_Spr_ChngGfx(@shipmsgfx,@sprite[0],-1);
+	;														# HORIZONTAL CONTROL
+
+	if d2 and JOYFIRE andif not sprite[1].on then
+		d0:=(SHIPPIXWIDTH-SHIPFIREPIXWIDTH) lsr 1;
+		d1:=sprite[1].height-SHIPFIRESPEED;
+
+		sprite[1].on:=-1;
+		sprite[1].x:=sprite[0].x+d0; sprite[1].y:=sprite[0].y-d1;
+		x_PlaySoundQ(0,@shipfiresound,@end_shipfiresound-@shipfiresound,0,0,3,428,64);
+	;														# FIRE
+else
+	if sprite[0].cycle>0 then sprite[0].on:=0;;
+;													# DURING EXPLOSION
+
+pop d2;
+rts;															# DOSHIP
+
+
+
+
+
+doshipfire:
+push d2\a2;
+
+sprite[1].y:=sprite[1].y-SHIPFIRESPEED;
+if sprite[1].y<-SHIPFIREHEIGHT then sprite[1].on:=0;;
+
+if sprite[1].on then
+	a2:=@sprite[2];
+	for d2:=7 downto 0 do
+		if x_spr(a2).on andif x_spr(a2).userdata=0 then
+			x_Spr_CollChk(0,@sprite[1],a2);		# COLLISSION CHECK WITH EVIL
+			if d0 then
+				sprite[1].on:=0;
+				x_spr(a2).userdata:=-1;
+				x_Spr_ChngGfx(@evilexplsgfx,a2,0);
+				x_PlaySoundQ(1,@evilexplsound,@end_evilexplsound-@evilexplsound,0,0,2,428,64);
+			;												# WE HIT AN EVIL
+		;
+		a2:=a2+sizeof(x_spr);
+	;
+;
+
+pop d2\a2;
+rts;															# DOSHIPFIRE
+
+
+#-------------------------------------------------------------------------------
+
+
+#																	D0=EVILS EXIST
+
+arethereevils:
+d0:=0; a0:=@sprite[2];
+for d1:=7 downto 0 do
+	if x_spr(a0).on then d0:=-1;;
+	a0:=a0+sizeof(x_spr);
+;
+rts;															# ARETHEREEVILS
+
+
+#-------------------------------------------------------------------------------
+
+
+doevils:
+push d2\a2\a3;
+
+a2:=@sprite[2];
+for d2:=7 downto 0 do
+	if x_spr(a2).on andif x_spr(a2).userdata=0 then
+		if evildown=0 then x_spr(a2).x:=x_spr(a2).x+evilvx;
+		else x_spr(a2).y:=x_spr(a2).y+EVILSPEEDY;;
+	;
+	a2:=a2+sizeof(x_spr);
+;															# MOVEMENT
+
+if evildown then
+	evildown:=evildown-1;
+	if evildown=0 then evilvx:=-evilvx;;
+;
+
+
+a2:=@sprite[2];
+for d2:=0 upto 7 do
+	if d2=0 orif d2=4 then a3:=@sprite[10];;
+
+	if x_spr(a2).on andif x_spr(a2).userdata=0 then
+		if evildown=0 then
+			if (evilvx<0 andif x_spr(a2).x<4)
+			orif (evilvx>0 andif x_spr(a2).x>284) then
+				evildown:=8;
+			;
+		;													# RIGHT OR LEFT EDGE REACHED
+
+		x_Spr_CollChk(0,@sprite[0],a2);		# COLLISSION CHECK WITH SHIP
+		if d0 then
+			x_spr(a2).userdata:=-1;
+			x_Spr_ChngGfx(@evilexplsgfx,a2,0);
+			x_PlaySoundQ(1,@evilexplsound,@end_evilexplsound-@evilexplsound,0,0,2,428,64);
+
+			if shipexplcount=-1 then
+				shipexplcount:=0;
+				x_Spr_ChngGfx(@shipexplsgfx,@sprite[0],0);
+				x_PlaySoundQ(1,@shipexplsound,@end_shipexplsound-@shipexplsound,0,0,3,428,64);
+			;												# EXPLODE SHIP
+		;
+
+		if x_spr(a2).y>27*8 then
+			x_spr(a2).userdata:=-1;
+			x_Spr_ChngGfx(@evilexplsgfx,a2,0);
+			x_PlaySoundQ(1,@evilexplsound,@end_evilexplsound-@evilexplsound,0,0,2,428,64);
+
+			if shipexplcount=-1 then
+				shipexplcount:=0;
+				x_Spr_ChngGfx(@shipexplsgfx,@sprite[0],0);
+				x_PlaySoundQ(1,@shipexplsound,@end_shipexplsound-@shipexplsound,0,0,3,428,64);
+			;
+		;													# SCREEN BOTTOM REACHED
+	;
+
+
+	if x_spr(a2).on andif x_spr(a2).userdata=0 then
+		if not x_spr(a3).on then
+			a0:=a2+4*sizeof(x_spr);
+			if d2>=4 orif not x_spr(a0).on then
+
+				x_Rnd;
+				if d0 and $7fff<evilfiretempo then
+					d0:=(EVILPIXWIDTH-EVILFIREPIXWIDTH)>>1;
+					d1:=x_spr(a2).height-EVILFIRESPEED;
+
+					x_spr(a3).on:=-1;
+					x_spr(a3).x:=x_spr(a2).x+d0; x_spr(a3).y:=x_spr(a2).y+d1;
+					x_PlaySoundQ(0,@evilfiresound,@end_evilfiresound-@evilfiresound,0,0,2,428,64);
+				;											# EVIL FIRES
+			;
+		;
+	elif x_spr(a2).on andif x_spr(a2).userdata then
+		if x_spr(a2).cycle>0 then x_spr(a2).on:=0;;
+	;
+
+	a2:=a2+sizeof(x_spr); a3:=a3+sizeof(x_spr);
+;
+
+pop d2\a2\a3;
+rts;															# DOEVILS
+
+
+
+
+
+doevilfires:
+push d2\a2;
+
+a2:=@sprite[10];
+for d2:=3 downto 0 do
+	if x_spr(a2).on then
+		x_spr(a2).y:=x_spr(a2).y+EVILFIRESPEED;
+		if x_spr(a2).y>244 then x_spr(a2).on:=0;;
+	;
+
+	if x_spr(a2).on then
+		x_Spr_CollChk(0,a2,@sprite[0]);		# COLLISSION CHECK WITH SHIP
+		if d0 then
+			x_spr(a2).on:=0;
+			if shipexplcount=-1 then
+				shipexplcount:=0;
+				x_Spr_ChngGfx(@shipexplsgfx,@sprite[0],0);
+				x_PlaySoundQ(1,@shipexplsound,@end_shipexplsound-@shipexplsound,0,0,3,428,64);
+			;
+		;
+	;
+
+	a2:=a2+sizeof(x_spr);
+;
+
+pop d2\a2;
+rts;															# DOEVILFIRES
+
+
+#******************************************************************************#
+# THE FOLLOWING BLOCK NORMALLY ISN'T IN THE SOURCE, THE EXTENSION WILL CONTAIN #
+# THIS KIND OF FUNCTIONS.                                                      #
+#******************************************************************************#
+
+
+/******************************************************************************\
+**********                  M I S C E L L A N E O U S                 **********
+\******************************************************************************/
+
+
+def JOYRIGHT=$1;
+def JOYLEFT=$2;
+def JOYDOWN=$4;
+def JOYUP=$8;
+def JOYFIRE=$10;
+
+
+
+# D0=PORTNUM											D0=STATE FLAGS
+
+readjoyport:
+d1:=0;
+if d0=0 then
+	if not [$bfe001].b and $40 then d1:=d1 or JOYFIRE;;		# FIRE
+	d0:=Custom($dff000).joy0dat;
+else
+	if not [$bfe001].b and $80 then d1:=d1 or JOYFIRE;;		# FIRE
+	d0:=Custom($dff000).joy1dat;
+;
+
+if d0 and $200 then d1:=d1 or JOYLEFT;;				# LEFT
+if d0 and 2 then d1:=d1 or JOYRIGHT;;				# RIGHT
+if (d0<<1 xor d0) and 2 then d1:=d1 or JOYDOWN;;		# DOWN
+if (d0<<1 xor d0) and $200 then d1:=d1 or JOYUP;;		# UP
+
+d0:=d1;
+rts;															# READJOYPORT
+
+
+/******************************************************************************\
+********************************************************************************
+\******************************************************************************/
+
+
+def SHIPPIXWIDTH = 48;
+def SHIPHEIGHT = 32;
+def SHIPWIDTH = ((SHIPPIXWIDTH+15) >> 3 and -2);
+
+def SHIPFIREPIXWIDTH = 8;
+def SHIPFIREHEIGHT = 16;
+def SHIPFIREWIDTH = ((SHIPFIREPIXWIDTH+15) >> 3 and -2);
+
+def EVILPIXWIDTH = 32;
+def EVILHEIGHT = 26;
+def EVILWIDTH = ((EVILPIXWIDTH+15) >> 3 and -2);
+
+def EVILFIREPIXWIDTH = 8;
+def EVILFIREHEIGHT = 8;
+def EVILFIREWIDTH = ((EVILFIREPIXWIDTH+15) >> 3 and -2);
+
+
+
+data;
+
+mysgfx:									# SPRITE GFX STRUCTURES, WHEN PREPARED (X_SPR_PREPGFX),
+												# THESE CAN BE INSTALLED INTO THE SPRITES
+evilsgfx:
+dc EVILWIDTH,EVILHEIGHT;
+dc.l @evilgfx;
+dc 1,32;
+dc 0,0,EVILPIXWIDTH,EVILHEIGHT;
+ds.b 12;
+
+evilexplsgfx:
+dc EVILWIDTH,EVILHEIGHT;
+dc.l @evilexplgfx;
+dc 1,16;
+dc 0,0,EVILPIXWIDTH,EVILHEIGHT;
+ds.b 12;
+
+evilfiresgfx:
+dc EVILFIREWIDTH,EVILFIREHEIGHT;
+dc.l @evilfiregfx;
+dc 1,16;
+dc 0,0,EVILFIREPIXWIDTH,EVILFIREHEIGHT;
+ds.b 12;
+
+shiplsgfx:
+dc SHIPWIDTH,SHIPHEIGHT;
+dc.l @shiplgfx;
+dc 2,8;
+dc 0,0,SHIPPIXWIDTH,SHIPHEIGHT;
+ds.b 12;
+
+shipmsgfx:
+dc SHIPWIDTH,SHIPHEIGHT;
+dc.l @shipmgfx;
+dc 2,8;
+dc 0,0,SHIPPIXWIDTH,SHIPHEIGHT;
+ds.b 12;
+
+shiprsgfx:
+dc SHIPWIDTH,SHIPHEIGHT;
+dc.l @shiprgfx;
+dc 2,8;
+dc 0,0,SHIPPIXWIDTH,SHIPHEIGHT;
+ds.b 12;
+
+shipexplsgfx:
+dc SHIPWIDTH,SHIPHEIGHT;
+dc.l @shipexplgfx;
+dc 1,16;
+dc 0,0,SHIPPIXWIDTH,SHIPHEIGHT;
+ds.b 12;
+
+shipfiresgfx:
+dc SHIPFIREWIDTH,SHIPFIREHEIGHT;
+dc.l @shipfiregfx;
+dc 1,16;
+dc 0,0,SHIPFIREPIXWIDTH,SHIPFIREHEIGHT;
+ds.b 12;
+
+dc.l 0;									# TERMINATES
+
+
+
+data_c;
+
+backgnd:								incbin "data/background.gfx";
+
+evilexplgfx:						incbin "data/evil_expl.gfx";
+shipexplgfx:						incbin "data/ship_expl.gfx";
+evilgfx:								incbin "data/evil.gfx";
+shiplgfx:								incbin "data/ship_l.gfx";
+shiprgfx:								incbin "data/ship_r.gfx";
+shipmgfx:								incbin "data/ship_m.gfx";
+evilfiregfx:						incbin "data/evil_fire.gfx";
+shipfiregfx:						incbin "data/ship_fire.gfx";
+
+evilfiresound:					incbin "data/evil_fire.sfx";
+end_evilfiresound:
+shipfiresound:					incbin "data/ship_fire.sfx";
+end_shipfiresound:
+evilexplsound:					incbin "data/evil_expl.sfx";
+end_evilexplsound:
+shipexplsound:					incbin "data/ship_expl.sfx";
+end_shipexplsound:
+
+modul:									incbin "data/mod.silly";
+
+align 2;
+
+
+
+bss_c;
+
+backgndscr:							ds.b 40*320*4;
+
+
+#*******************************************************************************
+

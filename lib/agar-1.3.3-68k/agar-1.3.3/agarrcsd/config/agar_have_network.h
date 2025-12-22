@@ -1,0 +1,1 @@
+#undef AGAR_HAVE_NETWORK

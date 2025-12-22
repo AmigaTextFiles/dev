@@ -1,0 +1,239 @@
+***********************************************
+*                                             *
+*              (C)opyright 1991               *
+*                                             *
+*             by  Tomi Blinnikka              *
+*                                             *
+*      Don´t try to understand the code       *
+*                                             *
+***********************************************
+	
+;Yeah, sure we'll see! If Mr. Tomi Blinnikka can write something that
+;actually works... especially a BBS-software. LET ME LAUGH!
+
+	INCLUDE	"JMPLibs.i"
+	INCLUDE	"exec/types.i"
+	INCLUDE	"exec/io.i"
+	INCLUDE	"libraries/dos.i"
+	INCLUDE	"devices/serial.i"
+	INCLUDE	"intuition/intuition.i"
+
+	INCLUDE	"XREF:dos.xref"
+	INCLUDE	"XREF:gfx.xref"
+	INCLUDE	"XREF:intuition.xref"
+	INCLUDE	"XREF:exec.xref"
+
+	XREF	_CreatePort
+	XREF	_DeletePort
+	XREF	_CreateExtIO
+	XREF	_DeleteExtIO
+	XREF	_printf
+
+	XDEF	_DOSBase
+	XDEF	_SysBase
+	XDEF	_stdout
+
+;USFPV  - Unnecessary Setups For Pre-release Versions
+
+USFPV:		move.b	#$00,SerFlags
+		bset.b	#SERF_XDISABLED,SerFlags
+;		bset.b	#SERF_RAD_BOOGIE,SerFlags	;not used
+		move.l	#2400,SerBaud
+
+Start:		move.l	a0,ConfigAddress	;Get Config filename
+		clr.b	-1(a0,d0.l)		;add null to end of filename
+		openlib	Dos,ShutDown
+		move.l	_DosBase(pc),_DOSBase
+		move.l	$4,_SysBase
+
+		lib	Dos,Output
+		move.l	d0,_stdout
+
+		move.l	ConfigAddress(pc),a0
+		tst.b	(a0)
+		bne	GotFileName
+
+GotFileName:	move.l	ConfigAddress(pc),d1
+		move.l	#MODE_OLDFILE,d2
+		lib	Dos,Open
+		move.l	d0,ConfigFile
+		beq	ConfigNotOpen
+
+;Close config file, we've got what we want
+
+		move.l	ConfigFile(pc),d1
+		lib	Dos,Close
+		move.l	#$00,ConfigFile
+
+;Create reply port for serial.device (or modem0.device etc.)
+
+		move.l	#0,-(sp)
+;		move.l	#0,-(sp)
+		pea	SRPortName		;S(erial)R(eply)PortName
+		jsr	_CreatePort
+		add.l	#8,sp
+		move.l	d0,SRPort
+		beq	ShutDown
+
+;Create IOReq for serial.device (or for other device, but size is EXTSER)
+
+		move.l	#IOEXTSER_SIZE,-(sp)
+		move.l	d0,-(sp)
+		jsr	_CreateExtIO
+ 		add.l	#8,sp
+		move.l	d0,SerDevIO
+		bne	OpenSer
+		print	<"Couldn't get SerialIOReq!",13,10>,_stdout
+		jmp	ShutDown
+
+;open serial.device
+
+OpenSer:	move.w	#$00,SerOpen
+		lea.l	SerName(pc),a0
+		move.l	SerUnit(pc),d0
+		move.l	SerDevIO(pc),a1
+		move.b	#SERF_SHARED,IO_SERFLAGS(a1)	;for debugging!
+		move.l	#$00,d1				;no flags
+		lib	Exec,OpenDevice
+		tst.l	d0
+		beq	OpenSer1
+		print	<"Couldn't open requested device!",13,10>,_stdout
+		jmp	ShutDown
+
+OpenSer1:	move.w	#$1,SerOpen		;just to tell if open
+		move.l	SRPort(pc),a1
+		move.l	#00,d1
+		move.b	MP_SIGBIT(a1),d1
+		bset.l	d1,WaitMask
+
+		jsr	SetUpSer
+		tst.l	d1
+		beq	ResetModem
+		print	<"***BREAK",13,10,"I couldn't set baud rate etc!",13,10>,_stdout
+		jmp	ShutDown
+
+ResetModem:	move.l	SerDevIO(pc),a1
+		move.w	#CMD_WRITE,IO_COMMAND(a1)
+		move.l	#-1,IO_LENGTH(a1)
+		lea.l	TestCMD2(pc),a0
+		move.l	a0,IO_DATA(a1)
+		lib	Exec,SendIO
+
+		move.l	WaitMask(pc),d0
+		lib	Exec,Wait
+
+		move.l	SerDevIO(pc),a1
+		lib	Exec,CheckIO
+		tst.l	d0
+		bne	ResetModem2
+		move.l	SerDevIO(pc),a1
+		lib	Exec,AbortIO
+ResetModem2:	move.l	SerDevIO(pc),a1
+		lib	Exec,WaitIO
+
+CloseSer:
+		move.l	SerDevIO(pc),a1
+		lib	Exec,CloseDevice
+		move.w	#$00,SerOpen
+ 
+		move.l	#IOEXTSER_SIZE,-(sp)
+		move.l	SerDevIO(pc),-(sp)
+		jsr	_DeleteExtIO
+		add.l	#8,sp
+		move.l	#$00,SerDevIO
+
+		move.l	SRPort(pc),-(sp)
+		jsr	_DeletePort
+		add.l	#4,sp
+		move.l	#$00,SRPort
+		jmp	ShutDown8800
+
+SetUpSer:	move.l	SerDevIO(pc),a1
+		move.w	#SDCMD_SETPARAMS,IO_COMMAND(a1)
+		move.b	SerFlags(pc),IO_SERFLAGS(a1)
+		move.l	SerBaud(pc),IO_BAUD(a1)
+		lib	Exec,SendIO
+
+		move.l	WaitMask(pc),d0
+		lib	Exec,Wait
+		move.l	#$00,d1			;returns wait stat in d1
+		cmp.l	#SIGBREAKF_CTRL_C,d0
+		bne	SetUpSerOut
+		move.l	SerDevIO(pc),a1
+		lib	Exec,AbortIO
+		move.l	SerDevIO(pc),a1
+		lib	Exec,WaitIO
+		move.l	#$01,d1
+SetUpSerOut:	rts
+
+ShutDown:	tst.l	SerOpen
+		beq	ShutDown9000
+		move.l	SerDevIO(pc),a1
+		lib	Exec,CloseDevice
+		
+ShutDown9000:	move.l	SerDevIO(pc),d0
+		tst.l	d0
+		beq	ShutDown8900
+		move.l	#IOEXTSER_SIZE,-(sp)
+		move.l	d0,-(sp)
+		jsr	_DeleteExtIO
+		add.l	#8,sp
+
+ShutDown8900:	move.l	SRPort(pc),d0
+		tst.l	d0
+		beq	ShutDown8800
+		move.l	d0,-(sp)
+		jsr	_DeletePort
+		add.l	#4,sp
+
+ShutDown8800:	move.l	ConfigFile(pc),d1
+		beq	ShutDown8700
+		lib	Exec,Close
+
+ShutDown8700:
+ShutDown1000:	closlib	Dos
+
+ShutDownOut:	move.l	#RETURN_OK,d0
+		rts
+
+		INCLUDE	"LWF:NBBS/DosError.i"
+
+;bits
+
+WaitMask	dc.l	SIGBREAKF_CTRL_C
+
+;Structures
+
+_DOSBase 	dc.l	0
+_SysBase	dc.l	0
+
+		libnames
+;file stuff
+
+_stdout		dc.l	0			;ex. outfile
+ConfigAddress	dc.l	0
+ConfigFile:	dc.l	0			;pointer from Exec,Open
+
+;device stuff
+
+SerOpen		dc.w	0			;Equals 1 if open
+SerDevIO	dc.l	0
+
+;port stuff
+
+SRPortName	dc.b	"NBBS_SerialPort",0
+		ds.l	0
+SRPort		dc.l	0
+
+;config stuff - a straight copy of the .config file and vice versa
+
+		INCLUDE	"LWF:NBBS/Config.i"
+
+;debug stuff
+
+fstr		dc.b	"$%lx",10,0
+		ds.l	0
+TestCMD2:	dc.b	"ATZ",13,0
+		ds.l	0
+
+		END

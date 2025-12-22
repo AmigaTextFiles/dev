@@ -1,0 +1,1 @@
+#undef SDL_LIBS

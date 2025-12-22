@@ -1,0 +1,282 @@
+
+These comments and ideas are based on the premise that faster is better.
+It's reasonable to assume that if well thought out assembly language is
+used to replace parts of a higher level language, then the program will run
+faster. It will also usually be smaller, which is no bad thing. E language
+makes incorporating assembly language extremely easy.
+
+For max speed, the first thing is to have a good algorithm, i.e. write the
+program in E to make it run as fast as possible, before even thinking about
+assembly language. The best assembly language program may well be a dog if
+the algorithm is lousy to start with.
+
+Use registers as much as possible. The simple minded approach is to just
+put OPT REG=5 at the top of the program. This gives EC the option to use its
+own judgment about which registers to use for what. Without this option
+variables get stored at offsets from registers A4 or A5, which means that
+access to the variables is slower than if the variables were stored in one of
+the data registers, of which EC uses D3 through D7. Time your program both
+with and without OPT REG=5, and note the difference in speed and size. Try it
+again with REG=4 or REG=3, which in some cases may be slightly faster. If
+there are more variables than you specify by the REG options, EC does a good
+job of deciding which variables should go into registers, but it may be that
+you can make a more educated choice of variables than EC can. If you know
+that a certain variable should be in a register, than use DEF var:REG to
+force it there. You can do this with no more than 5 variables, of course.
+
+It doesn't make much sense to translate an entire program into assembly
+language if most of the running time of the program is spent churning around
+and around in one small part of the program. If you aren't sure what part of
+your program takes up most of the time, profile it. The E distribution
+provides a great profiler, AProf, in the Bin directory. Documentation for
+AProf is in Tools/AProf. To use it, the executable file to be profiled should
+have a symbol table, which you get by using the EC option "sym". To make it
+easy, use the alias capability of AmigaDOS. Type in "alias ecs ec sym", or
+better yet put it in your startup file.
+
+Once you know what part of the program you are going to concentrate on, the
+easiest way to get started is to see how that part of the program is already
+coded by EC, and try to figure out more economical ways to code it. To do
+this, you need to disassemble an executable file. There are many debuggers
+and disassemblers in the public domain. My first recommendation is ADIS,
+by Martin Apel.    email: apel@physik.uni-kl.de
+I know that it is in the public domain, but have completely forgotten where
+I got it. It's well worth looking for. In many cases it will produce files
+which are essentially ready for reassembly. To use it with E the -ml option
+is necessary. Again an alias is appropriate, "alias adis adis -ml" I use
+"alias adis adis -ml -c2" because I have an Amiga 1200 which uses the 68020
+chip. Actually the -c2 option is necessary only when you are disassembling
+programs which have instructions contained in the 68020 but not the 68000
+chip. Not many programmers use them, which makes sense to ensure backward
+compatibility. The only ones I have ever used are some of the 32 bit divide
+and multiply instructions.
+
+Disassembling isn't much use if you then can't find the code you are planning
+to improve. No problem: Surround the code with NOPs. NOP is 68000 for do
+nothing, and it can go anywhere in the program. Put the disassembled program
+into your text editor and look for NOP (or possibly nop if that's what your
+disassembler puts out). I use Matt Dillon's DME, which can find a NOP almost
+instantaneously.
+Example:
+
+PROC   main()
+DEF i:REG
+NOP
+i++
+NOP
+ENDPROC
+
+results in a bunch of stuff including:
+
+main		    LINK	   A5,#$0
+		    MOVEM.L	   D7,-(SP)
+		    NOP
+		    ADDQ.L	   #$1,D7
+		    NOP
+		    MOVEQ	   #$0,D0
+		    MOVEM.L	   (SP)+,D7
+		    UNLK	   A5
+		    RTS
+
+The listing above is exactly as it came out of ADIS.
+Note: Most disassemblers put out SP instead of A7, but EC insists on A7.
+The listing shows that variable i is stored in D7, and that ADDQ.L #$1,D7 is
+equivalent to i++. Now try it again without the :REG.
+
+main		    LINK	   A5,#-$4
+		    NOP
+		    ADDQ.L	   #$1,-$4(A5)
+		    NOP
+		    MOVEQ	   #$0,D0
+		    UNLK	   A5
+		    RTS
+
+Now i is stored at a memory location 4 below whatever address A5 is pointing
+at, and ADDQ.L #$1,-4(A5) is considerably slower than ADDQ.L #$1,D7. Note
+that the LINK instrucion makes available 4 bytes on the stack to stow i in.
+UNLK releases that stack space. Here's a more complicated example:
+
+PROC   main()
+DEF i, j=0
+NOP
+FOR i:=1 TO 100 DO j++
+NOP
+ENDPROC
+
+Which translates into:
+
+main		    LINK	   A5,#-$8
+		    MOVEQ	   #$0,D0
+		    MOVE.L	   D0,-$8(A5)
+		    NOP
+		    MOVEQ	   #$1,D0
+		    MOVE.L	   D0,-$4(A5)
+L$1B4		    MOVEQ	   #$64,D0
+		    CMP.L	   -$4(A5),D0
+		    BMI.L	   L$1CA
+		    ADDQ.L	   #$1,-$8(A5)
+		    ADDQ.L	   #$1,-$4(A5)
+		    BRA.L	   L$1B4
+
+L$1CA		    NOP
+		    MOVEQ	   #$0,D0
+		    UNLK	   A5
+		    RTS
+
+If DEF i,j=0 is changed to DEF i:REG, j=0:REG  the result is:
+
+main		    LINK	   A5,#$0
+		    MOVEM.L	   D6-D7,-(SP)
+		    MOVEQ	   #$0,D0
+		    MOVE.L	   D0,D6
+		    NOP
+		    MOVEQ	   #$1,D0   /* set up loop  */
+		    MOVE.L	   D0,D7
+L$1B4		    MOVEQ	   #$64,D0
+		    CMP.L	   D7,D0
+		    BMI.L	   L$1C4    /* get out of loop	*/
+		    ADDQ.L	   #$1,D6   /* this is j  */
+		    ADDQ.L	   #$1,D7   /* increment loop counter  */
+		    BRA.L	   L$1B4    /* go to top of loop  */
+
+L$1C4		    NOP
+		    MOVEQ	   #$0,D0
+		    MOVEM.L	   (SP)+,D6-D7
+		    UNLK	   A5
+		    RTS
+
+This doesn't look much simpler than the previous one but runs a lot faster.
+So far we haven't written any assembly language. Let's improve on the line
+FOR i:=1 TO 100 DO j++
+and assume that DEF i:REG, j:REG is in the program.
+
+  MOVEQ #99,i	  /* these 3 instructions replace 8 above  */
+loop: ADDQ.L #1,j
+      DBRA i,loop
+
+That's all there is to it. First 99 gets moved into some data register i.
+Let EC worry about which one it is. It's correct to put in 99 rather than 100
+because DBRA always takes one more trip through the loop than the starting
+value of i. The loop is traversed 100 times, each time adding 1 to j, again
+letting EC worry about what data register holds j.
+
+For the real speed fanatics, sometimes it is practical to put the code for a
+function in line, even if it is code provided by a module or even by EC
+itself. The StrLen function is a good example. Note that this is StrLen,
+not EstrLen, and operates on any null-terminated string. The advantage of
+putting functions in line is that the overhead of pushing variables,
+branching, and returning takes a lot of time, and that time can be saved.
+
+  MOVEQ #-1,D0
+  MOVEA.L str,A0
+loop:  TST.B (A0)+
+  DBEQ D0,loop
+  NOT.L D0
+
+Here str is the name of the string whose length you want. D0 will hold that
+length when the instructions are completed. Note that DBEQ exits the loop
+when the zero condition flag is set, at which time D0 is some negative number.
+It would seem reasonable to use NEG on D0, since NEG does a two's complement
+negation, but NOT gives the correct answer. Putting this code in line does
+not increase the size of the program.
+
+Another extremely small function is strcopy, assuming here that str and
+newstr are either Estrings or strings, i.e ARRAY OF CHAR.
+
+  MOVEA.L str,A0
+  MOVEA.L newstr,A1
+  loop: MOVE.B (A0)+,(A1)+
+  BNE.S loop
+
+For the ultimate in speed, where you want a very small string constant to be
+shoved into a string, try some variation on this:
+
+  MOVEA.L str,A0
+  MOVE.L #"abc\0",(A0)
+
+It is not my intention to attempt to teach assembly language, just to get
+someone who knows a little assembly language started on incorporating it into
+E. Beginners will find it easier to become proficient this way than by trying
+to write a complete assembly lanuage from scratch. The two books which I have
+found most useful in getting started with assembly language are Programming
+the 68000 by Steve Williams, (SYBEX) and Amiga Machine Language by Stefan
+Dittrich (Abacus). A probably unnecessary word of caution: If you program in
+assembly language, the Guru is coming! You might minimize its impact a bit
+by working in RAD: or some other variety of supposedly recoverable ram:
+device. In particular, be wary of any program which opens and sends something
+to a hard disk file. It's annoying to have to reconstruct a few megabytes of
+hard disk files.
+
+Beware the incredibly slow RawDoFmt!!!
+
+Back in the early days somewhere around 1986 when the Amiga 1000 was just
+called the Amiga, I wrote a disassembler, in BASIC of all things. Later I
+translated it into C, using Matt Dillon's DICE, then into Pascal, using Pat
+Quaid's PCQ Pascal, and finally into E. A testfile of about 20K was processed
+in about 19 seconds with DICE, in about 15 seconds with PCQ, and finally in
+about 44 seconds with E. Not good!! After quite a bit of detective work the
+problem was traced to the above mentioned RawDoFmt, which hangs out in the
+exec library. E uses it in WriteF and StringF, PCQ and DICE don't! I had put
+together a stringf function for PCQ, using mostly my code with a bit of help
+from an itoa (integer to string) function in the public domain somewhere. I
+later passed it on to Joe Siebenmann for his EZAsm. Most recently I rewrote
+it as a module for E. The moral of the story is that now my disassembler
+processes the same test file in 11 seconds, a clear winner over PCQ which uses
+essentially the same stringf, and DICE, which doesn't. The speed increase is
+attributable entirely to the stringf function, which is at least 15 times as
+fast as StringF. Incidentally, I later translated the disassembler into EZAsm,
+and the same file ran in 3 seconds, but that's a different story.
+
+If you have need for a fast stringf function, here they are, all 4 of them.
+Four because there are two versions, and both come in two options. One option
+is for the 68000 and one for the 68020 or above. My Amiga 1200 has the 68020
+chip so I figured that I might as well take advantage of the DIVU.L inst.
+It doesn't have any noticeable affect on speed, but makes the module about
+80 bytes smaller, for whatever that's worth. Now for the two versions:
+qstringf.m and of course qstringf20.m run about twice as fast as stringf.m
+and stringf20.m, but don't do as much. The q versions handle format strings
+including \n, \c, \d, \h, \s. The versions without q also handle \l, \r,
+\z, [n] and (m,n). In other words, for the loss of speed you get left and
+right justification, padding with leading zeros, field specifications and
+max and min lengths for strings. For most purposes, the quick version will
+get the job done faster with smaller code. Don't try to include more than
+one version as a module in a program, since both modules will have similarly
+named functions. In other words, all four have a procedure called stringf
+in them, but each is different. As with the real StringF, the output string
+will be an Estring and the return values are the same as for StringF.
+How to use stringf:
+  Just like StringF EXCEPT, the data stream must be a list!! Example:
+      StringF(str,format,datastream) becomes stringf(str,format,[datastream])
+      StringF(str,'\d \h \s\n',3,5,'abc') becomes
+      stringf(str,'\d \h \s\n',[3,5,'abc'])
+If you forget the square brackets , it will give you an error message if you
+put more than one argument in the data stream. With just one argument in the
+data stream, stringf will assume that argument is a pointer to a list, with
+unpredictable results (potential guru?).
+
+Incidentally, all versions have an added capability, printout of binary
+representations, called by putting %lb in the format string. If you get
+your kicks by translating C programs into E, you may not be aware that you
+can use the format strings unchanged in most cases. For instance, EC would
+translate \h into %lx before passing it to RawDoFmt, so why not just leave it
+%lx in the first place?  To see what EC does to various \ options, use the
+technique of creating an executable file and disassembling. Don't bother with
+the NOP business because the strings will be somewhere else, probably near
+the end of the file.
+
+StringF(s,'xxx\h[2]xxx\d[2]xxx\n',456,456)
+WriteF('string is \s',s)
+
+According to my C manual, if the field specification doesn't provide enough
+space to print an entire number, the whole number will be printed anyway.
+RawDoFmt won't do that. My stringf will. Try the above, which should print
+three digits for each number but only prints two.
+
+The stringf20.e file is an example of an E file which has been almost fully
+translated from E to assembly language. Stringf20.doc is really an early
+version of stringf20.e, when the translation process was just getting started.
+By comparing the two files, you can find examples of many E structures, such
+as REPEAT:UNTIL loops, FOR loops, SELECT:CASE, and various  IF statements.
+
+
+

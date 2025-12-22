@@ -1,0 +1,356 @@
+
+			     LWP.AUTODOC V1.02
+			      26 December 1988
+
+			   LIGHT WEIGHT PROCESSES
+
+			       CALL SUMMARY
+
+
+
+
+    extern APTR ThisLWP;	   Global Variable
+
+	This variable is the descriptor for the 'current' LWP running, or
+	NULL if accessed from outside the LWP domain (i.e. if accessed
+	from main()).
+
+    extern long LastLWPMem;	    Global Variable
+
+	This variable is set by ForkLWP() and holds the number of bytes
+	that were allocated for the LWP descriptor + stack.  Used mainly
+	for debugging.
+
+    extern long CoreLWPStack;	    Global Variable
+
+	This holds the minimum stack size.  This value is added to the
+	stack specified in ForkLWP() as well as the calculated stack
+	already used by the subroutine being converted.
+
+	This value must be at least 92+8+3 = 103.  The 92 is for EXEC,
+	which pushes registers and other things on the user stack when
+	in task-switches.  The 8 is so user programs specifying a stack
+	size of 0 are still able to make calls in LWP routines, and the 3
+	is used for long word alignment.
+
+	When using 68881 or other instructions a certain amount of state
+	might be pushed onto the user stack when EXEC switches between
+	tasks, requiring some programs to increase CoreLWPStack to
+	accomodate the extra data.
+
+RunLWP()                                                             RunLWP()
+
+    ransomelwps = RunLWP();
+
+    This routine runs active Light Weight Processes (LWPs) until there are
+    no LWPs ready to run.  This end condition occurs either when all are
+    waiting for an event via WaitLWP() or when there are no LWPs in the
+    system (all have been deleted).
+
+    1 is returned if there were indeed some LWPs run, 0 otherwise.  This
+    call cannot be made from within an LWP.
+
+    This call must be made with at least 512 bytes of stack available.	Since
+    the call is normally made from main() or equivalent, this is not
+    normally a problem.
+
+
+
+ForkLWP()                                                           ForkLWP()
+
+    LWPDescriptor = ForkLWP(extrastack, sizeofargs)
+
+    APTR LWPDescriptor;
+    long extrastack;
+    long sizeofargs;
+
+    ForkLWP() duplicates the calling subroutine's stack context, allocating
+    a new context for the duplicate with 'extrastack' accessable stack.
+    ForkLWP() cannot determine the number of bytes that contain the arguments
+    passed to the subroutine so this must be specified to (see example below).
+    A non-0 LWP descriptor is returned to the 'parent' immediately and the
+    child is queued for execution in the LWP system.  When the child gets
+    run, it will return a 0 (so you can discern who is who).
+
+    ForkLWP() will DUPLICATE the C SUBROUTINE that called it into an LWP
+    by allocating an LWP descriptor and stack, and copying the subroutine's
+    current stack frame and arguments into the new stack.  The new stack's
+    size is sizeofargs+extrastack+N bytes long, where N is the amount
+    already taken up by the subroutine (that is, you do not have to take
+    into account local variables when specifying your stack size).  In
+    otherwords, 'extrastack' is how much stack you want free for calls
+    this subroutine might make.  The available stack is actually larger
+    than what you specify to take into account what EXEC might push onto
+    it when EXEC does a normal amiga context switch.
+
+    NOTE:   The C compiler must generate 'link A5,#<whatever>' at the
+    beginning of its subroutines as ForkLWP() uses this register to
+    determine the calling subroutine's stack context size.  Both Aztec
+    and Lattice do this but be careful about specifying optimization
+    options.
+
+    * When assigning stack size, note that if you use task exceptions all
+      LWP stacks will have to be big enough to handle an exception.  Most
+      programs do not use task exceptions (though Lattice C appears to
+      use them for ^C handling ... it is better to disable ^C and handle
+      checking for it yourself).  Either that or use small stacks and
+      ensure exception handling is disabled while LWP processes are running.
+
+    If called with (0,0), only enough stack for the C subroutine will exist
+    and none of the arguments to the C subroutine will be accessable.  That
+    is, only the local variables will be accessable and you will not have
+    enough stack to make further subroutine calls EXCEPT for LWP calls
+    such as ForkLWP(), WaitLWP(), SwitchLWP(), and AlertLWP(), which may
+    be called.
+
+    The contents of the local variables and arguments as specified by
+    arglen will be copied to the new stack and the registers as of the
+    call to ForkLWP() will be copied to the new context.  ForkLWP() then
+    returns the LWP descriptor (a non-0 longword) to the parent process
+    (the subroutine that just called it), and 0 to the child (that same
+    subroutine later on when LWPs are running).
+
+
+	main()
+	{
+	    xx("hi");    /*  start one LWP   */
+	    xx("there"); /*  start another   */
+	    RunLWP();
+	}
+
+	xx(str)
+	char *str;
+	{
+	    /*
+	     *	2K stack because we use stdio, one argument (str) which is
+	     *	4 bytes storage on the stack
+	     */
+
+	    if (ForkLWP(2048L, 4L)) {
+		/* this is the parent thread in the original stack context */
+		/* thus we are returning to main() here                    */
+		return;
+	    }
+	    /*
+	     * This is the child thread in the new (2K) stack context.
+	     */
+	    puts(str);
+	    /*
+	     * when this baby returns, it returns to the void (gets deleted)
+	     */
+	}
+
+    The LWP is automatically deleted when it returns.  The exact executing
+    sequence of the above example is this:
+
+	main() calls xx() which calls ForkLWP() which allocates a copy
+	     of the context, queues the child, then returns a non-zero
+	     value.
+	xx() returns to main via the if.
+
+	main() calls xx() with a different argument and the sequence is
+	repeated.
+
+	main() calls RunLWP() which runs one of the two children (that is,
+	either "hi" or "there" will be printed, the order is INDETERMINANT).
+	The child exits and gets deleted.  the second child is run and
+	the other string is printed.  that child returns and gets
+	deleted.  There being no more LWPs ready to run, RunLWP() returns
+	to main.
+
+	NOTE:	The sizeof integers determines the size of integer arguments
+	passed to a subroutine.  That is, if you are using 32 bit ints,
+	4 bytes will be passed for an integer even if declared a short.
+
+	xx(a,b,c)
+	long a;
+	short b,c;			N is 4+4+4 = 12 if using 32 bit ints
+	{				N is 4+2+2 = 8 if using 16 bit ints
+	    if (ForkLWP(2048L, (long)N))
+		return;
+	    ...
+	}
+
+
+	 -----------------------------------------------------------
+
+			   Calling ForkLWP() from an LWP
+
+    Operations works much like the UNIX fork() except only the current
+    subroutine's stack context is duplicated, and the 'processes' are
+    run synchronously (CPU does not get stolen, they give it away).  You
+    can use ForkLWP() to dynamically change the available stack for your
+    subroutine as well as to fork off a second running process:
+
+	xx()
+	{
+	    short i = 0;
+	    if (ForkLWP(2048L, 0L)) /* need stack to say hello      */
+		return;
+	    puts("hello");
+	    if (ForkLWP(0L,0L)) {   /* don't need stack for loop    */
+		puts("fork returned");
+		return;
+	    }
+	    while (i < 10)
+		++i;
+	    if (ForkLWP(4096L, 0L)) /* need stack to say goodbye    */
+		return;
+	    puts("goodbye");
+	}
+
+    In the above case, the first ForkLWP() sets up a new LWP context and
+    returns to main().  When main() finally starts the LWPs running, it
+    will have a 2K stack, say hello, and then call ForkLWP() again.
+
+    Now the tricky part:  This call to ForkLWP() sets up a new context with
+    no extra stack, then returns non-zero to the parent (which is still
+    running under the old context).  Thus, we can puts("fork returned");
+    because we have enough stack.  But we then return, deleting the parent.
+    The child, however, will then run and the procedure will be non the
+    wizer... all the local variables will be the same.
+
+    But watch out!  The ADDRESSES of all the local variables have now
+    changed ... to the new stack, so don't keep around addresses of
+    variables (variables which are pointers are ok, just not the address
+    of a local variable).  E.G.  If you declare a list:
+
+	xx()
+	{
+	    struct List List;
+	    ...
+	}
+
+    Which contain pointers to itself (as well as nodes which will contain
+    pointers to the list), it becomes invalid to the child of a ForkLWP()
+    because the addresses are all wrong.  (that is, the list structure
+    itself is ok, but the pointers it setup to itself or nodes which have
+    pointers to it are all wrong now).
+
+
+SwitchLWP()                                                       SwitchLWP()
+
+    SwitchLWP()
+
+    This routine gives up CPU to the next ready LWP.  If no other LWPs
+    are ready, it is a quick nop.  This does NOT unlink the current LWP
+    so it will eventually get CPU back again.
+
+    This is useful to give CPU to other LWPs when in a tight loop to
+    simulate multitasking.
+
+    That is, the LWP system is SYNCHRONOUS and NOT PREEMPTIVE.	This means
+    that, if you have enough stack, you may call any LINK LIBRARY FUNCTION
+    as if you all were just one process... because in actual fact there IS
+    just one process.  I.E. the LWPs can call STDIO functions.
+
+    SwitchLWP() returns 1 if there were no other LWPs ready to run, 0
+    if other LWPs were run.
+
+
+WaitLWP()                                                           WaitLWP()
+
+    (void) WaitLWP()
+
+    A singular Wait/Alert mechanism is provided.  WaitLWP() unlinks the
+    LWP from the ready list (this might cause RunLWP() to return if no
+    other LWPs are ready to run) until somebody, either main() or some
+    other LWP, alerts it.
+
+    If the LWP has already been alerted, this function simply clears
+    the alert flag and returns without unlinking (actually, it just
+    calls SwitchLWP()).
+
+AlertLWP()                                                         AlertLWP()
+
+    (void) AlertLWP(LWPDescriptor)
+
+    APTR LWPDescriptor;
+
+    This may be called from anybody and causes the LWP in question to
+    be placed on the ready list (if not already on it), and alerted.
+
+    This routine alerts an LWP.  If the LWP is waiting, it is linked back
+    into the ready list.  If not (it is already in the read list), a flag
+    is set that will cause the next WaitLWP() from that LWP to return
+    rather than wait (actually, it calls SwitchLWP()).  No signals are
+    ever effected.
+
+AutoAlertLWP()                                                 AutoAlertLWP()
+
+    (void) AutoAlertLWP(port, LWPDescriptor)
+
+    MSGPORT *port;
+    APTR LWPDescriptor;
+
+    When given a valid LWPDescriptor, this call sets the port mp_Flags to
+    3 (undocumented mode) and mp_SigTask to a special function.  This
+    causes any messages sent or replied to the port to
+    AlertLWP(LWPDescriptor).  Note that only one LWPDescriptor slot exists
+    for each of the 32 signal bits, so you cannot AutoAlert() multiple ports
+    which have the same signal bit to different LWPDescriptors.  You can
+    do just about anything else though.
+
+    While installed, operations depends on whether the program is within
+    a RunLWP() call or not.  If not, operation is to Signal() the current
+    task as of the last AutoAlertLWP() call AND to AutoAlert() the
+    descriptor.  If the program IS within a RunLWP(), then operation is
+    to just AutoAlert() it... the LWP is guarenteed to run before RunLWP()
+    returns.
+
+    Note that NO signal is generated in the latter case.  Note that if
+    messages exist on the port when AutoAlertLWP() was called, an
+    immediate signal+alert or alert will take place.
+
+    When given a NULL LWPDescriptor, this call sets the port mp_Flags to
+    0 (PA_SIGNAL) and mp_SigTask to the calling task.  Note that if messages
+    exist on the port when AutoAlertLWP() is called in this case, an
+    immediate signal will occur.
+
+
+    This is a synchronous call which may not be called from a foreign
+    task or interrupt.
+
+
+CallBigStack()                                                 CallBigStack()
+
+    (any) CallBigStack(function, bytesofargs, args....)
+    (any)(*func)();
+    long bytesofargs;
+
+    This routine may only be called from an LWP.  This allows one to
+    give LWPs very little stack and still allow them to make function or
+    library calls which require lots of stack.	Specifically, this
+    routine will change the stack pointer back to the stack RunLWP() was
+    called with (usually the task's original stack), then make the
+    function call specified.
+
+    WARNING:	You cannot CallBigStack() a routine which will call any
+    other LWP function as LWP functions will also try to use the MasterStack
+    thus overwriting the routine's temporary stack.
+
+    bytesofargs is the # of bytes of arguments being passed, which must
+    be EVEN.  For example:
+
+    lwp()
+    {
+	long Open();
+
+	if (ForkLWP(32,0))  /*  enough stack for CallBigStack() call */
+	    return;
+	CallBigStack(Open, 8, "Charlie", 1005);
+    }
+
+    bytesofargs is 8 here because Open() takes two arguments .. a string
+    pointer (4 bytes) and an integer (4 bytes).  Here I am assuming 32 bit
+    int compilation.  The LWP need have only enough stack to accomodate
+    the arguments to CallBigStack() since they are pushed on its stack.
+
+    CallBigStack() proceedes to change the sp, copy the arguments, and
+    make the specified call, returning D0.
+
+    Warning: 16 bit compilation: The 'bytesofargs' argument is a longword,
+    for example, 8L, rather than 8.
+
+
+

@@ -1,0 +1,895 @@
+/*******************************************
+** OK, this is the sixth attempt at writing
+** an ACTION! parser.
+** Created Feb 22, 2010
+** By Jim Patchell
+**
+** This code is in the public domain.  I
+** appreciate the continued credit for the
+** parser in future distributions.
+** Some of the code for this compiler came
+** from the book Compiler Design in C
+** by Alen Holoub.  Not really sure how
+** he might feel about this, but he never
+** responded to any of my inquiries.  Some
+** of this code has been modified from the
+** original, bgut I don't remember where.
+**
+** This grammar is based on the Grammar that
+** is in Appendix A of the ACTION! manual. 
+** There are errors in that Grammar, and I
+** hope I have corrected them all.  Then
+** again, maybe I have broken something I
+** am not aware of.
+**
+** Here are the major components of this 
+** compiler:
+**	LEXER
+**	PARSER
+**	ABSTRACT SYNTAX TREE GENERATOR
+**	ABSTRACT SYNTAX TREE PROCESSOR
+**	CODE GENERATOR
+**
+**	I probably did not really need to do the
+** abstract syntax tree generator, but I felt
+** that this made it much easier to write the
+** code.
+**------------------------------------------
+** April 26, 2010
+**
+** Hoo-Boy.  I just discovered that Action!
+** allows a RETURN statement anywhere in
+** a function.  There was nothing in the
+** BNF script in the ACTION manual that 
+** indicated this.  This is yet another
+** error in that script.  Well, I am going
+** to add that to the grammar and see if
+** I can get that to work.
+*******************************************/
+{
+	#include "tokens.h"
+	#include <stdio.h>
+	#include <stdlib.h>
+	#include <string.h>
+	#include "actionlexer.h"
+	#include "symtab.h"
+	#include "decl.h"
+	#include "value.h"
+	#include "abstract.h"
+	#include "nodeid.h"
+	#include "nodeman.h"
+	#include "nodeproc.h"
+	#include "misc.h"
+	#include "codegen.h"
+	#include "gen.h"
+}
+
+[
+    event driven
+	context type = token	/* this is our own token type	*/
+	input values		/* we want to use oour own TOKEN type	*/
+    default input type = token
+	grammar token = action
+	sticky {FundDecl,RecIdentList,FundIdentList,ArrIdentList,PtrIdentList,SystemDecls,FUNCdecl,PROCdecl}
+//	sticky {VarDecl,FundDecl,RecIdentList,FundIdentList,ArrIdentList,PtrIdentList,SystemDecls,FUNCdecl,PROCdecl}
+	enum {
+		eof	=	0,
+		AND	=	256,
+		ANDassign,			// =&
+		OR,					// OR
+		ORassign,			// =|
+		XORassign,			// =%
+		ADDassign,			// =+
+		SUBassign,			// =-
+		MULassign,			// =*
+		DIVassign,			// =/
+		MODassign,			// =MOD
+		LSHassign,			// ==RSH
+		RSHassign,			// ==LSH
+		EQUAL,				// ==
+		NEQ,			// <>
+		GTE,			// >=
+		LTE,			// <=
+		STRING,
+		ARRAY,
+		POINTER,
+		BYTE,
+		CARD,
+		INT,
+		TYPE,
+		TYPEDEF,
+		IDENTIFIER,
+		CONSTANT,
+		DO,
+		OD,
+		IF,
+		ELSEIF,
+		ELSE,
+		FI,
+		FOR,
+		TO,
+		STEP,
+		WHILE,
+		UNTIL,
+		EXIT,
+		PROC,
+		FUNC,
+		RETURN,
+		BEGIN,
+		END,
+		MODULE,
+		LSH,
+		RSH,
+		MOD,
+		THEN,
+		CHAR,
+		HEX_CONSTANT,
+		CHAR_CONSTANT,
+		DEFINE,
+		XOR,
+		LONG,
+		PROCIDENT,
+		FUNCIDENT,
+		RECTYPE,
+		PRETURN
+	}
+	parser file name = "action.c"
+	header file name = "action.h"
+
+]
+
+action ->modules,eof
+
+modules->module=ScopeLevel=0;
+       ->modules,module=ScopeLevel=0;
+
+module->MODULE, ProgModules
+
+ProgModules->GlobalDecls, Routines
+           ->Routines
+
+/****************************************
+** Statement Declarations
+****************************************/
+
+(void)Routines-> Routine
+        -> Routine,Routine
+
+(void)Routine->PROCroutine:n={print_tree(n);process_tree(n);RemoveLocalsFromSymtab(Symbol_tab);}
+             ->FUNCroutine:n={print_tree(n);process_tree(n);RemoveLocalsFromSymtab(Symbol_tab);}
+
+(NODE *)PROCroutine->PROCdecl:s1=PROCRoutine(s1,NULL,NULL,NULL);
+                   ->PROCdecl:s1,SystemDecls:s2=PROCRoutine(s1,s2,NULL,NULL);
+				   ->PROCdecl:s1,Statements:n1=PROCRoutine(s1,NULL,n1,NULL);
+				   ->PROCdecl:s1,Statements:n1,ProcReturn:n2=PROCRoutine(s1,NULL,n1,n2);
+				   ->PROCdecl:s1,ProcReturn:n2=PROCRoutine(s1,NULL,NULL,n2);
+                   ->PROCdecl:s1,SystemDecls:s2,Statements:n1=PROCRoutine(s1,s2,n1,NULL);
+                   ->PROCdecl:s1,SystemDecls:s2,ProcReturn:n2=PROCRoutine(s1,s2,NULL,n2);
+                   ->PROCdecl:s1,SystemDecls:s2,Statements:n1, ProcReturn:n2=PROCRoutine(s1,s2,n1,n2);
+
+(symbol *)PROCdecl->PROC,DeclIdent:s,'(',VarDecl:s1,')'=PROCdecl(s,0,s1);
+                  ->PROC,DeclIdent:s,ProcInit:V,'(',')'=PROCdecl(s,V,NULL);
+				  ->PROC,DeclIdent:s,'(',')'=PROCdecl(s,0,NULL);
+                  ->PROC,DeclIdent:s,ProcInit:V,'(',VarDecl:s1,')'=PROCdecl(s,V,s1);
+
+//(void)Proc->PROC=ScopeLevel = 1;
+
+(NODE *)OptStmtList->nothing:n=n;
+                   ->Statements:n=n;
+
+(int)ProcInit->'=',Addr:v=v;
+
+(NODE *)ProcReturn->RETURN=MakeNode(NODEID_RETURN,NULL,NULL);
+
+(NODE *)FUNCroutine->FUNCdecl:s1=PROCRoutine(s1,NULL,NULL,NULL);
+                   ->FUNCdecl:s1,SystemDecls:s2=PROCRoutine(s1,s2,NULL,NULL);
+				   ->FUNCdecl:s1,Statements:n1=PROCRoutine(s1,NULL,n1,NULL);
+				   ->FUNCdecl:s1,Statements:n1,FuncReturn:n2=PROCRoutine(s1,NULL,n1,n2);
+				   ->FUNCdecl:s1,FuncReturn:n2=PROCRoutine(s1,NULL,NULL,n2);
+				   ->FUNCdecl:s1,SystemDecls:s2,Statements:n1=PROCRoutine(s1,s2,n1,NULL);
+				   ->FUNCdecl:s1,SystemDecls:s2,FuncReturn:n2=PROCRoutine(s1,s2,NULL,n2);
+                   ->FUNCdecl:s1,SystemDecls:s2 ,Statements:n1,FuncReturn:n2=PROCRoutine(s1,s2,n1,n2);
+  
+(symbol *)FUNCdecl->FundType:l,FUNC,DeclIdent:s,'(',')'=FUNCdecl(l,s, 0, NULL);
+                  ->FundType:l,FUNC,DeclIdent:s,ProcInit:V,'(',')'=FUNCdecl(l,s, V, NULL);
+				  ->FundType:l,FUNC,DeclIdent:s,'(',VarDecl:s1,')'=FUNCdecl(l,s, 0, s1);
+                  ->FundType:l,FUNC,DeclIdent:s,ProcInit:V,'(',VarDecl:s1,')'=FUNCdecl(l,s, V, s1);
+
+//(void)Func->FUNC=ScopeLevel=1;
+
+(NODE *)FuncReturn->RETURN, BitExp:n1=MakeNode(NODEID_RETURN,n1,NULL);
+				  
+(void *)nothing-> =NULL;
+
+(NODE *)Statements->Stmt:n=n;
+                  ->Statements:n1,Stmt:n2=MakeList(n1,n2);
+
+(NODE *)Stmt->SimpStmt:n=n;
+            ->StructStmt:n=n;
+        	->CodeBlock:n=n;
+
+(NODE *)SimpStmt->AssignStmt:n=n;
+                ->EXITStmt:n=n;
+        		->ProcCall:n=n;
+				->Return:n=n;
+
+(NODE *)Return->PRETURN,'(', BitExp:n1,')'=MakeNode(NODEID_RETURN,n1,NULL);
+	          ->PRETURN           =MakeNode(NODEID_RETURN,NULL,NULL);
+
+
+
+(NODE *)EXITStmt->EXIT=MakeNode(NODEID_EXIT,NULL,NULL);
+
+(NODE *)ProcCall->ProcIdent:n1,'(',Arguments:n2,')'=MakeNode(NODEID_PROCCALL,n1,n2);
+                ->ProcIdent:n1,'(',')'=MakeNode(NODEID_PROCCALL,n1,NULL);
+
+(NODE *)FuncCall->FuncIdent:n1,'(',Arguments:n2,')'=MakeNode(NODEID_FUNCCALL,n1,n2);
+                ->FuncIdent:n1,'(',')'=MakeNode(NODEID_FUNCCALL,n1,NULL);
+
+(NODE *)ProcIdent->PROCIDENT:t={
+						symbol *pSym = findsym( Symbol_tab,t.yytext  );
+						return MakeLeaf(NODEID_PROCIDENT,pSym,NULL);
+					}
+                  
+(NODE *)FuncIdent->FUNCIDENT:t={
+						symbol *pSym = findsym( Symbol_tab,t.yytext  );
+						return MakeLeaf(NODEID_PROCIDENT,pSym,NULL);
+					}
+
+(NODE *)StructStmt->IFstmt:n=n;
+                 ->WHILEloop:n=n;
+		         ->FORloop:n=n;
+		         ->DOloop:n=n;
+
+(NODE *)DOloop->DO,OptStmtList:n1,OptUntil:n2,OD=MakeNode(NODEID_DOLOOP,n1,n2);
+
+(NODE *)OptUntil-> = NULL;
+                ->UNTIL, CondExp:n1=MakeNode(NODEID_UNTIL,n1,NULL);
+
+(NODE *)WHILEloop->WHILE,CondExp:n1,DOloop:n2={
+							n2->id = NODEID_WHILEDOLOOP;
+							return MakeNode(NODEID_WHILE,n1,n2);
+						}
+
+(NODE *)FORloop->FOR,Ident:n1,'=',BitExp:n2,TO,BitExp:n3,OptStep:n4,DOloop:n5={
+					NODE *start = MakeNode(NODEID_FORSTART,n1,n2);
+					NODE *to = MakeNode(NODEID_FORTO,n3,NULL);
+					NODE *FOR = MakeNode(NODEID_FOR,start,to);
+					if(n4) MakeList(start,n4);
+					n5->id = NODEID_FORDOLOOP;
+					MakeList(start,n5);
+					return FOR;
+               }
+
+(NODE *)OptStep-> =NULL;
+       ->STEP,BitExp:n=MakeNode(NODEID_STEP,n,NULL);
+
+(NODE *)IFstmt->IFpart:n,EndIf=MakeNode(NODEID_IFSTMT,n,NULL);
+              ->IFpart:n1,ELSEpart:n2,EndIf=MakeNode(NODEID_IFSTMT,n1,n2);
+	          ->IFpart:n1,ELSEIFlist:n2,EndIf=MakeNode(NODEID_IFSTMT,n1,n2);
+	          ->IFpart:n1,ELSEIFlist:n2,ELSEpart:n3,EndIf={
+				NODE *n =MakeNode(NODEID_IFSTMT,n1,n2);
+				MakeList(n1,n3);
+				return n;
+			  }
+
+EndIf->FI=IfLevel--;
+
+StartIf->IF=IfLevel++;
+
+(NODE *)IFpart->StartIf, CondExp:n1, THEN, OptStmtList:n2=MakeNode(NODEID_IF,n1,n2);
+
+(NODE *)ELSEIFlist->ELSEIFpart:n=n;
+				  ->ELSEIFlist:nl, ELSEIFpart:n=MakeList(nl,n);
+
+(NODE *)ELSEIFpart->ELSEIF,CondExp:n1,THEN,OptStmtList:n2=MakeNode(NODEID_ELSEIF,n1,n2);
+(NODE *)ELSEpart->ELSE,OptStmtList:n1=MakeNode(NODEID_ELSE,n1,NULL);
+
+(NODE *)AssignStmt->MemContents:n1,'=',BitExp:n2=MakeNode(NODEID_EQUALS,n1,n2);
+                  ->MemContents:n1,ADDassign,BitExp:n2=MakeNode(NODEID_ADDEQ,n1,n2);
+				  ->MemContents:n1,SUBassign,BitExp:n2=MakeNode(NODEID_SUBEQ,n1,n2);
+				  ->MemContents:n1,MULassign,BitExp:n2=MakeNode(NODEID_MULEQ,n1,n2);
+				  ->MemContents:n1,DIVassign,BitExp:n2=MakeNode(NODEID_DIVEQ,n1,n2);
+				  ->MemContents:n1,MODassign,BitExp:n2=MakeNode(NODEID_MODEQ,n1,n2);
+				  ->MemContents:n1,LSHassign,BitExp:n2=MakeNode(NODEID_LSHEQ,n1,n2);
+				  ->MemContents:n1,RSHassign,BitExp:n2=MakeNode(NODEID_RSHEQ,n1,n2);
+				  ->MemContents:n1,ANDassign,BitExp:n2=MakeNode(NODEID_ANDEQ,n1,n2);
+				  ->MemContents:n1,ORassign,BitExp:n2 =MakeNode(NODEID_OREQ ,n1,n2);
+				  ->MemContents:n1,XORassign,BitExp:n2=MakeNode(NODEID_XOREQ,n1,n2);
+
+
+(NODE *)CondExp->CondExp:n1,OR ,AndExp:n2=MakeNode(NODEID_OR,n1,n2);
+	           ->AndExp:n1=n1;
+
+(NODE *)AndExp->AndExp:n1,AND,RelExp:n2=MakeNode(NODEID_AND,n1,n2);
+	          ->RelExp:n1=n1;
+
+(NODE *)RelExp->RelExp:n1,'=',BitExp:n2=MakeNode(NODEID_EQ,n1,n2);
+              ->RelExp:n1,'<',BitExp:n2=MakeNode(NODEID_LT,n1,n2);
+	          ->RelExp:n1,'>',BitExp:n2=MakeNode(NODEID_GT,n1,n2);
+        	  ->RelExp:n1,'#',BitExp:n2=MakeNode(NODEID_NE,n1,n2);
+        	  ->RelExp:n1,GTE,BitExp:n2=MakeNode(NODEID_GTE,n1,n2);
+	          ->RelExp:n1,LTE,BitExp:n2=MakeNode(NODEID_LTE,n1,n2);
+	          ->RelExp:n1,NEQ,BitExp:n2=MakeNode(NODEID_NE,n1,n2);
+	          ->BitExp:n1=n1;
+
+(NODE *)BitExp->BitExp:n1,'&',ShiftExp:n2=MakeNode(NODEID_BITAND,n1,n2);
+              ->BitExp:n1,'|',ShiftExp:n2=MakeNode(NODEID_BITXOR,n1,n2);
+	          ->BitExp:n1,'%',ShiftExp:n2=MakeNode(NODEID_BITOR,n1,n2);
+	          ->ShiftExp:n1=n1;
+
+(NODE *)ShiftExp->ShiftExp:n1,LSH,AddExp:n2=MakeNode(NODEID_LSH,n1,n2);
+                ->ShiftExp:n1,RSH,AddExp:n2=MakeNode(NODEID_RSH,n1,n2);
+		        ->AddExp:n1=n1;
+
+(NODE *)AddExp->AddExp:n1,'+',MulExp:n2=MakeNode(NODEID_ADD,n1,n2);
+              ->AddExp:n1,'-',MulExp:n2=MakeNode(NODEID_SUB,n1,n2);
+	          ->MulExp:n1=n1;
+
+(NODE *)MulExp->MulExp:n1,'*',Urnary:n2=MakeNode(NODEID_MUL,n1,n2);
+              ->MulExp:n1,'/',Urnary:n2=MakeNode(NODEID_DIV,n1,n2);
+	          ->MulExp:n1,MOD,Urnary:n2=MakeNode(NODEID_MOD,n1,n2);
+	          ->Urnary:n1=n1;
+
+(NODE *)Urnary->Primary:n1=n1;
+              ->'-',Urnary:n1=MakeNode(NODEID_NEGATIVE,n1,NULL);
+	   
+(NODE *)Primary->MemRef:n=n;
+			   ->StrConst:s={
+					NODE *pN;
+					pN = MakeLeaf(NODEID_STRING,s,NULL);
+					return pN;
+			   }
+               ->Constant:V={
+					char *s = malloc(32);
+					symbol *pSym;
+					link *l;
+					sprintf(s,"%d",V);
+					pSym = new_symbol(s,ScopeLevel );
+					free(s);
+					l = new_link();
+					l->tclass = SYMTAB_SPECIFIER;
+					l->select.s.noun = SYMTAB_INT;
+					l->select.s.sclass = SYMTAB_CONSTANT;
+					l->V_INT = V;
+					sprintf(pSym->name,"%d",V);
+					pSym->type = pSym->etype = l;
+					return MakeLeaf(NODEID_CONSTANT,pSym,NULL);
+				}
+					
+	           ->'(',BitExp:n,')'=n;
+	           ->FuncCall:n=n;
+
+(NODE *)CodeBlock->'[',CompConstList:cL,']'={
+		DATABLOCK *pD;
+		NODE *pN;
+
+		pD = malloc(sizeof(DATABLOCK));
+		ClistToDataBlock(pD,cL);
+		pN = MakeLeaf(NODEID_CODEBLOCK,NULL,pD);
+		return pN;
+}
+
+(CLIST *)CompConstList->CompConst:v=newCLIST(v);
+             ->CompConstList:cL,CompConst:v={
+				CLIST *pCL = newCLIST(v);
+				return CLISTchain(cL,pCL);
+			 }
+
+(NODE *)Arguments->BitExpList:n = MakeNode(NODEID_ARGUMENTS,n,NULL);
+
+(NODE *)BitExpList ->BitExp:n1=n1;
+           ->BitExpList:n1,',',BitExp:n2=MakeList(n2,n1);	//make list in reverse order
+
+/****************************************
+** Memory References
+****************************************/
+
+(NODE *)MemRef->MemContents:n=n;
+              ->'@',Ident:n1=MakeNode(NODEID_ADDRESSOF,n1,NULL);
+
+(NODE *)MemContents ->Ident:n=n;
+            ->PtrRef:n=n;
+			->ArrRef:n=n;
+			->RecRef:n=n;
+
+(NODE *)PtrRef->Ident:n1,'^'=MakeNode(NODEID_CONTENTSOF,n1,NULL);
+
+(NODE *)ArrRef->Ident:n1,'(',BitExp:n2,')' =MakeNode(NODEID_ARRAYREF,n1,n2);
+
+(NODE *)RecRef->RecordIdent:n1,'.',MembrIdent:n2=MakeNode(NODEID_MEMBER,n1,n2);
+
+(NODE *)RecordIdent->RECTYPE:t ={
+						symbol *pSym = findsym( Symbol_tab,t.yytext  );
+						return MakeLeaf(NODEID_IDENT,pSym,NULL);
+					}
+
+
+/****************************************
+** Variable Declarations
+****************************************/
+
+
+(void)GlobalDecls->SystemDecl:s={
+						GenSymbolRname(s,NULL);
+						OutputData(OutFile,s);
+                      }
+                   ->GlobalDecls,SystemDecl:s={
+						GenSymbolRname(s,NULL);
+						OutputData(OutFile,s);
+                      }
+
+(symbol *)SystemDecls ->SystemDecl:s=s;
+                      ->SystemDecls:S1,SystemDecl:S2=JoinSymbolChains(S1,S2);
+
+(symbol *)SystemDecl->TYPEdecl:s=s;
+                    ->DEFINEdecl:s=s;
+	                ->ArrDecl:s=s;
+					->PtrDecl:s=s;
+	                ->RecDecl:s=s;
+					->RecPtrDecl:s=s;
+                    ->FundDecl:s=s;
+
+(symbol *)VarDecl
+                 ->VarDecl:sL,BaseVarDecl:s1=JoinSymbolChains(sL,s1);
+                 ->VarDecl:sL,',',BaseVarDecl:s1=JoinSymbolChains(sL,s1);
+                 ->BaseVarDecl:s=s;
+
+(symbol *)BaseVarDecl->PtrDecl:s=s;
+	                ->ArrDecl:s=s;
+	               ->RecDecl:s=s;
+				   ->RecPtrDecl:s=s;
+                   ->FundDecl:s=s;
+
+(symbol *)PtrDecl -> FundType:l, POINTER, PtrIdentList:s1 = {
+						ABSTRACT *pA = newABSTRACT();
+						AbstractBuildDeclarator(pA,SYMTAB_POINTER,0,NULL);
+						add_spec_to_decl (l,s1);
+						add_spec_to_decl(pA->type,s1);
+						return s1;
+                  }
+
+(symbol *)PtrIdentList->PtrIdent:s=s;
+                      ->PtrIdentList:sL,',',PtrIdent:s={
+					     symbol *pS = sL;	//we need to make a forward facubg kust
+					     while(pS->next) pS = pS->next;
+					     pS->next = s;
+						 return sL;
+					}
+
+(symbol *)PtrIdent->DeclIdent:s=s;
+                  ->DeclIdent:s,'=',Addr:A = {
+				     s->iv.initval = A;
+					 s->init = SYMTAB_INIT_ADDRESS;
+					 return s;
+				  }
+
+(symbol *)ArrDecl->FundType:l,ARRAY,ArrIdentList:s1 ={
+						link *pD;
+						link *pL;
+						symbol *pS =s1;
+						while(pS)
+						{
+							pD = pS->type;
+							pL = new_link();
+							memcpy(pL,l,sizeof(link));
+							pS->type = pL;
+							pL->next = pD;
+							//pD->next = pL;
+							pS->etype = pD;
+							pS = pS->next;
+						}
+						return s1;
+                 }
+
+(symbol *)ArrIdentList->ArrIdent:s=s;
+                      ->ArrIdentList:sL,',',ArrIdent:s ={
+						symbol *pS = sL;
+						while(pS->next) pS = pS->next;
+						pS->next = s;
+						return sL;
+					}
+
+(symbol *)ArrIdent->DeclIdent:s= {
+					   ABSTRACT *pA = newABSTRACT();
+					   AbstractBuildDeclarator(pA,SYMTAB_ARRAY,0,NULL);
+					   add_spec_to_decl (pA->type,s);
+					   return s;
+				  }
+
+                  ->DeclIdent:s,'(',Constant:D,')'= {
+					   ABSTRACT *pA = newABSTRACT();
+					   AbstractBuildDeclarator(pA,SYMTAB_ARRAY,D,NULL);
+					   add_spec_to_decl (pA->type,s);
+					   return s;
+				  }
+
+		          ->DeclIdent:s,'(',Constant:D, ')','=', Addr:A = {
+					   ABSTRACT *pA = newABSTRACT();
+					   s->iv.initval = A;
+					   s->init = SYMTAB_INIT_ADDRESS;
+					   AbstractBuildDeclarator(pA,SYMTAB_ARRAY,D,NULL);
+					   add_spec_to_decl (pA->type,s);
+					   return s;
+				  }
+		          ->DeclIdent:s,'(',Constant:D, ')','=','[', ConstList:cL, ']' = {
+					   ABSTRACT *pA = newABSTRACT();
+					   DATABLOCK *pD = malloc(sizeof(DATABLOCK));
+					   ClistToDataBlock(pD, cL);
+					   s->iv.arrinit = pD->data;
+					   s->initSize = pD->size;
+					   s->init = SYMTAB_INIT_ARRAY;
+					   AbstractBuildDeclarator(pA,SYMTAB_ARRAY,D,NULL);
+					   add_spec_to_decl (pA->type,s);
+					   return s;
+				  }
+		          ->DeclIdent:s,'(',Constant:D, ')','=',StrConst:sc= {
+					   ABSTRACT *pA = newABSTRACT();
+					   s->iv.arrinit = sc;
+					   s->initSize = strlen(sc);
+					   s->init = SYMTAB_INIT_ARRAY;
+					   AbstractBuildDeclarator(pA,SYMTAB_ARRAY,D,NULL);
+					   pA->type->select.d.string_flag = 1;	//initdacte this is a string
+					   add_spec_to_decl (pA->type,s);
+					   return s;
+				  }
+
+		          ->DeclIdent:s,'=',Addr:A= {
+					   ABSTRACT *pA = newABSTRACT();
+					   s->iv.initval = A;
+					   s->init = SYMTAB_INIT_ADDRESS;
+					   AbstractBuildDeclarator(pA,SYMTAB_ARRAY,0,NULL);
+					   add_spec_to_decl (pA->type,s);
+					   return s;
+				  }
+
+		          ->DeclIdent:s,'=','[', ConstList:cL, ']' = {
+					   ABSTRACT *pA = newABSTRACT();
+					   DATABLOCK *pD = malloc(sizeof(DATABLOCK));
+					   ClistToDataBlock(pD, cL);
+					   s->iv.arrinit = pD->data;
+					   s->initSize = pD->size;
+					   s->init = SYMTAB_INIT_ARRAY;
+					   AbstractBuildDeclarator(pA,SYMTAB_ARRAY,pD->size,NULL);
+					   add_spec_to_decl (pA->type,s);
+					   return s;
+				  }
+		          ->DeclIdent:s,'=',StrConst:sc= {
+					   ABSTRACT *pA = newABSTRACT();
+					   s->iv.arrinit = sc;
+					   s->initSize = strlen(sc);
+//				printf("**STRING size = %d\n",s->initSize);
+					   s->init = SYMTAB_INIT_ARRAY;
+					   AbstractBuildDeclarator(pA,SYMTAB_ARRAY,s->initSize,NULL);
+					   pA->type->select.d.string_flag = 1;	//initdacte this is a string
+					   add_spec_to_decl (pA->type,s);
+					   return s;
+				  }
+
+
+
+(symbol *)FundDecl->FundType:l, FundIdentList:s = {add_spec_to_decl (l,s); return s;}
+
+(link *)FundType->BYTE = new_type_spec ("char");
+                ->CHAR = new_type_spec ("char");
+		        ->INT = new_type_spec ("int");
+		        ->CARD = new_type_spec ("unsigned");
+		        ->LONG= new_type_spec ("long");
+
+(symbol *)FundIdentList ->FundIdent:s = s;
+              ->FundIdentList:sL,',',FundIdent:s={
+					symbol *pS = sL;
+					while(pS->next) pS = pS->next;
+					pS->next = s;
+					return sL;
+			}
+
+(symbol *)FundIdent->DeclIdent:s=s;
+                   ->DeclIdent:s,'=',Addr:v ={
+					s->iv.initval = v;
+					s->init = SYMTAB_INIT_ADDRESS;
+					return s;
+				   }
+		           ->DeclIdent:s,'=','[',Constant:v,']' ={
+					s->iv.initval = v;
+					s->init = SYMTAB_INIT_VALUE;
+					return s;
+				   }
+
+(CLIST *)ConstList-> Constant:v={
+						return newCLIST(v);
+				  }
+                  -> ConstList:cL,Constant:v={
+				    CLIST *pCL = newCLIST(v);
+				    return CLISTchain(cL,pCL);
+			      }
+
+(int)Addr -> CompConst:v=v;
+
+(int)CompConst ->BaseCompConst:v=v;
+	->CompConst:v1, '+', BaseCompConst:v2=v1+v2;
+
+(int)BaseCompConst
+	->IDENTIFIER=0;
+	->Constant:v=v;
+//	->PtrRef
+	->'*' = -1;
+
+(symbol *)RecPtrDecl->RecType:t,POINTER, RecIdentList:s={
+				    link *l,*pD;
+					symbol *pS = s;
+					while(pS)
+					{
+						l = new_link();	//create new specifier
+						memcpy(l,t->type,sizeof(link));
+						l->tdef = 0;
+						pD = new_link();
+						pD->SYMTAB_DCL_TYPE = SYMTAB_POINTER;
+						pS->type = l;
+						l->next = pD;
+						pS->etype = pD;
+						pS = pS->next;
+					}
+					return s;
+				}
+
+(symbol *)RecDecl->RecType:t, RecIdentList:s={
+				    link *l;
+					symbol *pS = s;
+					while(pS)
+					{
+						l = new_link();	//create new specifier
+						memcpy(l,t->type,sizeof(link));
+						l->tdef = 0;
+						pS->type = l;
+						pS->etype = l;
+						pS = pS->next;
+					}
+					return s;
+                 }
+
+(symbol *)RecType->TYPEDEF:t ={
+				symbol *pSym;
+				pSym = findsym( Symbol_tab,t.yytext  );
+				if(pSym == NULL) fprintf(stderr,"Could not find %s\n",t.yytext);
+				return pSym;
+              }
+
+(symbol *)RecIdentList->RecIdent:s={s->Token = RECTYPE;return s; }
+                      ->RecIdentList:sL,',',RecIdent:s ={
+				symbol *pS = sL;
+				while(pS->next) pS = pS->next;
+				pS->next = s;
+				s->Token = RECTYPE;
+				return sL;
+			}
+
+(symbol *)RecIdent->DeclIdent:s=s;
+                  ->DeclIdent:s,'=',Addr:A={
+				    s->init = SYMTAB_INIT_ADDRESS;
+					s->iv.initval = A;
+					return s;
+				  }
+
+(symbol *)TYPEdecl->TYPE ,TypeIdentList:S=S;
+
+(symbol *)TypeIdentList->TypeIdent:s=s;
+                      ->TypeIdentList:sL,',',TypeIdent:s={s->next=sL;return s;}
+
+(symbol *)TypeIdent->DeclIdent:S1,LBracket,FieldInit:S2,RBracket={
+						/*****************************
+						** OK, this is probably the
+						** most difficult part of the
+						** entire compiler.  We need
+						** to deal with TWO symbol
+						** tables here, the struct_def
+						** table and the symbol_tab
+						** table.
+						*****************************/
+						link *pL;
+						structdef *pSD;
+						pL = new_link();
+						pL->tclass = 1;	//set to specifier
+						pL->tdef = 1;	//a typedef chain
+						pL->select.s.noun = SYMTAB_STRUCTURE;
+						pL->select.s.sclass = SYMTAB_TYPEDEF;
+						pSD = new_structdef(S1->name);	/* create struct def */
+						pL->select.s.const_val.v_struct = pSD;
+						add_spec_to_decl(pL,S1);
+						pSD->fields = S2;	/* set field chain */
+						pSD->size =  figure_struct_offsets(S2,1);
+						addsym( Struct_tab, pSD );
+						S1->Token = TYPEDEF;
+						return S1;
+                   }
+
+RBracket->']' = SymtabFlag=1;
+
+LBracket->'['=SymtabFlag=0;
+
+(symbol *)FieldInit->VarDecl:s=s;
+
+(symbol *)DEFINEdecl->DEFINE,DefIdentList:s=s;
+
+(symbol *)DefIdentList->DefIdent:S=S;
+            ->DefIdentList:sL,',',DefIdent:s ={s->next = sL;return s;}
+
+(symbol *)DefIdent->DeclIdent:S,'=',Constant:C ={
+            link *l = new_link();
+			l->tclass = SYMTAB_SPECIFIER;
+			l->SYMTAB_NOUN = SYMTAB_INT;
+			l->SYMTAB_SCLASS = SYMTAB_CONSTANT;
+			l->V_INT = C;
+			add_spec_to_decl (l,S);
+			return S;
+
+          }
+        ->DeclIdent:S,'=',StrConst:str={
+            link *l = new_link();
+			l->tclass = SYMTAB_SPECIFIER;
+			l->SYMTAB_NOUN = SYMTAB_MACRO;
+			l->SYMTAB_SCLASS = SYMTAB_CONSTANT;
+			l->V_STRING = str;
+			add_spec_to_decl (l,S);
+			return S;
+		}
+
+(char *)StrConst->STRING:t ={
+    char *s;
+	int l;
+
+	l = strlen(t.yytext);
+	s = malloc(l+1);
+	strcpy(s,t.yytext);
+//	printf("STRING=%s\n",s);
+	return s;
+}
+
+(symbol *)DeclIdent->IDENTIFIER:t ={
+	symbol *pSym = new_symbol(t.yytext,ScopeLevel );
+	AddSymbolToSymTab(SymtabFlag,pSym);
+	return pSym;
+}
+
+(NODE *)Ident->IDENTIFIER:t ={
+	symbol *pSym = findsym( Symbol_tab,t.yytext  );
+	if(pSym == NULL) fprintf(stderr,"Undefined Symbol %s\n",t.yytext);
+	return MakeLeaf(NODEID_IDENT,pSym,NULL);
+}
+
+(NODE *)MembrIdent->IDENTIFIER:t={
+	char *s = malloc(strlen(t.yytext)+1);
+	strcpy(s,t.yytext);
+	return MakeLeaf(NODEID_IDENT,s,NULL);
+}
+
+(int)Constant->HEX_CONSTANT:t = {
+			int v = (int)strtol(t.yytext,NULL,16);
+			return v;
+}
+        ->CONSTANT:t = {
+		   int v = atoi(t.yytext);
+		   return v;
+}
+		->CHAR_CONSTANT:t ={
+		   return t.yytext[0];
+}
+
+{
+
+#define SYNTAX_ERROR syntaxError()
+int SymtabFlag = 1;
+int IfLevel = 0;
+int ScopeLevel = 0;
+
+void syntaxError(void)
+{
+	extern int yyLine,yyCol;
+
+	fprintf(stderr,"%s, line %d, column %d\n", \
+  (PCB).error_message, yyLine, yyCol);
+  exit(1);
+}
+
+/***************************************************
+** PROCRoutine
+**  Create a node for a proceedure or function
+** block
+**
+** parameters:
+**	s1...pointer to symbol for function declaration (includes args)
+**	s2...Pointer to symbol for local variables
+**	n1...pointer to node for statement list
+**  n2...pointer to node for return statement
+**
+**************************************************/
+
+NODE *PROCRoutine(symbol *s1,symbol *s2,NODE *n1,NODE *n2)
+{
+	NODE *pN,*pL;
+	if(s2)	//are there any local variables?
+	{
+		MarkSymbolsAsLocal(s2);
+		pL = MakeLeaf(NODEID_PROCLOCALS,s2,s1);
+		n1 = MakeList(pL,n1);
+	}
+	if(n1)pN = MakeNode(NODEID_PROC,n1,n2);
+	else pN = MakeNode(NODEID_PROC,n2,NULL);
+	pN->symb = s1;	//add proc name to nodes
+	MarkSymbolsAsLocal(s1->type->next->SYMTAB_ARGS);
+	return pN;
+}
+
+symbol *PROCdecl(symbol *s, int V, symbol *s1)
+{
+	link *spec = new_link();
+	link *decl = new_link();
+	spec->tclass=SYMTAB_SPECIFIER;
+	spec->V_ULONG = V;	//this determines the address to call if the proc was initialized
+	spec->SYMTAB_NOUN = SYMTAB_VOID;
+	decl->SYMTAB_DCL_TYPE = SYMTAB_FUNCTION;
+	s->Token = PROCIDENT;	//checked by lexer
+	spec->next = decl;
+	s->type = spec;
+	s->etype = decl;
+	decl->SYMTAB_ARGS = s1;		//point to argument declarations
+	s->level = 0;
+	return s;
+}
+
+/********************************************
+** Create declarator for a FUNCTION
+**
+** Parameters:
+**	l........specifier for function type
+**  s.......,symbol table entry for function name
+**  V.......value of optional function address init
+**  s1.......chain of symbols that specify parameter list
+**
+** returns: Symbol s
+********************************************/
+
+symbol *FUNCdecl(link *l,symbol *s, int V, symbol *s1)
+{
+ 	link *decl = new_link();
+	decl->SYMTAB_DCL_TYPE = SYMTAB_FUNCTION;
+	s->Token = FUNCIDENT;	//checked by lexer
+	l->next = decl;
+	l->V_ULONG = V;	//this determines the address to call if the proc was initialized
+	s->level = 0;
+	s->type = l;
+	s->etype = decl;
+	decl->SYMTAB_ARGS = s1;		//point to argument declarations
+	return s;
+}
+
+
+void yyparse(void)
+{
+	/***************************************
+	** THIS is the function that we call to
+	** parse the ACTION! input file.
+	**************************************/
+
+	int tokenID;
+	extern int yylex(void);
+	char *yytext;
+	char *s;
+
+	init_action();
+	do
+	{
+		tokenID = yylex();	//get the next token
+		yytext = GetLexBuff();	//get the current lex buffer
+		s = malloc(strlen(yytext)+1);
+		strcpy(s,yytext);	//copy the lex buffer
+		PCB.input_code = tokenID;	//this is the next token
+		PCB.input_value.TokenID = tokenID;	//current token value tokenID
+		PCB.input_value.yytext = s;	//current toeken value lex buffer contents
+		PCB.input_context.TokenID = tokenID;	//tokenID for context member
+		PCB.input_context.yytext = s;			//lex buff for token context
+		action();	//parse the next token
+	}while(tokenID > 0);
+}
+
+}

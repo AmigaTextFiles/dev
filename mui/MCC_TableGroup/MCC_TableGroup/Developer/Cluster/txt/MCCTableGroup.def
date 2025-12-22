@@ -1,0 +1,173 @@
+|##########|
+|#MAGIC   #|FLJDMNFE
+|#PROJECT #|"MCCTableGroupLib"
+|#PATHS   #|"StdProject"
+|#LINK    #|""
+|#GUIDE   #|""
+|#STACK   #|"4096"
+|#FLAGS   #|xx-x-x-xxxx--xx-----------------
+|#USERSW  #|--------------------------------
+|#USERMASK#|--------------------------------
+|#SWITCHES#|x----xxxxx-xx---
+|##########|
+DEFINITION MODULE MCCTableGroup;
+
+(*------------------------------------------
+
+  :Module.      MCCTableGroup.mod
+  :Author.      Henning Thielemann
+  :Address.     Veilchenweg 34, 06118 Halle, Germany
+  :EMail.       henning.thielemann@student.uni-halle.de
+  :Version.     $VER: MCCTableGroup.mod 1.0 (06.01.98)
+  :Copyright.   Henning Thielemann
+  :Language.    Cluster
+  :Translator.  Amiga Cluster V2.0
+  :Contents.    Advanced column/row group
+  :Usage.       See MCCTableDemo.mod
+  :History.            [ht]  25-Feb-1998 : NIL-dereferences in a sub-module prevented
+  :History.            [ht]  19-Feb-1998 : TableGroup sometimes forgot to dispose objects, fixed
+  :History.     0.1    [ht]  06-Jan-1998 : initial definition
+
+--------------------------------------------*)
+
+FROM MuiO      IMPORT MuiTags, CustomClassPtr, AreaObject, GroupObject, CBOOLEAN;
+FROM Intuition IMPORT IntuitionBase, MethodID, MsgRoot;
+FROM System    IMPORT Regs;
+
+
+CONST
+  cTableGroup = "TableGroup.mcc";
+
+TYPE
+  PoolHeaderPtr     = DEFERRED POINTER Exec39     .PoolHeaderPtr;
+
+  Errors            = (none, notEnoughMemory, noSize,
+		       objectAlreadyMember, objectNotAMember,
+		       makeLong = $10000);
+  Directions        = (down, right, makeLong = $10000);
+  DropTypes         = (row, column, horizontal, vertical, makeLong = 31);
+  DropTypeSet       = SET OF DropTypes;   | default DragDrop calls TableReplace
+
+  TableGroupTags = TAGS OF MuiTags
+    tableCellHorizWeight   = $F9F8010F : LONGCARD;          |  V1 isg    horizontal weight of the current (empty) cell
+    tableCellVertWeight    = $F9F8010E : LONGCARD;          |  V1 isg    vertical weight of the current (empty) cell
+    tableColumn            = $F9F80101 : LONGCARD;          |  V1 isg    place next child in this column or ask for the column an object was dropped on
+    tableColumns           = $F9F8010C : LONGCARD;          |  V1 i.g    number of columns to be reserved
+    tableColumnSpace       = $F9F80109 : LONGCARD;          |  V1 isg    keep n characters of current font distance to the right column; if integer numbers aren't enough, denominator tags could be added in future
+    tableColumnSpan        = $F9F80103 : LONGCARD;          |  V1 isg    use space of the next n cells down from here for the next child
+    tableColumnWeight      = $F9F80113 : LONGCARD;          |  V1 i.g    horizontal weight of the current column
+    tableDropType          = $F9F80108 : DropTypeSet;       |  V1 isg    specify possible drop positions (horizontal, vertical for between cells; column, row for cells itself) or ask where an object was dropped
+    tableEmptyCells        = $F9F8010D : LONGCARD;          |  V1 is.    insert n empty cells
+    tableError             = $F9F80114 : Errors;            |  V1 ..g    find out the error which occurs since last question
+    tableFind              = $F9F80117 : AreaObject;        |  V1 is.    find the cell the object is in
+    tableGrowsTo           = $F9F80107 : Directions;        |  V1 isg    direction in which the table will be extended if necessary; implies the placing order: down means placing from left to right and from top to bottom
+    tableNextColumn        = $F9F80111 : LONGCARD;          |  V1 is.    place next child in this column, do not replace anything but extend table if necessary
+    tableNextRow           = $F9F80110 : LONGCARD;          |  V1 is.    place next child in this row, do not replace anything but extend table if necessary
+    tablePool              = $F9F80104 : PoolHeaderPtr;     |  V1 i.g
+    tablePoolPuddleSize    = $F9F80105 : LONGCARD;          |  V1 i..
+    tablePoolThreshSize    = $F9F80106 : LONGCARD;          |  V1 i..
+    tableRow               = $F9F80100 : LONGCARD;          |  V1 isg    place next child in this row or ask for the row an object was dropped on
+    tableRows              = $F9F8010B : LONGCARD;          |  V1 i.g    number of rows to be reserved
+    tableRowSpace          = $F9F8010A : LONGCARD;          |  V1 isg    keep n characters of current font distance to the row below; if integer numbers aren't enough, denominator tags could be added in future
+    tableRowSpan           = $F9F80102 : LONGCARD;          |  V1 isg    use space of the next n cells right from here for the next child
+    tableRowWeight         = $F9F80112 : LONGCARD;          |  V1 i.g    vertical weight of the current column
+    tableSkipColumns       = $F9F80116 : LONGINT;           |  V1 is.    skip n columns (n maybe < 0) and make it the current
+    tableSkipRows          = $F9F80115 : LONGINT;           |  V1 is.    skip n rows (n maybe < 0) and make it the current
+  END;
+
+  TableGroupTagAPtr = POINTER TO TableGroupTagA;
+  TableGroupTagA    = ARRAY OF TableGroupTags;
+  | all tags changing appearance require mInitChange/mExitChange
+  | do not use groupColumns, groupRows but tableColumns, tableRows
+  | use groupChild to add new childs or
+  |   to get the object placed at the current position
+
+CONST
+  mTableClear        = MethodID($F9F80103); | V1   clears complete table
+  mTableInsert       = MethodID($F9F80102); | V1   inserts new row or column, overlapping cells are stretched
+  mTableMove         = MethodID($F9F80104); | V1   moves a rectangular clip of objects from one table to another
+  mTableRemove       = MethodID($F9F80100); | V1   clears and returns object at specified position or removes a whole row or column
+  mTableReplace      = MethodID($F9F80101); | V1   replaces and returns object at specified position
+
+  clearRowCurrent    = -1;
+  clearColumnCurrent = -1;
+  clearRowsAll       = -1;
+  clearColumnsAll    = -1;
+  moveRowCurrent     = -1;
+  moveColumnCurrent  = -1;
+  moveRowsAll        = -1;
+  moveColumnsAll     = -1;
+  insertCurrent      = -1;
+  removeCurrent      = -1;
+  removeAll          = -1;
+
+TYPE
+  InsertDirections   = (row, column, makeLong = $10000);
+
+  pTableClearPtr     = POINTER TO pTableClear;
+  pTableClear        = RECORD OF MsgRoot;
+			 row,  column,
+			 rows, columns : LONGINT;
+		       END;
+
+  pTableInsertPtr    = POINTER TO pTableInsert;
+  pTableInsert       = RECORD OF MsgRoot;
+			 pos, num : LONGINT;
+			 dir      : InsertDirections;
+		       END;
+
+  pTableMovePtr      = POINTER TO pTableMove;
+  pTableMove         = RECORD OF MsgRoot;
+			 source  : GroupObject;
+			 dstRow, dstColumn,
+			 srcRow, srcColumn,
+			 rows,   columns : LONGINT;
+		       END;
+
+  pTableRemovePtr    = POINTER TO pTableRemove;
+  pTableRemove       = RECORD OF pTableInsert END;
+
+  pTableReplacePtr   = POINTER TO pTableReplace;
+  pTableReplace      = RECORD OF MsgRoot;
+			 obj         : AreaObject;
+			 row, column : LONGCARD;
+		       END;
+
+PROCEDURE MakeTableGroupObject (tags : LIST OF TableGroupTags) : GroupObject;
+
+| sets groupForward : false additionally
+PROCEDURE SetTableAttrs (object : GroupObject;
+			 tags   : LIST OF TableGroupTags);
+
+GROUP
+  ClassGrp =
+    MakeTableGroupObject, cTableGroup;
+
+  TagGrp =
+    Errors,         Directions,
+    DropTypes,      DropTypeSet,
+    TableGroupTagA, TableGroupTagAPtr,
+    TableGroupTags, SetTableAttrs;
+
+  MethodGrp =
+    mTableClear,    mTableInsert,
+    mTableMove,     mTableRemove,
+    mTableReplace,
+
+    clearRowCurrent, clearColumnCurrent,
+    clearRowsAll,    clearColumnsAll,
+    moveRowCurrent,  moveColumnCurrent,
+    moveRowsAll,     moveColumnsAll,
+    insertCurrent,
+    removeCurrent,   removeAll,
+
+    InsertDirections,
+    pTableClearPtr,   pTableClear,
+    pTableInsertPtr,  pTableInsert,
+    pTableMovePtr,    pTableMove,
+    pTableRemovePtr,  pTableRemove,
+    pTableReplacePtr, pTableReplace;
+
+  All = ClassGrp, TagGrp, MethodGrp;
+
+END MCCTableGroup.

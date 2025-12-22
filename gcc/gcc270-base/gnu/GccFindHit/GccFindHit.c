@@ -1,0 +1,258 @@
+/* GccFindHit V1.0, 22/05/95
+*
+*  The same than FindHit by Michael Sinz, but for GCC users
+*  Usage: FindHit <executable file> <list of offsets in hexadecimal>
+*  The file should have been linked with the '-g' flag passed to gcc
+*  to turn on debugging information (the 'stabs')
+*
+*  FindHit outputs the line numbers matching with the offsets given by
+*  Enforcer (or whatever). Currently, there is no need
+*  to provide the hunk number because it should always be zero.
+*
+*  Copyright (C) 1995 Daniel Verite -- daniel@brasil.frmug.fr.net
+*  This program is distributed under the General GNU Public License version 2
+*  See the file COPYING for information about the GPL
+*
+*/
+
+#include <stdio.h>
+#include <stdlib.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <string.h>
+
+#include "defs.h"
+
+extern int errno;
+
+int ExeFile,NbOffs;
+unsigned long *SearchOffs;
+
+int Read4 (long *buf)
+{
+  if (read (ExeFile,buf,4)==4) {
+    *buf = GETLONG(*buf);
+    return 1;
+  }
+  else
+    return 0;
+}
+
+struct Header *ReadHeader ()
+{
+  long nb,size;
+  struct Header *h;
+  int i;
+
+  /* skip hunk names */
+  while (Read4 (&size) && size)
+    lseek (ExeFile, size<<2, SEEK_CUR);
+
+  /* reads the number of hunks */
+  if (!Read4(&nb))
+    return NULL;
+  h = (struct Header*)malloc(sizeof(struct Header)+(nb-1)*sizeof(long));
+  if (!h)
+    return NULL;
+  h->nb_hunks = nb;
+  if (Read4 (&h->first) && Read4 (&h->last)) {
+    for (i=0; i<nb; i++)
+      if (!Read4 (&h->sizes[i])) {
+	free (h);
+	return NULL;
+      }
+  }
+  return h;
+} /* ReadHeader() */
+
+int long_cmp (long *e1,long *e2)
+{
+  return (*e1)<(*e2);
+} /* long_cmp() */
+
+void SkipRelocation ()
+{
+  unsigned long no; /* number of offsets */
+  long h;  /* hunk number */
+  while (Read4 (&no) && no && Read4 (&h))
+    lseek (ExeFile, no<<2, SEEK_CUR);
+}
+
+/* this function hasn't been tested; AFAIK, ld won't output short relocs,
+   so it's useless for now */
+void SkipShortRel ()
+{
+  unsigned long no;
+  short h;
+  while (Read4 (&no) && no && read (ExeFile, &h, sizeof h))
+    lseek (ExeFile, no<<1, SEEK_CUR);
+}
+
+/* can be slow if I/O buffering doesn't do some read-ahead */
+void SkipSymbols ()
+{
+  long nl; /* name length in long words */
+  while (Read4 (&nl) && nl) {
+    /* skips the name + the value */
+    lseek (ExeFile, (nl+1)<<2, SEEK_CUR);
+  }
+}
+
+void GetLines (long symsz, BSD_SYM *syms, long strsz, char *strings)
+{
+  long nbsyms = symsz/sizeof(BSD_SYM);
+  BSD_SYM *sym = syms;
+  unsigned char prev_type;
+  char *srcname="",*prev_src=srcname;
+  unsigned short prev_line=0;
+  unsigned long offs,prev_offs=-1UL;
+  int i;
+
+  while (nbsyms--) {
+    switch (sym->type) {
+    case N_SO:
+    case N_SOL:
+      srcname = strings + GETLONG (sym->strx);
+      break;
+    case N_SLINE:
+      offs = OFFSET_N_SLINE (GETLONG (sym->value));
+      for (i=0; i<NbOffs; i++) {
+	if (SearchOffs[i]>=prev_offs && SearchOffs[i]<offs) {
+	  printf ("%s: line %hd, offset 0x%lx\n", prev_src, prev_line,
+		  prev_offs);
+	}
+      }
+      prev_offs = offs;
+      prev_line = GETWORD (sym->desc);
+      prev_src = srcname;
+      break;
+    }
+    prev_type = sym->type;
+    sym++;
+  }
+  /* the last SLINE is a special case */
+  for (i=0; i<NbOffs; i++) {
+    if (SearchOffs[i]==prev_offs) {
+      printf ("%s: line %hd, offset 0x%lx\n", prev_src, prev_line,
+	      prev_offs);
+    }
+  }
+}
+
+void HunkDebug ()
+{
+  long hunksz, symsz, strsz;
+  struct bsd_header hdr;
+  long pos = lseek (ExeFile, 0, SEEK_CUR);
+  char *strings,*syms;
+
+  if (pos<0)
+    return;
+  if (Read4(&hunksz) && read (ExeFile, &hdr, sizeof(hdr)) == sizeof(hdr)) {
+    if (GETLONG(hdr.magic)==ZMAGIC) {
+      /* seems to be gcc-compiled */
+      strsz = GETLONG (hdr.strsz);
+      symsz = GETLONG (hdr.symsz);
+      if (strsz+symsz != 0) {
+	syms = (char*)malloc (symsz);
+	strings = (char*)malloc (strsz);
+	if (strings && syms) {
+	  if (read (ExeFile, syms, symsz)==symsz &&
+	      read (ExeFile, strings, strsz)==strsz) {
+	    GetLines (symsz, (BSD_SYM*)syms, strsz, strings);
+	  }
+	  free (strings); free (syms);
+	}
+      }
+    }
+  }
+  /* go to the end of the hunk whatever happened before */
+  lseek (ExeFile, pos+((hunksz+1)<<2), SEEK_SET);
+}
+
+void DoHunks (struct Header *h)
+{
+  long hnum,size,nsec=0;
+  while (Read4 (&hnum)) {
+    switch (hnum) {
+    case HUNK_CODE:
+    case HUNK_DATA:
+      if (Read4 (&size)) {
+	nsec++;
+	lseek (ExeFile, (size&0x3fffffff)<<2, SEEK_CUR);
+      }
+      break;
+    case HUNK_BSS:
+      nsec++;
+      Read4 (&size);
+    case HUNK_END:
+    case HUNK_BREAK:
+      break;
+    case HUNK_RELOC32:
+    case HUNK_RELOC16:
+    case HUNK_RELOC8:
+    case HUNK_DRELOC32:
+    case HUNK_DRELOC16:
+    case HUNK_DRELOC8:
+      SkipRelocation();
+      break;
+    case HUNK_RELOC32SHORT:
+      SkipShortRel ();
+      break;
+    case HUNK_SYMBOL:
+      SkipSymbols();
+      break;
+    case HUNK_DEBUG: /* here we are... */
+      HunkDebug ();
+      break;
+    default:
+      fprintf (stderr, "Unexpected hunk 0x%lx\n", hnum);
+      return;
+    }
+  }
+} /* DoHunks() */
+
+void Out(int code)
+{
+  if (ExeFile>0) close (ExeFile);
+  if (SearchOffs) free (SearchOffs);
+  exit (code);
+}
+
+int main(int argc,char **argv)
+{
+  long HunkNum;
+  struct Header *header=NULL;
+  int i;
+
+  if (argc<3) {
+    fprintf (stderr,"Usage: %s <file> <hex offsets>\n",argv[0]);
+    Out (1);
+  }
+  ExeFile = open (argv[1], O_RDONLY);
+  if (ExeFile<0) {
+    fprintf (stderr,"can't open %s:%s\n", argv[1], strerror (errno));
+    Out (1);
+  }
+  NbOffs = argc-2;
+  SearchOffs = (long*)malloc (sizeof (long)*NbOffs);
+  if (!SearchOffs) {
+    fprintf (stderr,"No memory\n");
+    Out (1);
+  }
+  for (i=0; i<NbOffs; i++) {
+    if (sscanf (argv[i+2],"%lx",&SearchOffs[i])!=1) {
+      fprintf (stderr, "Operand %s is not an hex offset\n", argv[i+2]);
+      Out (1);
+    }
+  }
+  if (!Read4(&HunkNum) || HunkNum!=HUNK_HEADER || !(header=ReadHeader())) {
+    fprintf (stderr, "%s is not an amigados executable\n", argv[1]);
+    Out (1);
+  }
+  DoHunks (header);
+  free (header);
+  Out (0);
+  return 0; /* another brick in the -Wall */
+} /* main() */
+

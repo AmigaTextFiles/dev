@@ -1,0 +1,134 @@
+<HTML>
+<HEAD>
+<TITLE>Snooping</TITLE>
+<meta name="DC.Language" content="en">
+<meta http-equiv="content-language" content="en">
+<meta http-equiv="content-type" content="text/html; charset=iso-8859-1">
+<!-- $Id: snoop.html 1.3 2003/12/09 10:57:18 wepl Exp wepl $ -->
+</HEAD>
+<BODY>
+<h3>Snooping</h3>
+<h4>What it is</h4>
+Snooping is a feature of WHDLoad which performs validating and logging of
+accesses to the Custom and Cia registers. If <a href="opt.html#Snoop">Snoop</a> is
+activated all invalid accesses will create an Access
+Fault and the installed program will be terminated. Such accesses are:
+<ul>
+<li>accesses to nonexistent registers
+<li>read accesses to Write Only registers
+<li>write accesses to Read Only registers
+<li>accesses to Early Read registers
+<li>byte write accesses (except <tt>bltcon0l</tt> and <tt>aud*vol+1</tt>)
+</ul>
+Strobe registers can be read or written. The set of valid Custom registers can
+vary between OCS (Old ChipSet - A500, A1000, old A2000), ECS (Enhanced ChipSet
+- A600, new A2000, A3000) and AGA (Advanced Graphics - A1200, A4000). This is
+useful especially to locate bugs in old programs caused by undefined accesses
+to new AGA registers.
+<h4>How it works</h4>
+If Snoop is enabled, WHDLoad marks the addresses of the custom and cia registers as
+invalid in the MMU translation tree. Because of this, each access to a custom or cia
+register will result in an Access Fault exception. The exception handler in
+WHDLoad handles this exception. First it checks if the access is valid. If the
+access is invalid the program will be terminated. If the access is valid and
+is a read operation it will be emulated and program execution
+continues. If it is a write operation WHDload additional saves the value written to
+a internal storage.
+<br>Because the overhead of the exception and the emulation sequence the
+program execution will slow down. How much it slows down depends on the CPU
+type, Chip Memory type (16/32-bit) and Stackpointer alignment if Chip
+Memory is 32-bit (LongWord aligned or not). It also differs for the access
+type (Byte/Word/LongWord, Read/Write). On the 68030 Writes are faster than
+Reads (because on reads the stackframe is 92 bytes on writes 32 bytes), on
+the 68060 Reads are faster because the emulation for Writes is more
+complex.
+<h4>Fast Snoop Mode</h4>
+The option <a href="opt.html#Snoop">Snoop/S</a> enables the fast snooping. Read accesses will not be
+checked. No special checks are performed. This mode may be useful to only
+get contents of the custom registers, e.g. to save a picture using <a
+href="sp.html">SP</a>.
+<h4>Copper List Scanner</h4>
+Since version 13 of WHDLoad also copperlists itself will be checked. The
+scanner will be activated on writes to the <tt>coplc</tt> registers if the copper
+dma is enabled, or when the installed program enables the coppper dma by
+writing the <tt>dmacon</tt> register. The scanner follows the copperlist and
+validates all Move instructions by applying the restrictions caused by the
+Snoop option (OCS/ECS/AGA). Skip and Wait (except CEND) instructions will be ignored. When it
+finds invalid entries the installed program will be terminated. The scanner
+follows branches (<tt>copjmp</tt>), detects loops and checks upto 16 sublists. The
+Move's in copperlists will be saved in the internal custom register file
+which is dumped at WHDLoad exit. The scanner is not active in Fast Snoop
+Mode.
+<h4>Blitter Priority Check</h4>
+When option ChkBltHog/S is activated WHDLoad will check that the installed
+program does not enable the <tt>BltHog</tt> bit by a write to the <tt>dmacon</tt> register.
+The Blitter Priority can cause problems on some hardware configuration in
+conjunction with large blitter operations (all channels used).
+<h4>Blitter Size Check</h4>
+When option ChkBltSize/S is activated WHDLoad will check that blitter jobs
+do not access any memory outside the BaseMem area. On write accesses to
+<tt>bltsize</tt> or <tt>bltsizh</tt> it checks if the line mode is enabled
+in <tt>bltcon1</tt>. If the line mode is active it will cancel the size check.
+Otherwise WHDLoad will calculate the first and the last word to access for
+each activated DMA channel. If one address is outside the BaseMem area the
+program will be terminated with a requester. The calculation is designed to
+work with all modes (ascending/descending, positive/negativ modulos, odd
+modulos/pointers).
+<br>Remember that the line drawing mode will not verified and that all blitter
+registers can also be written by the copper if <tt>copcon</tt> is set.
+<h4>Blitter Wait Check</h4>
+When option ChkBltWait/S is activated WHDLoad will use a instruction trace
+to verify that the installed program does correctly wait for the blitter to
+finish before starting a new blitter job. It uses a internal variable which
+represents the working state of the blitter. The variable is set when a
+write access to the <tt>bltsize</tt> or <tt>bltsizh</tt> occurs and cleared
+when read access to the <tt>dmaconr</tt> register is performed. On each
+write to a blitter register the value of the internal variable is checked,
+if it states a running blitter job the installed program will be terminated
+and WHDLoad will report the PC of the last started blitter job together
+with the actual access.
+<br>There are two major bottlenecks of this feature. First blitter usage
+via the copper are not checked and second the use of blitter interrupts
+will cause the check routine to report errors without necessity.
+<h4>Future</h4>
+It is planned to implement features like Freezing and Iconifing.
+For these, Snoop is an essential assumption. Therefore it is
+recommended for install authors to check their installs with Snoop to secure
+future compatibility.
+<h4>Requirements</h4>
+An MMU is required for the Snoop feature. Also WHDLoad must <a
+href="mmu.html#usercontrol">use</a> the MMU, therefore <a
+href="opt.html#MMU">MMU/S</a> must be enabled on 68030 machines.
+<h4>Limitations</h4>
+<ul>
+<li>68020 + 68851
+<ul>
+<li>this hardware is currently not supported
+</ul>
+<li>68030
+<ul>
+<li>no known limitations
+</ul>
+<li>68040
+<ul>
+<li>this hardware is currently not supported
+</ul>
+<li>68060
+<ul>
+<li><tt>movem</tt> instruction may access an invalid register without
+creating an Access Fault exception, this is possible because only the first
+access will be verified for matching a valid register
+<li><tt>move &lt;Cia/Custom register&gt;,sr</tt> will be executed incorrectly
+if it likes to change the supervisor portion of the status register, the
+supervisor portion will remain unchanged
+<li>any <tt>(ssp)+</tt> or <tt>-(ssp)</tt> in conjunction with a write
+access to a Cia or Custom register cannot be handled due stackframe
+problems, WHDLoad will detect such accesses and terminate with a
+appropriate requester
+<li>instructions must not access more than one snooped register at a time,
+that means that code like <tt>move.b ($dff006),($bfd800)</tt> cannot be
+handled, if such code occurs WHDLoad will show an Access Fault requester
+</ul>
+</ul>
+</BODY>
+</HTML>

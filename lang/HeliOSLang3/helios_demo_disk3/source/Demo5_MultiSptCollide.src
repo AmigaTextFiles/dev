@@ -1,0 +1,995 @@
+
+  \ ***********************************************************
+  \
+  \              MULTI SPRITES + COLLISIONS DEMO
+  \
+  \ ***********************************************************
+  \
+  \ This code demonstrates how to create multiple sprites and
+  \ then do collision detection.
+  \
+  \ This code builds upon the following Demos:
+  \
+  \ Demo1_SinglePF.src
+  \ Demo2_SinglePFCopper.src
+  \ Demo3_SimpleSprite.src
+  \ Demo4_MultiSprites.src
+  \
+  \ This code is then expanded in the following Demos:
+  \
+  \ Demo6_SimpleAnim.src
+  \ Demo7_MultiAnim.src
+  \
+  \ ***********************************************************
+  \
+  \
+  \ Note that it is easy to change the number of "Alien" sprites.
+  \
+  \ All you have to do is change the value of the CONSTANT Alien#.
+  \
+  \ If you locate Alien#, you will see that it normally has a value
+  \ of 15.  Try changing this to another value.
+  \
+  \
+  \ ***********************************************************
+  \ Re-initialise HeliOS dictionary to standard CORE vocabulary
+  \ ***********************************************************
+
+  \ This should always be used at the start of any program which
+  \ is to be repeatedly recompiled.
+
+  FORGET **CORE**
+
+  \ *************************
+  \ Load include symbol files
+  \ *************************
+  \
+  \ These "include files" are pre-compiled (for speed) versions of the
+  \ Amiga includes and the Helios system includes.
+  \
+  \ Uncomment the lines below for standalone compilation, but otherwise
+  \ it is better to set these include files from the Helios Forth menus
+
+  AMIGAINCLUDE HeliOS:HeliOS_AmigaInclude
+  USERINCLUDE  HeliOS:HeliOS_UserInclude
+
+  \ ****************************************
+  \ Create display imagery file name strings
+  \ ****************************************
+
+  \ These files are ordinary IFF's (and may be "PowerPacked" if required)
+  \
+  \ The pictures here will be loaded into each of the display BitMaps.
+  \
+
+  $CONSTANTL Slice1Pic $Helios:Source/Data/Pic1$
+
+  \ **************************************
+  \ Create display configuration constants
+  \ **************************************
+  \
+  \ Collect all "display-specific" parameters here and generate "named"
+  \ constants which make references easier than using numeric values.
+  \
+  \ Collecting these together here makes it easier to adjust things at any
+  \ time without having to search source code to replace values individually.
+  \
+
+
+  256                      CONSTANT DisplayHeight      \ Full PAL display
+  320                      CONSTANT DisplayWidth       \ Lores display
+  44                       CONSTANT DisplayTopLine     \ Display start
+
+  DisplayWidth             CONSTANT Slice1Width        \ Lores width
+  DisplayWidth 32 +        CONSTANT Slice1RasterWidth  \ Raster=SWidth+32
+  DisplayHeight            CONSTANT Slice1Height       \ Slice height
+  DisplayHeight 32 +       CONSTANT Slice1RasterHeight \ Slice Raster=DHgt+32
+  0                        CONSTANT Slice1Mode         \ Lores
+  3                        CONSTANT Slice1Planes       \ Slice bitplanes
+
+  \ The calculation below takes the number of bitplanes and calculates
+  \ how many colours this represents.
+  \
+  \ One bitplane gives two colours.
+  \
+  \ Each additional bitplane multiplies the number of colours by two.
+  \
+  \ Performing a single LSL operation on any number multipies by 2, so we
+  \ have a quick method of multiplying by two for our colour calculation.
+  \
+  \ In this case, we need "2 to the power 3", which is 2*2*2=8.
+  \
+  \ e.g.                              2*2*2
+  \                                   ^ ^ ^
+  \                                   Total number of planes = 3
+  \
+  \
+  \ So, we take the first value two
+  \
+  \ e.g.                              2*2*2
+  \                                   ^
+  \                                  Initial start value of 2
+  \
+  \ and we now need to multiply it by two "the_number_of_planes minus_one"
+  \ more times.
+  \
+  \ e.g.                              2*2*2
+  \                                     ^ ^
+  \                                     Total planes minus one
+  \
+  \
+  \ So, Number of colours = 2 operated on by LSL NumberOfPlanes-1 times.
+  \
+
+  2 Slice1Planes 1- LSL    CONSTANT Slice1Colours      \ A-slice colours
+
+  \ ***********************
+  \ Error handling routines
+  \ ***********************
+
+  \ This error handler allows all errors to be routed via a comprehensive
+  \ sequential closedown routine, which is associated with the HeliOS
+  \ system error handler word ERROR".
+  \
+  \ When ERROR" senses an error, it prints an associated error message
+  \ delimited by '"' characters, and then closes everything down using the
+  \ routine CLOSEDOWN below which you have supplied.
+  \
+  \ This simplifies errors checks to the use of a single word, ERROR", which
+  \ displays a text message and closes eveything down.
+  \
+
+  0 VARIABLE (CLOSEDOWN)
+
+  : ?CLOSEDOWNERROR
+
+  IF
+    CR
+    CR
+    TYPE
+    CR
+    CR
+    ." Press <Space> to quit!"
+    CR
+    CR
+    WAITSPACE
+    (CLOSEDOWN) @EXECUTE
+    QUIT
+  ELSE
+    DDROP
+  THEN
+  ;
+
+  LATESTCFA VARIABLE ERROR1
+
+  \ ****************************************
+  \ Create display pointer storage variables
+  \ ****************************************
+
+  \ Here we create a set of "pointers", initially set to a "null" value.
+  \
+  \ These "pointers" are set up as "long addresses" when various components
+  \ of the display system are allocated and initialised.
+  \
+  \ Note that initially these are all set to zero, and we clear them back
+  \ to zero when we de-allocate the associated resource.
+  \
+  \ These DPOINTERs are all initially set to "null" by using '0.'.
+  \
+  \ When we allocate memory or Amiga system resources in the program at
+  \ run-time, these pointers are updated to contain the 32-bit address
+  \ of the newly allocated resource.
+  \
+  \ Subsequently the symbolic DPOINTER name can be used in your code to
+  \ represent the associated address.
+
+  0. DPOINTER Display1             \ Main Display structure pointer
+  0. DPOINTER Slice1               \ Slice 1 Slice structure pointer
+
+  0. DPOINTER Slice1_ColorMap      \ Slice 1 ColourMap structure pointer
+
+  0. DPOINTER Slice1_RasInfo       \ Slice 1 RasInfo structure pointer
+
+  0. DPOINTER Slice1_BMap          \ Slice 1 BitMap structure pointer
+
+  0. DPOINTER Slice1_SliceControl  \ Slice 1 SliceControl structure pointer
+
+  \ *************
+  \ Colour tables
+  \ *************
+
+  \ Each colour entry requies 2 bytes of storage space
+
+  CREATEL Slice1_ColorTable        \ Create longword pointer to table
+  Slice1Colours 2* 0 ALLOTFILL     \ Allocate Slice1 colours * 2 bytes
+
+
+  \ *************************************
+  \ Copper strip for graduated background
+  \ *************************************
+
+  0. DVARIABLE Copper              \ 32-bit CopperList pointer store
+  0. DVARIABLE CopperLength        \ 32-bit CopperList length store
+
+  : AddCopper                      \ Add custom copper list to display
+
+  Display1                         \ We are adding CopperList to Display1
+  Copper D@
+  ADDCOPPERSTRIP
+  SORTSTRIPTABLE
+  LINKSTRIPS
+  DDROP
+  ;
+
+  : RemCopper                      \ Remove custom copper list from display
+
+  Display1                         \ We are removing CopperList from Display1
+  Copper D@
+  DFLAG
+  IF
+    REMCOPPERSTRIP
+    LINKSTRIPS
+    DDROP
+  ELSE
+    DDDROP
+  THEN
+  ;
+
+  : Create_Copper
+
+  COPPERSTART
+  Copper D!
+  0 [ DECIMAL ]  45 [ HEX ] FFFE COPPERWAIT  DROP   0100 18E COPPERMOVE  DROP
+  0 [ DECIMAL ]  60 [ HEX ] FFFE COPPERWAIT  DROP   0200 18E COPPERMOVE  DROP
+  0 [ DECIMAL ]  75 [ HEX ] FFFE COPPERWAIT  DROP   0300 18E COPPERMOVE  DROP
+  0 [ DECIMAL ]  90 [ HEX ] FFFE COPPERWAIT  DROP   0400 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 105 [ HEX ] FFFE COPPERWAIT  DROP   0500 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 120 [ HEX ] FFFE COPPERWAIT  DROP   0600 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 135 [ HEX ] FFFE COPPERWAIT  DROP   0700 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 150 [ HEX ] FFFE COPPERWAIT  DROP   0800 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 165 [ HEX ] FFFE COPPERWAIT  DROP   0900 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 180 [ HEX ] FFFE COPPERWAIT  DROP   0A00 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 195 [ HEX ] FFFE COPPERWAIT  DROP   0B00 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 210 [ HEX ] FFFE COPPERWAIT  DROP   0C00 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 225 [ HEX ] FFFE COPPERWAIT  DROP   0D00 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 240 [ HEX ] FFFE COPPERWAIT  DROP   0E00 18E COPPERMOVE  DROP
+  0 [ DECIMAL ] 255 [ HEX ] FFFE COPPERWAIT  DROP   0F00 18E COPPERMOVE  DROP
+  [ DECIMAL ]
+  COPPEREND
+  CopperLength D!   Copper D!
+  ADDCOPPER
+  ;
+
+  : Free_Copper                  \ Closes down and frees copperlist memory
+
+  RemCopper
+  Copper D@ FREEMEMORY
+  ;
+
+  \ ***********************************
+  \ Create Display and Slice structures
+  \ ***********************************
+
+  \ This routine simply makes blank structures, which then need to be
+  \ initialised later (in the CREATE_DISPLAY routine).
+
+  : CREATE_DSLICES
+
+  DS_SIZEOF MAKESTRUCTURE Display1 MAKEPOINTER  \ Main "Display" structure
+
+  SL_SIZEOF MAKESTRUCTURE Slice1   MAKEPOINTER  \ Display "Slice" structure
+  ;
+
+  : FREE_DSLICES
+
+  Slice1    DDUP FREEMEMORY   CLEARPOINTER
+  Display1  DDUP FREEMEMORY   CLEARPOINTER
+  ;
+
+  \ ******************************
+  \ Create RasInfo structures etc.
+  \ ******************************
+
+  : CREATE_RASINFO
+
+  \ First allocate and initialise complete RasInfo structures.
+  \
+  \ This routine automatically allocates all BitMaps etc.
+  \
+
+  Slice1RasterWidth Slice1RasterHeight Slice1Planes  OPENRASINFO
+  DFLAG0= ERROR" Fail: RasInfo1"
+  Slice1_RasInfo MAKEPOINTER
+
+  \ Set invisible area "sprite margins" for slice RasInfo
+
+  16              Slice1_RasInfo         ri_RxOffset    INDEX!L
+  16              Slice1_RasInfo         ri_RyOffset    INDEX!L
+
+  \ Store BitMap pointer - often useful for later reference
+
+  Slice1_RasInfo  ri_BitMap INDEXD@L Slice1_BMap MAKEPOINTER
+  ;
+
+  : FREE_RASINFO
+
+  Slice1_RasInfo   DDUP CLOSERASINFO   CLEARPOINTER
+  ;
+
+  \ ********************************
+  \ Create Display/Slice Copperlists
+  \ ********************************
+
+  \ This function builds the main display copperlist by:
+  \
+  \ 1. Initialising the Slice data structure
+  \ 2. Calling MAKECOPSTRIP for the slice, to build a copperlist
+  \ 3. Calling MAKEDISPLAY to build the master Display copperlist
+  \
+
+  : CREATE_DISPLAY
+
+  \ First initialise main display structures
+
+  Slice1                           Display1  DS_Slice     INDEXD!L
+
+  Slice1Width                      Slice1    SL_DWidth    INDEX!L
+  Slice1Height                     Slice1    SL_DHeight   INDEX!L
+  DisplayTopLine                   Slice1    SL_DyOffset  INDEX!L
+  Slice1_RasInfo                   Slice1    SL_RasInfo   INDEXD!L
+  Slice1_ColorMap                  Slice1    SL_ColorMap  INDEXD!L
+  Slice1Mode                       Slice1    SL_Modes     INDEX!L
+
+  \ Generate copper list information for each of the display slices
+
+  Slice1 MAKECOPSTRIP
+  D0= ERROR" Fail: Slice1CopStrip"
+
+  \ Make display
+
+  Display1 MAKEDISPLAY
+  D0= ERROR" Fail: Display1"
+  ;
+
+  : FREE_DISPLAY
+
+  Display1                 FREEDISPLAY
+  Slice1                   FREECOPSTRIP
+  ;
+
+  \ ********************************************************
+  \ Create SliceControl structures for double buffered slice
+  \ ********************************************************
+
+  \ SliceControl structures are used to control any slices which perform
+  \ mapping or scrolling functions, or which require double or triple
+  \ playfield buffering.
+  \
+  \ In this case we have one slice which does not scroll, is not mapped,
+  \ but IS double buffered.
+  \
+
+  : CREATE_SLICECONTROL
+
+  \ Make SliceControl for double buffered bitmap display
+
+  Slice1  0 0 MAKESLICECONTROL
+  DFLAG0= ERROR" Fail: SliceControl1"
+  Slice1_SliceControl MAKEPOINTER
+
+  \ Install slice controls into HeliOS display control system
+
+  Slice1_SliceControl  INSTALLSLICECONTROL
+  ;
+
+  : FREE_SLICECONTROL
+
+  CLEARSLICECONTROLS
+  Slice1_SliceControl  CLOSESLICECONTROL
+  ;
+
+  \ These routines load an IFF picture into supplied BitMap, and correctly
+  \ initialises the supplied ColorTable.
+  \
+  \ The ColorTable is then used to create an initialised ColorMap structure.
+  \
+
+  : CREATE_IMAGERY
+
+  Slice1_BMap
+  Slice1_ColorTable
+  Slice1Pic
+  10 2 DOSLIB                        \ Call to internal HeliOS library
+  10 <> ERROR" Fail: Slice1Pic"
+
+  Slice1_ColorTable  Slice1Colours MAKECOLORMAP  \ Allocate ColourMap
+  DFLAG0= ERROR" Fail: Slice1ColorMap"
+  Slice1_ColorMap MAKEPOINTER
+  ;
+
+  : FREE_IMAGERY
+
+  Slice1_ColorMap  DDUP FREECOLORMAP  CLEARPOINTER
+  ;
+
+  \ **************
+  \ Collision Demo
+  \ **************
+
+  \ ************************
+  \ Collision Demo constants
+  \ ************************
+
+  \ Set up a number of constants which determine various aspects of the
+  \ demo, e.g. How many Bullets required
+  \
+  \ Change these values as required
+  \
+
+  15 CONSTANT Bullet#           \ Number of Bullets available
+  15 CONSTANT Alien#            \ Number of Aliens available
+  8  CONSTANT BulletSpeed       \ Speed of Bullet
+  6  CONSTANT FiringRate        \ Speed of gun reload
+  4  CONSTANT GunSpeed          \ Speed of Gun movement
+  8  CONSTANT AlienMaxXSpeed    \ Maximum speed of Alien movement
+  4  CONSTANT AlienMaxYSpeed    \ Maximum speed of Alien movement
+
+  \ ****************************************************
+  \ Create collision demo pointers and storage variables
+  \ ****************************************************
+
+  0. DPOINTER GunSpriteSet         \ Gun sprite image
+  0. DPOINTER BulletSpriteSet      \ Bullet sprite image
+  0. DPOINTER AlienSpriteSet       \ Alien sprite images
+
+  CREATE AlienTable                \ Alien sprite storage table
+  Alien# 4* 0 ALLOTFILL            \ Space allocated = Number_of_Aliens*4
+                                   \ This table has to hold a number of
+                                   \ 32-bit (4-byte) numbers, because
+                                   \ each Alien sprite is a 32-bit pointer
+
+  CREATE BulletTable               \ Bullet sprite pointer storage table.
+  Bullet# 4* 0 ALLOTFILL           \ Space allocated = Number_of_Bullets*4
+                                   \ This table has to hold a number of
+                                   \ 32-bit (4-byte) numbers, because
+                                   \ each Bullet sprite is a 32-bit pointer
+
+  CREATE  AlienCollHandlerTable    \ Alien collision handler table
+  Alien# 4* 0 ALLOTFILL
+
+  CREATE  BulletCollHandlerTable   \ Bullet collision handler table
+  Bullet# 4* 0 ALLOTFILL
+
+  0 VARIABLE     FireTimer         \ Gun reload rate store
+
+  \ *************************
+  \ Sprite collision routines
+  \ *************************
+
+  \ Note that in this instance the routines below are the same, and
+  \ could have been replaced by a single routine........
+
+  \ This routine is called when a Bullet collides.
+
+  : BulletHit
+
+  2 DDROPS                        \ Drop collisionmask and hit-object pointer
+
+  DDUP SpriteCtrl_CollFlag D+ 0!L \ Disable further collisions
+  REMOVESPRITE                    \ Remove Bullet
+  ;
+
+  \ This routine is called when the Alien collides.
+
+  : AlienHit
+
+  2 DDROPS                        \ Drop collisionmask and "hitting" object
+  DDUP SpriteCtrl_CollFlag D+ 0!L \ Disable further collisions
+  REMOVESPRITE                    \ Remove Alien
+  ;
+
+  \ ***************************
+  \ Create HitMasks and MeMasks
+  \ ***************************
+
+  \ Collisions can only occur between objects which have coincident bits
+  \ set in HitMask-MeMask or MeMask-HitMask pairs
+  \
+  \ Each bit of the HitMask/MeMask pair have a corresponding position in
+  \ a collision table which stores an array of collision routines.
+  \
+  \ In the event of a collision, the routine in an object's Collision Table
+  \ corresponding to the HitMask-MeMask bit coincidence will be called
+  \ with 3 parameters: the two colliding objects and the collision HitMask
+  \
+  \ The stack on a collision call looks like this:
+  \
+  \ CollisionHitMask(l) = Top 32-bit value on stack
+  \ CollidingObject(l)  = 2nd 32-bit value on stack
+  \ This Object(l)      = 3rd 32-bit value on stack
+  \
+  \ Here are two examples:
+  \
+  \   00000000000000000000000000000010.  = Object A HitMask
+  \   00000000000000000000000000000000.  = Object B HitMask
+  \   00000000000000000000000000000001.  = Object C HitMask
+  \
+  \   00000000000000000000000000000000.  = Object A MeMask
+  \   00000000000000000000000000000011.  = Object B MeMask
+  \   00000000000000000000000000000000.  = Object C MeMask
+  \
+  \ Would allow A and B to collide, B and C to collide, but not A and C.
+  \
+  \ B and C would run the routine at position 1 in the collision table
+  \ A and B would run the routine at position 2 in the collision table
+  \
+  \ -----------------------------------------------------------
+  \
+  \   00000000000000000000000000000011.  = Object A HitMask
+  \   00000000000000000000000000000001.  = Object B HitMask
+  \   00000000000000000000000000000001.  = Object C HitMask
+  \
+  \   00000000000000000000000000000000.  = Object A MeMask
+  \   00000000000000000000000000000000.  = Object B MeMask
+  \   00000000000000000000000000000010.  = Object C MeMask
+  \
+  \ Would allow just A and C to collide
+  \
+  \ A and C would run the routine at position 2 in the collision table
+  \
+
+  BIN
+
+  00000000000000000000000000000001.  DCONSTANT  BulletHitMask
+  00000000000000000000000000000000.  DCONSTANT  AlienHitMask
+
+  00000000000000000000000000000000.  DCONSTANT  BulletMeMask
+  00000000000000000000000000000001.  DCONSTANT  AlienMeMask
+
+  DECIMAL
+
+
+  CREATEL BulletCollTable
+  -1 ,                        \ -1 = The "1" means there is 1 entry in table
+                              \      The "-" signifies that it is a HeliOS
+                              \      16-bit CFA rather than machine code
+
+  FIND BulletHit ,            \ Find BulletHit and store HeliOS word CFA
+
+  CREATEL AlienCollTable
+  -1 ,                        \ -1 = The "1" means there is 1 entry in table
+                              \      The "-" signifies that it is a HeliOS
+                              \      16-bit CFA rather than machine code
+
+  FIND AlienHit ,             \ Find AlienHit and store HeliOS word CFA
+
+
+  \ *************************
+  \ Set up collision handlers
+  \ *************************
+
+  : CREATE_COLLISIONS
+
+  Bullet# 0
+  DO
+    GETCOLLHANDLER
+    DFLAG0= ERROR" Fail: Bullet CollHandler"
+    DDUP BulletCollHandlerTable I 4* + D!
+    BulletTable I 4* + D@  SpriteCtrl_CollHandler  INDEXD!L
+  LOOP
+
+  Alien# 0
+  DO
+    GETCOLLHANDLER
+    DFLAG0= ERROR" Fail: Alien CollHandler"
+    DDUP AlienCollHandlerTable I 4* + D!
+    AlienTable I 4* + D@  SpriteCtrl_CollHandler  INDEXD!L
+  LOOP
+  ;
+
+  : FREE_COLLISIONS
+
+  Alien# 0
+  DO
+    Alien# 1- I - 4*
+    AlienCollHandlerTable +
+    D@ FREECOLLHANDLER
+  LOOP
+
+  Bullet# 0
+  DO
+    Bullet# 1- I - 4*
+    BulletCollHandlerTable +
+    D@ FREECOLLHANDLER
+  LOOP
+  ;
+
+  \ *****************
+  \ Boundary routines
+  \ *****************
+
+  \ Alien boundary sense routine
+
+  : AlienBoundary
+
+  DDUP SETSTRUCTURE5
+  SpriteCtrl_VisiHit INDEX@L                 \ Get boundary hit mask word
+  0 BTST                                     \ Did it hit left boundary
+  IF
+    SpriteCtrl_UserData1 STRUCTURE5 @L       \ Reverse X-motion
+    NEGATE
+    SpriteCtrl_UserData1 STRUCTURE5 !L
+  ELSE
+    1 BTST                                   \ Did it hit right boundary
+    IF
+      SpriteCtrl_UserData1 STRUCTURE5 @L     \ Reverse X-motion
+      NEGATE
+      SpriteCtrl_UserData1 STRUCTURE5 !L
+    THEN
+  THEN
+
+  2 BTST                                     \ Did it hit upper boundary
+  IF
+    DROP
+    SpriteCtrl_UserData2 STRUCTURE5 @L       \ Reverse Y-motion
+    NEGATE
+    SpriteCtrl_UserData2 STRUCTURE5 !L
+  ELSE
+    3 BTST                                   \ Did it hit lower boundary
+    IF
+      DROP
+      SpriteCtrl_UserData2 STRUCTURE5 @L     \ Reverse Y-motion
+      NEGATE
+      SpriteCtrl_UserData2 STRUCTURE5 !L
+    ELSE
+      DROP
+    THEN
+  THEN
+  ;
+
+  \ Remove Bullet - called when bullet hits boundary at edge of display
+
+  : BulletRemove
+
+  RemoveSprite
+  ;
+
+  \ ****************************
+  \ User input response routines
+  \ ****************************
+
+  : Fire
+
+  RAWKEY @ 64 =
+  JOY1FIRE OR
+  IF
+    FireTimer @ 0<
+    IF
+      FiringRate FireTimer !
+      Bullet# 0
+      DO
+        BulletTable I 4* + D@ SETSTRUCTURE1
+        SpriteCtrl_Running STRUCTURE1 @L 0=
+        IF
+          1 SpriteCtrl_Running STRUCTURE1 !L
+          GunSpriteSet 8. D+ D@L SETSTRUCTURE2
+
+          SpriteCtrl_XPos STRUCTURE2 @L 5 +
+          SpriteCtrl_XPos STRUCTURE1 !L
+
+          SpriteCtrl_YPos STRUCTURE2 @L 2 -
+          SpriteCtrl_YPos STRUCTURE1 !L
+
+          SpriteCtrl_UserData1 STRUCTURE1
+          SpriteCtrl_YAdd STRUCTURE1 D!L
+
+          BulletSpeed NEGATE SpriteCtrl_UserData1 STRUCTURE1 !L
+
+          1 SpriteCtrl_CollFlag STRUCTURE1 !L
+          1 SpriteCtrl_Flags STRUCTURE1 !L
+
+          0. STRUCTURE1 INSTALLSPRITE
+          LEAVE
+        THEN
+      LOOP
+    ELSE
+      FireTimer DEC
+    THEN
+  THEN
+  ;
+
+  : MoveGun
+
+  RAWKEY @ 78 =
+  JOY1LEFTRIGHT 0>
+  OR
+  IF
+     GunSpeed
+     19 320
+     GunSpriteSet 8. D+ D@L SpriteCtrl_XPos D+
+     LIMIT+!L
+  ELSE
+    RAWKEY @ 79 =
+    JOY1LEFTRIGHT 0<
+    OR
+    IF
+     GunSpeed NEGATE
+     19 320
+     GunSpriteSet 8. D+ D@L SpriteCtrl_XPos D+
+     LIMIT+!L
+    THEN
+  THEN
+  ;
+
+  \ *********************
+  \ Create sprite objects
+  \ *********************
+
+  : CREATE_SPRITES
+
+  \ ----------
+  \ Gun sprite
+  \ ----------
+
+  Slice1_BMap
+  154 272
+  13 15
+  1
+  MAKESPRITESET
+  DFLAG0= ERROR" Fail: Gun SpriteSet"
+  GunSpriteSet MAKEPOINTER
+
+  GunSpriteSet 8. D+ D@L
+  DDUP  SpriteCtrl_XPos D+       170 -ROT !L
+        SpriteCtrl_YPos D+       239 -ROT !L
+
+  Slice1_SliceControl   GunSpriteSet    INITSPRITESET
+
+  \ --------------
+  \ Bullet sprites
+  \ --------------
+
+  Slice1_BMap
+  159 279
+  3 7
+  1
+  MAKESPRITESET
+  DFLAG0= ERROR" Fail: Bullet SpriteSet"
+  BulletSpriteSet MAKEPOINTER
+
+  Slice1_SliceControl   BulletSpriteSet    INITSPRITESET
+
+  Bullet# 0
+  DO
+    BulletSpriteSet 8. D+ D@L CLONESPRITE
+    DFLAG0= ERROR" Fail: Bullet Sprite"
+    DDUP BulletTable I 4* + D!
+    SETSTRUCTURE1
+
+    BulletCollTable        SpriteCtrl_CollTable      STRUCTURE1 D!L
+    BulletHitMask          SpriteCtrl_HitMask        STRUCTURE1 D!L
+    BulletMeMask           SpriteCtrl_MeMask         STRUCTURE1 D!L
+    -2                     SpriteCtrl_VisiZone       STRUCTURE1 !L
+    4                      SpriteCtrl_LeftZone       STRUCTURE1 !L
+    4                      SpriteCtrl_RightZone      STRUCTURE1 !L
+    4                      SpriteCtrl_UpZone         STRUCTURE1 !L
+    10                     SpriteCtrl_DownZone       STRUCTURE1 !L
+    ' BulletRemove CFA     SpriteCtrl_VisiForth      STRUCTURE1 !L
+  LOOP
+
+  \ -------------
+  \ Alien sprites
+  \ -------------
+
+  Slice1_BMap
+  24 276
+  14 9
+  1
+  MAKESPRITESET
+  DFLAG0= ERROR" Fail: Alien SpriteSet"
+  AlienSpriteSet MAKEPOINTER
+
+  Slice1_SliceControl   AlienSpriteSet    INITSPRITESET
+
+  Alien# 0
+  DO
+    AlienSpriteSet 8. D+ D@L CLONESPRITE
+    DFLAG0= ERROR" Fail: Alien Sprite"
+    DDUP AlienTable I 4* + D!
+    SETSTRUCTURE1
+
+    ALienCollTable         SpriteCtrl_CollTable      STRUCTURE1 D!L
+    AlienHitMask           SpriteCtrl_HitMask        STRUCTURE1 D!L
+    AlienMeMask            SpriteCtrl_MeMask         STRUCTURE1 D!L
+    1                      SpriteCtrl_VisiZone       STRUCTURE1 !L
+    4                      SpriteCtrl_LeftZone       STRUCTURE1 !L
+    4                      SpriteCtrl_RightZone      STRUCTURE1 !L
+    4                      SpriteCtrl_UpZone         STRUCTURE1 !L
+    25                     SpriteCtrl_DownZone       STRUCTURE1 !L
+    ' AlienBoundary CFA    SpriteCtrl_VisiForth      STRUCTURE1 !L
+    SpriteCtrl_UserData1 STRUCTURE1 SpriteCtrl_XAdd  STRUCTURE1 D!L
+    SpriteCtrl_UserData2 STRUCTURE1 SpriteCtrl_YAdd  STRUCTURE1 D!L
+  LOOP
+  ;
+
+  : FREE_SPRITES
+
+  Alien# 0
+  DO
+    Alien# 1- I - 4* AlienTable +
+    DUP
+    D@ FREEMEMORY
+    D0!
+  LOOP
+
+  AlienSpriteSet  DDUP FREESPRITESET CLEARPOINTER
+
+  Bullet# 0
+  DO
+    Bullet# 1- I - 4* BulletTable +
+    DUP
+    D@ FREESPRITE
+    D0!
+  LOOP
+
+  BulletSpriteSet DDUP FREESPRITESET CLEARPOINTER
+  GunSpriteSet    DDUP FREESPRITESET CLEARPOINTER
+  ;
+
+  \ *****************
+  \ Re-Install Aliens
+  \ *****************
+
+  : ?Install_Aliens
+
+  \ Check to see if any Aliens are still running
+
+  1                                             \ Put 1 flag on stack
+  Alien# 0                                      \ Loop for all Aliens
+  DO
+    AlienTable I 4* + D@ SETSTRUCTURE7
+    SpriteCtrl_Running STRUCTURE7 @L            \ If an Alien is running
+    IF
+      DROP 0                                    \ Change '1' on stack to '0'
+    THEN
+  LOOP
+
+  \ If any Alien was running flag will now be '0' so next code is skipped
+
+  IF
+    Alien# 0
+    DO
+      AlienTable I 4* + D@ SETSTRUCTURE7
+
+      1              SpriteCtrl_CollFlag    STRUCTURE7 !L
+      1              SpriteCtrl_Flags       STRUCTURE7 !L
+      280 RND 26 +   SpriteCtrl_XPos        STRUCTURE7 !L
+      180 RND 26 +   SpriteCtrl_YPos        STRUCTURE7 !L
+      AlienMaxXSpeed RND 2 MAX 1 RND IF NEGATE THEN
+                     SpriteCtrl_UserData1   STRUCTURE7 !L
+      AlienMaxYSpeed RND 1 MAX 1 RND IF NEGATE THEN
+                     SpriteCtrl_UserData2   STRUCTURE7 !L
+      0. STRUCTURE7 INSTALLSPRITE
+    LOOP
+  THEN
+  ;
+
+  \ *********************
+  \ Close down everything
+  \ *********************
+
+  : CLOSEDOWN
+
+  FREE_COLLISIONS
+  FREE_SPRITES
+  FREE_COPPER
+  FREE_SLICECONTROL
+  FREE_DISPLAY
+  FREE_IMAGERY
+  FREE_RASINFO
+  FREE_DSLICES
+  RESETERROR"
+  ;
+
+  LATESTCFA (CLOSEDOWN) !
+
+  : TestDisplay          \ Start of program
+
+  SCRCLR
+  CR
+
+  ."        **********************************************************"
+  CR 6 FPENSET
+  ."                     MULTI SPRITES + COLLISIONS DEMO"
+  CR 1 FPENSET
+  ."        **********************************************************"
+  CR
+  CR
+  ."        This code demonstrates how to create multiple sprites and "
+  CR
+  ."        then do collision detection."
+  CR
+  CR
+  ."        This code builds upon the following Demos:"
+  CR
+  CR
+  ."        Demo1_SinglePF.src"
+  CR
+  ."        Demo2_SinglePFCopper.src"
+  CR
+  ."        Demo3_SimpleSprite.src"
+  CR
+  ."        Demo4_MultiSprites.src"
+  CR
+  CR
+  ."        This code is then expanded in the following Demos:"
+  CR
+  CR
+  ."        Demo6_SimpleAnim.src"
+  CR
+  ."        Demo7_MultiAnim.src"
+  CR
+  ."        **********************************************************"
+  CR 6 FPENSET
+  ."                  Press <Space> or <L-Mouse> to see Demo"
+  CR 3 FPENSET
+  ."          Use a Joystick to move the gun turret and fire bullets"
+  CR
+  ."        **********************************************************"
+  CR
+
+  WAITSPACE
+
+  SCRCLR
+
+  ERROR1 SETERROR"       \ Redirect system errors to our routine ERROR1
+
+  CREATE_DSLICES
+  CREATE_RASINFO
+  CREATE_IMAGERY
+  CREATE_DISPLAY
+  CREATE_SLICECONTROL
+  CREATE_COPPER
+  CREATE_SPRITES
+  CREATE_COLLISIONS
+
+  HeliOS_On
+
+  GunSpriteSet 8. D+ D@L INSTALLSPRITE
+
+  1 FrameRate !L
+
+  Display1 SHOWDISPLAY
+
+  BEGIN
+    WAITFRAME
+
+    ?Install_Aliens
+
+    Fire
+
+    MoveGun
+
+    ?TERMINAL 27 =
+  UNTIL
+
+  -3 GunSpriteSet 8. D+ D@L SpriteCtrl_Flags INDEX!L
+
+  Alien# 0
+  DO
+  -3 AlienTable I 4* + D@ SpriteCtrl_Flags INDEX!L
+  LOOP
+
+  Bullet# 0
+  DO
+    -3 BulletTable I 4* + D@ SpriteCtrl_Flags INDEX!L
+  LOOP
+
+  5 DELAY
+
+  HeliOS_Off
+
+  CLOSEDOWN
+  ;
+
+  TestDisplay

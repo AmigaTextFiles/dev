@@ -1,0 +1,251 @@
+/* $Id: dos.h 20404 2003-12-24 15:27:23Z falemagn $ */
+OPT NATIVE, PREPROCESS, POINTER
+MODULE 'target/exec/types', 'target/dos/bptr', 'target/aros/macros'
+{#include <dos/dos.h>}
+NATIVE {DOS_DOS_H} CONST
+
+TYPE BPTR IS NATIVE {BPTR} PTR
+TYPE BSTR IS NATIVE {BSTR} ARRAY
+
+#define BADDR(x) Baddr(x)
+PROC Baddr(x:BPTR) IS x !!VALUE!!PTR
+#define MKBADDR(x) Mkbaddr(x)
+PROC Mkbaddr(x:PTR) IS x !!VALUE!!BPTR
+
+
+/* The name of the dos.library. Use this constant instead of the string. */
+NATIVE {DOSNAME} CONST
+#define DOSNAME dosname
+STATIC dosname = 'dos.library'
+
+NATIVE {DOSTRUE}  CONST DOSTRUE  = (-1)
+NATIVE {DOSFALSE} CONST DOSFALSE = ( 0)
+
+
+/* Number of so-called "ticks" in a second. */
+NATIVE {TICKS_PER_SECOND} CONST TICKS_PER_SECOND = 50
+
+NATIVE {DateStamp} OBJECT datestamp
+   {ds_Days}	days	:VALUE   /* Number of days since 1.1.1978 */
+   {ds_Minute}	minute	:VALUE /* Number of minutes since midnight */
+   {ds_Tick}	tick	:VALUE   /* Number of ticks (1/50 second) in the current minute
+                      Note that this may not be exact */
+ENDOBJECT
+
+
+NATIVE {MAXFILENAMELENGTH} CONST MAXFILENAMELENGTH = 108
+
+NATIVE {MAXCOMMENTLENGTH} CONST MAXCOMMENTLENGTH = 80
+
+NATIVE {FileInfoBlock} OBJECT fileinfoblock
+    {fib_DiskKey}	diskkey	:VALUE
+    {fib_DirEntryType}	direntrytype	:VALUE
+    {fib_FileName}	filename[MAXFILENAMELENGTH]	:ARRAY OF UBYTE
+    {fib_Protection}	protection	:VALUE   /* The protection bits (see below). */
+    {fib_EntryType}	entrytype	:VALUE
+    {fib_Size}	size	:VALUE         /* The size of the file. */
+    {fib_NumBlocks}	numblocks	:VALUE    /* Number of blocks used for file. */
+    {fib_Date}	datestamp	:datestamp         /* Date of last change to file. */
+    {fib_Comment}	comment[MAXCOMMENTLENGTH]	:ARRAY OF UBYTE  /* The filecomment (null-terminated). */
+    {fib_OwnerUID}	owneruid	:UINT     /* UserID of fileowner. */
+    {fib_OwnerGID}	ownergid	:UINT     /* GroupID of fileowner. */
+    {fib_Reserved}	reserved[32]	:ARRAY OF UBYTE /* PRIVATE */
+ENDOBJECT
+
+/* Protection bits for files (fib_Protection). */
+NATIVE {FIBB_DELETE}      CONST FIBB_DELETE      = 0  /* File is deleteable. */
+NATIVE {FIBB_EXECUTE}     CONST FIBB_EXECUTE     = 1  /* File is executable (no scripts!). */
+NATIVE {FIBB_WRITE}       CONST FIBB_WRITE       = 2  /* File is writable. */
+NATIVE {FIBB_READ}        CONST FIBB_READ        = 3  /* File is readable. */
+/* General flags, not owner-dependant. */
+NATIVE {FIBB_ARCHIVE}     CONST FIBB_ARCHIVE     = 4  /* File was archived (not used by OS). */
+NATIVE {FIBB_PURE}        CONST FIBB_PURE        = 5  /* Make program resident on execution. */
+NATIVE {FIBB_SCRIPT}      CONST FIBB_SCRIPT      = 6  /* File is a script (DOS or ARexx). */
+NATIVE {FIBB_GRP_DELETE}  CONST FIBB_GRP_DELETE  = 8
+NATIVE {FIBB_GRP_EXECUTE} CONST FIBB_GRP_EXECUTE = 9
+NATIVE {FIBB_GRP_WRITE}   CONST FIBB_GRP_WRITE   = 10
+NATIVE {FIBB_GRP_READ}    CONST FIBB_GRP_READ    = 11
+/* Flags for other/world (meaning see above, these are high-active!). */
+NATIVE {FIBB_OTR_DELETE}  CONST FIBB_OTR_DELETE  = 12
+NATIVE {FIBB_OTR_EXECUTE} CONST FIBB_OTR_EXECUTE = 13
+NATIVE {FIBB_OTR_WRITE}   CONST FIBB_OTR_WRITE   = 14
+NATIVE {FIBB_OTR_READ}    CONST FIBB_OTR_READ    = 15
+
+NATIVE {FIBF_DELETE}      CONST FIBF_DELETE      = $1
+NATIVE {FIBF_EXECUTE}     CONST FIBF_EXECUTE     = $2
+NATIVE {FIBF_WRITE}       CONST FIBF_WRITE       = $4
+NATIVE {FIBF_READ}        CONST FIBF_READ        = $8
+NATIVE {FIBF_ARCHIVE}     CONST FIBF_ARCHIVE     = $10
+NATIVE {FIBF_PURE}        CONST FIBF_PURE        = $20
+NATIVE {FIBF_SCRIPT}      CONST FIBF_SCRIPT      = $40
+NATIVE {FIBF_GRP_DELETE}  CONST FIBF_GRP_DELETE  = $100
+NATIVE {FIBF_GRP_EXECUTE} CONST FIBF_GRP_EXECUTE = $200
+NATIVE {FIBF_GRP_WRITE}   CONST FIBF_GRP_WRITE   = $400
+NATIVE {FIBF_GRP_READ}    CONST FIBF_GRP_READ    = $800
+NATIVE {FIBF_OTR_DELETE}  CONST FIBF_OTR_DELETE  = $1000
+NATIVE {FIBF_OTR_EXECUTE} CONST FIBF_OTR_EXECUTE = $2000
+NATIVE {FIBF_OTR_WRITE}   CONST FIBF_OTR_WRITE   = $4000
+NATIVE {FIBF_OTR_READ}    CONST FIBF_OTR_READ    = $8000
+
+
+/* Structure used in Info(). Must be longword-aligned. */
+NATIVE {InfoData} OBJECT infodata
+    {id_NumSoftErrors}	numsofterrors	:VALUE /* Number of soft errors on device. */
+    {id_UnitNumber}	unitnumber	:VALUE    /* Unit number of device. */
+    {id_DiskState}	diskstate	:VALUE     /* State the current volume is in (see below). */
+    {id_NumBlocks}	numblocks	:VALUE     /* Number of blocks on device. */
+    {id_NumBlocksUsed}	numblocksused	:VALUE /* Number of blocks in use. */
+    {id_BytesPerBlock}	bytesperblock	:VALUE /* Bytes per block. */
+    {id_DiskType}	disktype	:VALUE      /* Type of disk (see below). */
+    {id_VolumeNode}	volumenode	:BPTR
+    {id_InUse}	inuse	:VALUE         /* Set, if device is in use. */
+ENDOBJECT
+
+/* id_DiskState */
+NATIVE {ID_WRITE_PROTECTED} CONST ID_WRITE_PROTECTED = 80 /* Volume is write-protected. */
+NATIVE {ID_VALIDATING}      CONST ID_VALIDATING      = 81 /* Volume is currently validating. */
+NATIVE {ID_VALIDATED}       CONST ID_VALIDATED       = 82 /* Volume is ready to be read and written. */
+
+NATIVE {ID_NO_DISK_PRESENT}  CONST ID_NO_DISK_PRESENT  = (-1)
+NATIVE {ID_UNREADABLE_DISK}  CONST ID_UNREADABLE_DISK  = "BAD\x00"
+NATIVE {ID_DOS_DISK}         CONST ID_DOS_DISK         = "DOS\x00"
+NATIVE {ID_FFS_DISK}         CONST ID_FFS_DISK         = "DOS\x01"
+NATIVE {ID_INTER_DOS_DISK}   CONST ID_INTER_DOS_DISK   = "DOS\x02"
+NATIVE {ID_INTER_FFS_DISK}   CONST ID_INTER_FFS_DISK   = "DOS\x03"
+NATIVE {ID_FASTDIR_DOS_DISK} CONST ID_FASTDIR_DOS_DISK = "DOS\x04"
+NATIVE {ID_FASTDIR_FFS_DISK} CONST ID_FASTDIR_FFS_DISK = "DOS\x05"
+NATIVE {ID_NOT_REALLY_DOS}   CONST ID_NOT_REALLY_DOS   = "NDOS"
+NATIVE {ID_KICKSTART_DISK}   CONST ID_KICKSTART_DISK   = "KICK"
+NATIVE {ID_MSDOS_DISK}       CONST ID_MSDOS_DISK       = "MSD\x00"
+
+/**********************************************************************
+ **************** Program Execution and Error Handling ****************
+ **********************************************************************/
+
+/* Return conditions for programs. */
+NATIVE {RETURN_OK}    CONST RETURN_OK    = 0
+NATIVE {RETURN_WARN}  CONST RETURN_WARN  = 5
+NATIVE {RETURN_ERROR} CONST RETURN_ERROR = 10
+NATIVE {RETURN_FAIL}  CONST RETURN_FAIL  = 20
+
+
+NATIVE {ERROR_UNKNOWN}			CONST ERROR_UNKNOWN			= 100
+
+
+  /* Out of memory. */
+NATIVE {ERROR_NO_FREE_STORE}		CONST ERROR_NO_FREE_STORE		= 103
+  /* Too many tasks are already running. */
+NATIVE {ERROR_TASK_TABLE_FULL}		CONST ERROR_TASK_TABLE_FULL		= 105
+
+/* Errors concerning ReadArgs(). See also <dos/rdargs.h>. */
+NATIVE {ERROR_BAD_TEMPLATE}		CONST ERROR_BAD_TEMPLATE		= 114
+NATIVE {ERROR_BAD_NUMBER}		CONST ERROR_BAD_NUMBER		= 115
+NATIVE {ERROR_REQUIRED_ARG_MISSING}	CONST ERROR_REQUIRED_ARG_MISSING	= 116
+NATIVE {ERROR_KEY_NEEDS_ARG}		CONST ERROR_KEY_NEEDS_ARG		= 117
+NATIVE {ERROR_TOO_MANY_ARGS}		CONST ERROR_TOO_MANY_ARGS		= 118
+NATIVE {ERROR_UNMATCHED_QUOTES}		CONST ERROR_UNMATCHED_QUOTES		= 119
+NATIVE {ERROR_LINE_TOO_LONG}		CONST ERROR_LINE_TOO_LONG		= 120
+
+/* Errors in files. */
+NATIVE {ERROR_FILE_NOT_OBJECT}		CONST ERROR_FILE_NOT_OBJECT		= 121
+NATIVE {ERROR_INVALID_RESIDENT_LIBRARY}	CONST ERROR_INVALID_RESIDENT_LIBRARY	= 122
+NATIVE {ERROR_NO_DEFAULT_DIR}		CONST ERROR_NO_DEFAULT_DIR		= 201
+NATIVE {ERROR_OBJECT_IN_USE}		CONST ERROR_OBJECT_IN_USE		= 202
+NATIVE {ERROR_OBJECT_EXISTS}		CONST ERROR_OBJECT_EXISTS		= 203
+NATIVE {ERROR_DIR_NOT_FOUND}		CONST ERROR_DIR_NOT_FOUND		= 204
+NATIVE {ERROR_OBJECT_NOT_FOUND}		CONST ERROR_OBJECT_NOT_FOUND		= 205
+
+/* Miscellaneous errors. */
+NATIVE {ERROR_BAD_STREAM_NAME}		CONST ERROR_BAD_STREAM_NAME		= 206
+NATIVE {ERROR_OBJECT_TOO_LARGE}		CONST ERROR_OBJECT_TOO_LARGE		= 207
+NATIVE {ERROR_ACTION_NOT_KNOWN}		CONST ERROR_ACTION_NOT_KNOWN		= 209
+NATIVE {ERROR_INVALID_COMPONENT_NAME}	CONST ERROR_INVALID_COMPONENT_NAME	= 210
+NATIVE {ERROR_INVALID_LOCK}		CONST ERROR_INVALID_LOCK		= 211
+NATIVE {ERROR_OBJECT_WRONG_TYPE} 	CONST ERROR_OBJECT_WRONG_TYPE 	= 212
+NATIVE {ERROR_DISK_NOT_VALIDATED}	CONST ERROR_DISK_NOT_VALIDATED	= 213
+NATIVE {ERROR_DISK_WRITE_PROTECTED}	CONST ERROR_DISK_WRITE_PROTECTED	= 214
+NATIVE {ERROR_RENAME_ACROSS_DEVICES}	CONST ERROR_RENAME_ACROSS_DEVICES	= 215
+NATIVE {ERROR_DIRECTORY_NOT_EMPTY}	CONST ERROR_DIRECTORY_NOT_EMPTY	= 216
+NATIVE {ERROR_TOO_MANY_LEVELS}		CONST ERROR_TOO_MANY_LEVELS		= 217
+NATIVE {ERROR_DEVICE_NOT_MOUNTED}	CONST ERROR_DEVICE_NOT_MOUNTED	= 218
+NATIVE {ERROR_SEEK_ERROR}		CONST ERROR_SEEK_ERROR		= 219
+NATIVE {ERROR_COMMENT_TOO_BIG}		CONST ERROR_COMMENT_TOO_BIG		= 220
+NATIVE {ERROR_DISK_FULL} 		CONST ERROR_DISK_FULL 		= 221
+NATIVE {ERROR_DELETE_PROTECTED}		CONST ERROR_DELETE_PROTECTED		= 222
+NATIVE {ERROR_WRITE_PROTECTED}		CONST ERROR_WRITE_PROTECTED		= 223
+NATIVE {ERROR_READ_PROTECTED}		CONST ERROR_READ_PROTECTED		= 224
+NATIVE {ERROR_NOT_A_DOS_DISK}		CONST ERROR_NOT_A_DOS_DISK		= 225
+NATIVE {ERROR_NO_DISK}			CONST ERROR_NO_DISK			= 226
+NATIVE {ERROR_NO_MORE_ENTRIES}		CONST ERROR_NO_MORE_ENTRIES		= 232
+NATIVE {ERROR_IS_SOFT_LINK}		CONST ERROR_IS_SOFT_LINK		= 233
+NATIVE {ERROR_OBJECT_LINKED}		CONST ERROR_OBJECT_LINKED		= 234
+NATIVE {ERROR_BAD_HUNK}			CONST ERROR_BAD_HUNK			= 235
+NATIVE {ERROR_NOT_IMPLEMENTED}		CONST ERROR_NOT_IMPLEMENTED		= 236
+NATIVE {ERROR_RECORD_NOT_LOCKED} 	CONST ERROR_RECORD_NOT_LOCKED 	= 240
+NATIVE {ERROR_LOCK_COLLISION}		CONST ERROR_LOCK_COLLISION		= 241
+NATIVE {ERROR_LOCK_TIMEOUT}		CONST ERROR_LOCK_TIMEOUT		= 242
+NATIVE {ERROR_UNLOCK_ERROR}		CONST ERROR_UNLOCK_ERROR		= 243
+
+/* Further errors are defined in dosasl.h amd filesystem.h as well */
+
+NATIVE {FAULT_MAX}		CONST FAULT_MAX		= 82
+
+NATIVE {SIGBREAKB_CTRL_C} CONST SIGBREAKB_CTRL_C = 12 /* CTRL-c, usually meaning program abortion. */
+NATIVE {SIGBREAKB_CTRL_D} CONST SIGBREAKB_CTRL_D = 13 /* CTRL-d */
+NATIVE {SIGBREAKB_CTRL_E} CONST SIGBREAKB_CTRL_E = 14 /* CTRL-e, usually meaning that the application
+                               should iconify itself. */
+NATIVE {SIGBREAKB_CTRL_F} CONST SIGBREAKB_CTRL_F = 15 /* CTRL-f, usually meaning that the application
+                               should uniconify itself. */
+
+NATIVE {SIGBREAKF_CTRL_C} CONST SIGBREAKF_CTRL_C = $1000
+NATIVE {SIGBREAKF_CTRL_D} CONST SIGBREAKF_CTRL_D = $2000
+NATIVE {SIGBREAKF_CTRL_E} CONST SIGBREAKF_CTRL_E = $4000
+NATIVE {SIGBREAKF_CTRL_F} CONST SIGBREAKF_CTRL_F = $8000
+
+
+/* Modes for Open(). */
+NATIVE {MODE_OLDFILE}   CONST MODE_OLDFILE   = 1005
+NATIVE {MODE_NEWFILE}   CONST MODE_NEWFILE   = 1006
+NATIVE {MODE_READWRITE} CONST MODE_READWRITE = 1004
+
+/* Locking mechanism as used in Lock() */
+NATIVE {SHARED_LOCK}    CONST SHARED_LOCK    = -2
+NATIVE {ACCESS_READ}    CONST ACCESS_READ    = SHARED_LOCK
+NATIVE {EXCLUSIVE_LOCK} CONST EXCLUSIVE_LOCK = -1
+NATIVE {ACCESS_WRITE}   CONST ACCESS_WRITE   = EXCLUSIVE_LOCK
+
+/* Returned by SameLock(). See autodocs for description. */
+NATIVE {LOCK_DIFFERENT}   CONST LOCK_DIFFERENT   = -1
+NATIVE {LOCK_SAME}         CONST LOCK_SAME         = 0
+NATIVE {LOCK_SAME_VOLUME}  CONST LOCK_SAME_VOLUME  = 1
+
+/* Used in MakeLink() */
+NATIVE {LINK_HARD} CONST LINK_HARD = 0
+NATIVE {LINK_SOFT} CONST LINK_SOFT = 1
+
+/* Used in Seek() */
+NATIVE {OFFSET_BEGINNING} CONST OFFSET_BEGINNING = -1
+NATIVE {OFFSET_CURRENT}    CONST OFFSET_CURRENT    = 0
+NATIVE {OFFSET_END}        CONST OFFSET_END        = 1
+
+/* Limits of the "int" type */
+NATIVE {MAXINT} CONST MAXINT = $7FFFFFFF	->((int)(((unsigned int)~0)/2))
+NATIVE {MININT} CONST MININT = (-MAXINT - 1)
+
+/* Used in ChangeMode() */
+NATIVE {CHANGE_LOCK} CONST CHANGE_LOCK = 0
+NATIVE {CHANGE_FH}   CONST CHANGE_FH   = 1
+
+/* Returned by ReadItem() */
+NATIVE {ITEM_EQUAL}    CONST ITEM_EQUAL    = -2
+NATIVE {ITEM_ERROR}    CONST ITEM_ERROR    = -1
+NATIVE {ITEM_NOTHING}   CONST ITEM_NOTHING   = 0
+NATIVE {ITEM_UNQUOTED}  CONST ITEM_UNQUOTED  = 1
+NATIVE {ITEM_QUOTED}    CONST ITEM_QUOTED    = 2
+
+NATIVE {DOS_FILEHANDLE}   CONST DOS_FILEHANDLE   = 0 /* struct FileHandle <dos/dosextens.h> */
+NATIVE {DOS_EXALLCONTROL} CONST DOS_EXALLCONTROL = 1 /* struct ExAllControl <dos/exall.h> */
+NATIVE {DOS_FIB}          CONST DOS_FIB          = 2 /* struct FileInfoBlock (see above) */
+NATIVE {DOS_STDPKT}       CONST DOS_STDPKT       = 3 /* struct DosPacket <dos/dosextens.h> */
+NATIVE {DOS_CLI}          CONST DOS_CLI          = 4 /* struct CommandLineInterface <dos/dosextens.h> */
+NATIVE {DOS_RDARGS}       CONST DOS_RDARGS       = 5 /* struct RDArgs <dos/rdargs.h> */

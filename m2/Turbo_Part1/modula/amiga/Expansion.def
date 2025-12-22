@@ -1,0 +1,423 @@
+DEFINITION FOR LIBRARY MODULE Expansion ;
+
+FROM SYSTEM IMPORT STRING, ADDRESS, SHORTSET, BYTE, LONGSET ;
+FROM Exec   IMPORT Node, Library, List ;
+FROM Dos    IMPORT DeviceNodePtr ;
+
+(* AutoConfig (tm) hardware register and bit definitions *)
+
+(* AutoConfig (tm) boards each contain a 32 byte "ExpansionRom" area that is  *)
+(* read by the system software at configuration time.  Configuration of each  *)
+(* board starts when the ConfigIn* signal is passed from the previous board   *)
+(* (or from the system for the first board).  Each board will present it's    *)
+(* ExpansionRom structure at location $00E80000 to be read by the system.     *)
+(* This file defines the appearance of the ExpansionRom area.		      *)
+(*									      *)
+(* Expansion boards are actually organized such that only one nybble per      *)
+(* 16 bit word contains valid information.  The low nybbles of each	      *)
+(* word are combined to fill the structure below. (This table is structured   *)
+(* as LOGICAL information.  This means that it never corresponds exactly      *)
+(* with a physical implementation.)					      *)
+(*									      *)
+(* The ExpansionRom space is further split into two regions:  The first 16    *)
+(* bytes are read-only.  Except for the er_type field, this area is inverted  *)
+(* by the system software when read in.  The second 16 bytes contain the      *)
+(* control portion, where all read/write registers are located.		      *)
+(*									      *)
+(* The system builds one "ConfigDev" structure for each board found.  The     *)
+(* list of boards can be examined using the expansion.library/FindConfigDev   *)
+(* function.								      *)
+(*									      *)
+(* A special "hacker" Manufacturer ID number is reserved for test use:	      *)
+(* 2011 ($7DB).  When inverted this will look like $F824.		      *)
+
+TYPE
+  ExpansionRomPtr = POINTER TO ExpansionRom ;
+  ExpansionRom = RECORD		  (* -First 16 bytes of the expansion ROM     *)
+    er_Type	    : SHORTSET  ; (* Board type, size and flags		      *)
+    er_Product	    : SHORTCARD ; (* Product number, assigned by manufacturer *)
+    er_Flags	    : SHORTSET  ; (* Flags				      *)
+    er_Reserved03   : SHORTCARD ; (* Must be zero ($ff inverted)	      *)
+    er_Manufacturer : CARDINAL  ; (* Unique ID,ASSIGNED BY COMMODORE-AMIGA!   *)
+    er_SerialNumber : LONGINT   ; (* Available for use by manufacturer	      *)
+    er_InitDiagVec  : CARDINAL  ; (* Offset to optional "DiagArea" structure  *)
+    er_Reserved0c   : SHORTCARD ;
+    er_Reserved0d   : SHORTCARD ;
+    er_Reserved0e   : SHORTCARD ;
+    er_Reserved0f   : SHORTCARD ;
+  END ;
+
+(* Note that use of the ec_BaseAddress register is tricky.  The system	   *)
+(* will actually write twice.  First the low order nybble is written	   *)
+(* to the ec_BaseAddress register+2 (D15-D12).	Then the entire byte is    *)
+(* written to ec_BaseAddress (D15-D8).	This allows writing of a byte-wide *)
+(* address to nybble size registers.					   *)
+
+TYPE
+  ExpansionControlPtr = POINTER TO ExpansionControl ;
+  ExpansionControl = RECORD	(* -Second 16 bytes of the expansion ROM     *)
+    ec_Interrupt  : SHORTSET  ;	(* Optional interrupt control register	     *)
+    ec_Z3_HighBase: SHORTCARD ; (* Zorro III   : Config address bits 24-31   *)
+    ec_BaseAddress: SHORTCARD ; (* Zorro II/III: Config address bits 16-23   *)
+    ec_Shutup     : SHORTCARD ;	(* The system writes here to shut up a board *)
+    ec_Reserved14 : SHORTCARD ;
+    ec_Reserved15 : SHORTCARD ;
+    ec_Reserved16 : SHORTCARD ;
+    ec_Reserved17 : SHORTCARD ;
+    ec_Reserved18 : SHORTCARD ;
+    ec_Reserved19 : SHORTCARD ;
+    ec_Reserved1a : SHORTCARD ;
+    ec_Reserved1b : SHORTCARD ;
+    ec_Reserved1c : SHORTCARD ;
+    ec_Reserved1d : SHORTCARD ;
+    ec_Reserved1e : SHORTCARD ;
+    ec_Reserved1f : SHORTCARD ;
+ END ;
+
+(* many of the constants below consist of a triplet of equivalent	   *)
+(* definitions: xxMASK is a bit mask of those bits that matter.		   *)
+(* xxBIT is the starting bit number of the field.  xxSIZE is the	   *)
+(* number of bits that make up the definition.	This method is		   *)
+(* used when the field is larger than one bit.				   *)
+(*									   *)
+(* If the field is only one bit wide then the xxB_xx and xxF_xx convention *)
+(* is used (xxB_xx is the bit number, and xxF_xx is mask of the bit).	   *)
+
+(* manifest constants *)
+
+CONST
+  E_SLOTSIZE	= 010000H ;
+  E_SLOTMASK	= 0FFFFH ;
+  E_SLOTSHIFT	= 16 ;
+
+(* these define the free regions of Zorro memory space.		*)
+(* THESE MAY WELL CHANGE FOR FUTURE PRODUCTS!			*)
+
+CONST
+  E_EXPANSIONBASE	= 000E80000H ;	(* Zorro II  config address	*)
+  EZ3_EXPANSIONBASE	= 0FF000000H ;	(* Zorro III config address	*)
+
+  E_EXPANSIONSIZE	= 000080000H ;	(* Zorro II  I/O type cards	*)
+  E_EXPANSIONSLOTS	= 8 ;
+
+  E_MEMORYBASE		= 000200000H ;	(* Zorro II  8MB space		*)
+  E_MEMORYSIZE		= 000800000H ;
+  E_MEMORYSLOTS		= 128 ;
+
+  EZ3_CONFIGAREA	= 040000000H ;	(* Zorro III space		*)
+  EZ3_CONFIGAREAEND	= 07FFFFFFFH ;	(* Zorro III space		*)
+  EZ3_SIZEGRANULARITY	= 000080000H ;	(* 512K increments		*)
+
+
+
+(**** er_Type definitions (ttldcmmm) ***************************************)
+
+(* er_Type board type bits -- the OS ignores "old style" boards *)
+CONST
+  ERT_TYPEMASK		= {6,7} ;	(* Bits 7-6 *)
+  ERT_TYPEBIT		= 6 ;
+  ERT_TYPESIZE		= 2 ;
+  ERT_NEWBOARD		= SHORTSET( 0C0H ) ;
+  ERT_ZORROII		= ERT_NEWBOARD ;
+  ERT_ZORROIII		= SHORTSET( 080H ) ;
+
+(* other bits defined in er_Type *)
+  ERTB_MEMLIST		= 5 ;   (* Link RAM into free memory list *)
+  ERTB_DIAGVALID	= 4 ;   (* ROM vector is valid *)
+  ERTB_CHAINEDCONFIG	= 3 ;   (* Next config is part of the same card *)
+
+  ERTF_MEMLIST		= {5} ;
+  ERTF_DIAGVALID	= {4} ;
+  ERTF_CHAINEDCONFIG	= {3} ;
+
+(* er_Type field memory size bits *)
+  ERT_MEMMASK		= {0..2} ;	(* Bits 2-0 *)
+  ERT_MEMBIT		= 0 ;
+  ERT_MEMSIZE		= 3 ;
+
+
+(**** er_Flags byte -- for those things that didn't fit into the type byte ****)
+(**** the hardware stores this byte in inverted form			   ****)
+
+  ERFF_MEMSPACE		= {7} ;	(* Wants to be in 8 meg space.		*)
+  ERFB_MEMSPACE		=  7  ;	(* (NOT IMPLEMENTED)			*)
+
+  ERFF_NOSHUTUP		= {6} ;	(* Board can't be shut up		*)
+  ERFB_NOSHUTUP		=  6  ;
+
+  ERFF_EXTENDED		= {5} ;	(* Zorro III: Use extended size table	*)
+  ERFB_EXTENDED		=  5  ;	(*	      for bits 0-2 of er_Type	*)
+				(* Zorro II : Must be 0			*)
+
+  ERFF_ZORRO_III	= {4} ;	(* Zorro III: must be 1			*)
+  ERFB_ZORRO_III	=  4  ;	(* Zorro II : must be 0			*)
+
+  ERT_Z3_SSMASK		= {0..3};(* Bits 3-0.  Zorro III Sub-Size.  How  *)
+  ERT_Z3_SSBIT		=  0 ;	 (* much space the card actually uses    *)
+  ERT_Z3_SSSIZE		=  4 ;	 (* (regardless of config granularity)   *)
+				 (* Zorro II : must be 0		 *)
+
+
+(* ec_Interrupt register (unused) ********************************************)
+
+  ECIB_INTENA		= 1 ;
+  ECIB_RESET		= 3 ;
+  ECIB_INT2PEND		= 4 ;
+  ECIB_INT6PEND		= 5 ;
+  ECIB_INT7PEND		= 6 ;
+  ECIB_INTERRUPTING	= 7 ;
+
+  ECIF_INTENA		= {1} ;
+  ECIF_RESET		= {3} ;
+  ECIF_INT2PEND		= {4} ;
+  ECIF_INT6PEND		= {5} ;
+  ECIF_INT7PEND		= {6} ;
+  ECIF_INTERRUPTING	= {7} ;
+
+(*==========================================================================*)
+(*									    *)
+(* these are the specifications for the diagnostic area.  If the Diagnostic *)
+(* Address Valid bit is set in the Board Type byte (the first byte in       *)
+(* expansion space) then the Diag Init vector contains a valid offset.	    *)
+(*									    *)
+(* The Diag Init vector is actually a word offset from the base of the	    *)
+(* board.  The resulting address points to the base of the DiagArea	    *)
+(* structure.  The structure may be physically implemented either four,     *)
+(* eight, or sixteen bits wide.  The code will be copied out into	    *)
+(* ram first before being called.					    *)
+(*									    *)
+(* The da_Size field, and both code offsets (da_DiagPoint and da_BootPoint) *)
+(* are offsets from the diag area AFTER it has been copied into ram, and    *)
+(* "de-nibbleized" (if needed).  (In other words, the size is the size of   *)
+(* the actual information, not how much address space is required to	    *)
+(* store it.)								    *)
+(*									    *)
+(* All bits are encoded with uninverted logic (e.g. 5 volts on the bus	    *)
+(* is a logic one).							    *)
+(*									    *)
+(* If your board is to make use of the boot facility then it must leave	    *)
+(* its config area available even after it has been configured.  Your	    *)
+(* boot vector will be called AFTER your board's final address has been	    *)
+(* set.									    *)
+(*									    *)
+(*==========================================================================*)
+
+TYPE
+  DiagAreaPtr = POINTER TO DiagArea ;
+  DiagArea = RECORD
+    da_Config	  : SHORTSET ;	(* see below for definitions		      *)
+    da_Flags	  : SHORTSET ;	(* see below for definitions		      *)
+    da_Size 	  : CARDINAL ;	(* the size (in bytes) of the total diag area *)
+    da_DiagPoint  : CARDINAL ;	(* where to start for diagnostics, or zero    *)
+    da_BootPoint  : CARDINAL ;	(* where to start for booting		      *)
+    da_Name	  : CARDINAL ;	(* offset in diag area where a string	      *)
+				(*   identifier can be found (or zero if no   *)
+				(*   identifier is present).		      *)
+
+    da_Reserved01 : CARDINAL ;	(* two words of reserved data.	must be zero. *)
+    da_Reserved02 : CARDINAL ;
+  END ;
+
+(* da_Config definitions *)
+(* DAC_BYTEWIDE can be simulated using DAC_NIBBLEWIDE. *)
+
+CONST
+  DAC_BUSWIDTH	 = SHORTSET( 0C0H ) ; (* two bits for bus width		      *)
+  DAC_NIBBLEWIDE = SHORTSET( 000H ) ;
+  DAC_BYTEWIDE	 = SHORTSET( 040H ) ; (*BUG:Will not work under V34 Kickstart!*)
+  DAC_WORDWIDE	 = SHORTSET( 080H ) ;
+
+  DAC_BOOTTIME	 = SHORTSET( 030H ) ; (* two bits for when to boot	      *)
+  DAC_NEVER	 = SHORTSET( 000H ) ; (* obvious			      *)
+  DAC_CONFIGTIME = SHORTSET( 010H ) ; (* call da_BootPoint when first	      *)
+  				      (*  configing the device		      *)
+  DAC_BINDTIME	 = SHORTSET( 020H ) ; (* run when binding drivers to boards   *)
+
+(* These are the calling conventions for the diagnostic callback	*)
+(* (from da_DiagPoint):							*)
+(*									*)
+(* A7 -- points to at least 2K of stack					*)
+(* A6 -- ExecBase							*)
+(* A5 -- ExpansionBase							*)
+(* A3 -- your board's ConfigDev structure				*)
+(* A2 -- Base of diag/init area that was copied				*)
+(* A0 -- Base of your board						*)
+(*									*)
+(* Your board must return a value in D0.  If this value is NULL, then	*)
+(* the diag/init area that was copied in will be returned to the free	*)
+(* memory pool.								*)
+
+(* At early system startup time, one ConfigDev structure is created for      *)
+(* each board found in the system.  Software may seach for ConfigDev         *)
+(* structures by vendor & product ID number.  For debugging and diagnostic   *)
+(* use, the entire list can be accessed.  See the expansion.library document *)
+(* for more information.						     *)
+
+TYPE
+  ConfigDevPtr = POINTER TO ConfigDev ;
+  ConfigDev = RECORD
+    cd_Node	 : Node ;
+    cd_Flags	 : SHORTSET ;	(* (read/write)				*)
+    cd_Pad	 : SHORTCARD ;	(* reserved				*)
+    cd_Rom	 : ExpansionRom;(* copy of board's expansion ROM	*)
+    cd_BoardAddr : ADDRESS ;	(* where in memory the board was placed *)
+    cd_BoardSize : LONGINT ;	(* size of board in bytes		*)
+    cd_SlotAddr  : CARDINAL ;	(* which slot number (PRIVATE)		*)
+    cd_SlotSize  : CARDINAL ;	(* number of slots (PRIVATE)		*)
+    cd_Driver    : ADDRESS ;	(* pointer to node of driver		*)
+    cd_NextCD	 : ConfigDevPtr;(* linked list of drivers to config	*)
+    cd_Unused	 : ARRAY [0..3] OF LONGINT ;
+    				(* for whatever the driver wants	*)
+  END ;
+
+(* cd_Flags *)
+CONST
+  CDB_SHUTUP	= 0 ;	(* this board has been shut up			*)
+  CDB_CONFIGME	= 1 ;	(* this board needs a driver to claim it	*)
+  CDB_BADMEMORY	= 2 ;	(* this board contains bad memory		*)
+  CDB_PROCESSED	= 3 ;	(* private flag					*)
+
+  CDF_SHUTUP	= {0} ;
+  CDF_CONFIGME	= {1} ;
+  CDF_BADMEMORY	= {2} ;
+  CDF_PROCESSED	= {3} ;
+
+(* Boards are usually "bound" to software drivers.			*)
+(* This structure is used by GetCurrentBinding() and SetCurrentBinding()*)
+
+TYPE
+  CurrentBindingPtr = POINTER TO CurrentBinding ;
+  CurrentBinding = RECORD
+    cb_ConfigDev	: ConfigDevPtr ; (* first configdev in chain	*)
+    cb_FileName		: STRING ;	 (* file name of driver		*)
+    cb_ProductString	: STRING ;	 (* product # string		*)
+    cb_ToolTypes	: POINTER TO ARRAY OF STRING ;
+    					 (* tooltypes from disk object  *)
+  END ;
+
+CONST
+  EXPANSIONNAME	= "expansion.library" ;
+
+(* flags for the AddDosNode() call *)
+  ADNB_STARTPROC =  0  ;
+  ADNF_STARTPROC = {0} ;
+
+
+(* BootNodes are scanned by dos.library at startup.  Items found on the
+   list are started by dos. BootNodes are added with the AddDosNode() or
+   the V36 AddBootNode() calls. *)
+
+TYPE
+  BootNodePtr = POINTER TO BootNode ;
+  BootNode = RECORD
+    bn_Node	  : Node ;
+    bn_Flags	  : BITSET ;
+    bn_DeviceNode : ADDRESS ;
+  END ;
+
+
+(* expansion.library has functions to manipulate most of the information in
+   ExpansionBase.  Direct access is not permitted.  Use FindConfigDev()
+   to scan the board list. *)
+
+  ExpansionBasePtr = POINTER TO ExpansionBaseRec ;
+  ExpansionBaseRec = RECORD
+    LibNode	 : Library ;
+    Flags	 : SHORTSET ;		(* read only (see below)	    *)
+    eb_Private01 : SHORTCARD ;		(* private			    *)
+    eb_Private02 : LONGINT ;		(* private			    *)
+    eb_Private03 : LONGINT ;		(* private			    *)
+    eb_Private04 : CurrentBinding ;	(* private			    *)
+    eb_Private05 : List ;		(* private			    *)
+    MountList	 : List ;		(* contains struct BootNode entries *)
+	(* private *)
+  END ;
+
+VAR
+  ExpansionBase : ExpansionBasePtr ;
+
+(* error codes *)
+CONST
+  EE_OK		 =  0 ;
+  EE_LASTBOARD	 = 40 ; (* could not shut him up		   *)
+  EE_NOEXPANSION = 41 ; (* not enough expansion mem; board shut up *)
+  EE_NOMEMORY	 = 42 ; (* not enough normal memory		   *)
+  EE_NOBOARD	 = 43 ; (* no board at that address		   *)
+  EE_BADMEM	 = 44 ; (* tried to add bad memory card		   *)
+
+(* Flags *)
+
+  EBB_CLOGGED	 =  0  ; (* someone could not be shutup  *)
+  EBF_CLOGGED	 = {0} ;
+  EBB_SHORTMEM	 =  1  ; (* ran out of expansion mem	 *)
+  EBF_SHORTMEM	 = {1} ;
+  EBB_BADMEM	 =  2  ; (* tried to add bad memory card *)
+  EBF_BADMEM	 = {2} ;
+  EBB_DOSFLAG	 =  3  ; (* reserved for use by AmigaDOS *)
+  EBF_DOSFLAG	 = {3} ;
+  EBB_KICKBACK33 =  4  ; (* reserved for use by AmigaDOS *)
+  EBF_KICKBACK33 = {4} ;
+  EBB_KICKBACK36 =  5  ; (* reserved for use by AmigaDOS *)
+  EBF_KICKBACK36 = {5} ;
+
+(* If the following flag is set by a floppy's bootblock code, the initial
+   open of the initial shell window will be delayed until the first output
+   to that shell.  Otherwise the 1.3 compatible behavior applies. *)
+
+  EBB_SILENTSTART =  6  ;
+  EBF_SILENTSTART = {6} ;
+
+(* Magic kludge for CC0 use *)
+
+  EBB_START_CC0	  =  7  ;
+  EBF_START_CC0	  = {7} ;
+
+(*--- functions in V33 or higher (Release 1.2) ---*)
+
+PROCEDURE AddConfigDev( configDev : ConfigDevPtr ) ;
+
+(*--- functions in V33 or higher (Release 1.2) ---*)
+
+PROCEDURE AllocBoardMem( slotSpec : LONGINT ) ;
+PROCEDURE AllocConfigDev( ) : ConfigDevPtr ;
+PROCEDURE AllocExpansionMem( numSlots,slotAlign : LONGINT ) : ADDRESS ;
+PROCEDURE ConfigBoard( board : ADDRESS ; configDev : ConfigDevPtr ) ;
+PROCEDURE ConfigChain( baseAddr : ADDRESS ) ;
+
+PROCEDURE FindConfigDev( oldConfigDev : ConfigDevPtr ;
+			 manufacturer, product : LONGINT ) : ConfigDevPtr ;
+
+PROCEDURE FreeBoardMem( startSlot , slotSpec : LONGINT );
+PROCEDURE FreeConfigDev( configDev : ConfigDevPtr ) ;
+PROCEDURE FreeExpansionMem( startSlot, numSlots : LONGINT ) ;
+PROCEDURE ReadExpansionByte( board : ADDRESS ; offset : LONGINT ) : BYTE ;
+PROCEDURE ReadExpansionRom( board : ADDRESS ; configDev : ConfigDevPtr ) ;
+PROCEDURE RemConfigDev( configDev : ConfigDevPtr ) ;
+
+PROCEDURE WriteExpansionByte( board  : ADDRESS ;
+			      offset : LONGINT ;
+			      byte   : BYTE ) ;
+
+PROCEDURE ObtainConfigBinding( ) ;
+PROCEDURE ReleaseConfigBinding( ) ;
+
+PROCEDURE SetCurrentBinding( cb : CurrentBindingPtr ;
+			     bindingSize : LONGINT ) ;
+
+PROCEDURE GetCurrentBinding( cb : CurrentBindingPtr ;
+			     bindingSize : LONGINT ) : LONGINT ;
+
+PROCEDURE MakeDosNode( parmPacket : ADDRESS ) : DeviceNodePtr ;
+
+PROCEDURE AddDosNode( bootPri    : LONGINT ;
+		      flags      : LONGSET ;
+		      deviceNode : DeviceNodePtr ) : BOOLEAN ;
+
+(*--- functions in V36 or higher (Release 2.0) ---*)
+
+PROCEDURE AddBootNode( bootPri	  : LONGINT ;
+		       flags	  : LONGSET ;
+		       deviceNode : DeviceNodePtr ;
+		       configDev  : ConfigDevPtr ) : BOOLEAN ;
+
+END Expansion.

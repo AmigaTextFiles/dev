@@ -1,0 +1,14 @@
+VERSION		EQU	1
+REVISION	EQU	149
+DATE	MACRO
+		dc.b	'18.4.95'
+	ENDM
+VERS	MACRO
+		dc.b	'NaeGreyPatch 1.149'
+	ENDM
+VSTRING	MACRO
+		dc.b	'NaeGreyPatch 1.149 (18.4.95)',13,10,0
+	ENDM
+VERSTAG	MACRO
+		dc.b	0,'$VER: NaeGreyPatch 1.149 (18.4.95)',0
+	ENDM

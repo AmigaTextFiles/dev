@@ -1,0 +1,7 @@
+		IFND LIBRARIES_CARDS_LIB_I
+LIBRARIES_CARDS_LIB_I	SET	1
+
+
+_LVOShuffleDeck             	EQU	-6
+
+		ENDC

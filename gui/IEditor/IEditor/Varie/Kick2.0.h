@@ -1,0 +1,15 @@
+#define	GTMX_TitlePlace	0x80080047;
+#define	GTNM_Clipped	0x80080055;
+#define	GTNM_Justification	0x8008004A;
+#define	GTNM_MaxNumberLen	0x8008004C;
+#define	GTNM_Format	0x8008004B;
+#define	GTPA_NumColors	0x80080046;
+#define	GTSL_Justification	0x80080051;
+#define	GTTX_Clipped	0x80080055;
+#define	GTTX_Justification	0x8008004A;
+#define	GTJ_RIGHT		1;
+#define	GTJ_CENTER		2;
+#define	GTMN_NewLookMenus	0x80080043;
+#define	WFLG_NEWLOOKMENUS	0x00200000;
+#define	IDCMP_GADGETHELP	0x04000000;
+#define	GFLG_EXTENDED	0x8000;

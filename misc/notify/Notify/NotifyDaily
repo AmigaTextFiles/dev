@@ -1,0 +1,253 @@
+/* NotifyDaily 1.02 */
+/* Copyright © Michael Tanzer, 1991, 1992 */
+/* See additional notices in accompanying documentation */
+
+perpetual = 0                              /* 1 = run daily at midnight    */
+dateformat = 'E'                           /* Date format (E, U, or O)     */
+datafile = 's:NotifyDaily.data'            /* Name of data file            */
+
+/* Make sure the necessary libraries are available */
+if ~show('L','rexxsupport.library') then
+  call addlib('rexxsupport.library',0,-30)
+if ~show('L','rexxarplib.library') then
+  call addlib('rexxarplib.library',0,-30)
+
+parse arg w .
+if upper(w)='HELP' | w='?' then do         /* Handle call for help         */
+  call help
+  exit
+  end
+if length(w)>0 then do                     /* Invalid parameter specified  */
+  w = 'Invalid parameter specified:' w'\'                                 ||,
+      'Format: RX NOTIFYDAILY <HELP|?>\'                                  ||,
+      'Enter ''RX NOTIFYDAILY ?'' for more information.\'                 ||,
+      'Enter ''RX NOTIFYDAILY''   to run NotifyDaily.'
+  call request(0,0,w,,'I''ll try that.')
+  exit 78
+  end
+
+if perpetual then do                       /* Handle perpetual operation   */
+  if getenv('NotifyDaily.asynchsw')=1 then do /* Executing asynchronously  */
+    call setenv('NotifyDaily.asynchsw',0)  /*     Clear asynch switch      */
+    call bumpcount                         /*     Go increment call count  */
+    end
+  else do                                  /*   Processing user request    */
+    call setenv('NotifyDaily.asynchsw',1)  /*     Set switch for asynch    */
+    address arexx 'NotifyDaily'            /*     Start asynch task        */
+    exit                                   /*     Free up CLI task         */
+    end
+  end
+
+dateformat = upper(dateformat)             /* Make sure dateformat is UC   */
+select                                     /* Adjust for different formats */
+  when dateformat='E' then do              /*   European                   */
+    dateyy = 7
+    datemm = 4
+    datedd = 1
+    template = 'dd''/''mm''/''yy'
+    end
+  when dateformat='U' then do              /*   U.S.A.                     */
+    dateyy = 7
+    datemm = 1
+    datedd = 4
+    template = 'mm''/''dd''/''yy'
+    end
+  when dateformat='O' then do              /*   Ordered                    */
+    dateyy = 1
+    datemm = 4
+    datedd = 7
+    template = 'yy''/''mm''/''dd'
+    end
+  end                                      /* Note: no 'otherwise'         */
+
+colmax = screencols()%8-16                 /* Get max msg length           */
+errmax = screencols()%8-5                  /* Get max error msg length     */
+
+/* Build day-of-week table */
+d.mon = '80'x                              /* Monday                       */
+d.tue = '40'x                              /* Tuesday                      */
+d.wed = '20'x                              /* Wednesday                    */
+d.thu = '10'x                              /* Thursday                     */
+d.fri = '08'x                              /* Friday                       */
+d.sat = '04'x                              /* Saturday                     */
+d.sun = '02'x                              /* Sunday                       */
+d.m_f = 'f8'x                              /* Monday through Friday        */
+d.s_s = '06'x                              /* Saturday and Sunday          */
+d.mwf = 'a8'x                              /* Monday, Wednesday, Friday    */
+d.tth = '50'x                              /* Tuesday and Thursday         */
+d.all = 'fe'x                              /* Every day                    */
+
+do forever                                 /* Perpetual loop               */
+  w = open( 'input',datafile,'R')          /* Verify data file             */
+  if w~=1 then do                          /* Handle error                 */
+    say 'Data file' datafile 'can not be opened.'
+    exit 92
+    end
+  today = date(dateformat)                 /* Get today's date             */
+  thisyy = substr(today,dateyy,2)          /* Get today's year             */
+  thismm = substr(today,datemm,2)          /* Get today's month            */
+  thisdd = substr(today,datedd,2)          /* Get today's day              */
+  now = substr(time(),1,5)                 /* Get current time             */
+  interpret 'weekday = d.'substr(date('W'),1,3) /* Table value for weekday */
+  parse var now hh':'mm                    /* Get hours and minutes        */
+  decnow = hh||mm                          /* Save it as decimal value     */
+  do forever                               /* Read loop                    */
+    inrec = readln('input')                /*   Read a line                */
+    if eof('input') then leave             /*   Handle end-of-file         */
+    if words(inrec)=0 then iterate         /*   Skip blank lines           */
+    date = upper(word(inrec,1))            /*   Get the date               */
+    time = upper(word(inrec,2))            /*   Get the time               */
+    interpret 'parse var date' template    /*   Get year, month, and day   */
+    message = subword(inrec,3)             /*   Get the message            */
+    select                                 /*   Check date/day             */
+      when date=today then nop             /*     Match on date            */
+      when length(date)=3 then do          /*     Check day of week        */
+        day = translate(date,'_','-')      /*          Change '-' to '_'   */
+        if symbol('d.day')~='VAR' then do  /*          Handle invalid day  */
+          prompt = 'Invalid day found in'
+          call error
+          exit 89
+          end
+        day = d.day                        /*          Value from table    */
+        if bitand(day,weekday)~=weekday then iterate
+        end
+      when words(yy)>0 then do             /*     Check date               */
+        if yy~='??' & yy~=thisyy then iterate
+        if mm~='??' & mm~=thismm then iterate
+        select                             /*      Handle day formats      */
+          when dd='??' then nop            /*       Wildcard               */
+          when datatype(dd,'W') then do    /*       Date                   */
+            if dd~=thisdd then iterate
+            end
+          otherwise do                     /*       Weekday                */
+            day = translate(substr(dd,1,3),'_','-')  /* Change '-' to '_'  */
+            if symbol('d.day')~='VAR' then do        /* Handle invalid day */
+              prompt = 'Invalid day of month found in'
+              call error
+              exit 88
+              end
+            day = d.day                              /* Value from table   */
+            if bitand(day,weekday)~=weekday then iterate
+            if length(dd)>3 then do                  /* Nth 'day' of month */
+              w = substr(dd,4)                       /* Check 'n'          */
+              if (thisdd-1)%7+1~=w then iterate
+              end
+            end /* otherwise */
+          end /* select */
+        end /* when words(yy)>0 */
+      otherwise do                         /*   Handle unrecognised format */
+        prompt = 'Invalid date found in'
+        call error
+        exit 87
+        end
+      end
+    if length(message)>colmax then do      /*   Handle overlength message  */
+      prompt = 'Overlength message found in'
+      call error
+      exit 86
+      end
+    if time='NOW' then do                  /*   Issue message now          */
+      call 'Notify' 'add' time message     /*     Add message to list      */
+      iterate                              /*     Back for next record     */
+      end
+    if ~vertime(time) then do              /*   Handle invalid time        */
+      prompt = 'Invalid time found in'
+      call error
+      exit 85
+      end
+    if dectime<decnow then iterate         /*   Its time has passed        */
+    call 'Notify' 'add' time message       /*   Add message to list        */
+    end                                    /*   End of read loop           */
+  call close 'input'                       /* Close input file             */
+  if ~perpetual then exit                  /* Exit if no midnight rerun    */
+  do forever
+    seconds = 86400-time(s)                /*   Number of seconds to wait  */
+    if seconds<=600 then leave             /*   Leave loop if <10 min      */
+    seconds = seconds*9%10                 /*   Get 90% of seconds         */
+    call wait                              /*   Go wait 90% of time        */
+    end                                    /*   Go handle remaining 10%    */
+  call wait                                /* Wait until midnight          */
+  w = getenv('NotifyDaily.count')          /* Get call count               */
+  if w~=callcount then exit                /* Exit if new task started     */
+  end
+
+wait:                                      /* Wait for time to pass        */
+  signal on halt                           /* Disable halt interrupt       */
+  call delay(seconds*50)                   /* Nod off                      */
+halt:
+  signal off halt                          /* Enable halt interrupt        */
+  return
+
+bumpcount:                                 /* Bump call count              */
+  callcount = getenv('NotifyDaily.count')  /* Get previous count           */
+  if words(callcount)=0 then callcount = 1 /* Use 1 first time             */
+  else callcount = callcount+1             /* Bump count                   */
+  call setenv('NotifyDaily.count',callcount)  /* Store result              */
+  return
+
+vertime:                                   /* Verify time                  */
+  parse arg hh':'mm                        /* Get hour and minute          */
+  if ~datatype(hh,'W') then return 0       /* HH must be a whole number    */
+  w = length(mm)                           /* Get length of MM             */
+  select                                   /* Handle different formats     */
+    when substr(mm,w-1)='AM' then do       /*   AM; 12-hour clock          */
+      mm = substr(mm,1,w-2)                /*     Drop 'AM'                */
+      if hh<1 | hh>12 then return 0        /*     HH must be between 1 & 12*/
+      hh = hh//12                          /*     Change 12 to 0           */
+      end
+    when substr(mm,w)='A' then do          /*   A; 12-hour clock           */
+      mm = substr(mm,1,w-1)                /*     Drop 'A'                 */
+      if hh<1 | hh>12 then return 0        /*     HH must be between 1 & 12*/
+      hh = hh//12                          /*     Change 12 to 0           */
+      end
+    when substr(mm,w-1)='PM' then do       /*   PM; 12-hour clock          */
+      mm = substr(mm,1,w-2)                /*     Drop 'PM'                */
+      if hh<1 | hh>12 then return 0        /*     HH must be between 1 & 12*/
+      hh = hh//12+12                       /*     Change 12 to 0, add 12   */
+      end
+    when substr(mm,w)='P' then do          /*   P; 12-hour clock           */
+      mm = substr(mm,1,w-1)                /*     Drop 'P'                 */
+      if hh<1 | hh>12 then return 0        /*     HH must be between 1 & 12*/
+      hh = hh//12+12                       /*     Change 12 to 0, add 12   */
+      end
+    otherwise do                           /*   24-hour clock              */
+      if hh<0 | hh>23 then return 0        /*     Verify HH                */
+      end
+    end
+  if ~datatype(mm,'W') then return 0       /* MM must be a whole number    */
+  if mm<0 | mm>59 then return 0            /* MM must be between 0 and 59  */
+  dectime = hh||right(mm,2,'0')            /* Save time as decimal value   */
+  return 1                                 /* Indicate success             */
+
+error:                                     /* Invalid record in data file  */
+  if length(inrec)>errmax then inrec = substr(inrec,1,errmax)
+  prompt = prompt datafile'\'translate(inrec,'/','\')
+  okay = 'I''m sorry!'
+  cancel = 'It won''t happen again!'
+  call request(0,0,prompt,,okay,cancel)
+  return
+
+help:                                      /* Give help                    */
+  select                                   /* Handle date formats          */
+    when dateformat='E' then df = 'dd/mm/yy'
+    when dateformat='U' then df = 'mm/dd/yy'
+    when dateformat='O' then df = 'yy/mm/dd'
+    end                                    /* Note: no 'otherwise'         */
+  w = 'NotifyDaily reads a data file ('datafile') and calls Notify\'      ||,
+      'to issue messages for the current day.  The data format is:\'      ||,
+      '      date time <message text>\'                                   ||,
+      'The date may be expressed either as an actual date ('df') or as\'  ||,
+      'a day of the week, as indicated by the following list:\'           ||,
+      '      mon tue wed thu fri sat sun m-f s-s mwf tth all\'            ||,
+      'If the date format is used, a wildcard (''??'') can be specified\' ||,
+      'for the year, month, and/or day.  The day can be specified as a\'  ||,
+      'day of the week; suffix this with a number to indicate which\'     ||,
+      'occurrence of that day in the month.  For example, specifying\'    ||,
+      'MON3 for day and wildcards for year and month will cause the\'     ||,
+      'message to be issued on the third monday of each month.\'          ||,
+      'The time may be expressed either as a time of day (hh:mm) or as\'  ||,
+      '''NOW'', which causes the message to be issued immediately.\'      ||,
+      'Times not suffixed with ''AM'' or ''PM'' (or ''A'' or ''P'') are\' ||,
+      'assumed to be 24-hour values, e.g. 3:00PM = 15:00; 3:00 = 03:00.'
+   call request(0,0,w,,'How wonderful!')
+  return

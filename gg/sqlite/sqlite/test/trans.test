@@ -1,0 +1,409 @@
+# 2001 September 15
+#
+# The author disclaims copyright to this source code.  In place of
+# a legal notice, here is a blessing:
+#
+#    May you do good and not evil.
+#    May you find forgiveness for yourself and forgive others.
+#    May you share freely, never taking more than you give.
+#
+#***********************************************************************
+# This file implements regression tests for SQLite library.  The
+# focus of this script is database locks.
+#
+# $Id: trans.test,v 1.7 2001/09/24 03:12:41 drh Exp $
+
+
+set testdir [file dirname $argv0]
+source $testdir/tester.tcl
+
+
+# Create several tables to work with.
+#
+do_test trans-1.0 {
+  execsql {
+    CREATE TABLE one(a int PRIMARY KEY, b text);
+    INSERT INTO one VALUES(1,'one');
+    INSERT INTO one VALUES(2,'two');
+    INSERT INTO one VALUES(3,'three');
+    SELECT b FROM one ORDER BY a;
+  }
+} {one two three}
+do_test trans-1.1 {
+  execsql {
+    CREATE TABLE two(a int PRIMARY KEY, b text);
+    INSERT INTO two VALUES(1,'I');
+    INSERT INTO two VALUES(5,'V');
+    INSERT INTO two VALUES(10,'X');
+    SELECT b FROM two ORDER BY a;
+  }
+} {I V X}
+do_test trans-1.9 {
+  sqlite altdb test.db
+  execsql {SELECT b FROM one ORDER BY a} altdb
+} {one two three}
+do_test trans-1.10 {
+  execsql {SELECT b FROM two ORDER BY a} altdb
+} {I V X}
+
+# Basic transactions
+#
+do_test trans-2.1 {
+  set v [catch {execsql {BEGIN}} msg]
+  lappend v $msg
+} {0 {}}
+do_test trans-2.2 {
+  set v [catch {execsql {END}} msg]
+  lappend v $msg
+} {0 {}}
+do_test trans-2.3 {
+  set v [catch {execsql {BEGIN TRANSACTION}} msg]
+  lappend v $msg
+} {0 {}}
+do_test trans-2.4 {
+  set v [catch {execsql {COMMIT TRANSACTION}} msg]
+  lappend v $msg
+} {0 {}}
+do_test trans-2.5 {
+  set v [catch {execsql {BEGIN TRANSACTION 'foo'}} msg]
+  lappend v $msg
+} {0 {}}
+do_test trans-2.6 {
+  set v [catch {execsql {ROLLBACK TRANSACTION 'foo'}} msg]
+  lappend v $msg
+} {0 {}}
+do_test trans-2.10 {
+  execsql {
+    BEGIN;
+    SELECT a FROM one ORDER BY a;
+    SELECT a FROM two ORDER BY a;
+    END;
+  }
+} {1 2 3 1 5 10}
+
+# Check the locking behavior
+#
+do_test trans-3.1 {
+  execsql {
+    BEGIN;
+    SELECT a FROM one ORDER BY a;
+  }
+} {1 2 3}
+do_test trans-3.2 {
+  set v [catch {execsql {
+    SELECT a FROM two ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {1 {database is locked}}
+do_test trans-3.3 {
+  set v [catch {execsql {
+    SELECT a FROM one ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {1 {database is locked}}
+do_test trans-3.4 {
+  set v [catch {execsql {
+    INSERT INTO one VALUES(4,'four');
+  }} msg]
+  lappend v $msg
+} {0 {}}
+do_test trans-3.5 {
+  set v [catch {execsql {
+    SELECT a FROM two ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {1 {database is locked}}
+do_test trans-3.6 {
+  set v [catch {execsql {
+    SELECT a FROM one ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {1 {database is locked}}
+do_test trans-3.7 {
+  set v [catch {execsql {
+    INSERT INTO two VALUES(4,'IV');
+  }} msg]
+  lappend v $msg
+} {0 {}}
+do_test trans-3.8 {
+  set v [catch {execsql {
+    SELECT a FROM two ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {1 {database is locked}}
+do_test trans-3.9 {
+  set v [catch {execsql {
+    SELECT a FROM one ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {1 {database is locked}}
+do_test trans-3.10 {
+  execsql {END TRANSACTION}
+} {}
+do_test trans-3.11 {
+  set v [catch {execsql {
+    SELECT a FROM two ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {0 {1 4 5 10}}
+do_test trans-3.12 {
+  set v [catch {execsql {
+    SELECT a FROM one ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {0 {1 2 3 4}}
+do_test trans-3.13 {
+  set v [catch {execsql {
+    SELECT a FROM two ORDER BY a;
+  } db} msg]
+  lappend v $msg
+} {0 {1 4 5 10}}
+do_test trans-3.14 {
+  set v [catch {execsql {
+    SELECT a FROM one ORDER BY a;
+  } db} msg]
+  lappend v $msg
+} {0 {1 2 3 4}}
+
+do_test trans-4.1 {
+  set v [catch {execsql {
+    COMMIT;
+  } db} msg]
+  lappend v $msg
+} {0 {}}
+do_test trans-4.2 {
+  set v [catch {execsql {
+    ROLLBACK;
+  } db} msg]
+  lappend v $msg
+} {0 {}}
+do_test trans-4.3 {
+  set v [catch {execsql {
+    BEGIN TRANSACTION;
+    SELECT a FROM two ORDER BY a;
+  } db} msg]
+  lappend v $msg
+} {0 {1 4 5 10}}
+do_test trans-4.4 {
+  set v [catch {execsql {
+    SELECT a FROM two ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {1 {database is locked}}
+do_test trans-4.5 {
+  set v [catch {execsql {
+    SELECT a FROM one ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {1 {database is locked}}
+do_test trans-4.6 {
+  set v [catch {execsql {
+    BEGIN TRANSACTION;
+    SELECT a FROM one ORDER BY a;
+  } db} msg]
+  lappend v $msg
+} {0 {1 2 3 4}}
+do_test trans-4.7 {
+  set v [catch {execsql {
+    SELECT a FROM two ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {1 {database is locked}}
+do_test trans-4.8 {
+  set v [catch {execsql {
+    SELECT a FROM one ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {1 {database is locked}}
+do_test trans-4.9 {
+  set v [catch {execsql {
+    END TRANSACTION;
+    SELECT a FROM two ORDER BY a;
+  } db} msg]
+  lappend v $msg
+} {0 {1 4 5 10}}
+do_test trans-4.10 {
+  set v [catch {execsql {
+    SELECT a FROM two ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {0 {1 4 5 10}}
+do_test trans-4.11 {
+  set v [catch {execsql {
+    SELECT a FROM one ORDER BY a;
+  } altdb} msg]
+  lappend v $msg
+} {0 {1 2 3 4}}
+do_test trans-4.99 {
+  altdb close
+  execsql {
+    DROP TABLE one;
+    DROP TABLE two;
+  }
+} {}
+
+# Check out the commit/rollback behavior of the database
+#
+do_test trans-5.1 {
+  execsql {SELECT name FROM sqlite_master WHERE type='table' ORDER BY name}
+} {}
+do_test trans-5.2 {
+  execsql {BEGIN TRANSACTION}
+  execsql {SELECT name FROM sqlite_master WHERE type='table' ORDER BY name}
+} {}
+do_test trans-5.3 {
+  execsql {CREATE TABLE one(a text, b int)}
+  execsql {SELECT name FROM sqlite_master WHERE type='table' ORDER BY name}
+} {one}
+do_test trans-5.4 {
+  execsql {SELECT a,b FROM one ORDER BY b}
+} {}
+do_test trans-5.5 {
+  execsql {INSERT INTO one(a,b) VALUES('hello', 1)}
+  execsql {SELECT a,b FROM one ORDER BY b}
+} {hello 1}
+do_test trans-5.6 {
+  execsql {ROLLBACK}
+  execsql {SELECT name FROM sqlite_master WHERE type='table' ORDER BY name}
+} {}
+do_test trans-5.7 {
+  set v [catch {
+    execsql {SELECT a,b FROM one ORDER BY b}
+  } msg]
+  lappend v $msg
+} {1 {no such table: one}}
+
+# Test commits and rollbacks of table CREATE TABLEs, CREATE INDEXs
+# DROP TABLEs and DROP INDEXs
+#
+do_test trans-5.8 {
+  execsql {
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name
+  }
+} {}
+do_test trans-5.9 {
+  execsql {
+    BEGIN TRANSACTION;
+    CREATE TABLE t1(a int, b int, c int);
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {t1}
+do_test trans-5.10 {
+  execsql {
+    CREATE INDEX i1 ON t1(a);
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {i1 t1}
+do_test trans-5.11 {
+  execsql {
+    COMMIT;
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {i1 t1}
+do_test trans-5.12 {
+  execsql {
+    BEGIN TRANSACTION;
+    CREATE TABLE t2(a int, b int, c int);
+    CREATE INDEX i2a ON t2(a);
+    CREATE INDEX i2b ON t2(b);
+    DROP TABLE t1;
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {i2a i2b t2}
+do_test trans-5.13 {
+  execsql {
+    ROLLBACK;
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {i1 t1}
+do_test trans-5.14 {
+  execsql {
+    BEGIN TRANSACTION;
+    DROP INDEX i1;
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {t1}
+do_test trans-5.15 {
+  execsql {
+    ROLLBACK;
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {i1 t1}
+do_test trans-5.16 {
+  execsql {
+    BEGIN TRANSACTION;
+    DROP INDEX i1;
+    CREATE TABLE t2(x int, y int, z int);
+    CREATE INDEX i2x ON t2(x);
+    CREATE INDEX i2y ON t2(y);
+    INSERT INTO t2 VALUES(1,2,3);
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {i2x i2y t1 t2}
+do_test trans-5.17 {
+  execsql {
+    COMMIT;
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {i2x i2y t1 t2}
+do_test trans-5.18 {
+  execsql {
+    SELECT * FROM t2;
+  }
+} {1 2 3}
+do_test trans-5.19 {
+  execsql {
+    SELECT x FROM t2 WHERE y=2;
+  }
+} {1}
+do_test trans-5.20 {
+  execsql {
+    BEGIN TRANSACTION;
+    DROP TABLE t1;
+    DROP TABLE t2;
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {}
+do_test trans-5.21 {
+  set r [catch {execsql {
+    SELECT * FROM t2
+  }} msg]
+  lappend r $msg
+} {1 {no such table: t2}}
+do_test trans-5.22 {
+  execsql {
+    ROLLBACK;
+    SELECT name fROM sqlite_master 
+    WHERE type='table' OR type='index'
+    ORDER BY name;
+  }
+} {i2x i2y t1 t2}
+do_test trans-5.23 {
+  execsql {
+    SELECT * FROM t2;
+  }
+} {1 2 3}
+
+finish_test

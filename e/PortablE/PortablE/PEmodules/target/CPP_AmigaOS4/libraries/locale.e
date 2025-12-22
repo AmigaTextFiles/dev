@@ -1,0 +1,259 @@
+/* $Id: locale.h,v 1.23 2005/11/10 15:39:41 hjfrieden Exp $ */
+OPT NATIVE
+MODULE 'target/exec/types', 'target/exec/nodes', 'target/exec/lists', 'target/exec/libraries', 'target/exec/interfaces', 'target/utility/tagitem', 'target/dos/datetime'
+{#include <libraries/locale.h>}
+NATIVE {LIBRARIES_LOCALE_H} CONST
+
+/* constants for GetLocaleStr() */
+NATIVE {LANG_CODE}     CONST LANG_CODE     = 0 /* ISO-639-2/T 3-letter lowercase language   */
+                        /* code (e.g. "eng"). Added in V50. Caution: */
+                        /* All known old language drivers return a   */
+                        /* pointer to an empty string (""). The code */
+                        /* can e.g. be used as ID to get the         */
+                        /* localized language name from              */
+                        /* sys/languages.catalog ($656e6700 = "eng") */
+
+NATIVE {DAY_1}         CONST DAY_1         = 1 /* Sunday    */
+NATIVE {DAY_2}         CONST DAY_2         = 2 /* Monday    */
+NATIVE {DAY_3}         CONST DAY_3         = 3 /* Tuesday   */
+NATIVE {DAY_4}         CONST DAY_4         = 4 /* Wednesday */
+NATIVE {DAY_5}         CONST DAY_5         = 5 /* Thursday  */
+NATIVE {DAY_6}         CONST DAY_6         = 6 /* Friday    */
+NATIVE {DAY_7}         CONST DAY_7         = 7 /* Saturday  */
+
+NATIVE {ABDAY_1}       CONST ABDAY_1       = 8 /* Sun */
+NATIVE {ABDAY_2}       CONST ABDAY_2       = 9 /* Mon */
+NATIVE {ABDAY_3}      CONST ABDAY_3      = 10 /* Tue */
+NATIVE {ABDAY_4}      CONST ABDAY_4      = 11 /* Wed */
+NATIVE {ABDAY_5}      CONST ABDAY_5      = 12 /* Thu */
+NATIVE {ABDAY_6}      CONST ABDAY_6      = 13 /* Fri */
+NATIVE {ABDAY_7}      CONST ABDAY_7      = 14 /* Sat */
+
+NATIVE {MON_1}        CONST MON_1        = 15 /* January   */
+NATIVE {MON_2}        CONST MON_2        = 16 /* February  */
+NATIVE {MON_3}        CONST MON_3        = 17 /* March     */
+NATIVE {MON_4}        CONST MON_4        = 18 /* April     */
+NATIVE {MON_5}        CONST MON_5        = 19 /* May       */
+NATIVE {MON_6}        CONST MON_6        = 20 /* June      */
+NATIVE {MON_7}        CONST MON_7        = 21 /* July      */
+NATIVE {MON_8}        CONST MON_8        = 22 /* August    */
+NATIVE {MON_9}        CONST MON_9        = 23 /* September */
+NATIVE {MON_10}       CONST MON_10       = 24 /* October   */
+NATIVE {MON_11}       CONST MON_11       = 25 /* November  */
+NATIVE {MON_12}       CONST MON_12       = 26 /* December  */
+
+NATIVE {ABMON_1}      CONST ABMON_1      = 27 /* Jan */
+NATIVE {ABMON_2}      CONST ABMON_2      = 28 /* Feb */
+NATIVE {ABMON_3}      CONST ABMON_3      = 29 /* Mar */
+NATIVE {ABMON_4}      CONST ABMON_4      = 30 /* Apr */
+NATIVE {ABMON_5}      CONST ABMON_5      = 31 /* May */
+NATIVE {ABMON_6}      CONST ABMON_6      = 32 /* Jun */
+NATIVE {ABMON_7}      CONST ABMON_7      = 33 /* Jul */
+NATIVE {ABMON_8}      CONST ABMON_8      = 34 /* Aug */
+NATIVE {ABMON_9}      CONST ABMON_9      = 35 /* Sep */
+NATIVE {ABMON_10}     CONST ABMON_10     = 36 /* Oct */
+NATIVE {ABMON_11}     CONST ABMON_11     = 37 /* Nov */
+NATIVE {ABMON_12}     CONST ABMON_12     = 38 /* Dec */
+
+NATIVE {YESSTR}       CONST YESSTR       = 39 /* affirmative response for yes/no queries */
+NATIVE {NOSTR}        CONST NOSTR        = 40 /* negative response for yes/no queries    */
+
+NATIVE {AM_STR}       CONST AM_STR       = 41 /* AM */
+NATIVE {PM_STR}       CONST PM_STR       = 42 /* PM */
+
+NATIVE {SOFTHYPHEN}   CONST SOFTHYPHEN   = 43 /* soft hyphenation */
+NATIVE {HARDHYPHEN}   CONST HARDHYPHEN   = 44 /* hard hyphenation */
+
+NATIVE {OPENQUOTE}    CONST OPENQUOTE    = 45 /* start of quoted block */
+NATIVE {CLOSEQUOTE}   CONST CLOSEQUOTE   = 46 /* end of quoted block   */
+
+NATIVE {YESTERDAYSTR} CONST YESTERDAYSTR = 47 /* Yesterday */
+NATIVE {TODAYSTR}     CONST TODAYSTR     = 48 /* Today     */
+NATIVE {TOMORROWSTR}  CONST TOMORROWSTR  = 49 /* Tomorrow  */
+NATIVE {FUTURESTR}    CONST FUTURESTR    = 50 /* Future    */
+
+NATIVE {LANG_NAME}    CONST LANG_NAME    = 51 /* native name of this language */
+                        /* in this language and charset. */
+                        /* Added in V50. */
+
+/* Added in V50: Alternate forms of weekday names to be used
+ * in date strings, some languages need those. Fallback are
+ * the normal weekday names for standalone usage. */
+NATIVE {ALTDAY_1}     CONST ALTDAY_1     = 52 /* Sunday    */
+NATIVE {ALTDAY_2}     CONST ALTDAY_2     = 53 /* Monday    */
+NATIVE {ALTDAY_3}     CONST ALTDAY_3     = 54 /* Tuesday   */
+NATIVE {ALTDAY_4}     CONST ALTDAY_4     = 55 /* Wednesday */
+NATIVE {ALTDAY_5}     CONST ALTDAY_5     = 56 /* Thursday  */
+NATIVE {ALTDAY_6}     CONST ALTDAY_6     = 57 /* Friday    */
+NATIVE {ALTDAY_7}     CONST ALTDAY_7     = 58 /* Saturday  */
+
+/* Added in V50: Alternate forms of month names to be used
+ * in date strings, some languages need those. Fallback are
+ * the normal month names for standalone usage. */
+NATIVE {ALTMON_1}     CONST ALTMON_1     = 59 /* January   */
+NATIVE {ALTMON_2}     CONST ALTMON_2     = 60 /* February  */
+NATIVE {ALTMON_3}     CONST ALTMON_3     = 61 /* March     */
+NATIVE {ALTMON_4}     CONST ALTMON_4     = 62 /* April     */
+NATIVE {ALTMON_5}     CONST ALTMON_5     = 63 /* May       */
+NATIVE {ALTMON_6}     CONST ALTMON_6     = 64 /* June      */
+NATIVE {ALTMON_7}     CONST ALTMON_7     = 65 /* July      */
+NATIVE {ALTMON_8}     CONST ALTMON_8     = 66 /* August    */
+NATIVE {ALTMON_9}     CONST ALTMON_9     = 67 /* September */
+NATIVE {ALTMON_10}    CONST ALTMON_10    = 68 /* October   */
+NATIVE {ALTMON_11}    CONST ALTMON_11    = 69 /* November  */
+NATIVE {ALTMON_12}    CONST ALTMON_12    = 70 /* December  */
+
+NATIVE {MAXSTRMSG}    CONST MAXSTRMSG    = 71 /* current number of defined strings */
+
+/*****************************************************************************/
+
+/* This structure must only be allocated by locale.library and is READ-ONLY! */
+NATIVE {Locale} OBJECT locale
+    {loc_LocaleName}	localename	:/*STRPTR*/ ARRAY OF CHAR           /* locale's name               */
+    {loc_LanguageName}	languagename	:/*STRPTR*/ ARRAY OF CHAR         /* language of this locale     */
+    {loc_PrefLanguages}	preflanguages[10]	:ARRAY OF /*STRPTR*/ ARRAY OF CHAR    /* preferred languages         */
+    {loc_Flags}	flags	:ULONG                /* always 0 for now            */
+
+    {loc_CodeSet}	codeset	:ULONG              /* IANA charset number, see    */
+                                      /* L:CharSets/character-sets,  */
+                                      /* used for diskfont.library   */
+                                      /* V50+ default charset        */
+    {loc_CountryCode}	countrycode	:ULONG          /* user's country code         */
+                                      /* This is in fact an UBYTE[4] */
+                                      /* New .country files should   */
+                                      /* use ISO-3166 Alpha 3 names  */
+                                      /* The code can e.g. be used   */
+                                      /* as ID to get the localized  */
+                                      /* country name from           */
+                                      /* sys/countries.catalog       */
+                                      /* ($55534100 for "USA").      */
+    {loc_TelephoneCode}	telephonecode	:ULONG        /* country's telephone code    */
+    {loc_GMTOffset}	gmtoffset	:VALUE            /* minutes from GMT            */
+    {loc_MeasuringSystem}	measuringsystem	:UBYTE      /* what measuring system?      */
+    {loc_CalendarType}	calendartype	:UBYTE         /* what calendar type?         */
+    {loc_Reserved0}	reserved0[2]	:ARRAY OF UBYTE
+
+    {loc_DateTimeFormat}	datetimeformat	:/*STRPTR*/ ARRAY OF CHAR       /* regular date & time format  */
+    {loc_DateFormat}	dateformat	:/*STRPTR*/ ARRAY OF CHAR           /* date format by itself       */
+    {loc_TimeFormat}	timeformat	:/*STRPTR*/ ARRAY OF CHAR           /* time format by itself       */
+
+    {loc_ShortDateTimeFormat}	shortdatetimeformat	:/*STRPTR*/ ARRAY OF CHAR  /* short date & time format    */
+    {loc_ShortDateFormat}	shortdateformat	:/*STRPTR*/ ARRAY OF CHAR      /* short date format by itself */
+    {loc_ShortTimeFormat}	shorttimeformat	:/*STRPTR*/ ARRAY OF CHAR      /* short time format by itself */
+
+    /* for numeric values */
+    {loc_DecimalPoint}	decimalpoint	:/*STRPTR*/ ARRAY OF CHAR         /* character before the decimals */
+    {loc_GroupSeparator}	groupseparator	:/*STRPTR*/ ARRAY OF CHAR       /* separates groups of digits    */
+    {loc_FracGroupSeparator}	fracgroupseparator	:/*STRPTR*/ ARRAY OF CHAR   /* separates groups of digits    */
+    {loc_Grouping}	grouping	:PTR TO UBYTE             /* size of each group            */
+    {loc_FracGrouping}	fracgrouping	:PTR TO UBYTE         /* size of each group            */
+
+    /* for monetary values */
+    {loc_MonDecimalPoint}	mondecimalpoint	:/*STRPTR*/ ARRAY OF CHAR
+    {loc_MonGroupSeparator}	mongroupseparator	:/*STRPTR*/ ARRAY OF CHAR
+    {loc_MonFracGroupSeparator}	monfracgroupseparator	:/*STRPTR*/ ARRAY OF CHAR
+    {loc_MonGrouping}	mongrouping	:PTR TO UBYTE
+    {loc_MonFracGrouping}	monfracgrouping	:PTR TO UBYTE
+    {loc_MonFracDigits}	monfracdigits	:UBYTE        /* digits after the decimal point   */
+    {loc_MonIntFracDigits}	monintfracdigits	:UBYTE     /* for international representation */
+    {loc_Reserved1}	reserved1[2]	:ARRAY OF UBYTE
+
+    /* for currency symbols */
+    {loc_MonCS}	moncs	:/*STRPTR*/ ARRAY OF CHAR                /* currency symbol               */
+    {loc_MonSmallCS}	monsmallcs	:/*STRPTR*/ ARRAY OF CHAR           /* symbol for small amounts      */
+    {loc_MonIntCS}	monintcs	:/*STRPTR*/ ARRAY OF CHAR             /* international (ISO 4217) code */
+                                      /* and international separator   */
+
+    /* for positive monetary values */
+    {loc_MonPositiveSign}	monpositivesign	:/*STRPTR*/ ARRAY OF CHAR      /* indicate positive money value   */
+    {loc_MonPositiveSpaceSep}	monpositivespacesep	:UBYTE  /* determine if separated by space */
+    {loc_MonPositiveSignPos}	monpositivesignpos	:UBYTE   /* position of positive sign       */
+    {loc_MonPositiveCSPos}	monpositivecspos	:UBYTE     /* position of currency symbol     */
+    {loc_Reserved2}	reserved2	:UBYTE
+
+    /* for negative monetary values */
+    {loc_MonNegativeSign}	monnegativesign	:/*STRPTR*/ ARRAY OF CHAR      /* indicate negative money value   */
+    {loc_MonNegativeSpaceSep}	monnegativespacesep	:UBYTE  /* determine if separated by space */
+    {loc_MonNegativeSignPos}	monnegativesignpos	:UBYTE   /* position of negative sign       */
+    {loc_MonNegativeCSPos}	monnegativecspos	:UBYTE     /* position of currency symbol     */
+    {loc_Reserved3}	reserved3	:UBYTE
+ENDOBJECT
+
+/* constants for Locale.loc_MeasuringSystem */
+NATIVE {MS_ISO}      CONST MS_ISO      = 0 /* international metric system */
+NATIVE {MS_AMERICAN} CONST MS_AMERICAN = 1 /* american system             */
+NATIVE {MS_IMPERIAL} CONST MS_IMPERIAL = 2 /* imperial system             */
+NATIVE {MS_BRITISH}  CONST MS_BRITISH  = 3 /* british system              */
+
+/* constants for Locale.loc_CalendarType */
+NATIVE {CT_7SUN}  CONST CT_7SUN  = 0 /* 7 days a week, Sunday is the first day    */
+NATIVE {CT_7MON}  CONST CT_7MON  = 1 /* 7 days a week, Monday is the first day    */
+NATIVE {CT_7TUE}  CONST CT_7TUE  = 2 /* 7 days a week, Tuesday is the first day   */
+NATIVE {CT_7WED}  CONST CT_7WED  = 3 /* 7 days a week, Wednesday is the first day */
+NATIVE {CT_7THU}  CONST CT_7THU  = 4 /* 7 days a week, Thursday is the first day  */
+NATIVE {CT_7FRI}  CONST CT_7FRI  = 5 /* 7 days a week, Friday is the first day    */
+NATIVE {CT_7SAT}  CONST CT_7SAT  = 6 /* 7 days a week, Saturday is the first day  */
+
+/* constants for Locale.loc_MonPositiveSpaceSep and
+ *               Locale.loc_MonNegativeSpaceSep
+ */
+NATIVE {SS_NOSPACE} CONST SS_NOSPACE = 0 /* cur. symbol is NOT separated from value with a space */
+NATIVE {SS_SPACE}   CONST SS_SPACE   = 1 /* cur. symbol IS separated from value with a space     */
+
+/* constants for Locale.loc_MonPositiveSignPos and
+ *               Locale.loc_MonNegativeSignPos
+ */
+NATIVE {SP_PARENS}    CONST SP_PARENS    = 0 /* () surround the quantity and currency_symbol   */
+NATIVE {SP_PREC_ALL}  CONST SP_PREC_ALL  = 1 /* sign string comes before amount and symbol     */
+NATIVE {SP_SUCC_ALL}  CONST SP_SUCC_ALL  = 2 /* sign string comes after amount and symbol      */
+NATIVE {SP_PREC_CURR} CONST SP_PREC_CURR = 3 /* sign string comes right before currency symbol */
+NATIVE {SP_SUCC_CURR} CONST SP_SUCC_CURR = 4 /* sign string comes right after currency symbol  */
+
+/* constants for Locale.loc_MonPositiveCSPos and
+ *               Locale.loc_MonNegativeCSPos
+ */
+NATIVE {CSP_PRECEDES} CONST CSP_PRECEDES = 0 /* currency symbol comes before value */
+NATIVE {CSP_SUCCEEDS} CONST CSP_SUCCEEDS = 1 /* currency symbol comes after value  */
+
+/* elements of the byte arrays pointed to by:
+ *   Locale.loc_Grouping
+ *   Locale.loc_FracGrouping
+ *   Locale.loc_MonGrouping
+ *   Locale.loc_MonFracGrouping
+ * are interpreted as follows:
+ *
+ *    255     indicates that no further grouping is to be performed
+ *    0       indicates that the previous element is to be repeatedly used
+ *            for the remainder of the digits
+ *    <other> the number of digits that comprises the current group
+ */
+
+/*****************************************************************************/
+
+/* Tags for OpenCatalog() */
+NATIVE {OC_TagBase}         CONST OC_TAGBASE         = (TAG_USER + $90000)
+NATIVE {OC_BuiltInLanguage} CONST OC_BUILTINLANGUAGE = OC_TAGBASE+1 /* language of built-in strings      */
+NATIVE {OC_BuiltInCodeSet}  CONST OC_BUILTINCODESET  = OC_TAGBASE+2 /* code set of built-in strings      */
+NATIVE {OC_Version}         CONST OC_VERSION         = OC_TAGBASE+3 /* catalog version number required   */
+NATIVE {OC_Language}        CONST OC_LANGUAGE        = OC_TAGBASE+4 /* preferred language of catalog     */
+NATIVE {OC_WantedCodeSet}   CONST OC_WANTEDCODESET   = OC_TAGBASE+5 /* code set of font to be used (V50) */
+
+/*****************************************************************************/
+
+/* Comparison types for StrnCmp() */
+NATIVE {SC_ASCII}    CONST SC_ASCII    = 0
+NATIVE {SC_COLLATE1} CONST SC_COLLATE1 = 1
+NATIVE {SC_COLLATE2} CONST SC_COLLATE2 = 2
+
+/*****************************************************************************/
+
+/* This structure must only be allocated by locale.library and is READ-ONLY! */
+NATIVE {Catalog} OBJECT catalog
+    {cat_Link}	ln	:ln     /* for internal linkage      */
+    {cat_Pad}	pad	:UINT      /* to longword align         */
+    {cat_Language}	language	:/*STRPTR*/ ARRAY OF CHAR /* language of the catalog   */
+    {cat_CodeSet}	codeset	:ULONG  /* IANA charset number, see  */
+                              /* L:CharSets/character-sets */
+    {cat_Version}	version	:UINT  /* version of the catalog    */
+    {cat_Revision}	revision	:UINT /* revision of the catalog   */
+ENDOBJECT

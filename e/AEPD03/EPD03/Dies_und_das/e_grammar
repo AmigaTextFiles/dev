@@ -1,0 +1,129 @@
++---------------------------------------------------------------+
+|	E INFORMAL GRAMMAR					|
++---------------------------------------------------------------+
+
+lex syntax: regular expressions
+parse syntax: own ASF/SDF adaption;
+
+	name	= grammar ident
+	"name"	= constant
+	()	= grouping
+	|	= or
+	e*	= 0 or more of e
+	e+	= 1 or more of e
+	{e s}*	= 0 or more of e separated by s
+	{e s}+	= 1 or more of e separated by s
+	[e]	= e is optional
+	; e	= e is comment :-)
+
++-------------------+
+|	LEX	    |
++-------------------+
+
+whitespace	= [ \t] 	; also \n if last token is [,+-*/] or similar
+		  anything between "/*" and "*/"
+		  from "->" to \n
+eol		= [;\n]
+
+constant	= [A-Z] ( [A-Z] [A-Za-z0-9_]* )?
+builtin		= [A-Z] [a-z] [A-Za-z0-9_]*
+ident,objident	= [a-z] [a-zA-Z0-9_]*
+
+num		= [0-9]+	; "-" is seperate token
+                  $[0-9A-Fa-f]+
+		  %[01]+
+fnum		= [0-9]*.[0-9]*
+
+stringconst	= anything in ''
+charconst	= anything in ""
+
++-------------------+
+|	PARSE       |
++-------------------+
+
+program		= opts globalpart localpart
+
+globalpart	= ( modulestat | defstat | objdecl | constdecl | raisedecl )*
+localpart	= ( procdecl | constdecl )+
+
+modulestat	= "MODULE" { conststring "," }+ eol
+defstat		= "DEF" vardecllist eol
+objdecl		= "OBJECT" ident [ "OF" ident ] eol
+                     ( vardecllist eol )+
+                  "ENDOBJECT" eol
+constdecl	= "CONST" { ( constant "=" constexp ) "," }+ |
+		  "ENUM" { ( constant | constant "=" constexp ) "," }+ |
+		  "SET" { constant "," }+
+procdecl	= [ "EXPORT" ] "PROC" ident "(" argdecllist ")" [ "HANDLE" ]
+                  ( "RETURN" { exp "," }* |
+                     eol defstat* stats 
+                     [ "EXCEPT" eol stats ]
+                     "ENDPROC" { exp "," }* eol )
+raisedecl	= "RAISE" { ( constant "IF" builtin "()" compop num ) "," }+
+opts		= ( "OPT" { setting "," }+ )*		; machine dependant
+
+vardecllist	= { vardecl "," }+
+vardecl		= ident [ "=" num ]
+                    [ ":" ( "LONG" | "REAL" | "PTR" "TO" ptrtype ) ] |
+                  ident ":" objtype |
+                  ident "[" num "]" ":"
+                    ( "ARRAY" |
+                      "ARRAY" "OF" ptrtype |
+                      "STRING" |
+                      "LIST" )
+argdecllist	= { argdecl "," }+
+argdecl		= ident [ "=" defaultarg ]
+                    [ ":" ( "LONG" | "REAL" | "PTR" "TO" ptrtype ) ]
+ptrtype		= objtype | simpletype
+simpletype	= CHAR | INT | LONG
+objtype		= ident
+
+stats		= ( ( onelinestat | multlinestat ) eol )*
+onelinestat	= exp |
+		  lval ":=" exp |
+		  { var "," }+ ":=" exp |
+		  "IF" exp "THEN" onelinestat "ELSE" onelinestat |
+		  "FOR" var ":=" exp "TO" exp [ "STEP" num ]
+                     "DO" onelinestat |
+		  "WHILE" exp "DO" onelinestat |
+		  "RETURN" { exp "," }* |
+		  "JUMP" ident |
+                  ( "INC" | "DEC" ) var |		; nearly obsolete
+		  asm_mnemonic { operand "," }*	|	; machine dependant
+		  "INCBIN" stringconst |		; inline asm support
+		  simpletype { num "," }+ |
+		  "VOID" exp				; obsolete
+multlinestat	= "IF" exp eol stats
+                     [ ( "ELSEIF" exp eol stats )* ] 
+                     [ "ELSE" eol stats ]
+                     "ENDIF" |
+		  "FOR" var ":=" exp "TO" exp [ "STEP" num ] eol
+                     stats "ENDPROC" |
+		  "WHILE" exp eol stats "ENDWHILE" |
+		  "REPEAT" eol stats "UNTIL" exp |
+		  "SELECT" var eol
+                     ( "CASE" exp eol stats )+
+                     [ "DEFAULT" eol stats ]
+                     "ENDSELECT" |
+                  "LOOP" eol stats "ENDLOOP"
+
+explist		= { exp "," }+
+exp		= [ "-" ] { item binop }+ |
+		  exp "BUT" exp
+item		= num | fnum | lval | stringconst | charconst |
+		  "SIZEOF" objident |
+		  "IF" exp "THEN" exp "ELSE" exp |
+		  "[" explist "]" [ ":" ptrtype ] |
+		  ( builtin | ident ) "(" explist ")" |
+		  var ":=" exp |
+		  "{" ident "}" |
+		  "`" exp |
+binop		= mathop | compop | logop
+mathop		= "+" | "-" | "*" | "/"
+compop		= "=" | "<>" | ">" | "<" | ">=" | "<="
+logop		= "AND" | "OR"
+constexp	= [ "-" ] { num ( "+" | "-" | "*" | "/" ) }+
+lval		= var [ "[" [ exp ] "]" ] [ "." ident ] [ "++" | "--" ] |
+		  "^" var [ "++" | "--" ] |
+var		= ident
+defaultarg	= num

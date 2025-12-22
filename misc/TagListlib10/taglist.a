@@ -1,0 +1,255 @@
+;*--------------------------------------------------------------------------*
+;                       tagsupport.a (Jul 16 1992)
+;*--------------------------------------------------------------------------*
+
+ maclib "include:allsymsplus.mac"
+ MRESET
+
+;*--------------------------------------------------------------------------*
+;*NAME
+;*	TL_GetTagData - search tagitem in taglist and return data
+;*
+;*SYNOPSIS
+;*	VOID = TL_GetTagData(ULONG id, ULONG default, struct TagItem *list)
+;*	                     D0        D1             A0
+;*FUNCTION
+;*	Search a given tagitem in a taglist. If the tagitem does not exist default
+;*	is returned, else the ti_Data is returned.
+;*
+
+ sGLOBAL LibTL_GetTagData
+	move.l d1,-(a7)
+	bsr.b LibTL_FindTagItem
+	WNE.b
+		addq.l #4,a7
+		move.l d0,a0
+		move.l (4,a0),d0
+		rts
+	WEND
+	move.l (a7)+,d0
+	rts
+
+
+
+
+;*--------------------------------------------------------------------------*
+;*NAME
+;*	TL_FindTagData - search tagitem in taglist and return pointer to ti_Data
+;*
+;*SYNOPSIS
+;*	ULONG *data = TL_FindTagData(ULONG id, struct TagItem *list)
+;*	                             D0        A0
+;*FUNCTION
+;*	Search a given tagitem in a taglist. If the tagitem does not exist NULL
+;*	is returned. It is more easy to typecast a ULONG * than a struct TagItem *.
+;*
+
+ sGLOBAL LibTL_FindTagData
+	bsr.b LibTL_FindTagItem
+	WNE.b
+		addq.l #4,d0
+	WEND
+	rts
+
+
+
+
+;*--------------------------------------------------------------------------*
+;*NAME
+;*	TL_FindTagItem - search tagitem in taglist
+;*
+;*SYNOPSIS
+;*	struct TagItem *item = TL_FindTagItem(ULONG id, struct TagItem *list)
+;*	                                      D0        A0
+;*FUNCTION
+;*	Search a given tagitem in a taglist. If the tagitem does not exist NULL
+;*	is returned.
+;*
+;*	If taglist==NULL then NULL is returned.
+;*
+
+ sGLOBAL LibTL_FindTagItem
+	exg.l d0,d1
+	move.l a0,d0
+	bne.b 2$
+	rts
+1$	addq.l #8,a0
+2$	move.l (a0),d0
+	bpl.b 3$
+	cmp.l d0,d1
+	bne.b 1$
+	move.l a0,d0
+4$	rts	
+3$	beq.b 4$				; TAG_DONE
+	subq.l #1,d0
+	beq.b 1$				; TAG_IGNORE
+	subq.l #1,d0
+	beq.b 5$				; TAG_MORE
+	move.w (6,a0),d0		; TAG_SKIP
+	lsl.w #3,d0
+	lea (8,a0,d0.w),a0
+	bra.b 2$
+5$	move.l (4,a0),a0
+	bra.b 2$
+
+
+
+
+;*--------------------------------------------------------------------------*
+;*NAME
+;*	TL_MapTagList - convert taglist to structure
+;*
+;*SYNOPSIS
+;*	VOID = TL_MapTagList(struct TagMapItem *map, VOID *struct, struct TagItem *list)
+;*	                     A0                      A1            A2
+;*FUNCTION
+;*	This routine copy tagvalues from a taglist into specified offsets in a
+;*	structure.
+;*
+;*
+
+;------ code creation macros ------------------------------------------------
+DC1 MACRO
+	DC.L \1,\2,\3
+	ENDM
+DC2 MACRO
+	DC.L \1,\2,\3
+	ENDM
+
+
+RE	MACRO
+	move.\1	d2,(a1,d0.w)
+	bra.b go
+	ENDM
+BO	MACRO
+	beq.b	de\1
+	or.\1	d1,(a1,d0.w)
+	bra.b go
+	ENDM
+bo	MACRO
+	bne.b	de\1
+	or.\1	d1,(a1,d0.w)
+	bra.b go
+	ENDM
+DE	MACRO
+	or.\1	d1,(a1,d0.w)
+	bra.b go
+	ENDM
+de	MACRO
+de\1
+	not.\1	d1
+	and.\1	d1,(a1,d0.w)
+	bra.b go
+	ENDM
+
+;------ empty taglist -------------------------------------------------------
+empty
+	DC.L TAG_DONE
+
+;------ code ----------------------------------------------------------------
+b1 RE b,3
+w1 RE w,2
+l1 RE l,0
+b2 BO b,3
+w2 BO w,2
+l2 BO l,0
+b3 bo b,3
+w3 bo w,2
+l3 bo l,0
+b4 de b,3
+w4 de w,2
+l4 de l,0
+b5 DE b,3
+w5 DE w,2
+l5 DE l,0
+
+;------ entry ---------------------------------------------------------------
+ sGLOBAL LibTL_MapTagList
+	movem.l d2-d4/a2-a4,-(a7)
+	moveq.l #0,d3
+	moveq.l #127,d4
+	move.l a2,a4
+	move.l a2,d2
+	bne.b go1
+		lea (empty,pc),a2
+		move.l a2,a4
+go		move.l a2,d2
+go1	move.l (a0)+,d0
+	bmi.b loop2
+
+;------ handle command in tagmap --------------------------------------------
+	bne.b notfound
+	move.w d3,d0
+	lsr.w #8,d0
+	movem.l (a7)+,d2-d4/a2-a4
+	rts
+
+;------ search loop ---------------------------------------------------------
+loop1	cmp.l a2,d2
+		beq.b notfound
+loop2	move.l (a2),d1
+		bpl.b command
+		addq.l #8,a2
+	cmp.l d0,d1
+	bne.b loop1
+
+;------ tag found in taglist ------------------------------------------------
+found
+	movem.l (a0)+,d0/d1
+	and.w d4,d0
+	move.l (j1,pc,d0.w),a3
+	swap.w d0
+	move.l (-4,a2),d2
+	jmp (a3)
+
+;------ handle command in taglist -------------------------------------------
+command
+	WEQ.b
+		move.l a4,a2
+		bra.b loop1
+	WEND
+	addq.l #8,a2
+	subq.l #1,d1
+	BEQ.b loop1
+	subq.l #1,d1
+	WEQ.b
+		move.l -(a2),a2
+		bra.b loop1
+	WEND
+	move.w -(a3),d1
+	lsl.w #3,d1
+	lea (2,a3,d1.w),a3
+	bra.b loop1
+
+;------ tag not found in taglist --------------------------------------------
+notfound
+	movem.l (a0)+,d0/d1
+	or.w d0,d3
+	and.w d4,d0
+	move.l (j2,pc,d0.w),a3
+	swap.w d0
+	move.l d1,d2
+	jmp (a3)
+
+;------ tagitem found ------------------------------------------------------
+j1
+ DC1 b1,w1,l1	; NORMAL	NODEFAULT	copy value into struct
+ DC1 b2,w2,l2	; BOOL		NODEFAULT	or value into struct
+ DC1 b3,w3,l3	; bool		NODEFAULT	and ~value into struct
+ DC1 b1,w1,l1	; NORMAL	DEFAULT		copy value into struct
+ DC1 b2,w2,l2	; BOOL		DEFAULT		or value into struct
+ DC1 b3,w3,l3	; bool		DEFAULT		and ~value into struct
+ DC1 b2,w2,l2	; BOOL		default		or value into struct
+ DC1 b3,w3,l3	; bool		default		and ~value into struct
+
+;------ tagitem could not be found ------------------------------------------
+j2
+ DC2 go,go,go	; NORMAL	NODEFAULT	skip
+ DC2 go,go,go	; BOOL		NODEFAULT	skip
+ DC2 go,go,go	; bool		NODEFAULT	skip
+ DC2 b1,w1,l1	; NORMAL	DEFAULT		copy default into struct
+ DC2 b5,w5,l5	; BOOL		DEFAULT		or default into struct
+ DC2 b4,w4,l4	; bool		DEFAULT		and ~default into struct
+ DC2 b4,w4,l4	; BOOL		default		and ~default into struct
+ DC2 b5,w5,l5	; bool		default		or default into struct
+

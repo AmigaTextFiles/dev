@@ -1,0 +1,190 @@
+(******************************************************************************)
+(*                                                                            *)
+(*    The global constants and variables defined in this module are optional: *)
+(* if you don't want to access their features, you needn't import them into   *)
+(* your program. The variables in the parameter lists of the procedures are   *)
+(* the only variables you are required to supply.                             *)
+(*    When describing the order in which certain routines are called, I have  *)
+(* adopted the curly-bracket notation of EBNF: routines in curly brackets {}  *)
+(* may be called an arbitrary number of times (0 to n). A, {B}, {C, {D}} thus *)
+(* implies that A is called once, followed by an arbitrary number of calls to *)
+(* to B, followed by an arbitrary number of calls to C. Each of the calls to  *)
+(* C may be followed by an arbitrary number of calls to D. Likewise, {{C},{D}}*)
+(* implies an arbitrary number of calls to C and D in any order.              *)
+(*                                                                            *)
+(******************************************************************************)
+(*                                                                            *)
+(*  Version 1.00a.002 (Beta) :   March 2, 1988                                *)
+(*                                                                            *)
+(*    These procedures were originally written under version 1.20 of the TDI  *)
+(* Modula-2 compiler. I have rewritten this module to operate under the v2.00 *)
+(* compiler. However, should you find any problem or inconsistency with the   *)
+(* functionality of this code, please contact me at the following address:    *)
+(*                                                                            *)
+(*                               Jerry Mack                                   *)
+(*                               23 Prospect Hill Ave.                        *)
+(*                               Waltham, MA   02154                          *)
+(*                                                                            *)
+(*    Check the module MenuUtils for TDI's (considerably less powerful) ver-  *)
+(* sions of my Menu and IntuitionText procedures. The modules GadgetUtils and *)
+(* EasyGadgets should also be of great help.                                  *)
+(*                                                                            *)
+(******************************************************************************)
+(*                                                                            *)
+(*    The source code to MenuTools is in the public domain. You may do with   *)
+(* it as you please.                                                          *)
+(*                                                                            *)
+(******************************************************************************)
+
+DEFINITION MODULE MenuTools;
+
+FROM Intuition       IMPORT WindowPtr, MenuPtr, MenuFlags, MenuFlagSet,
+                            MenuItemPtr, ItemFlags, ItemFlagSet, 
+                            IntuitionTextPtr;
+FROM Menus           IMPORT HighComp;
+FROM Strings         IMPORT String;
+
+
+CONST                  (* set Commandkey to this if you do not want a    *)
+   NoKey  = " ";       (* key-equivalent for the current Item or SubItem *)
+
+                    (* common assignments for ItemSetting & MenuSetting: *)
+CONST
+   Checkable = ItemFlagSet{CheckIt, MenuToggle};
+   CheckNow  = ItemFlagSet{Checked};              (* requires Checkable  *)
+   ItemOn    = ItemFlagSet{ItemEnabled} + HighComp;
+   ItemOff   = ItemFlagSet{};
+   MenuOn    = MenuFlagSet{MenuEnabled}; (* default value of MenuSetting *)
+   MenuOff   = MenuFlagSet{};
+
+VAR
+   FirstMenu       : MenuPtr;        (* pointer to first Menu in Menu bar *)
+   CurrentMenu     : MenuPtr;        (* current Menu    in Menu bar       *)
+   CurrentItem     : MenuItemPtr;    (* current Item    in Menu bar       *)
+   CurrentSubItem  : MenuItemPtr;    (* current SubItem in Menu bar       *)
+   ItemPen         : INTEGER;        (* color of current  Item or SubItem *)
+   ItemSelectPen   : INTEGER;        (* color of selected Item or SubItem *)
+   LoneMenuStrip   : MenuPtr;        (* unattached, DISPOSEable MenuStrip *)
+   SelectText      : String;         (* (Sub)Item text shown if selected  *)
+   VerPixPerChar   : CARDINAL;       (* vertical   pixels per character   *)
+   HorPixPerChar   : CARDINAL;       (* horizontal pixels per character   *)
+   MenuSetting     : MenuFlagSet;    (* characteristics of current Menu   *)
+   HiResScreen     : BOOLEAN;        (* high resolution screen?           *)
+   AutoIndent      : BOOLEAN;        (* shift (Sub)Items to right?        *)
+   RightJustify    : BOOLEAN;        (* extend select boxes to right?     *)
+   Left, Top       : INTEGER;        (* left & top location and width &   *)
+   Wide, High      : INTEGER;        (* height of current Menu, (Sub)Item *)
+   NewItemColumn   : BOOLEAN;        (* flag: start new (Sub)Item column? *)
+
+                                    (* all of these parameters are inputs *)
+   PROCEDURE InitializeMenuStrip;
+
+   PROCEDURE AddMenu    (MenuBarText : String);
+
+   PROCEDURE AddItem    (ItemText    : String;
+                         Commandkey  : CHAR;
+                         ItemSetting : ItemFlagSet;
+                         Exclusion   : LONGINT);
+ 
+   PROCEDURE AddSubItem (SubItemText : String;
+                         Commandkey  : CHAR;
+                         ItemSetting : ItemFlagSet;
+                         Exclusion   : LONGINT);
+
+   PROCEDURE DestroyMenuStrip (WindowPointer : WindowPtr);
+
+
+         (* Variables reset in PROCEDURE InitializeMenuStrip : *)
+ 
+         (* CurrentMenu = NULL    MenuSetting   = MenuON       *)
+         (* FirstMenu   = NULL    AutoIndent    = FALSE        *)
+         (* SelectText  = NoText  HorPixPerChar = 8            *)
+         (* MenuLeft    = 0       VerPixPerChar = 8            *)
+         (* HiResScreen = FALSE   RightJustify  = TRUE         *)
+
+ (* ItemSetting := Checkable + CheckNow --> this (Sub)Item can be and is  *)
+ (* now checked; the routines above automatically set the ItemText flag.  *)
+
+ (* Left, Top, Wide & High are recalculated in each subroutine to yield   *)
+ (* a pleasing MenuStrip; if you dislike it, you may change them prior to *)
+ (* calling AddMenu, AddItem and/or AddSubItem; also, Left & Wide affect  *)
+ (* the placement of text in AddMenu but affect the placement and size    *)
+ (* of the select boxes in AddItem and AddSubItem;                        *)
+
+ (* To what are Left, Top, Wide and High measured relative? For Menus,    *)
+ (* they are relative to the upper-left corner of the Screen. For Items,  *)
+ (* they are relative to the lower-left corner of the Menu. For SubItems, *)
+ (* they are relative to the lower-left corner of the Item.               *) 
+
+ (* If AutoIndent = TRUE, all Items under the CurrentMenu (or all SubItems*)
+ (* under the CurrentItem) will be shifted to the right to allow for a    *)
+ (* checkmark. If AutoIndent = FALSE, then only those (Sub)Items which    *)
+ (* request a checkmark in ItemSetting will be shifted to the right. The  *)
+ (* amount of space added to the left of the select box depends upon the  *)
+ (* value of HiresScreen.                                                 *)
+
+ (* If RightJustify is TRUE, then the right edge of each Item extends to  *)
+ (* the edge of its Menu. Otherwise, the right edge of each Item is deter-*)
+ (* mined by the width of the longest Item in the current Item-column.    *)
+ (* This is of most use when multiple Item-columns are desired: setting   *)
+ (* RightJustify to TRUE ensures that the first column of Items isn't ex- *)
+ (* cessively wide.                                                       *)
+ 
+ (* If CommandKey <> NoKey, then space will be added to the right of the  *)
+ (* (Sub)Item's select box according to the value of HiresScreen.         *)
+ 
+ (* In addition, TextFlag is included in all Itemsetting values above,    *)
+ (* since these routines are designed to create text Menus and (Sub)Items.*)
+
+ (* HorPixPerChar and VerPixPerChar are used to determine the width and   *)
+ (* height of the Menus, Items and SubItems. You may change these values  *)
+ (* to quickly obtain larger select boxes.                                *)
+
+ (* SelectText allows you to specify a different text be displayed when   *)
+ (* the (Sub)Item is chosen, though it prevents use of other highlighting.*)
+ (* SelectText = NoText upon exit from each of the above four procedures. *)
+ (* As stated above, Left, Wide, Top and High are reset or recalculated   *)
+ (* prior to exit from the above four routines. Don't change these values *)
+ (* unless you know where you want a specific Menu or (Sub)Item placed.   *)
+  
+ (* CurrentMenu, CurrentItem and CurrentSubItem point to the Menu, Item   *)
+ (* or SubItem, respectively, which was just added to the MenuStrip. Thus,*)
+ (* if you require access to a particular node in the MenuStrip, you may  *)
+ (* copy these pointers as needed following the call to AddMenu, AddItem  *)
+ (* or AddSubItem.                                                        *)
+ 
+ (* DestroyMenuStrip is designed to remove a MenuStrip from a Window and  *)
+ (* DISPOSE of its Menus, Items and SubItems, as well as the IntuitionText*)
+ (* structures to which they point. ANY non-NULL pointer in the MenuStrip *)
+ (* has its contents DISPOSED. If you wish only to DISPOSE of a MenuStrip *)
+ (* (one that is not attached to a Window), then set WindowPointer to NULL*)
+ (* and assign LoneMenuStrip to the MenuStrip of which to DISPOSE. Just   *)
+ (* prior to exit, DestroyMenuStrip calls InitializeMenuStrip. Thus, you  *)
+ (* need only call InitializeMenuStrip for the first MenuStrip and if you *)
+ (* want multiple MenuStrips defined at one time. I didn't call the pro-  *)
+ (* cedure in the module body because it looked unusual to call it for the*)
+ (* second and subsequent concurrent MenuStrips but not the first.        *)
+ 
+ (* You can easily create multiple MenuStrips by calling InitializeMenu-  *)
+ (* Strip once for each MenuStrip. Be sure to save the value of FirstMenu *)
+ (* prior to the call, as that is the pointer to the first Menu of the    *)
+ (* current MenuStrip.                                                    *)
+
+ (* Since the IntuiText routines above are used to create the Intuition-  *)
+ (* Text structures for the MenuStrip, you may change the values of the   *)
+ (* global variables associated with those routines to obtain different   *)
+ (* text attributes (color, font, etc.) for your MenuStrip.               *)
+ 
+ (* The colors of Items and SubItems can be changed by varying ItemPen and*)
+ (* ItemSelectPen. ItemPen assigns the foreground color of the (Sub)Item  *)
+ (* as it normally appears; ItemSelectPen assigns the foreground color it *)
+ (* assumes when selected.                                                *)
+  
+ (* Be sure to add at least one Item to each Menu to prevent a crash.     *)
+ 
+ (* In case you haven't figured it out, the order in which you call these *)
+ (* routines is as follows:  InitializeMenuStrip, {AddMenu,  AddItem,     *)
+ (* {AddSubItem}, {AddItem, {AddSubItem}}}, DestroyMenuStrip.             *)
+
+ 
+END MenuTools.

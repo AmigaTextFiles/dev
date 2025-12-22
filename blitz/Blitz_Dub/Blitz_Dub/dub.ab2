@@ -1,0 +1,361 @@
+
+; Experimental doubles for Blitz with no FPU.
+
+; (c) 2011-2013 Lorence Lombardo
+
+; Date commenced:- 12-June-2011
+; Last modified:-   22-May-2013
+
+; Tested on ROM 1.3
+
+; The following OS functions can be used with doubles:-
+
+; IEEEDPAbs_
+; IEEEDPAcos_
+; IEEEDPAdd_
+; IEEEDPAsin_
+; IEEEDPAtan_
+; IEEEDPCeil_
+; IEEEDPCmp_
+; IEEEDPCos_
+; IEEEDPCosh_
+; IEEEDPDiv_
+; IEEEDPExp_
+; IEEEDPFieee_
+; IEEEDPFix_
+; IEEEDPFloor_
+; IEEEDPFlt_
+; IEEEDPLog_
+; IEEEDPLog10_
+; IEEEDPMul_
+; IEEEDPNeg_
+; IEEEDPPow_
+; IEEEDPSin_
+; IEEEDPSincos_
+; IEEEDPSinh_
+; IEEEDPSqrt_
+; IEEEDPSub_
+; IEEEDPTan_
+; IEEEDPTanh_
+; IEEEDPTieee_
+; IEEEDPTst_
+
+
+; optimize 5  ; <-- integer optimizer if you want.
+
+
+INCLUDE "IEEED_inc.bb2"  ; <-- Add path here for classic Blitz
+
+
+NEWTYPE .dub : dub0.l : dub1.l : End NEWTYPE
+
+
+; This converts a numeric string to a double float.
+; The result will be placed in a specified address.
+
+Statement ValD{valfd$, addy.l}
+   valtd.dub\dub0=0 : valtd\dub1=0 : sign.b=0
+   valfd$=Replace$(valfd$,",","") : valfd$=Replace$(valfd$," ","")
+   signd$=Left$(valfd$,1) : If signd$="-" Then sign=1
+   If signd$="-" OR signd$="+" Then valfd$=Mid$(valfd$,2)
+   ntype$=Left$(valfd$,1) : base.b=10 : nmax.b=58
+   If ntype$<>"%" AND ntype$<>"$" AND ntype$<>"#" Then ntype$=""
+   If ntype$<>"" Then valfd$=Mid$(valfd$,2)
+   signd$=Left$(valfd$,1) : If signd$="-" Then sign=1
+   If signd$="-" OR signd$="+" Then valfd$=Mid$(valfd$,2)
+   If ntype$="%" Then base=2 : nmax=50
+   If ntype$="$" Then base=16 : valfd$=UCase$(valfd$)
+   If ntype$="#" Then base=8 : nmax=56
+   vl_xp2.w=Instr(valfd$,".") : fraclen.w=0
+   If vl_xp2>0
+      fract$=Mid$(valfd$,vl_xp2+1) : fract$=StripTrail$(fract$,48)
+      fraclen.w=Len(fract$) : vl_intlen.w=vl_xp2-1
+      valfd$=Left$(valfd$, vl_intlen)
+   Else
+      vl_intlen.w=Len(valfd$)
+   EndIf
+   IEEEDPFlt{ base, &dbase.dub } : fract.dub\dub0=0 : fract\dub1=0
+   slen.w=fraclen : v$=fract$
+   For x.b=1 To 2
+      If x=2 Then slen.w=vl_intlen : v$=valfd$
+      If slen>0
+         c.w=0 : calc.b=x
+         Repeat
+            v.b=Peek.b(&v$+c) : c+1
+            If v>47 AND v<nmax
+               IEEEDPFlt{ v-48, &dv.dub }
+            Else
+               If base=16 AND v>64 AND v<71
+                  IEEEDPFlt{ v-55, &dv.dub }
+               Else
+                  c = slen : calc=0
+               EndIf
+            EndIf
+            If calc=1
+               IEEEDPFlt{ c*-1, &cd.dub } : IEEEDPPow{&cd, &dbase, &cd}
+               IEEEDPMul{&cd, &dv, &dv} : IEEEDPAdd{&fract, &dv, &fract}
+            EndIf
+            If calc=2
+               IEEEDPMul{&valtd, &dbase, &valtd}
+               IEEEDPAdd{&valtd, &dv, &valtd}
+            EndIf
+         Until c=>slen
+      EndIf
+   Next x
+   If fraclen>0 Then IEEEDPAdd{&valtd, &fract, &valtd}
+   If sign=1 Then IEEEDPNeg{&valtd, &valtd}
+   CopyMem_ &valtd, addy, 8
+End Statement
+
+
+; This converts the integer component of a numeric string to a double float.
+; The result will be placed in a specified address.
+
+Statement ValDint{valfi$, addy.l}
+   vl_xp.w=Instr(valfi$,".")
+   If vl_xp>0 Then valfi$=Left$(valfi$, vl_xp-1)
+   ValD{valfi$, addy}
+End Statement
+
+
+; Bonus compatible Vallong function for classic mostly,
+; not quite as fast tho, but has octal also.
+
+Function.l VaLong{v$}
+   vl_xp.w=Instr(v$,".")
+   If vl_xp>0 Then v$=Left$(v$, vl_xp-1)
+   ValD{v$, &temp.dub}
+   Function Return IEEEDPFix_(temp\dub0, temp\dub1)
+End Function
+
+
+; This function returns the long mod of 2 double floats
+
+Function.l MODDL{ad1.l, ad2.l}
+   numA.dub\dub0=Peek.l(ad1) : numA\dub1=Peek.l(ad1+4)
+   numB.dub\dub0=Peek.l(ad2) : numB\dub1=Peek.l(ad2+4)
+   numC.dub\dub0=0 : numC\dub1=0 : ok.b=1
+   c.l=IEEEDPTst_(numA\dub0, numA\dub1) : If c=0 Then ok=0
+   c.l=IEEEDPTst_(numB\dub0, numB\dub1) : If c=0 Then ok=0
+   If ok=1
+      IEEEDPDiv{&numA, &numB, &numC} : IEEEDPFloor{&numC, &numC}
+   EndIf
+   IEEEDPMul{&numB, &numC, &numB} : IEEEDPSub{&numA, &numB, &numA}
+   Function Return IEEEDPFix_(numA\dub0, numA\dub1)
+End Function
+
+
+; Decimal Float to Multi Base float string signed
+; Based on the FPU version of MBStrDd{} from StrD.ab2 from
+; "num2str.lha" from the aminet.
+
+Function.s MBStrDd{addy.l, base.b, fdig.b}
+   v$="" : nmax.b=base-1 : ngtv.b=0
+   If base<>2 AND base<>10 AND base<>16 AND base<>8
+      Function Return v$
+   EndIf
+   num.dub\dub0=Peek.l(addy) : num\dub1=Peek.l(addy+4)
+   c.l=IEEEDPTst_(num\dub0, num\dub1)
+   If c=-1 Then ngtv=1 : IEEEDPNeg{&num, &num}
+   IEEEDPFloor{&num, &numA.dub} : IEEEDPSub{&num, &numA, &numB.dub}
+   IEEEDPFlt{ base, &dbase.dub } : c.l=IEEEDPTst_(numA\dub0, numA\dub1)
+   If c>0
+      Repeat
+         rem.l=MODDL{&numA, &dbase}
+         If rem<0 OR rem>nmax Then rem=0
+         If rem>9 Then v$=Chr$(rem+55)+v$ Else v$=Chr$(rem+48)+v$
+         IEEEDPFlt{ rem, &drem.dub } : IEEEDPSub{&numA, &drem, &numA}
+         IEEEDPDiv{&numA, &dbase, &numA}
+         c.l=IEEEDPTst_(numA\dub0, numA\dub1)
+      Until c<=0
+   EndIf
+   c.l=IEEEDPTst_(numB\dub0, numB\dub1)
+   If c>0 AND fdig>0
+      v$=v$+"." : fc.b=0
+      Repeat
+         IEEEDPMul{&numB, &dbase, &ans.dub}
+         IEEEDPFloor{&ans, &numB} : rem.l=IEEEDPFix_(numB\dub0, numB\dub1)
+         If rem<0 OR rem>nmax Then rem=0 : numB\dub0=0 : numB\dub1=0
+         If rem>9 Then v$=v$+Chr$(rem+55) Else v$=v$+Chr$(rem+48)
+         IEEEDPSub{&ans, &numB, &numB} : fc+1
+         c.l=IEEEDPTst_(numB\dub0, numB\dub1)
+      Until c<=0 OR fc=>fdig
+      v$=StripTrail$(v$,48) : v$=StripTrail$(v$,46)
+   EndIf
+   If ngtv=1 Then v$="-"+v$
+   If v$="" OR v$="-" Then v$="0"
+   Function Return v$
+End Function
+
+
+; MBStrDd{} wrapper with suggested fraction digit defaults for each base.
+; Simply alter the defaults to your liking & use MBStrDd{} directly
+; when you want to specify the maximum fraction digits.
+
+Function.s MBStrD{addy.l, base.b}
+   If base=10 Then fdig.b=16
+   If base=16 Then fdig.b=14
+   If base=8 Then fdig.b=18
+   If base=2 Then fdig.b=50
+   Function Return MBStrDd{addy, base, fdig}
+End Function
+
+
+; Str$() like wrapper
+
+Function.s StrD{addy.l}
+   fdig.b=16 : base.b=10
+   Function Return MBStrDd{addy, base, fdig}
+End Function
+
+
+; Hex wrapper
+
+Function.s HexStrD{addy.l}
+   fdig.b=14 : base.b=16
+   Function Return MBStrDd{addy, base, fdig}
+End Function
+
+
+; Binary wrapper
+
+Function.s BinStrD{addy.l}
+   fdig.b=50 : base.b=2
+   Function Return MBStrDd{addy, base, fdig}
+End Function
+
+
+; Octal wrapper
+
+Function.s OctStrD{addy.l}
+   fdig.b=18 : base.b=8
+   Function Return MBStrDd{addy, base, fdig}
+End Function
+
+
+
+; End of double float functions
+
+;--------------------------------------------------------------------------------------
+
+; Double float functions demo begins here.
+
+
+
+py$="3.14159226417541"
+
+ValD{py$, &test.dub}
+
+NPrint py$
+NPrint MBStrD{&test, 10}
+
+ValD{"22", &py1.dub}  ; <-- quick pi calculated 22/7
+ValD{"7", &py2.dub}
+
+py1\dub0=IEEEDPDiv_(py1\dub0, py1\dub1, py2\dub0, py2\dub1)
+PutReg d1, py1\dub1
+
+NPrint MBStrD{&py1, 10}
+
+
+py1\dub0=IEEEDPNeg_(py1\dub0, py1\dub1) : PutReg d1, py1\dub1
+
+ValD{MBStrD{&py1, 10}, &test}
+NPrint MBStrD{&py1, 10}
+NPrint MBStrD{&test, 10}
+
+bla$="1635592999999999999999999"
+
+ValD{bla$, &test}
+
+NPrint bla$
+NPrint MBStrD{&test, 10}
+
+bla$="$7A.C" : NPrint bla$ : ValD{bla$, &test}
+NPrint MBStrD{&test, 10}
+NPrint MBStrD{&test, 16}
+
+bla$="%101.11" : NPrint bla$ : ValD{bla$, &test}
+NPrint MBStrD{&test, 10}
+NPrint MBStrD{&test, 2}
+
+bla$="$"+String$("F",12) : NPrint bla$ : ValD{bla$, &test}
+NPrint MBStrD{&test, 10}
+NPrint MBStrD{&test, 16}
+
+ValD{"1", &test1.dub}
+ValD{"3", &test2.dub}
+IEEEDPDiv{&test1, &test2, &test1}
+NPrint MBStrD{&test1, 10}
+
+bla.f=2/3  ; <- ffp to double
+ieee.l = SPTieee_( Peek.l(&bla) )
+IEEEDPFieee{&ieee, &test}  ; <- if bla.f is with FPU then &bla would do
+NPrint MBStrD{&test, 10}
+
+
+; IEEEDPFieee aint too crash hot on ROM 1.3 with standard libs.
+; MkIEED{} makes an excellent alternative to the above
+; SPTieee/IEEEDPFieee combination.
+; If you need the result in a .dub you can do the following:-
+; CopyMem_ &ie$, &test.dub, 8
+
+; ie$=MkIEED {bla}         ; <- from "ieee2ffp.ab2" in the classic directory
+; NPrint MBStrD{&ie$, 10}
+
+; See the archive "SANE.lha" from the aminet for any other
+; potentially useful alternatives you may require.
+
+
+ValD{Str$(bla), &test}   ; <- This aint bad tho ;)
+NPrint MBStrD{&test, 10}
+
+
+bla$="-$7A.C" : NPrint bla$ : ValD{bla$, &test}
+NPrint MBStrD{&test, 10}
+
+bla$="$-7A.C" : NPrint bla$ : ValD{bla$, &test}
+NPrint MBStrD{&test, 10}
+
+bla$="-%101.11" : NPrint bla$ : ValD{bla$, &test}
+NPrint MBStrD{&test, 10}
+
+bla$="%-101.11" : NPrint bla$ : ValD{bla$, &test}
+NPrint MBStrD{&test, 10}
+
+
+ffp.l = SPFieee_( ieee )  ; <- ieee single to double
+ValD{Str$(Peek.f(&ffp)), &test}
+NPrint MBStrD{&test, 10}
+
+
+bla$="#172.6" : NPrint bla$ : ValD{bla$, &test}
+NPrint MBStrD{&test, 10}
+NPrint MBStrD{&test, 8}
+
+bla$="-#172.6" : NPrint bla$ : ValD{bla$, &test}
+NPrint MBStrD{&test, 10}
+NPrint MBStrD{&test, 8}
+
+bla$="#-172.6" : NPrint bla$ : ValD{bla$, &test}
+NPrint MBStrD{&test, 10}
+NPrint MBStrD{&test, 8}
+
+
+NPrint VaLong{"1000000001"} + VaLong{"999999999"}
+
+NPrint VaLong{"#-20000000000"}
+
+NPrint VaLong{bla$}
+
+
+ValD{"1.0005", &test.dub}
+NPrint StrD{&test} : NPrint ""
+
+bla$="$3a.c" : NPrint bla$ : ValD{bla$, &test}
+NPrint StrD{&test} : NPrint ""
+
+
+End
+
+

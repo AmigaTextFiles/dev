@@ -1,0 +1,949 @@
+DEFINITION FOR LIBRARY MODULE Classes ;
+
+(* Declared separately because Intuition.def is already	obese	*)
+(* IMPORT Classes{x} , will open Intuition with version x	*)
+
+FROM SYSTEM	IMPORT STRING, ADDRESS ;
+FROM Utility	IMPORT Tag, HookPtr, Hook, TagItemPtr, TAG_USER ;
+FROM Exec	IMPORT ListPtr, MinNode ;
+FROM InputEvent IMPORT InputEventPtr ;
+FROM Graphics	IMPORT RastPortPtr ;
+FROM Intuition	IMPORT IBox, ScreenPtr, WindowPtr, GadgetPtr, RequesterPtr,
+			GadgetInfoPtr, TabletDataPtr, IBoxPtr, DrawInfoPtr ;
+
+TYPE
+  opSetPtr		= POINTER TO opSet	  ;
+  opUpdatePtr		= POINTER TO opUpdate	  ;
+  opGetPtr		= POINTER TO opGet	  ;
+  opMemberPtr		= POINTER TO opMember	  ;
+  IClassPtr		= POINTER TO IClass	  ;
+  ObjectPtr		= POINTER TO Object	  ;
+  _ObjectPtr		= POINTER TO _Object	  ;
+  gpHitTestPtr		= POINTER TO gpHitTest	  ;
+  gpRenderPtr		= POINTER TO gpRender	  ;
+  gpInputPtr		= POINTER TO gpInput      ;
+  gpGoInactivePtr	= POINTER TO gpGoInactive ;
+  gpLayoutPtr		= POINTER TO gpLayout     ;
+  impFrameBoxPtr	= POINTER TO impFrameBox  ;
+  impDrawPtr		= POINTER TO impDraw      ;
+  impErasePtr 		= POINTER TO impErase     ;
+  impHitTestPtr		= POINTER TO impHitTest   ;
+
+(* User visible handles on objects, classes, messages *)
+
+  Object  = LONGINT ;		(* abstract handle *)
+
+  ClassID = STRING ;
+
+(* you can use this type to point to a "generic" message,	*)
+(* in the object-oriented programming parlance.  Based on	*)
+(* the value of 'MethodID', you dispatch to processing		*)
+(* for the various message types.  The meaningful parameter	*)
+(* packet structure definitions are defined below.		*)
+
+  Msg = POINTER TO RECORD
+          MethodID : LONGINT (* method-specific data follows *)
+         		     (* some examples below	     *)
+        END ;
+
+(* Class id strings for Intuition classes.			*)
+(* There's no real reason to use the uppercase constants	*)
+(* over the lowercase strings, but this makes a good place	*)
+(* to list the names of the built-in classes.			*)
+
+CONST
+  ROOTCLASS	= "rootclass"     ;
+  IMAGECLASS	= "imageclass"    ;
+  FRAMEICLASS	= "frameiclass"   ;
+  SYSICLASS	= "sysiclass"     ;
+  FILLRECTCLASS	= "fillrectclass" ;
+  GADGETCLASS	= "gadgetclass"   ;
+  PROPGCLASS	= "propgclass"    ;
+  STRGCLASS	= "strgclass"     ;
+  BUTTONGCLASS	= "buttongclass"  ;
+  FRBUTTONCLASS	= "frbuttonclass" ;
+  GROUPGCLASS	= "groupgclass"   ;
+  ICCLASS	= "icclass"       ;
+  MODELCLASS	= "modelclass"    ;
+  ITEXTICLASS	= "itexticlass"	  ;
+  POINTERCLASS	= "pointerclass"  ;
+
+(* Dispatched method ID's						*)
+(* NOTE: Applications should use Intuition entry points, not direct	*)
+(* DoMethod() calls, for NewObject, DisposeObject, SetAttrs,		*)
+(* SetGadgetAttrs, and GetAttr.						*)
+
+  OM_Dummy	= 0100H ;
+  OM_NEW	= 0101H ;	(* 'object' parameter is "true class"	*)
+  OM_DISPOSE	= 0102H ;	(* delete self (no parameters)		*)
+  OM_SET	= 0103H ;	(* set attributes (in tag list)		*)
+  OM_GET	= 0104H ;	(* return single attribute value	*)
+  OM_ADDTAIL	= 0105H ;	(* add self to a List (let root do it)	*)
+  OM_REMOVE	= 0106H ;	(* remove self from list		*)
+  OM_NOTIFY	= 0107H ;	(* send to self: notify dependents	*)
+  OM_UPDATE	= 0108H ;	(* notification message from somebody	*)
+  OM_ADDMEMBER	= 0109H ;	(* used by various classes with lists	*)
+  OM_REMMEMBER	= 010AH ;	(* used by various classes with lists	*)
+
+(* Parameter "Messages" passed to methods *)
+
+(* OM_NEW and OM_SET *)
+
+TYPE
+  opSet = RECORD
+    MethodID	 : LONGINT ;
+    ops_AttrList : TagItemPtr ;	  (* new attributes			*)
+    ops_GInfo	 : GadgetInfoPtr ;(* always there for gadgets,		*)
+				  (* when SetGadgetAttrs() is used,	*)
+				  (* but will be NULL for OM_NEW	*)
+  END ;
+
+(* OM_NOTIFY, and OM_UPDATE *)
+  opUpdate = RECORD
+    MethodID	 : LONGINT ;
+    opu_AttrList : TagItemPtr ;	(* new attributes *)
+    opu_GInfo    : GadgetInfoPtr ;
+    				(* non-NULL when SetGadgetAttrs or	*)
+				(* notification resulting from gadget	*)
+				(* input occurs.			*)
+
+    opu_Flags	 : LONGINT ;	(* defined below *)
+  END ;
+
+(* this flag means that the update message is being issued from		*)
+(* something like an active gadget, a la GACT_FOLLOWMOUSE.  When	*)
+(* the gadget goes inactive, it will issue a final update		*)
+(* message with this bit cleared.  Examples of use are for		*)
+(* GACT_FOLLOWMOUSE equivalents for propgadclass, and repeat strobes	*)
+(* for buttons.								*)
+
+CONST
+  OPUF_INTERIM	= {0} ;
+
+(* OM_GET *)
+
+TYPE
+  opGet = RECORD
+    MethodID    : LONGINT ;
+    opg_AttrID  : LONGINT ;
+    opg_Storage : ADDRESS ;
+    (* may be other types, but "int" types are all ULONG *)
+  END ;
+
+(* OM_ADDTAIL	*)
+
+  opAddTail = RECORD
+    MethodID  : LONGINT ;
+    opat_List : ListPtr ;
+  END ;
+
+(* OM_ADDMEMBER, OM_REMMEMBER	*)
+
+  opMember = RECORD
+    MethodID    : LONGINT ;
+    opam_Object : ObjectPtr ;
+  END ;
+
+  opAddMember = opMember ;
+
+(* "White box" access to struct IClass *)
+
+(* This structure is READ-ONLY, and allocated only by Intuition *)
+TYPE
+  IClass = RECORD
+    cl_Dispatcher	: Hook ;
+    cl_Reserved		: LONGINT ; (* must be 0 *)
+    cl_Super		: IClassPtr ;
+    cl_ID		: STRING ;
+    cl_InstOffset	: CARDINAL ;(* where within an object is the instance *)
+    				    (* data for this class?		      *)
+    cl_InstSize		: CARDINAL ;
+    cl_UserData		: LONGINT ; (* per-class data of your choice	      *)
+    cl_SubclassCount	: LONGINT ; (* how many direct subclasses?	      *)
+    cl_ObjectCount	: LONGINT ; (* how many objects created of this class?*)
+    cl_Flags		: LONGSET ;
+  END ;
+
+  Class = IClass ;
+  ClassPtr = IClassPtr ;
+
+CONST
+  CLF_INLIST = 000000001H ; (* class is in public class list *)
+
+TYPE
+  _Object = RECORD
+    o_Node  : MinNode ;
+    o_Class : IClassPtr
+  END ;
+
+CONST
+(* these are the display modes for which we have corresponding parameter *)
+(*  settings in the config arrays					 *)
+
+  DMODECOUNT		= 00002H ;	(* how many modes there are *)
+  HIRESPICK		= 00000H ;
+  LOWRESPICK		= 00001H ;
+
+  EVENTMAX		= 10 ;		(* size of event array	    *)
+
+(* these are the system Gadget defines *)
+  RESCOUNT		= 2 ;
+  HIRESGADGET		= 0 ;
+  LOWRESGADGET		= 1 ;
+  GADGETCOUNT		= 8 ;
+  UPFRONTGADGET		= 0 ;
+  DOWNBACKGADGET	= 1 ;
+  SIZEGADGET		= 2 ;
+  CLOSEGADGET		= 3 ;
+  DRAGGADGET		= 4 ;
+  SUPFRONTGADGET	= 5 ;
+  SDOWNBACKGADGET	= 6 ;
+  SDRAGGADGET		= 7 ;
+
+(*=====  Custom and 'boopsi' gadget class interface =======*)
+
+(* Gadget Class attributes *)
+CONST
+  GA_Dummy		= TAG_USER+030000H ;
+  GA_Left		= GA_Dummy+00001H ;
+  GA_RelRight		= GA_Dummy+00002H ;
+  GA_Top		= GA_Dummy+00003H ;
+  GA_RelBottom		= GA_Dummy+00004H ;
+  GA_Width		= GA_Dummy+00005H ;
+  GA_RelWidth		= GA_Dummy+00006H ;
+  GA_Height		= GA_Dummy+00007H ;
+  GA_RelHeight		= GA_Dummy+00008H ;
+  GA_Text		= GA_Dummy+00009H ;
+  GA_Image		= GA_Dummy+0000AH ;
+  GA_Border		= GA_Dummy+0000BH ;
+  GA_SelectRender	= GA_Dummy+0000CH ;
+  GA_Highlight		= GA_Dummy+0000DH ;
+  GA_Disabled		= GA_Dummy+0000EH ;
+  GA_GZZGadget		= GA_Dummy+0000FH ;
+  GA_ID			= GA_Dummy+00010H ;
+  GA_UserData		= GA_Dummy+00011H ;
+  GA_SpecialInfo	= GA_Dummy+00012H ;
+  GA_Selected		= GA_Dummy+00013H ;
+  GA_EndGadget		= GA_Dummy+00014H ;
+  GA_Immediate		= GA_Dummy+00015H ;
+  GA_RelVerify		= GA_Dummy+00016H ;
+  GA_FollowMouse	= GA_Dummy+00017H ;
+  GA_RightBorder	= GA_Dummy+00018H ;
+  GA_LeftBorder		= GA_Dummy+00019H ;
+  GA_TopBorder		= GA_Dummy+0001AH ;
+  GA_BottomBorder	= GA_Dummy+0001BH ;
+  GA_ToggleSelect	= GA_Dummy+0001CH ;
+
+   (* internal use only, until further notice, please *)
+
+  GA_SysGadget	= GA_Dummy+0001DH ; (* bool, sets GTYP_SYSGADGET field in type*)
+
+  GA_SysGType		= GA_Dummy+0001EH ; (* e.g., GTYP_WUPFRONT, ...	*)
+
+  GA_Previous		= GA_Dummy+0001FH ; (* previous gadget (or	      *)
+					    (* (struct Gadget ** )) in linked *)
+					    (* list NOTE: This attribute      *)
+					    (* CANNOT be used to link new     *)
+					    (* gadgets into the gadget list of*)
+					    (* an open window or requester.   *)
+					    (* You must use AddGList().	      *)
+
+  GA_Next		= GA_Dummy+00020H ; (* not implemented		      *)
+
+  GA_DrawInfo		= GA_Dummy+00021H ; (* some fancy gadgets need to see *)
+  					    (* a DrawInfo when created or for *)
+  					    (* layout			      *)
+
+(* You should use at most ONE of GA_Text, GA_IntuiText, and GA_LabelImage     *)
+
+  GA_IntuiText		= GA_Dummy+00022H ; (* ti_Data is (IntuiTextPtr)      *)
+
+  GA_LabelImage		= GA_Dummy+00023H ; (* ti_Data is an image (object),  *)
+ 					    (* used in place of GadgetText    *)
+
+  GA_TabCycle		= GA_Dummy+00024H ; (* New for V37: Boolean indicates *)
+ 					    (* that this gadget is to	      *)
+ 					    (* participate in cycling         *)
+ 					    (* activation with Tab or         *)
+ 					    (* Shift-Tab.		      *)
+
+  GA_GadgetHelp		= GA_Dummy+00025H ; (* New for V39: Boolean indicates *)
+ 					    (* that this gadget sends	      *)
+ 					    (* gadget-help		      *)
+
+  GA_Bounds		= GA_Dummy+00026H ; (* New for V39: ti_Data is a      *)
+ 					    (* pointer to an IBox structure   *)
+ 					    (* which is to be copied into the *)
+ 					    (* extended gadget's bounds.      *)
+
+  GA_RelSpecial		= GA_Dummy+00027H ; (* New for V39: Boolean indicates *)
+ 					    (* that this gadget has the	      *)
+ 					    (* "special relativity" property, *)
+ 					    (* which is useful for certain    *)
+ 					    (* fancy relativity operations    *)
+ 					    (* through the GM_LAYOUT method.  *)
+(* PROPGCLASS attributes *)
+
+  PGA_Dummy	= TAG_USER+031000H ;
+  PGA_Freedom	= PGA_Dummy+00001H ;
+
+(* only one of FREEVERT or FREEHORIZ *)
+
+  PGA_Borderless= PGA_Dummy+00002H ;
+  PGA_HorizPot	= PGA_Dummy+00003H ;
+  PGA_HorizBody	= PGA_Dummy+00004H ;
+  PGA_VertPot	= PGA_Dummy+00005H ;
+  PGA_VertBody	= PGA_Dummy+00006H ;
+  PGA_Total	= PGA_Dummy+00007H ;
+  PGA_Visible	= PGA_Dummy+00008H ;
+  PGA_Top	= PGA_Dummy+00009H ;
+
+(* New for V37: *)
+
+  PGA_NewLook	= PGA_Dummy+0000AH ;
+
+(* STRGCLASS attributes	*)
+
+  STRINGA_Dummy		= TAG_USER+032000H ;
+  STRINGA_MaxChars	= STRINGA_Dummy+00001H ;
+
+(* Note:  There is a minor problem with Intuition when using boopsi integer  *)
+(* gadgets (which are requested by using STRINGA_LongInt).  Such gadgets     *)
+(* must not have a STRINGA_MaxChars to be bigger than 15.  Setting	     *)
+(* STRINGA_MaxChars for a boopsi integer gadget will cause a mismatched	     *)
+(* FreeMem() to occur.							     *)
+
+  STRINGA_Buffer	= STRINGA_Dummy+00002H ;
+  STRINGA_UndoBuffer	= STRINGA_Dummy+00003H ;
+  STRINGA_WorkBuffer	= STRINGA_Dummy+00004H ;
+  STRINGA_BufferPos	= STRINGA_Dummy+00005H ;
+  STRINGA_DispPos	= STRINGA_Dummy+00006H ;
+  STRINGA_AltKeyMap	= STRINGA_Dummy+00007H ;
+  STRINGA_Font		= STRINGA_Dummy+00008H ;
+  STRINGA_Pens		= STRINGA_Dummy+00009H ;
+  STRINGA_ActivePens	= STRINGA_Dummy+0000AH ;
+  STRINGA_EditHook	= STRINGA_Dummy+0000BH ;
+  STRINGA_EditModes	= STRINGA_Dummy+0000CH ;
+
+(* booleans *)
+  STRINGA_ReplaceMode	= STRINGA_Dummy+0000DH ;
+  STRINGA_FixedFieldMode= STRINGA_Dummy+0000EH ;
+  STRINGA_NoFilterMode	= STRINGA_Dummy+0000FH ;
+
+  STRINGA_Justification	= STRINGA_Dummy+00010H ;
+(* GACT_STRINGCENTER, GACT_STRINGLEFT, GACT_STRINGRIGHT *)
+
+  STRINGA_LongVal	= STRINGA_Dummy+00011H ;
+  STRINGA_TextVal	= STRINGA_Dummy+00012H ;
+
+  STRINGA_ExitHelp	= STRINGA_Dummy+00013H ;
+(* STRINGA_ExitHelp is new for V37, and ignored by V36.	  *)
+(* Set this if you want the gadget to exit when Help is pressed. *)
+(* Look for a code of 05FH, the rawkey code for Help		  *)
+
+  SG_DEFAULTMAXCHARS	= 128 ;
+
+(* Gadget Layout related attributes *)
+
+  LAYOUTA_Dummy		= TAG_USER+038000H ;
+  LAYOUTA_LayoutObj	= LAYOUTA_Dummy+00001H ;
+  LAYOUTA_Spacing	= LAYOUTA_Dummy+00002H ;
+  LAYOUTA_Orientation	= LAYOUTA_Dummy+00003H ;
+
+(* orientation values *)
+
+  LORIENT_NONE	= 0 ;
+  LORIENT_HORIZ	= 1 ;
+  LORIENT_VERT	= 2 ;
+
+(* Gadget Method ID's *)
+
+  GM_Dummy	= -1 ;	(* not used for anything			 *)
+  GM_HITTEST	= 0  ;  (* return GMR_GADGETHIT if you are clicked on    *)
+			(* (whether or not you are disabled).		 *)
+
+  GM_RENDER	= 1 ;	(* draw yourself, in the appropriate state	 *)
+  GM_GOACTIVE	= 2 ;	(* you are now going to be fed input		 *)
+  GM_HANDLEINPUT= 3 ;	(* handle that input				 *)
+  GM_GOINACTIVE	= 4 ;	(* whether or not by choice, you are done 	 *)
+  GM_HELPTEST	= 5 ;	(* Will you send gadget help if the mouse is	 *)
+			(* at the specified coordinates?  See below	 *)
+			(* for possible GMR_ values.			 *)
+
+ GM_LAYOUT	= 6 ;	(* re-evaluate your size based on the GadgetInfo *)
+			(* Domain.  Do NOT re-render yourself yet, you   *)
+			(* will be called when it is time...		 *)
+
+(* Parameter "Messages" passed to gadget class methods			*)
+
+(* GM_HITTEST and GM_HELPTEST send this message.			*)
+(* For GM_HITTEST, gpht_Mouse are coordinates relative to the gadget	*)
+(* select box.	For GM_HELPTEST, the coordinates are relative to	*)
+(* the gadget bounding box (which defaults to the select box).		*)
+
+TYPE
+  gpHitTest = RECORD
+    MethodID	: LONGINT ;
+    gpht_GInfo	: GadgetInfoPtr ;
+    gpht_Mouse	: RECORD X, Y : INTEGER END ;
+  END ;
+
+(* For GM_HITTEST, return GMR_GADGETHIT if you were indeed hit,		    *)
+(* otherwise return zero.						    *)
+(*									    *)
+(* For GM_HELPTEST, return GMR_NOHELPHIT (zero) if you were not hit.        *)
+(* Typically, return GMR_HELPHIT if you were hit.			    *)
+(* It is possible to pass a UWORD to the application via the Code field     *)
+(* of the IDCMP_GADGETHELP message.  Return GMR_HELPCODE or'd with	    *)
+(* the UWORD-sized result you wish to return.				    *)
+(*									    *)
+(* GMR_HELPHIT yields a Code value of ((UWORD) ~0), which should	    *)
+(* mean "nothing particular" to the application.			    *)
+
+CONST
+  GMR_GADGETHIT	= 000000004H ;	(* GM_HITTEST hit			    *)
+
+  GMR_NOHELPHIT	= 000000000H ;	(* GM_HELPTEST didn't hit		    *)
+  GMR_HELPHIT	= 0FFFFFFFFH ;	(* GM_HELPTEST hit, return code = ~0	    *)
+  GMR_HELPCODE	= 000010000H ;	(* GM_HELPTEST hit, return low word as code *)
+
+(* GM_RENDER *)
+
+TYPE
+  gpRender = RECORD
+    MethodID   : LONGINT ;
+    gpr_GInfo  : GadgetInfoPtr ; (* gadget context		*)
+    gpr_RPort  : RastPortPtr ;	 (* all ready for use		*)
+    gpr_Redraw : LONGINT ;	 (* might be a "highlight pass"	*)
+  END ;
+
+(* values of gpr_Redraw	*)
+
+CONST
+  GREDRAW_UPDATE = 2 ;	(* incremental update, e.g. prop slider	*)
+  GREDRAW_REDRAW = 1 ;	(* redraw gadget			*)
+  GREDRAW_TOGGLE = 0 ;	(* toggle highlight, if applicable	*)
+
+(* GM_GOACTIVE, GM_HANDLEINPUT *)
+TYPE
+  gpInput = RECORD
+    MethodID		: LONGINT ;
+    gpi_GInfo		: GadgetInfoPtr ;
+    gpi_IEvent		: InputEventPtr ;
+    gpi_Termination	: LONGINT ;
+    gpi_Mouse		: RECORD X, Y : INTEGER END ;
+
+    (* (V39) Pointer to TabletData structure, if this event originated   *)
+    (* from a tablet which sends IESUBCLASS_NEWTABLET events, or NULL if *)
+    (* not.								 *)
+    (*									 *)
+    (* DO NOT ATTEMPT TO READ THIS FIELD UNDER INTUITION PRIOR TO V39!	 *)
+    (* IT WILL BE INVALID!						 *)
+
+    gpi_TabletData	: TabletDataPtr ;
+  END ;
+
+(* GM_HANDLEINPUT and GM_GOACTIVE  return code flags			*)
+(* return GMR_MEACTIVE (0) alone if you want more input.		*)
+(* Otherwise, return ONE of GMR_NOREUSE and GMR_REUSE, and optionally	*)
+(* GMR_VERIFY. 	(M2: eg GMR_NOREUSE+GMR_VERIFY )			*)
+
+CONST
+ GMR_MEACTIVE	= LONGINT({ }) ;
+ GMR_NOREUSE	= LONGINT({1}) ;
+ GMR_REUSE	= LONGINT({2}) ;
+ GMR_VERIFY	= LONGINT({3}) ; (* you MUST set gpi_Termination *)
+
+(* New for V37:								 *)
+(* You can end activation with one of GMR_NEXTACTIVE and GMR_PREVACTIVE, *)
+(* which instructs Intuition to activate the next or previous gadget	 *)
+(* that has GFLG_TABCYCLE set.						 *)
+
+
+ GMR_NEXTACTIVE	= {4} ;
+ GMR_PREVACTIVE	= {5} ;
+
+(* GM_GOINACTIVE *)
+
+TYPE
+  gpGoInactive = RECORD
+    MethodID   : LONGINT ;
+    gpgi_GInfo : GadgetInfoPtr ;
+
+    (* V37 field only!	DO NOT attempt to read under V36! *)
+    gpgi_Abort : LONGINT ; (* gpgi_Abort=1 if gadget was aborted  *)
+			   (* by Intuition and 0 if gadget went   *)
+			   (* inactive at its own request	  *)
+  END ;
+
+(* New for V39: Intuition sends GM_LAYOUT to any GREL_ gadget when	*)
+(* the gadget is added to the window (or when the window opens, if	*)
+(* the gadget was part of the NewWindow.FirstGadget or the WA_Gadgets	*)
+(* list), or when the window is resized.  Your gadget can set the	*)
+(* GA_RelSpecial property to get GM_LAYOUT events without Intuition	*)
+(* changing the interpretation of your gadget select box.  This		*)
+(* allows for completely arbitrary resizing/repositioning based on	*)
+(* window size.								*)
+
+(* GM_LAYOUT *)
+
+  gpLayout = RECORD
+    MethodID    : LONGINT ;
+    gpl_GInfo   : GadgetInfoPtr ;
+    gpl_Initial : LONGINT ;	(* non-zero if this method was invoked	  *)
+				(* during AddGList() or OpenWindow()	  *)
+				(* time.  zero if this method was invoked *)
+				(* during window resizing.		  *)
+  END ;
+
+(*=======  Gadget/object interconnection classes ========*)
+
+CONST
+  ICM_Dummy	= 00401H ; (* used for nothing			*)
+  ICM_SETLOOP	= 00402H ; (* set/increment loop counter	*)
+  ICM_CLEARLOOP	= 00403H ; (* clear/decrement loop counter	*)
+  ICM_CHECKLOOP	= 00404H ; (* set/increment loop		*)
+
+(* no parameters for ICM_SETLOOP, ICM_CLEARLOOP, ICM_CHECKLOOP	*)
+
+(* interconnection attributes used by icclass, modelclass, and gadgetclass *)
+
+  ICA_Dummy	 = TAG_USER+040000H ;
+  ICA_TARGET	 = ICA_Dummy+1 ; (* interconnection target		*)
+  ICA_MAP	 = ICA_Dummy+2 ; (* interconnection map tagitem list	*)
+  ICSPECIAL_CODE = ICA_Dummy+3 ; (* a "pseudo-attribute", see below.	*)
+
+(* Normally, the value for ICA_TARGET is some object pointer,		      *)
+(* but if you specify the special value ICTARGET_IDCMP, notification	      *)
+(* will be send as an IDCMP_IDCMPUPDATE message to the appropriate window's   *)
+(* IDCMP port.	See the definition of IDCMP_IDCMPUPDATE.		      *)
+(*									      *)
+(* When you specify ICTARGET_IDCMP for ICA_TARGET, the map you		      *)
+(* specify will be applied to derive the attribute list that is		      *)
+(* sent with the IDCMP_IDCMPUPDATE message.  If you specify a map list	      *)
+(* which results in the attribute tag id ICSPECIAL_CODE, the		      *)
+(* lower sixteen bits of the corresponding ti_Data value will		      *)
+(* be copied into the Code field of the IDCMP_IDCMPUPDATE IntuiMessage.	      *)
+
+  ICTARGET_IDCMP = LONGSET(-1) ;
+
+(*=====  Definitions for the image classes ========*)
+
+CONST
+  CUSTOMIMAGEDEPTH = -1 ; (* if image.Depth is this,	   *)
+  			  (* it's a new Image class object *)
+
+(* some convenient macros and casts *)
+
+CONST
+  IA_Dummy	= TAG_USER+020000H ;
+  IA_Left	= IA_Dummy+001H ;
+  IA_Top	= IA_Dummy+002H ;
+  IA_Width	= IA_Dummy+003H ;
+  IA_Height	= IA_Dummy+004H ;
+  IA_FGPen	= IA_Dummy+005H ; (* IA_FGPen also means "PlanePick"	      *)
+  IA_BGPen	= IA_Dummy+006H ; (* IA_BGPen also means "PlaneOnOff"	      *)
+  IA_Data	= IA_Dummy+007H ; (* bitplanes, for classic image, other image*)
+  				  (* classes may use it for other things      *)
+
+  IA_LineWidth	= IA_Dummy+008H ;
+  IA_Pens	= IA_Dummy+00EH ;
+  				(* pointer to UWORD pens[], ala DrawInfo.Pens,*)
+  				(* MUST be terminated by ~0.  Some classes can*)
+  				(* choose to have this, or SYSIA_DrawInfo, or *)
+  				(* both.				      *)
+
+  IA_Resolution	= IA_Dummy+00FH ;(* packed uwords for x/y resolution into a   *)
+  				 (* longword ala DrawInfo.Resolution	      *)
+
+(*=== see class documentation to learn which	====*)
+(*=== classes recognize these			====*)
+
+  IA_APattern	= IA_Dummy+010H ;
+  IA_APatSize	= IA_Dummy+011H ;
+  IA_Mode	= IA_Dummy+012H ;
+  IA_Font	= IA_Dummy+013H ;
+  IA_Outline	= IA_Dummy+014H ;
+  IA_Recessed	= IA_Dummy+015H ;
+
+  IA_DoubleEmboss = IA_Dummy+016H ;
+  IA_EdgesOnly	  = IA_Dummy+017H ;
+
+(*=== "sysiclass" attributes ====*)
+
+  SYSIA_Size	 = IA_Dummy+00BH ; (*  constants's below		      *)
+  SYSIA_Depth	 = IA_Dummy+00CH ; (* this is unused by Intuition.	      *)
+  				   (* SYSIA_DrawInfo is used instead for V36  *)
+
+  SYSIA_Which	 = IA_Dummy+00DH ; (* see  constants's below		      *)
+  SYSIA_DrawInfo = IA_Dummy+018H ; (* pass to sysiclass, please		      *)
+
+(*==== obsolete: don't use these, use IA_Pens ====*)
+
+  SYSIA_Pens	  = IA_Pens ;
+  IA_ShadowPen	  = IA_Dummy+009H ;
+  IA_HighlightPen = IA_Dummy+00AH ;
+
+(* New for V39: *)
+
+  SYSIA_ReferenceFont = IA_Dummy+019H ; (* Font to use as reference for       *)
+  					(* scaling certain sysiclass images   *)
+
+
+  IA_SupportsDisable  = IA_Dummy+01AH ; (* By default, Intuition ghosts	      *)
+  					(* gadgets itself, instead of relying *)
+  					(* on IDS_DISABLED or		      *)
+  					(* IDS_SELECTEDDISABLED.	      *)
+  					(* An imageclass that supports these  *)
+  					(* states should return this attribute*)
+  					(* as TRUE.  You cannot set or clear  *)
+  					(* this attribute, however.	      *)
+
+  IA_FrameType	      = IA_Dummy+01BH ; (* Starting with V39, FrameIClass     *)
+  					(* recognizes several standard types  *)
+  					(* of frame.  Use one of the FRAME_   *)
+  					(* specifiers below. Defaults to      *)
+  					(* FRAME_DEFAULT.		      *)
+
+(* next attribute: (IA_Dummy + 01CH) *)
+
+(* data values for SYSIA_Size	*)
+CONST
+  SYSISIZE_MEDRES = 0 ;
+  SYSISIZE_LOWRES = 1 ;
+  SYSISIZE_HIRES  = 2 ;
+
+(* SYSIA_Which tag data values:				*)
+(* Specifies which system gadget you want an image for. *)
+(* Some numbers correspond to internal Intuition s	*)
+
+  DEPTHIMAGE	= 000H ; (* Window depth gadget image		   *)
+  ZOOMIMAGE	= 001H ; (* Window zoom gadget image		   *)
+  SIZEIMAGE	= 002H ; (* Window sizing gadget image		   *)
+  CLOSEIMAGE	= 003H ; (* Window close gadget image		   *)
+  SDEPTHIMAGE	= 005H ; (* Screen depth gadget image		   *)
+  LEFTIMAGE	= 00AH ; (* Left-arrow gadget image		   *)
+  UPIMAGE	= 00BH ; (* Up-arrow gadget image		   *)
+  RIGHTIMAGE	= 00CH ; (* Right-arrow gadget image		   *)
+  DOWNIMAGE	= 00DH ; (* Down-arrow gadget image		   *)
+  CHECKIMAGE	= 00EH ; (* GadTools checkbox image		   *)
+  MXIMAGE	= 00FH ; (* GadTools mutual exclude "button" image *)
+
+(* New for V39: *)
+
+  MENUCHECK	= 010H ; (* Menu checkmark image *)
+  AMIGAKEY	= 011H ; (* Menu Amiga-key image *)
+
+(* Data values for IA_FrameType (recognized by FrameIClass)		*)
+(*									*)
+(* FRAME_DEFAULT:  The standard V37-type frame, which has		*)
+(*	thin edges.							*)
+(* FRAME_BUTTON:  Standard button gadget frames, having thicker		*)
+(*	sides and nicely edged corners.					*)
+(* FRAME_RIDGE:  A ridge such as used by standard string gadgets.	*)
+(*	You can recess the ridge to get a groove image.			*)
+(* FRAME_ICONDROPBOX: A broad ridge which is the standard imagery	*)
+(*	for areas in AppWindows where icons may be dropped.		*)
+
+  FRAME_DEFAULT	    = 0 ;
+  FRAME_BUTTON	    = 1 ;
+  FRAME_RIDGE	    = 2 ;
+  FRAME_ICONDROPBOX = 3 ;
+
+(* image message id's	*)
+
+  IM_DRAW	= 0202H ; (* draw yourself, with "state"	   *)
+  IM_HITTEST	= 0203H ; (* return TRUE if click hits image	   *)
+  IM_ERASE	= 0204H ; (* erase yourself			   *)
+  IM_MOVE	= 0205H ; (* draw new and erase old, smoothly	   *)
+  IM_DRAWFRAME	= 0206H ; (* draw with specified dimensions	   *)
+  IM_FRAMEBOX	= 0207H ; (* get recommended frame around some box *)
+  IM_HITFRAME	= 0208H ; (* hittest with dimensions		   *)
+  IM_ERASEFRAME	= 0209H ; (* hittest with dimensions		   *)
+
+(* image draw states or styles, for IM_DRAW		   *)
+(* Note that they have no bitwise meanings (unfortunately) *)
+
+  IDS_NORMAL		= 0 ;
+  IDS_SELECTED		= 1 ;	(* for selected gadgets			*)
+  IDS_DISABLED		= 2 ;	(* for disabled gadgets			*)
+  IDS_BUSY		= 3 ;	(* for future functionality		*)
+  IDS_INDETERMINATE	= 4 ;	(* for future functionality		*)
+  IDS_INACTIVENORMAL	= 5 ;	(* normal, in inactive window border	*)
+  IDS_INACTIVESELECTED	= 6 ;	(* selected, in inactive border 	*)
+  IDS_INACTIVEDISABLED	= 7 ;	(* disabled, in inactive border 	*)
+  IDS_SELECTEDDISABLED  = 8 ;	(* disabled and selected    		*)
+
+(* oops, please forgive spelling error by jimm *)
+  IDS_INDETERMINANT = IDS_INDETERMINATE ;
+
+(* IM_FRAMEBOX	*)
+TYPE
+  impFrameBox = RECORD
+    MethodID	    : LONGINT ;
+    imp_ContentsBox : IBoxPtr ;	    (* input: relative box of contents *)
+    imp_FrameBox    : IBoxPtr ;	    (* output: rel. box of encl frame  *)
+    imp_DrInfo	    : DrawInfoPtr ; (* NB: May be NULL		       *)
+    imp_FrameFlags  : LONGSET ;
+  END ;
+
+CONST
+  FRAMEF_SPECIFY = {0} ; (* Make do with the dimensions of FrameBox provided.*)
+
+(* IM_DRAW, IM_DRAWFRAME *)
+
+TYPE
+  impDraw = RECORD
+    MethodID   : LONGINT ;
+    imp_RPort  : RastPortPtr ;
+    imp_Offset : RECORD X, Y : INTEGER END ;
+    imp_State  : LONGINT ;
+    imp_DrInfo : DrawInfoPtr ;	(* NB: May be NULL *)
+
+    (* these parameters only valid for IM_DRAWFRAME *)
+    imp_Dimensions : RECORD Width, Height : INTEGER END ;
+  END ;
+
+(* IM_ERASE, IM_ERASEFRAME	     *)
+(* NOTE: This is a subset of impDraw *)
+
+  impErase = RECORD
+    MethodID   : LONGINT ;
+    imp_RPort  : RastPortPtr ;
+    imp_Offset : RECORD X, Y : INTEGER END ;
+
+    (* these parameters only valid for IM_ERASEFRAME *)
+    imp_Dimensions : RECORD Width, Height : INTEGER END ;
+  END ;
+
+(* IM_HITTEST, IM_HITFRAME *)
+
+  impHitTest = RECORD
+    MethodID   : LONGINT ;
+    imp_Point  : RECORD X, Y : INTEGER END ;
+
+    (* these parameters only valid for IM_HITFRAME *)
+    imp_Dimensions : RECORD Width, Height : INTEGER END ;
+  END ;
+
+(*====== 'boopsi' pointer class interface ========*)
+
+(* The following tags are recognized at NewObject() time by		*)
+(* pointerclass:							*)
+(*									*)
+(* POINTERA_BitMap (BitMapPtr ) - Pointer to bitmap to			*)
+(*	get pointer imagery from.  Bitplane data need not be		*)
+(*	in chip RAM.							*)
+(* POINTERA_XOffset (LONG) - X-offset of the pointer hotspot.		*)
+(* POINTERA_YOffset (LONG) - Y-offset of the pointer hotspot.		*)
+(* POINTERA_WordWidth (ULONG) - designed width of the pointer in words	*)
+(* POINTERA_XResolution (ULONG) - one of the POINTERXRESN_ flags below	*)
+(* POINTERA_YResolution (ULONG) - one of the POINTERYRESN_ flags below	*)
+
+CONST
+  POINTERA_Dummy	= TAG_USER+039000H ;
+
+  POINTERA_BitMap	= POINTERA_Dummy+001 ;
+  POINTERA_XOffset	= POINTERA_Dummy+002 ;
+  POINTERA_YOffset	= POINTERA_Dummy+003 ;
+  POINTERA_WordWidth	= POINTERA_Dummy+004 ;
+  POINTERA_XResolution	= POINTERA_Dummy+005 ;
+  POINTERA_YResolution	= POINTERA_Dummy+006 ;
+
+(* These are the choices for the POINTERA_XResolution attribute which	*)
+(* will determine what resolution pixels are used for this pointer.	*)
+(*									*)
+(* POINTERXRESN_DEFAULT (ECS-compatible pointer width)			*)
+(*	= 70 ns if SUPERHIRES-type mode, 140 ns if not			*)
+(*									*)
+(* POINTERXRESN_SCREENRES						*)
+(*	= Same as pixel speed of screen					*)
+(*									*)
+(* POINTERXRESN_LORES (pointer always in lores-like pixels)		*)
+(*	= 140 ns in 15kHz modes, 70 ns in 31kHz modes			*)
+(*									*)
+(* POINTERXRESN_HIRES (pointer always in hires-like pixels)		*)
+(*	= 70 ns in 15kHz modes, 35 ns in 31kHz modes			*)
+(*									*)
+(* POINTERXRESN_140NS (pointer always in 140 ns pixels)			*)
+(*	= 140 ns always							*)
+(*									*)
+(* POINTERXRESN_70NS (pointer always in 70 ns pixels)			*)
+(*	= 70 ns always							*)
+(*									*)
+(* POINTERXRESN_35NS (pointer always in 35 ns pixels)			*)
+(*	= 35 ns always							*)
+
+CONST
+  POINTERXRESN_DEFAULT	 = 0 ;
+  POINTERXRESN_140NS	 = 1 ;
+  POINTERXRESN_70NS	 = 2 ;
+  POINTERXRESN_35NS	 = 3 ;
+
+  POINTERXRESN_SCREENRES = 4 ;
+  POINTERXRESN_LORES	 = 5 ;
+  POINTERXRESN_HIRES	 = 6 ;
+
+(* These are the choices for the POINTERA_YResolution attribute which	      *)
+(* will determine what vertical resolution is used for this pointer.	      *)
+(*									      *)
+(* POINTERYRESN_DEFAULT							      *)
+(*	= In 15 kHz modes, the pointer resolution will be the same	      *)
+(*	  as a non-interlaced screen.  In 31 kHz modes, the pointer	      *)
+(*	  will be doubled vertically.  This means there will be about	      *)
+(*	  200-256 pointer lines per screen.				      *)
+(*									      *)
+(* POINTERYRESN_HIGH							      *)
+(* POINTERYRESN_HIGHASPECT						      *)
+(*	= Where the hardware/software supports it, the pointer resolution     *)
+(*	  will be high.  This means there will be about 400-480 pointer	      *)
+(*	  lines per screen.  POINTERYRESN_HIGHASPECT also means that	      *)
+(*	  when the pointer comes out double-height due to hardware/software   *)
+(*	  restrictions, its width would be doubled as well, if possible	      *)
+(*	  (to preserve aspect).						      *)
+(*									      *)
+(* POINTERYRESN_SCREENRES						      *)
+(* POINTERYRESN_SCREENRESASPECT						      *)
+(*	= Will attempt to match the vertical resolution of the pointer	      *)
+(*	  to the screen's vertical resolution.POINTERYRESN_SCREENASPECT also  *)
+(*	  means that when the pointer comes out double-height due to	      *)
+(*	  hardware/software restrictions, its width would be doubled as well, *)
+(*	  if possible (to preserve aspect).				      *)
+
+CONST
+  POINTERYRESN_DEFAULT		= 0 ;
+  POINTERYRESN_HIGH		= 2 ;
+  POINTERYRESN_HIGHASPECT	= 3 ;
+  POINTERYRESN_SCREENRES	= 4 ;
+  POINTERYRESN_SCREENRESASPECT	= 5 ;
+
+(* Compatibility note:							  *)
+(*									  *)
+(* The AA chipset supports variable sprite width and resolution, but	  *)
+(* the setting of width and resolution is global for all sprites.	  *)
+(* When no other sprites are in use, Intuition controls the sprite	  *)
+(* width and sprite resolution for correctness based on pointerclass	  *)
+(* attributes specified by the creator of the pointer.	Intuition	  *)
+(* controls sprite resolution with the VTAG_DEFSPRITERESN_SET tag	  *)
+(* to VideoControl().  Applications can override this on a per-viewport	  *)
+(* basis with the VTAG_SPRITERESN_SET tag to VideoControl().		  *)
+(*									  *)
+(* If an application uses a sprite other than the pointer sprite,	  *)
+(* Intuition will automatically regenerate the pointer sprite's image in  *)
+(* a compatible width.	This might involve BitMap scaling of the imagery  *)
+(* you supply.								  *)
+(*									  *)
+(* If any sprites other than the pointer sprite were obtained with the	  *)
+(* old GetSprite() call, Intuition assumes that the owner of those	  *)
+(* sprites is unaware of sprite resolution, hence Intuition will set the  *)
+(* default sprite resolution (VTAG_DEFSPRITERESN_SET) to ECS-compatible,  *)
+(* instead of as requested by the various pointerclass attributes.	  *)
+(*									  *)
+(* No resolution fallback occurs when applications use ExtSprites.	  *)
+(* Such applications are expected to use VTAG_SPRITERESN_SET tag if	  *)
+(* necessary.								  *)
+(*									  *)
+(* NB:	Under release V39, only sprite width compatibility is implemented.*)
+(* Sprite resolution compatibility was added for V40.			  *)
+
+(*------------------------------ macros --------------------------------------*)
+
+(* add offset for instance data to an object handle *)
+PROCEDURE INST_DATA( cl : IClassPtr ; o : ADDRESS ) : ADDRESS ;
+
+(* sizeof the instance data for a given class *)
+PROCEDURE SIZEOF_INSTANCE( cl : IClassPtr ) : LONGINT ;
+
+(* convenient typecast	*)
+PROCEDURE _OBJ( o : ADDRESS ) : _ObjectPtr ;
+
+(* get "public" handle on baseclass instance from real beginning of obj data *)
+PROCEDURE BASEOBJECT( _obj : ADDRESS ) : _ObjectPtr ;
+
+(* get back to object data struct from public handle *)
+PROCEDURE _OBJECT( o : ADDRESS ) : _ObjectPtr ;
+
+(* get class pointer from an object handle *)
+PROCEDURE OCLASS( o : ADDRESS ) : IClassPtr ;
+
+(*----------------------------- functions ------------------------------------*)
+
+PROCEDURE NewObjectA( classPtr : IClassPtr ;
+		      classID  : STRING ;
+		      tagList  : TagItemPtr ) : ADDRESS ;
+
+PROCEDURE NewObject( classPtr : IClassPtr ;
+		     classID : STRING ;
+		     tag1 : LONGINT ; .. ) : ADDRESS ;
+
+PROCEDURE DisposeObject( object : ADDRESS ) ;
+PROCEDURE SetAttrsA( object : ADDRESS ; tagList : TagItemPtr ) : LONGINT ;
+PROCEDURE SetAttrs( object : ADDRESS ; tag1 : LONGINT ; .. ) : LONGINT ;
+
+PROCEDURE GetAttr( attrID : LONGINT ;
+		   object : ADDRESS ;
+		   storagePtr : ADDRESS ) : LONGINT ;
+
+(* special set attribute call for gadgets *)
+
+PROCEDURE SetGadgetAttrsA( gadget    : GadgetPtr ;
+			   window    : WindowPtr ;
+			   requester : RequesterPtr ;
+			   tagList   : TagItemPtr ) : LONGINT ;
+
+PROCEDURE SetGadgetAttrs( gadget    : GadgetPtr ;
+			  window    : WindowPtr ;
+			  requester : RequesterPtr ;
+			  tag1	    : LONGINT ; .. ) : LONGINT ;
+
+PROCEDURE NextObject( objectPtr : ADDRESS ) : ADDRESS ;
+
+PROCEDURE MakeClass( classID , superClassID : STRING ;
+		     superClassPtr : IClassPtr ;
+		     instanceSize  : LONGINT ;
+		     flags	   : LONGSET ) : IClassPtr ;
+
+PROCEDURE AddClass( classPtr : IClassPtr ) ;
+
+PROCEDURE RemoveClass( classPtr : IClassPtr ) ;
+PROCEDURE FreeClass( classPtr : IClassPtr ) : BOOLEAN ;
+
+(*--------- functions in V39 or higher (Release 3) ---------*)
+(* IMPORT Classes{39}, will open Intuition with version 39  *)
+
+PROCEDURE DoGadgetMethodA( gad	   : GadgetPtr ;
+			   win	   : WindowPtr ;
+			   req	   : RequesterPtr ;
+			   message : Msg ) : LONGINT ;
+
+PROCEDURE DoGadgetMethod( gad	   : GadgetPtr ;
+			  win	   : WindowPtr ;
+			  req	   : RequesterPtr ;
+			  MethodID : LONGINT ; .. ) : LONGINT ;
+
+(*--------------- From AmigaLib linker library -------------------------*)
+
+PROCEDURE DoMethodA( obj : ObjectPtr ; message  : Msg ) : LONGINT ;
+PROCEDURE DoMethod ( obj : ObjectPtr ; MethodID : LONGINT ; .. ) : LONGINT ;
+
+PROCEDURE DoSuperMethodA( cl	  : IClassPtr ;
+			  obj	  : ObjectPtr ;
+			  message : Msg ) : LONGINT ;
+
+PROCEDURE DoSuperMethod( cl 	  : IClassPtr ;
+			 obj	  : ObjectPtr ;
+			 MethodID : LONGINT ; .. ) : LONGINT ;
+
+PROCEDURE CoerceMethodA( cl 	 : IClassPtr ;
+			 obj	 : ObjectPtr ;
+			 message : Msg ) : LONGINT ;
+
+PROCEDURE CoerceMethod( cl	 : IClassPtr ;
+			obj	 : ObjectPtr ;
+			MethodID : LONGINT ; .. ) : LONGINT ;
+
+PROCEDURE SetSuperAttrs( cl   : IClassPtr ;
+			 obj  : ObjectPtr ;
+			 Tag1 : Tag ; .. ) : LONGINT ;
+
+END Classes.

@@ -1,0 +1,305 @@
+<html><head>
+<title>Best of Blitz-List</title></head>
+<body bgcolor=#ffffff>
+<b>From</b> :  Steven Matty (Big.Will.Riker@ldngedge.demon.co.uk)<br>
+<b>Subject</b> :  Re: GadTool Windows Resizing<br>
+<pre>
+
+> What I'm trying to do is have the window refresh itself when someone
+> resized the window with the StringGadget and other gadgets resized
+> so they don't get chopped off. I can sort out everything appart from
+> freeing the old gadgets which remain in there old possitions along
+> with the new ones. Eventually I end up with a window full of gadgets.
+
+I've not used the DetachGTList which came with Blitz2.1 - weve
+written our own command which does what you need. When you detach the
+list, you will need to do an 'InnerCLS' or similar, because the gadget's
+imagery will not be erased just by calling DetachGTList.
+
+I'll try and dig out some source code which does this...
+
+<scrummage>
+
+
+-8<- cut here -------8<----------8<------------8<-----------8<---------- cut here
+
+;Hard disk sample player..using DSound (available from Aminet)
+;
+;(C) 1996 Red When Excited Ltd (formerly LES)
+;by S.Matty
+;Note, a lot of the used commans are part of the RIBlitzLibs
+;collection available on BUM7 and Aminet
+;V5 of RIBlitzLibs available soon
+
+DefaultIDCMP #IDCMP_CLOSEWINDOW|#IDCMP_GADGETUP|#IDCMP_NEWSIZE|#IDCMP_RAWKEY|#IDCMP_MOUSEMOVE|#IDCMP_GADGETDOWN
+stopstatus.w=0
+playstatus.w=-1
+loopstatus.w=-1
+ledstatus.w=0
+ledonoff=-1
+looponoff=-1
+slideronoff=-1
+
+MakeCommodity "DiskPlay","Display V2 (C)1996","HardDisk Sample Player"
+
+MaxLen pa$=192
+MaxLen fi$=192
+
+fontheight.w=0
+#FP_SCREENFONT=2
+
+
+Function.w TextExtent{a$}
+  SHARED fontad.l
+  font.l=fontad.l+40
+  first.w=Peek.b(font-8)
+  font=Peek.l(font)
+  w.w=4
+  For n=1 To Len(a$)
+    m.w=Asc(Mid$(a$,n,1))-first
+    If m+first<>Asc("_")
+      w+Peek.w(font+(m*4)+2)+3
+    EndIf
+  Next n
+  Function Return w
+End Function
+
+WbToScreen 0
+NoCli
+scrwidth.w=ScreenWidth
+scrheight.w=ScreenHeight
+scrnad.l=Peek.l(Addr Screen(0))
+barheight.w=Peek.b(scrnad+30)
+
+fontname$="topaz.font"
+fontheight.w=8
+
+Gosub getdefaultfont
+
+winwidth.q=0.75*scrwidth
+winheight.q=Max(0.2*scrheight,(fontheight*3)+34)
+wintitle$="DiskPlay v2"
+winflags.l=#WFLG_ACTIVATE|#WFLG_RMBTRAP|#WFLG_CLOSEGADGET|#WFLG_DRAGBAR|#WFLG_SIZEGADGET|#WFLG_DEPTHGADGET
+
+
+LoadFont 0,fontname$,fontheight
+
+fontad.l=Peek.l(Addr IntuiFont(0)+8)
+
+
+#filename=0
+#play=1
+#_stop=2
+#choose=3
+#quit=4
+#filenametext=5
+#led=6
+#loop=7
+#bufsize=8
+
+buffersize.l=65536
+
+key$="?ps/qnfl"
+
+Gosub dogui
+Gosub dowindow
+
+AddWaitEvent PortSigBit(CommodityMsgPort),$3
+AddWaitEvent PortSigBit(AppMsgPort),AppEventIDCMP
+
+Repeat
+  ev.l=WaitEvent
+  ew.l=EventWindow
+  ec.l=EventCode
+  gh.l=GadgetHit
+main:
+  Select ev
+    Case AppEventIDCMP
+      ev.l=AppEvent
+      fil$=NextAppFile
+      GTSetString 0,#filename,fil$
+      Redraw 0,#filename
+    Case $3
+      ce.l=CommodityEvent
+      cx.l=ExchangeMessage
+      If cx=CxKill Then Gosub stopit:End
+      If cx=CxDisAppear Then Gosub hidegui
+      If cx=CxAppear Then Gosub dogui:Gosub dowindow
+    Case #IDCMP_GADGETDOWN
+      Gosub procdowns
+    Case #IDCMP_GADGETUP
+      Gosub procgads
+    Case #IDCMP_NEWSIZE
+      winwidth=WindowWidth
+      winheight=WindowHeight
+      DetachGTList 0
+      InnerCls
+      BeginRefresh_ Peek.l(Addr Window(0))
+      EndRefresh_ Peek.l(Addr Window(0)),-1
+      RefreshWindowFrame_ Peek.l(Addr Window(0))
+      Gosub dogui
+      AttachGTList 0,0
+    Case #IDCMP_RAWKEY
+      m=Instr(key$,ASCRaw(ec))
+      If m
+        flg=1
+        If (RawStatus(96)=0 AND RawStatus(97)=0) AND m=#choose+1 Then flg=0
+      EndIf
+      If flg
+        ev=#IDCMP_GADGETUP:gh=m-1:Pop Select:Goto main
+      EndIf
+  End Select
+Until ev=$200 AND ew=0
+Gosub stopit
+End
+
+.dogui:
+;GTFreeGadget 0,#filename
+Free GTList 0
+xcurs.w=TextExtent{"_Name"}
+bwidth.w=TextExtent{"_?"}+4
+GTString 0,#filename,xcurs,2,winwidth-xcurs-24-bwidth,fontheight+4,"_Name",#_LEFT,80,fil$
+GTButton 0,#choose,xcurs+(winwidth-xcurs-24-bwidth),2,bwidth,fontheight+4,"_?",0
+
+xcurs.w=4
+width.w=Max(TextExtent{"_Play"},winwidth/5)+8
+GTButton 0,#play,4,winheight-((fontheight*2)+8),width,fontheight+2,"_Play",0
+
+If playstatus Then GTEnable 0,#play Else GTDisable 0,#play
+width.w=Max(TextExtent{"_Stop"},winwidth/5)
+xcurs=((winwidth)/2)-(width/2)
+xcurs-12
+GTButton 0,#_stop,xcurs,winheight-((fontheight*2)+8),width+4,fontheight+2,"_Stop",0
+If stopstatus Then GTEnable 0,#_stop Else GTDisable 0,#_stop
+
+width.w=Max(TextExtent{"_Quit"},winwidth/5)+8
+GTButton 0,#quit,winwidth-(width+26),winheight-((fontheight*2)+8),width,fontheight+2,"_Quit",0
+
+
+bwidth=Max((winwidth/8)-16,24)
+bheight=Max(winheight/8,16)
+xcurs=TextExtent{"_Filter"}
+GTCheckBox 0,#led,xcurs,fontheight+8,bwidth,bheight,"_Filter",#_LEFT|#_Scaled
+GTToggle 0,#led,ledstatus
+If ledonoff Then GTEnable 0,#led Else GTDisable 0,#led
+
+bwidth=Max((winwidth/8)-16,24)
+bheight=Max(winheight/8,16)
+xcurs+bwidth+4+TextExtent{"_Loop"}
+GTCheckBox 0,#loop,xcurs,fontheight+8,bwidth,bheight,"_Loop",#_LEFT|#_Scaled
+GTToggle 0,#loop,loopstatus
+If looponoff Then GTEnable 0,#loop Else GTDisable 0,#loop
+
+xcurs+4+bwidth+TextExtent{"_Buffer"}
+bwidth=(winwidth-xcurs)-24
+bwidth-TextExtent{"255"}
+
+form$="%ld"
+
+GTTags #GTSL_LevelFormat,&form$,#GTSL_MaxLevelLen,2,#GTSL_LevelPlace,#_RIGHT
+
+GTSlider 0,#bufsize,xcurs,fontheight+8,bwidth,bheight,"_Buffer",#_Immediate,16,256,buffersize ASR 10
+If slideronoff Then GTEnable 0,#bufsize Else GTDisable 0,#bufsize
+
+Return
+
+.stopit:
+If FindPort_("DSound.1")=0 Then Return
+  Execute_ "SYS:REXXC/RX >NIL: <NIL: "+Chr$(34)+"address 'DSound.1' QUIT"+Chr$(34),0,0
+Return
+
+.procdowns:
+;  Select gh
+;  End Select
+Return
+
+.procgads:
+  Select gh
+    Case #bufsize
+      buffersize=ec ASL 10
+    Case #filename
+      fil$=GTGetString(0,gh)
+    Case #play
+      Gosub stopit
+      If loopstatus Then loopt$="-o" Else loopt$=""
+      If ledstatus=0 Then filt$="-f" Else filt$=""
+      Execute_ "RUN >NIL: <NIL: SFX:DSound140/DSound -2 -w -v64 -b"+Str$(buffersize)+" "+loopt$+" "+filt$+" "+fil$,0,0
+      playstatus=0
+      stopstatus=-1
+      ledonoff=0
+      looponoff=0
+      GTDisable 0,#loop
+      GTDisable 0,#led
+      GTDisable 0,#play
+      GTEnable 0,#_stop
+      Redraw 0,#loop
+      Redraw 0,#led
+      Redraw 0,#play
+      Redraw 0,#_stop
+    Case #_stop
+      Gosub stopit
+      playstatus=-1
+      stopstatus=0
+      ledonoff=-1
+      looponoff=-1
+      GTEnable 0,#loop
+      GTEnable 0,#led
+      GTEnable 0,#play
+      GTDisable 0,#_stop
+      Redraw 0,#loop
+      Redraw 0,#led
+      Redraw 0,#play
+      Redraw 0,#_stop
+    Case #choose
+      fil2$=ASLFileRequest$("Choose File",pa$,fi$)
+      If fil2$<>"" Then GTSetString 0,#filename,fil2$:fil$=fil2$
+    Case #filenametext
+      GTActivateGadget 0,#filename
+    Case #quit
+      Gosub stopit
+      End
+    Case #loop
+      loopstatus=Abs(loopstatus)-1
+      GTToggle 0,gh,loopstatus:Redraw 0,gh
+    Case #led
+      ledstatus=Abs(ledstatus)-1
+      GTToggle 0,gh,ledstatus:Redraw 0,gh
+  End Select
+Return
+
+.dowindow:
+  SizeLimits TextExtent{"PlayStopQuitBufferSHOE1234"}+64,Max((fontheight*3)+34,(0.1*scrheight)),scrwidth,scrheight
+  x=(scrwidth ASR1)-(winwidth ASR1)
+  y=(scrheight ASR1)-(scrheight ASR1)
+
+  Window 0,x,y,winwidth,winheight,winflags,wintitle$,-1,-1
+  AttachGTList 0,0
+  AddAppWindow 0
+Return
+
+.getdefaultfont:
+  If OpenFontPrefs
+    fontname$=DefaultFontName(#FP_SCREENFONT)
+    fontheight.w=DefaultFontHeight(#FP_SCREENFONT)
+    CloseFontPrefs
+  EndIf
+Return
+
+.hidegui:
+  DelAppWindow 0
+  DetachGTList 0
+  CloseWindow 0
+Return
+
+fontextent:
+  Dc.w  0
+  Dc.w  0
+  Dc.w  0
+  Dc.w  0
+  Dc.w  0
+  Dc.w  0
+  Dc.w  0
+  Dc.w  0
+  Even
+End
+</pre></body></html>

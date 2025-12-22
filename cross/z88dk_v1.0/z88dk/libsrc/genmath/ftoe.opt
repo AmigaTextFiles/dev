@@ -1,0 +1,480 @@
+;* * * * *  Small-C/Plus Z88 * * * * *
+;  Version: v1.10b0.49 Date: 14/3/99 
+;
+;	Reconstructed for the z80 Module Assembler
+;	By Dominic Morris <djm@jb.man.ac.uk>
+
+;	Small C+ Library Function
+
+	XLIB	ftoe
+
+	INCLUDE "#z88_crt0.hdr"
+        LIB     floor
+
+.ftoe
+	ld	hl,-12
+	add	hl,sp
+	ld	sp,hl
+	ld	hl,6
+	add	hl,sp
+	push	hl
+	ld	hl,i_2+0
+	call	dload
+	pop	hl
+	call	dstore
+	ld	hl,4
+	add	hl,sp
+	push	hl
+	ld	hl,18
+	add	hl,sp
+	call	l_gint
+	pop	de
+	call	l_pint
+.i_3
+	ld	hl,4
+	add	hl,sp
+	push	hl
+	call	l_gint
+	dec	hl
+	pop	de
+	call	l_pint
+	inc	hl
+	ld	a,h
+	or	l
+	jp	z,i_4
+	ld	hl,6
+	add	hl,sp
+	push	hl
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+6
+	call	dload
+	call	dmul
+	pop	hl
+	call	dstore
+	jp	i_3
+.i_4
+	ld	hl,18
+	add	hl,sp
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+12
+	call	dload
+	call	deq
+	ld	a,h
+	or	l
+	jp	z,i_5
+	ld	hl,0
+	pop	bc
+	push	hl
+	ld	hl,6
+	add	hl,sp
+	push	hl
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+6
+	call	dload
+	call	dmul
+	pop	hl
+	call	dstore
+	jp	i_6
+.i_5
+	ld	hl,16
+	add	hl,sp
+	call	l_gint
+	pop	bc
+	push	hl
+	ld	hl,18
+	add	hl,sp
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+12
+	call	dload
+	call	dlt
+	ld	a,h
+	or	l
+	jp	z,i_7
+	ld	hl,14
+	add	hl,sp
+	push	hl
+	call	l_gint
+	inc	hl
+	pop	de
+	call	l_pint
+	dec	hl
+;push hl, ld hl,45 pop de optimized
+;Set char to number, but not when result is used
+	ld	(hl),(45 % 256)
+	ld	hl,18
+	add	hl,sp
+	push	hl
+	ld	hl,20
+	add	hl,sp
+	call	dload
+	call	minusfa
+	pop	hl
+	call	dstore
+.i_7
+	ld	hl,18
+	add	hl,sp
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,12
+	add	hl,sp
+	call	dload
+	call	dgt
+	ld	a,h
+	or	l
+	jp	z,i_8
+	ld	hl,6
+	add	hl,sp
+	push	hl
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+6
+	call	dload
+	call	dmul
+	pop	hl
+	call	dstore
+.i_9
+	ld	hl,18
+	add	hl,sp
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,12
+	add	hl,sp
+	call	dload
+	call	dge
+	ld	a,h
+	or	l
+	jp	z,i_10
+	ld	hl,18
+	add	hl,sp
+	push	hl
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+6
+	call	dload
+	call	ddiv
+	pop	hl
+	call	dstore
+;Increment int at top of stack optimised (from ++)
+	pop	hl
+	inc	hl
+	push	hl
+	jp	i_9
+.i_10
+	jp	i_11
+.i_8
+.i_12
+	ld	hl,18
+	add	hl,sp
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,12
+	add	hl,sp
+	call	dload
+	call	dlt
+	ld	a,h
+	or	l
+	jp	z,i_13
+	ld	hl,18
+	add	hl,sp
+	push	hl
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+6
+	call	dload
+	call	dmul
+	pop	hl
+	call	dstore
+;Decrement int at top of stack (from j--)
+	pop	hl
+	dec	hl
+	push	hl
+	jp	i_12
+.i_13
+	ld	hl,6
+	add	hl,sp
+	push	hl
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+6
+	call	dload
+	call	dmul
+	pop	hl
+	call	dstore
+.i_11
+	ld	hl,18
+	add	hl,sp
+	push	hl
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+18
+	call	dload
+	call	dadd
+	pop	hl
+	call	dstore
+	ld	hl,18
+	add	hl,sp
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,12
+	add	hl,sp
+	call	dload
+	call	dge
+	ld	a,h
+	or	l
+	jp	z,i_14
+	ld	hl,18
+	add	hl,sp
+	push	hl
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+6
+	call	dload
+	call	ddiv
+	pop	hl
+	call	dstore
+;Increment int at top of stack optimised (from ++)
+	pop	hl
+	inc	hl
+	push	hl
+.i_14
+.i_6
+	ld	hl,4
+	add	hl,sp
+;push hl, ld hl,0 pop de optimized
+	ld	de,0
+	ex	de,hl
+	call	l_pint
+.i_15
+	ld	hl,4
+	add	hl,sp
+	call	l_gint
+	push	hl
+	ld	hl,18
+	add	hl,sp
+	call	l_gint
+	pop	de
+	call	l_le
+	ld	a,h
+	or	l
+	jp	z,i_16
+	ld	hl,6
+	add	hl,sp
+	push	hl
+	ld	hl,i_2+18
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,14
+	add	hl,sp
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,i_2+24
+	call	dload
+	call	dmul
+	call	dadd
+	call	dpush
+	call	floor
+	pop	bc
+	pop	bc
+	pop	bc
+	pop	hl
+	call	dstore
+	ld	hl,18
+	add	hl,sp
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,12
+	add	hl,sp
+	call	dload
+	call	ddiv
+	call	dpush
+	call	ifix
+	pop	bc
+	pop	bc
+	pop	bc
+	pop	de
+	pop	bc
+	push	hl
+	push	de
+	ld	hl,14
+	add	hl,sp
+	push	hl
+	call	l_gint
+	inc	hl
+	pop	de
+	call	l_pint
+	dec	hl
+	push	hl
+	ld	hl,4
+	add	hl,sp
+	call	l_gint
+	ld	bc,48
+	add	hl,bc
+	pop	de
+	ld	a,l
+	ld	(de),a
+	ld	hl,18
+	add	hl,sp
+	push	hl
+; call dload, dpush -> dldpsh
+	call	dldpsh
+	ld	hl,10
+	add	hl,sp
+	call	l_gint
+	push	hl
+	call	float
+	pop	bc
+	call	dpush
+	ld	hl,20
+	add	hl,sp
+	call	dload
+	call	dmul
+	call	dsub
+	pop	hl
+	call	dstore
+	ld	hl,4
+	add	hl,sp
+	push	hl
+	call	l_gint
+	inc	hl
+	pop	de
+	call	l_pint
+	dec	hl
+	ld	a,h
+	or	l
+	jp	z,i_17
+	jp	i_15
+.i_17
+	ld	hl,14
+	add	hl,sp
+	push	hl
+	call	l_gint
+	inc	hl
+	pop	de
+	call	l_pint
+	dec	hl
+;push hl, ld hl,46 pop de optimized
+	ld	de,46
+	ex	de,hl
+	ld	a,l
+	ld	(de),a
+	jp	i_15
+.i_16
+	ld	hl,14
+	add	hl,sp
+	push	hl
+	call	l_gint
+	inc	hl
+	pop	de
+	call	l_pint
+	dec	hl
+;push hl, ld hl,101 pop de optimized
+;Set char to number, but not when result is used
+	ld	(hl),(101 % 256)
+;Get top int off stack optimized
+	pop	hl
+	push	hl
+	xor	a
+	or	h
+	jp	p,i_18
+	ld	hl,14
+	add	hl,sp
+	push	hl
+	call	l_gint
+	inc	hl
+	pop	de
+	call	l_pint
+	dec	hl
+;push hl, ld hl,45 pop de optimized
+;Set char to number, but not when result is used
+	ld	(hl),(45 % 256)
+;Get top int off stack optimized
+	pop	hl
+	push	hl
+	call	l_neg
+	pop	bc
+	push	hl
+.i_18
+;Get top int off stack optimized
+	pop	hl
+	push	hl
+;push hl, ld hl,9 pop de optimized
+	ld	de,9
+	ex	de,hl
+	call	l_gt
+	ld	a,h
+	or	l
+	jp	z,i_19
+	ld	hl,14
+	add	hl,sp
+	push	hl
+	call	l_gint
+	inc	hl
+	pop	de
+	call	l_pint
+	dec	hl
+	push	hl
+;Fetch second into off stack optimized
+	pop	bc
+	pop	hl
+	push	hl
+	push	bc
+;push hl, ld hl,10 pop de optimized
+	ld	de,10
+	ex	de,hl
+	call	l_div
+	ld	de,48
+	add	hl,de
+	pop	de
+	ld	a,l
+	ld	(de),a
+.i_19
+	ld	hl,14
+	add	hl,sp
+	push	hl
+	call	l_gint
+	inc	hl
+	pop	de
+	call	l_pint
+	dec	hl
+	push	hl
+;Fetch second into off stack optimized
+	pop	bc
+	pop	hl
+	push	hl
+	push	bc
+;push hl, ld hl,10 pop de optimized
+	ld	de,10
+	ex	de,hl
+	call	l_div
+	ex	de,hl
+	ld	de,48
+	add	hl,de
+	pop	de
+	ld	a,l
+	ld	(de),a
+	ld	hl,14
+	add	hl,sp
+	call	l_gint
+;push hl, ld hl,0 pop de optimized
+;Set char to number, but not when result is used
+	ld	(hl),(0 % 256)
+	ld	hl,12
+	add	hl,sp
+	ld	sp,hl
+	ret
+
+
+
+.i_2
+	defb	0,0,0,0,0,-127,0,0,0,0
+	defb	32,-124,0,0,0,0,0,0,0,0
+	defb	0,0,0,-128,-51,-52,-52,-52,76,125
+
+; --- Start of Static Variables ---
+
+
+; --- End of Compilation ---

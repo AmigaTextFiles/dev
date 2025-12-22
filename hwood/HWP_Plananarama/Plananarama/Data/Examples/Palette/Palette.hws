@@ -1,0 +1,349 @@
+/****************************************************************
+**                                                             **
+** Name:        Palette                                        **
+** Author:      Andreas Falkenhahn                             **
+** Version:     1.1                                            **
+** Date:        13.02.22                                       **
+** Interpreter: Hollywood 9.0                                  **
+** Licence:     Sample program for Hollywood                   **
+** Function:    Demonstrates palette cycling with Hollywood    **
+**                                                             **
+** Notes:       BlendShift Technology conceived, designed and  **
+**              coded by Joseph Huckaby. Copyright (c) 2001-02,**
+**              2010 Joseph Huckaby. Released under LGPL v3.0  **
+**                                                             **
+**              Images by Mark J. Ferrari                      **
+**                                                             **
+** History:                                                    **
+**                                                             **
+** 1.1: (13.02.22)                                             **
+**                                                             **
+** - adapted for Plananarama's palette mode                    **
+**                                                             **
+** 1.0: (12.04.20)                                             **
+**                                                             **
+** - initial release                                           **
+**                                                             **
+****************************************************************/
+
+/*
+** Important! Check if the used Hollywood version is at least
+** version 9.0!
+*/
+@VERSION 9,0
+
+/*
+** Put Plananarama in palette mode so that we can cycle colors
+** using the custom chip hardware
+*/
+@REQUIRE "plananarama", {PaletteMode = True}
+
+
+/*
+** Our data files
+*/
+@DIRECTORY 1, "Hollywood:Examples/Hollywood/Palette/data"
+
+; must install a dummy menu on startup to tell Plananarama to render the screen bar
+@MENU 2, { 
+    {"Dummy", {
+        {"Dummy", ID = "dummy"}
+    	}
+    }
+}          
+        
+/*
+** Give us a palette display
+*/
+@DISPLAY {Palette = #PALETTE_AGA, Menu = 2}
+
+
+/*
+** Some global constants
+*/
+Const #PRECISION = 100
+Const #CYCLE_SPEED = 280
+	
+	
+/*
+** Reverses palette colors
+*/	
+Function p_ReverseColors(colors, range)
+		
+	Local cycleSize = (range.high - range.low) + 1
+
+	For Local i = 0 To (cycleSize \ 2) - 1
+		Local temp = colors[range.low+i]
+		colors[range.low+i] = colors[range.high-i]
+		colors[range.high-i] = temp
+	Next
+	
+EndFunction	
+
+
+/*
+** Fade one color into another by a partial amount
+** and return new color in between
+*/
+Function p_FadeColor(sourceColor, destColor, frame, mx)
+	
+	Local sr, sg, sb = (sourceColor >> 16) & $ff, (sourceColor >> 8) & $ff, sourceColor & $ff
+	Local dr, dg, db = (destColor >> 16) & $ff, (destColor >> 8) & $ff, destColor & $ff
+
+	If Not mx Then Return(sourceColor)
+		
+	If frame < 0 Then frame = 0
+	If frame > mx Then frame = mx
+
+	Local r = Floor(sr + (((dr - sr) * frame) \ mx))
+	Local g = Floor(sg + (((dg - sg) * frame) \ mx))
+	Local b = Floor(sb + (((db - sb) * frame) \ mx))
+
+	Return(RGB(r, g, b))
+
+EndFunction
+
+
+/*
+** Cycle palette colors
+*/		
+Function p_ShiftColors(colors, range, amount)
+	
+	Local i, j, temp
+	Local amount = Floor(amount)
+
+	For Local i = 0 To amount - 1
+		
+		Local temp = colors[range.high]
+		
+		For Local j = range.high-1 To range.low Step -1 Do colors[j+1] = colors[j]
+
+		colors[range.low] = temp
+	Next
+	
+EndFunction
+
+
+/*	
+** Shift colors using BlendShift (fade colors creating a smooth transition)
+** BlendShift Technology conceived, designed and coded by Joseph Huckaby
+*/	
+Function p_BlendShiftColors(colors, range, amount)
+	
+	p_ShiftColors(colors, range, amount)
+	
+	Local frame = Floor((amount - Floor(amount)) * #PRECISION)
+	Local temp = colors[range.high]
+	
+	For Local j=range.high-1 To range.low Step -1
+		colors[j+1] = p_FadeColor(colors[j+1], colors[j], frame, #PRECISION)
+	Next
+
+	colors[range.low] = p_FadeColor(colors[range.low], temp, frame, #PRECISION)	
+
+EndFunction	
+
+
+/*
+** Floating point modulo using a coefficient
+*/
+Function p_DFloatMod(a, b)
+	
+	Return(Mod(Floor(a*#PRECISION), Floor(b*#PRECISION))/#PRECISION)
+	
+EndFunction
+
+
+/*
+** Cycle palette colors
+*/	
+Function p_Cycle(c, timeNow)
+	
+	Local t = GetAttribute(#PALETTE, 1, #ATTRPALETTE)
+	Local cycleAmount
+	
+	For Local i = 0 To ListItems(c) - 1
+		
+		Local cycle = c[i]
+		
+		If cycle.active
+			
+			Local cycleSize = (cycle.high - cycle.low) + 1
+			Local cycleRate = cycle.rate / Floor(#CYCLE_SPEED / speedAdjust)
+					
+			cycleAmount = p_DFloatMod((timeNow / (1000 / cycleRate)), cycleSize)
+
+			If cycle.reverse Then p_ReverseColors(t, cycle)
+		
+			If blendShift
+				p_BlendShiftColors(t, cycle, cycleAmount)
+			Else		
+				p_ShiftColors(t, cycle, cycleAmount)
+			EndIf
+					
+			If cycle.reverse Then p_ReverseColors(t, cycle)
+					
+			cycle.cycleAmount = cycleAmount
+		EndIf
+	Next
+	
+	CreatePalette(2, t)
+	SetPalette(2)
+	
+EndFunction	
+
+
+/*
+** Switch to a new scene
+*/
+Function p_SelectScene(id)
+	
+	Local s = scenes[id]
+	
+	LoadBGPic(1, GetDirectoryEntry(1, s.name .. ".LBM"), {LoadPalette = True})
+	DisplayBGPic(1)
+	
+	scenes[id].cycles = GetAttribute(#BGPIC, 1, #ATTRCYCLE)	
+		
+	ExtractPalette(1, #BGPIC, 1)	
+	StartTimer(1)
+	
+	cur = id
+	
+	SetTitle("Palette Cycle [" .. s.title .. "]")
+	SelectMenuItem(1, StrStr(id))
+		
+EndFunction	
+
+
+/*
+** Setup GUI menu
+*/
+Function p_Init()
+
+	scenes = {
+		{name = "V08AM", title = "Jungle Waterfall - Morning"},	
+		{name = "V29", title = "Seascape - Day"},	
+		{name = "V19", title = "Mountain Stream - Morning"},
+		{name = "V26SNOW", title = "Winter Forest - Snow"},
+		{name = "V08RAIN", title = "Jungle Waterfall - Rain"},
+		{name = "V14", title = "Mountain Storm - Day"},
+		{name = "V30", title = "Deep Forest - Day"},
+		{name = "V04", title = "Highland Ruins - Rain"},
+		{name = "V07", title = "Rough Seas - Day"},
+		{name = "V20", title = "Crystal Caves - Day"},
+		{name = "V05RAIN", title = "Haunted Castle Ruins - Rain"},
+		{name = "V08PM", title = "Jungle Waterfall - Night"},
+		{name = "V16RAIN", title = "Mirror Pond - Rain"},
+		{name = "V19AURA", title = "Mountain Stream - Night"},
+		{name = "CORAL", title = "Aquarius - Day"},
+		{name = "V15", title = "Harbor Town - Night"},
+		{name = "V30RAIN", title = "Deep Forest - Rain"},
+		{name = "V02", title = "Mountain Fortress - Dusk"},
+		{name = "V28", title = "Water City Gates - Fog"},
+		{name = "V29PM", title = "Seascape - Sunset"},
+		{name = "V16", title = "Mirror Pond - Morning"},
+		{name = "V01", title = "Island Fires - Dusk"},
+		{name = "V09", title = "Forest Edge - Day"},
+		{name = "V16PM", title = "Mirror Pond - Afternoon"},
+		{name = "V08", title = "Jungle Waterfall - Afternoon"},
+		{name = "V03", title = "Swamp Cathedral - Day"},
+		{name = "V05HAUNT", title = "Haunted Castle Ruins - Night"},
+		{name = "V10", title = "Deep Swamp - Day"},
+		{name = "V11AM", title = "Approaching Storm - Day"},
+		{name = "V13", title = "Pond Ripples - Dawn"},
+		{name = "V17", title = "Ice Wind - Day"},
+		{name = "V19PM", title = "Mountain Stream - Afternoon"},
+		{name = "V25HEAT", title = "Desert Heat Wave - Day"},
+		{name = "V27", title = "Magic Marsh Cave - Night"},
+		{name = "V29FOG", title = "Seascape - Fog"}
+	}		
+
+	numscenes = ListItems(scenes)
+	speedAdjust = 1
+	blendShift = True
+	   		
+    	Local s = {}	
+	
+	For Local k = 0 To numscenes - 1 Do InsertItem(s, {scenes[k].title, ID = StrStr(k), Flags = #MENUITEM_RADIO})
+	
+	Local m = {
+		{"Scenes", s},
+
+		{"Options", {
+			{"25% speed", ID = "speed_0.25", Flags = #MENUITEM_RADIO},
+			{"50% speed", ID = "speed_0.5", Flags = #MENUITEM_RADIO},
+        		{"100% speed", ID = "speed_1", Flags = #MENUITEM_RADIO|#MENUITEM_SELECTED},
+        		{"200% speed", ID = "speed_2", Flags = #MENUITEM_RADIO},
+        		{"400% speed", ID = "speed_4", Flags = #MENUITEM_RADIO},       		
+        		{},
+        		{"Normal mode", ID = "normal", Flags = #MENUITEM_RADIO},
+        		{"Blend shift mode", ID = "blendshift", Flags = #MENUITEM_RADIO|#MENUITEM_SELECTED}}},
+
+		{"?", {
+        		{"About...", ID = "about"}}}
+    		}	
+    					
+	CreateMenu(1, m)
+	SetDisplayAttributes({Menu = 1})
+	
+EndFunction			
+
+
+/*
+** Handle events
+*/
+Function p_EventFunc(msg)
+	
+	Switch msg.action
+	Case "OnMenuSelect":
+		Switch msg.item
+		Case "about":
+			SystemRequest("", "Palette Demo 1.0\nWritten by Andreas Falkenhahn\nBased on code by Joseph Huckaby\nGraphics by Mark J. Ferrari", "OK", #REQICON_INFORMATION)
+		Case "normal":
+			blendShift = False
+		Case "blendshift":
+			blendShift = True					
+		Default:
+			If StartsWith(msg.item, "speed_")
+				speedAdjust = Val(UnrightStr(msg.item, 6))
+			Else	
+				p_SelectScene(Val(msg.item))
+			EndIf	
+		EndSwitch
+		
+	Case "OnKeyUp":
+		Switch msg.key
+		Case "LEFT":
+			cur = Wrap(cur - 1, 0, numscenes)
+		Case "RIGHT":
+			cur = Wrap(cur + 1, 0, numscenes)
+		Default:
+			Return	
+		EndSwitch
+		
+		p_SelectScene(cur)		 				
+	EndSwitch
+
+EndFunction
+
+EscapeQuit(True)
+
+; init stuff
+p_Init()
+p_SelectScene(0)
+
+@IF #HW_AMIGA Or #HW_LINUX
+If GetAttribute(#DISPLAY, 0, #ATTRMODE) <> #DISPMODE_FULLSCREEN Then SystemRequest("Palette", "Use the cursor keys or the menu to switch between scenes!", "OK")
+@ENDIF
+
+; notify us about menu and key events
+InstallEventHandler({OnMenuSelect = p_EventFunc, OnKeyUp = p_EventFunc})
+
+; set up cycling interval function
+SetInterval(1, Function() p_Cycle(scenes[cur].cycles, GetTimer(1)) EndFunction, 1000\50)
+
+; main loop
+Repeat
+	WaitEvent
+Forever

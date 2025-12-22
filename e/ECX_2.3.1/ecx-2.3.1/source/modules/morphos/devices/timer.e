@@ -1,0 +1,39 @@
+OPT MODULE, PREPROCESS, EXPORT
+
+-> devices/timer.e (MorphOS)
+
+MODULE 'exec/io'
+
+CONST UNIT_MICROHZ     =  0
+CONST UNIT_VBLANK      =  1
+CONST UNIT_ECLOCK      =  2
+CONST UNIT_WAITUNTIL   =  3
+CONST UNIT_WAITECLOCK  =  4
+/*** V50 ***/
+CONST UNIT_CPUCLOCK     =  5
+CONST UNIT_WAITCPUCLOCK =  6
+
+
+#define TIMERNAME  'timer.device'
+
+
+OBJECT timeval
+   secs:LONG
+   micro:LONG
+ENDOBJECT
+
+OBJECT eclockval
+   hi:LONG
+   lo:LONG
+ENDOBJECT
+
+OBJECT timerequest
+   io:io
+   time:timeval
+ENDOBJECT
+
+CONST TR_ADDREQUEST  = CMD_NONSTD
+CONST TR_GETSYSTIME  = CMD_NONSTD + 1
+CONST TR_SETSYSTIME  = CMD_NONSTD + 2
+
+

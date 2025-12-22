@@ -1,0 +1,179 @@
+PRELIMINARY DOCUMENTATION FOR THE EXTENDED VERSION OF XLISP IN AMIGA:
+                     AMXLISP
+
+Installation:
+   the kernel of AMXlisp is named amxlisp
+   you need these files from the AMXlisp distribution disk:
+      init.lsp           some functions are modified, others added
+      interface.lsp      C-structure manipulations
+      defamiga.lsp       amiga libraries interface
+      fd (dir)           preprocessed fd.files (V1.2)
+      xlinclude (dir)    preprocessed C include files(V1.2)
+
+Execution:
+1> assign fd: amxlisp:fd
+1> assign xlinclude: amxlisp:include
+1> amxl
+
+(in fact, assigns are automatically executed in init.lsp when loading)
+
+I         C-structures Manipulation
+-----------------------------------
+(load-c-struct "<include_file>" [<structure_list>] )
+            where <include_file> is the name of the include file
+            containing the definitions of the C-structures you want to
+            use.
+             ex: (load-c-struct "exec/execbase")
+            The optionnal argument is to be used if you want to load
+            only a limited subset of definitions
+             ex: (load-c-struct "intuition/intuition" '(window))
+                  will load only the <window> structure definition
+CAVEAT: there is no automatic loading of involved structures, like in
+   C preprocessing. Loading structure window will NOT automatically load
+   Rastport definition for example.
+
+Every definition loaded is now accessible via some method applied to its
+name.
+Methods:
+   :new  <pointer>     creates a new instance of the structure
+                       pointing to <pointer>. This call does not allocate
+                       memory in the C heap. The call creates a lisp-object.
+                        ex: (setq eb (send execbase :new (memory-long 4)))
+
+   :ptr                access (read only) to the pointer
+                        ex: (send eb :ptr)
+                              returns the integer 4
+
+   :size-of            returns the size (in bytes) of the C-structure.
+                       This method should be used when you want to
+                       allocate a new structure in the C heap, via
+                       an AllocMem()
+                       It is also used internally.
+
+   :fshow              this method prints all C-fields of the structure
+                       Involved structure definitions are needed (see
+                       CAVEAT on load-c-struct), otherwise you will get
+                       an error. This function is not recursive, though
+                       it could be done with some care.
+
+   :-> <fieldname> [<value>]
+                       Usenet readers: this is not a joke.
+                       This is the main method. You should pronounce ":->"
+                       "access-field". The symbol has been chosen for
+                       similarity with C symbol.
+                       The <fieldname> is the word that is used in
+                       C-include files.
+                        ex: (send mywindow :-> 'LeftEdge)
+                              will return the actual value of the field
+                              LeftEdge of your <mywindow> structure
+                       AMXlisp is not case sensitive. But don't forget the
+                       quote.
+                       <value> is an optionnal value for write access.
+
+                       There is a mecanism of object generation.
+                       If Rasport definition is loaded, and mywindow is
+                       a window object,
+                        (send mywindow :-> 'Rastport)
+                        will return a Rastport structure, with the actual
+                        pointer in its instance variable.
+                       This mecanism allows multiple access in one
+                       simple lisp expression:
+                        (send (send (send mywindow :-> 'Rastport)
+                                    :-> 'BitMap)
+                              :-> 'Rows)
+                       If you want to write in a pointer field, you may
+                       pass a corresponding structure, the pointer will
+                       be extracted and stored in memory.
+
+Other functions:
+(class-of <object>)    will return the name of the class as a string.
+                       This was written because the predefined method
+                       :class only returns an object, which is not really
+                       informative.
+
+(c-to-string <ptr>)    while reading the include files, we have no means
+                       to detect if a (char *) points actually toward
+                       a null-terminated string. Therefore, we provide
+                       this function, to be used by the experimented
+                       programmer who knows where the strings are:
+                        (c-to-string (send (send mywindow :-> 'Title) :ptr))
+                              will return a lisp string (static) containing
+                              precisely the title of <mywindow>.
+
+
+II Amiga Libraries Functions
+----------------------------
+(openlibrary '<library>)
+               is the correct way to open a library for using its
+               functions. It will create the symbol <library>.
+               The function definitions and the library base are
+               stored in this symbol.
+               You may compute the library base with:
+                  (cassoc 'base <library>)
+                     if the library has been opened
+
+(defamiga '<function> '<library>)
+               will load the definition for <function> in <library>
+               and eventually open the <library>
+               Not case-sensitive.
+                ex: (defamiga 'DisplayBeep 'intuition)
+                    (defamiga 'FindTask    'exec)
+
+
+(callamiga '<function> <library> [<par1>] ...)
+            will call <function> of <library> with parameters <par1> ...
+            You must give the actual number of parameters needed.
+            Parameters can be: lisp strings
+                               lisp integers
+                               lisp object defined with C-structures
+                                    manipulation functions.
+            When an object is passed as a parameter, its pointer is
+            extracted and passed to callasm, which is the hard-coded part.
+
+            examples:
+               (callamiga 'displaybeep intuition 0)
+               (callamiga 'openlibrary exec "console.library" 0)
+               (callamiga 'setwindowtitles intuition <window>
+                              "Shoobeedoo" 0)
+               (callamiga 'sizewindow intuition <window> -40 -40)
+
+CAVEATS:
+The SetWindowTitles() call is dangerous because of non-persistency
+of the string. (see Real Programmer section)
+At the moment, callasm will return the weird number 1163022930, if it
+detects an error (bad parameter type, incompatibility between argument list
+and register list, ...).
+This value comes from
+   DC.L 'ERRR'
+in the assembly part.
+It should be possible to invoke the standard error mechanism, but it
+has not been implemented.
+
+REAL PROGRAMMER WARNINGS:
+
+- you may define your own C-structures, your own libraries, granted
+you create a corresponding xlinclude file and fd file.
+Formats for these can be found in the comments of the interface/defamiga
+lisp files.
+
+******* NOT VALID IN 2.0 *****************************************************
+*-warning: since Xlisp is monovalued (there is only one value for each
+*   symbol) it is unsane to define a C-structure whose name is the name
+*   of a lisp function.
+*   ex: list         we had to rename the C-structure "list" into "c_list"
+*                    everywhere in the xlinclude files.
+******* NOT VALID IN 2.0 *****************************************************
+
+- using :-> in write mode maybe dangerous.
+   The code still lacks some features to write fields correctly in
+   complicated cases (ie writing a field more than 4 bytes long).
+
+- methods are shared (i think) by all defined structures. If you want to add or
+   modify a method, please report to the code and be careful
+
+- note on recursion of :fshow method:
+   the problem lies in C_list structures, where you will loop on lh_succ
+   field.
+
+
+

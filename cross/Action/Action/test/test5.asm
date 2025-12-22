@@ -1,0 +1,133 @@
+	.SECTION	"temps",$80
+__TEMP_var0:	.DS	16
+	.SECTION	"args",$a0
+__ARGS:	.DS	16
+	.SECTION	"code",$2000
+_A:	.DS 1
+_B:	.DS 1
+_C:	.DS 1
+APROC_ARG__D:	.DS 1
+APROC:
+	STA	APROC_ARG__D
+	JMP	APROC_Lab0
+APROC_E:	.DS 1
+APROC_Lab0:
+	LDA	APROC_ARG__D+0
+	CLC
+	ADC	_A+0
+	SEC
+	SBC	_C+0
+	STA	APROC_E+0
+		;If Statement
+	LDA	_B+0
+	CMP	APROC_E+0
+	BCS	APROC_true__Lab3
+	JMP	APROC_false__Lab2
+APROC_true__Lab3:
+	LDA	APROC_E+0
+	SEC
+	SBC	_B+0
+	STA	APROC_E+0
+	LDA	_B+0
+	SEC
+	SBC	APROC_ARG__D+0
+	LDX	_A+0
+APROC_Lab4:
+	CMP	#128
+	ROR	A
+	DEX
+	BNE	APROC_Lab4
+	STA	_C+0
+	JMP	APROC_exit__Lab1
+APROC_false__Lab2:
+		;If Statement
+	LDA	_B+0
+	CMP	APROC_ARG__D+0
+	BEQ	APROC_true__Lab6
+	JMP	APROC_false__Lab5
+APROC_true__Lab6:
+	LDA	APROC_ARG__D+0
+	SEC
+	SBC	_B+0
+	LDX	_A+0
+APROC_Lab7:
+	ASL	A
+	DEX
+	BNE	APROC_Lab7
+	STA	_C+0
+	JMP	APROC_exit__Lab1
+APROC_false__Lab5:
+	LDA	_C+0
+	CLC
+	ADC	_A+0
+	SEC
+	SBC	_B+0
+	LDX	_B+0
+APROC_Lab8:
+	CMP	#128
+	ROR	A
+	DEX
+	BNE	APROC_Lab8
+	STA	APROC_ARG__D+0
+APROC_exit__Lab1:
+APROC_WHILE_Lab9:
+	LDA	_B+0
+	CLC
+	ADC	_C+0
+	CMP	_A+0
+	BCS	APROC_WCODE_Lab11
+	JMP	APROC_ELIHW_Lab10
+APROC_WCODE_Lab11:
+	LDA	_A+0
+	SEC
+	SBC	APROC_E+0
+	STA	_A+0
+	LDA	_A+0
+	CLC
+	ADC	_C+0
+	STA	_B+0
+	JMP	APROC_WHILE_Lab9
+APROC_ELIHW_Lab10:
+	LDA	_A+0
+	CLC
+	ADC	_C+0
+	STA	_B+0
+APROC_FOR_A_Lab12:
+	LDA	_B+0
+	CMP	APROC_E+0
+	BEQ	APROC_FOR_xit_A_Lab14
+	JMP	APROC_Fr_code_A_Lab13
+APROC_Fr_code_A_Lab13:
+	LDA	_A+0
+	AND	_B+0
+	STA	_C+0
+	LDA	APROC_ARG__D+0
+	CLC
+	ADC	_B+0
+	STA	_B+0
+	JMP	APROC_FOR_A_Lab12
+APROC_FOR_xit_A_Lab14:
+APROC_DO__Lab18:
+	LDA	_A+0
+	CLC
+	ADC	_C+0
+	STA	_A+0
+		;If Statement
+	LDA	_A+0
+	CMP	_B+0
+	BEQ	APROC_true__Lab21
+	JMP	APROC_false__Lab20
+APROC_true__Lab21:
+	JMP	APROC_OD__Lab17
+	JMP	APROC_exit__Lab19
+APROC_false__Lab20:
+APROC_exit__Lab19:
+	LDA	_A+0
+	SEC
+	SBC	_B+0
+	LDA	_C+0
+	BEQ	APROC_OD__Lab17
+	JMP	APROC_DO__Lab18
+	JMP	APROC_DO__Lab18
+APROC_OD__Lab17:
+	RTS

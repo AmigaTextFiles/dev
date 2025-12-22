@@ -1,0 +1,53 @@
+/*
+     MCC_Busy (c) by kMel, Klaus Melchior
+     Registered class of the Magic User Interface.
+
+     AmigaE Interface (by Ralph Wermke of Digital Innovations)
+     Based on Busy_mcc.h
+*/
+
+OPT MODULE
+OPT EXPORT
+OPT PREPROCESS
+
+
+MODULE 'libraries/mui'
+
+
+/*** MUI Defines ***/
+
+#define MUIC_Busy 'Busy.mcc'
+#define BusyObject Mui_NewObjectA(MUIC_Busy,[TAG_IGNORE,0
+#define BusyBar\
+   BusyObject,\
+     MUIA_Busy_Speed, MUIV_Busy_Speed_User,\
+     End
+
+
+
+/*** Methods ***/
+
+CONST MUIM_Busy_Move = $80020001
+
+/*** Method structs ***/
+
+OBJECT muip_busy_move
+   methodid
+ENDOBJECT
+
+/*** Special method values ***/
+
+/*** Special method flags ***/
+
+/*** Attributes ***/
+
+CONST MUIA_Busy_Speed = $80020049
+
+/*** Special attribute values ***/
+
+CONST MUIV_Busy_Speed_Off   =           0
+CONST MUIV_Busy_Speed_User  =          -1
+
+/*** Structures, Flags & Values ***/
+
+/* PrMake.rexx 0.10 (16.2.1996) Copyright 1995 kmel, Klaus Melchior */

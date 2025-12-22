@@ -1,0 +1,1 @@
+#define NastyBK __asm volatile ("illegal")

@@ -1,0 +1,340 @@
+
+
+****	CODE		ANIMATION_BOBS
+****	CODER		MARC.B
+****	DATE		31st MAY `92
+
+		
+;PERFORMS A SIMPLE ANIMATION BY SWITCHING BOBS IN A
+;SEQUENCE ACCORDING TO A TABLE	   
+
+
+***	constants	***
+
+chip		equ	2
+clear		equ	$10000
+Plane_Size	equ	320/8*256
+bob_size	equ	16*138
+
+
+*** 	include	hardware.i	***
+
+	incdir		sys:include/
+	include		source:include/hardware.i
+	include		exec/exec.i
+	include		exec/exec_lib.i
+
+	lea	$dff000,a5			;custom base address
+	
+
+**********************************************************
+*	OPEN GFX LIBRARY AND SAVE SYSTEM COPPER		 *
+**********************************************************
+
+	
+	move.l		#gfxname,a1
+	moveq		#0,d0
+	CALLEXEC	OpenLibrary
+	tst		d0			
+	beq		the_end			
+	move.l		d0,gfxbase		
+	move.l		d0,a0			;put gfxbase in a0 
+	move.l		38(a0),systemcopper	;save the copper address 
+
+
+
+****************************************************
+*	ALLOCATE MEMORY FOR BIT PLANES		   *
+****************************************************
+
+	
+	move.l		#Plane_Size*5,d0	;memory for bitplanes 
+	move.l		#chip+clear,d1		;chip memory and wipe it 
+	CALLEXEC	AllocMem
+	tst		d0			;fail 
+	beq		exit			
+	move.l		d0,bitbase		;save  pointer
+
+ 
+*****************************************************************
+*	LOAD BITPLANE AND SPRITE POINTERS INTO COPPER LIST      *
+*****************************************************************
+
+
+	move.l		bitbase,d0
+	lea		copper,a0
+	move.w		d0,6(a0)	
+	swap		d0
+	move.w		d0,2(a0)
+	swap		d0
+	add.l		#Plane_Size,d0
+	move.w		d0,14(a0)
+	swap		d0
+	move.w		d0,10(a0)
+	swap		d0
+	add.l		#Plane_Size,d0
+	move.w		d0,22(a0)
+	swap		d0
+	move.w		d0,18(a0)
+	swap		d0
+	add.l		#Plane_Size,d0
+	move.w		d0,30(a0)
+	swap		d0
+	move.w		d0,26(a0)
+	swap		d0
+	add.l		#Plane_Size,d0
+	move.w		d0,38(a0)
+	swap		d0
+	move.w		d0,34(a0)
+	swap		d0
+	
+	
+
+***************************************************************
+*		START CUSTOM COPPER LIST		      *
+***************************************************************	
+
+	move.l		#copper,COP1LCH(a5)
+	move.l		#0,COPJMP1(a5)
+	CALLEXEC	Forbid
+
+*************************************************************
+*		    MAIN CODE LOOP    			    *
+*************************************************************
+
+	lea		frame_sequence,a0	
+	
+	
+wait
+	move.l		VPOSR(a5),d0	;read current beam position
+	and.l		#$0001ff00,d0	;mask all but the vertical pos
+	lsr.l		#8,d0		
+	cmp.w		#$0106,d0	;wait for end of display
+	bne		wait
+	btst		#6,CIAAPRA	;check left mouse button
+	beq		clean_up	;end if pressed
+	add.b		#1,counter
+	cmp.b		#10,counter	call the next frame routine
+	bne		wait		every 10 frames.....
+	bsr		next_frame
+	move.b		#0,counter
+	bsr		blitter
+	bra		wait
+
+;this routine displays the next frame in the sequence
+;by loading the correct frame into A2 according to the
+;frame_sequence table,when the end of the table is reached
+;.next8 reloads the table into A0 
+
+next_frame
+
+	
+	move.b		(a0)+,d0
+	cmp.b		#1,d0
+	bne		.next	
+	lea		frame_1,a2
+	rts
+.next
+	cmp.b		#2,d0
+	bne		.next2
+	lea		frame_2,a2
+	rts
+.next2
+	cmp.b		#3,d0
+	bne		.next3
+	lea		frame_3,a2
+	rts
+.next3
+	cmp.b		#4,d0
+	bne		.next4
+	lea		frame_4,a2
+	rts
+.next4
+	cmp.b		#5,d0
+	bne		.next5
+	lea		frame_5,a2
+	rts
+.next5
+	cmp.b		#6,d0
+	bne		.next6
+	lea		frame_6,a2
+	rts
+.next6
+	cmp.b		#7,d0
+	bne		.next7
+	lea		frame_7,a2
+	rts
+.next7
+	cmp.b		#8,d0
+	bne		.next8
+	lea		frame_8,a2
+	rts
+.next8
+	lea		frame_sequence,a0
+	bra		next_frame
+	
+
+
+
+**********************************************************
+*			RESTORE SYSTEM 			 *
+**********************************************************
+
+clean_up
+
+	move.l		systemcopper,COP1LCH(a5)
+	move.l		#0,COPJMP1(a5)
+	CALLEXEC	Permit
+	
+
+exit1
+	
+	move.l		#Plane_Size*5,d0
+	move.l		bitbase,a1
+	CALLEXEC	FreeMem
+
+exit
+	move.l		gfxbase,a1		close the graphics library
+	CALLEXEC	CloseLibrary
+	
+the_end
+	rts					exit from program
+
+
+************************************************************
+*		BLITTER OPERATION			   *
+************************************************************
+
+blitter
+	
+	move.l		#4,d7		number of planes
+	move.l		bitbase,a3	;base address of screen	
+	add.l		#40*60+12,a3
+	
+
+blitter_loop
+	bsr 		blit_bob
+	add.l		#bob_size,a2		find next bob plane
+	add.l		#Plane_Size,a3		find next screen plane
+	dbra		d7,blitter_loop		do 'till end
+	rts
+
+blit_bob
+	bsr		blitter_busy		check blitter status
+	move.l		a2,BLTAPTH(a5)		DMA a pointer (bob)
+	move.l		a3,BLTDPTH(a5)		DMA d pointer (screen)
+	move.w		#0,BLTAMOD(a5)		no bob offset
+	move.w		#40-16,BLTDMOD(a5)	set screen offset
+	move.w		#0,BLTCON1(a5)
+	move.w		#$09f0,BLTCON0(a5)
+	move.w		#$ffff,BLTAFWM(a5)	;no mask
+	move.w		#$ffff,BLTALWM(a5)	;no mask
+	move.w		#(138*64)+(128/16),BLTSIZE(A5)	;start blitter
+	rts
+
+blitter_busy
+	btst		#14,DMACONR(a5)		
+	bne		blitter_busy		
+	rts				
+
+
+
+***********************************************************
+*		   CUSTOM COPPER LIST			  *
+***********************************************************
+
+
+	SECTION		copper.list,CODE_C
+
+copper
+	dc.w	BPL1PTH,0000		;next 4 blank words
+	dc.w	BPL1PTL,0000		;are where we load
+	dc.w	BPL2PTH,0000		;the bitplane pointers
+	dc.w	BPL2PTL,0000
+	dc.w	BPL3PTH,0000
+	dc.w	BPL3PTL,0000
+	dc.w	BPL4PTH,0000
+	dc.w	BPL4PTL,0000
+	dc.w	BPL5PTH,0000
+	dc.w	BPL5PTL,0000
+	dc.w	SPR0PTH,0000
+	dc.w	SPR0PTL,0000		;sprite 0 pointer
+	dc.w	SPR1PTH,0000
+	dc.w	SPR1PTL,0000		;sprite 1 pointer
+	dc.w	SPR2PTH,0000
+	dc.w	SPR2PTL,0000		;sprite 2 pointer
+	dc.w	SPR3PTH,0000
+	dc.w	SPR3PTL,0000		;sprite 3 pointer
+	dc.w	SPR4PTH,0000
+	dc.w	SPR4PTL,0000		;sprite 4 pointer
+	dc.w	SPR5PTH,0000
+	dc.w	SPR5PTL,0000		;sprite 5 pointer
+	dc.w	SPR6PTH,0000
+	dc.w	SPR6PTL,0000		;sprite 6 pointer
+	dc.w	SPR7PTH,0000
+	dc.w	SPR7PTL,0000		;sprite 7 pointer
+	dc.l 	$2b01fffe		;wait for line 43
+	dc.w	DIWSTRT,$2c81		;where we start displaying
+	dc.w	DIWSTOP,$2cc1		;where we stop!
+	dc.w	BPLCON0,$5200		
+	dc.w	BPLCON2,$0024		
+	dc.w	DDFSTRT,$0038		;where to start the horizontal display
+	dc.w	DDFSTOP,$00d0		;and where we stop
+	dc.w	BPLCON1,$0000
+	dc.w	BPL1MOD,$0000		
+	dc.w	BPL2MOD,$0000		
+
+color_map
+		dc.w	$180,$000,$182,$fff,$184,$630,$186,$940
+		dc.w	$188,$840,$18a,$740,$18c,$a50,$18e,$000
+		dc.w	$190,$b50,$192,$000,$194,$840,$196,$c50
+		dc.w	$198,$940,$19a,$d70,$19c,$d60,$19e,$d60
+		dc.w	$1a0,$a00,$1a2,$a10,$1a4,$b10,$1a6,$b20
+		dc.w	$1a8,$b30,$1aa,$c40,$1ac,$c40,$1ae,$c50
+		dc.w	$1b0,$d60,$1b2,$d70,$1b4,$d80,$1b6,$e90
+		dc.w	$1b8,$ea0,$1ba,$eb0,$1bc,$fc0,$1be,$fe0
+	
+	
+	
+	dc.l	$fffffffe		
+
+endcopper
+
+copperlen	equ	endcopper-copper
+
+
+
+frame_sequence	dc.b	1,2,3,4,5,6,7,8,7,6,5,4,3,2,0
+
+	
+
+	
+************************************************************
+*			VARIABLES	 		   *
+************************************************************
+
+
+gfxbase		dc.l 0
+bitbase		dc.l 0
+systemcopper	dc.l 0
+counter		dc.b 0
+	even
+
+
+
+
+
+
+gfxname		dc.b 'graphics.library',0
+
+frame_1		incbin 	source:m.bateson/graphics/frame_1
+frame_2		incbin	source:m.bateson/graphics/frame_2
+frame_3		incbin	source:m.bateson/graphics/frame_3
+frame_4		incbin	source:m.bateson/graphics/frame_4
+frame_5		incbin	source:m.bateson/graphics/frame_5		
+frame_6		incbin	source:m.bateson/graphics/frame_6
+frame_7		incbin	source:m.bateson/graphics/frame_7
+frame_8		incbin	source:m.bateson/graphics/frame_8
+
+end
+	

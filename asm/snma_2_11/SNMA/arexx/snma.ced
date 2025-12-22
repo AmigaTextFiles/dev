@@ -1,0 +1,172 @@
+/* SNMA to CED interface by MM $VER: 1.4
+
+Usage:
+- with OBJECT argument - assemble as o. linkable file
+- with DEBUG argument - assemble as executable with symbol data hunk
+- without argument (default) - assemble as normal executable
+*/
+
+VARSAVE = "ENV:SNMA_Save.dir" /* directory of last assembled file */
+RECENT = "Actual:assem/SNMA_Recent.file" /* path of recently assembled source */
+SNMAL = "Utilities:Dock/Debug/SNMA" /* location of SNMA */
+
+OPTIONS RESULTS
+ADR = address()
+
+arg MODE
+
+retc=20
+temp=0
+
+SIGNAL ON SYNTAX
+SIGNAL ON BREAK_C
+SIGNAL ON HALT
+
+DM 'Welcome to SNMA<->CED by MM'
+LOCKGUI
+STATUS RESTNAME
+FN=RESULT
+STATUS NUMCHANGES
+CI=RESULT
+IF FN = "" THEN SIGNAL .load
+STATUS FILENAME
+SN = RESULT
+
+.main:
+PUBS = "" /* set default pubscreen to empty string */
+STATUS PUBSCREENNAME
+IF RESULT = 0 THEN SIGNAL .skip
+PUBS=RESULT
+
+.skip:
+TAGZ='rt_pubscrname='PUBS 'rt_reqpos=reqpos_centerscr'
+
+IF SHOW('L',"rexxreqtools.library") THEN SIGNAL .lib_ok
+call addlib('rexxreqtools.library',0,-30,0)
+
+.lib_ok:
+IF EXISTS(VARSAVE) = ~0 THEN
+	DO
+		CALL OPEN(.dir, VARSAVE, 'R')
+		SAVEDIR = readln(.dir)
+		CALL CLOSE(.dir)
+	END
+ELSE SAVEDIR = "T:" /* default directory for assembled files */
+
+IF CI > 0 THEN SIGNAL .save
+
+SUFIX=LASTPOS('.',FN)
+IF SUFIX = 0 THEN SIGNAL .req
+EXE=DELSTR(FN,SUFIX)
+
+.req:
+IF MODE = "OBJECT" THEN EXE=INSERT(EXE,'.o')
+
+.req2:
+FN2=rtfilerequest(SAVEDIR , EXE , "Save executable:", , TAGZ,)
+IF FN2 = "" THEN
+	DO
+	'OKAY1 Assembling cancelled!' ; SIGNAL .exit
+	END
+
+PATH = LASTPOS('/',FN2)
+IF PATH = 0 THEN PATH = INDEX(FN2,':')
+IF PATH = 0 THEN SIGNAL .exit
+PATH = PATH+1
+PATH = DELSTR(FN2,PATH)
+
+CALL OPEN(.dir, VARSAVE, 'W')
+CALL writeln(.dir, PATH)
+CALL CLOSE(.dir)
+
+ADDRESS COMMAND 'Run "'SNMAL'" AREXX PORTNAME SNMA<->CED'
+ADDRESS COMMAND 'SYS:Rexxc/WaitForPort SNMA<->CED'
+ADDRESS 'SNMA<->CED'
+
+'SET OF=ON' /* enable msg output */
+
+/* if DEBUG arg present, assemble with debug info */
+
+IF MODE = "DEBUG" THEN 'SET S=ON'
+
+/* if OBJECT arg present, assemble as object linkable file */
+
+IF MODE = "OBJECT" THEN 'SET EXE=OFF S=ON'
+ELSE 'SET EXE=ON'
+
+'ASM "'SN'" O "'FN2'"'
+
+INFO A
+IF A.ERRORS > 0 THEN
+	DO
+	GETERR STEM E
+	ADDRESS VALUE ADR
+	IF E.FILENAME = 'user macro' THEN
+		DO
+		'OKAY1 Error in macro file 'E.FILENAME'' ; SIGNAL .out
+		END
+	JUMPTO E.LINENUM E.COLUMN
+	'DM 'E.ERRNUM'/'A.ERRORS': "'E.ERRTXT'"'
+	END
+
+.out:
+ADDRESS 'SNMA<->CED' QUIT
+/*IF temp ~= 0 THEN
+	ADDRESS COMMAND 'DELETE "'temp'" QUIET'*/
+retc = 0 ; SIGNAL .exit
+
+.load:
+IF CI > 0 THEN SIGNAL .save
+	IF EXISTS(RECENT) ~= 0 THEN
+		DO
+		CALL OPEN(.recent, RECENT, 'R')
+		SN = readln(.recent)
+		CALL CLOSE(.recent)
+		IF EXISTS(SN) = ~0 THEN SIGNAL .load2
+			'OKAY1 ERROR!: Cannot locate source file "'SN'"'; SIGNAL .exit
+
+			.load2:
+			OPEN SN ; retc = 0 ; SIGNAL .exit
+		END
+	ELSE 'OKAY1 ERROR!: Recent file not found!' ; SIGNAL .exit
+
+
+.save:
+'OKAY2 Source file not saved! Save it?'
+IF RESULT = 0 THEN SIGNAL .stemp
+	SAVE
+	IF RESULT = 0 THEN SIGNAL .save
+		STATUS FILENAME
+		SN = RESULT
+		IF EXISTS(RECENT) = 0 THEN SIGNAL .write
+		CALL OPEN(.recent, RECENT, 'R')
+		RF = readln(.recent)
+		CALL CLOSE(.recent)
+		IF SN=RF THEN SIGNAL .skip2
+.write:		CALL OPEN(.recent, RECENT, 'W')
+		CALL writeln(.recent, SN)
+		CALL CLOSE(.recent)
+.skip2:
+		CI = 0
+		STATUS RESTNAME
+		FN = RESULT
+		SIGNAL .main
+
+.stemp:
+temp=max(lastpos(':',SN),lastpos('/',SN))+1
+temp=substr(SN,temp)
+temp=insert('T:',temp)
+SAVE AS temp 1
+IF RESULT = 0 THEN SIGNAL .exit
+	CI = 0
+	SN=temp
+	SIGNAL .main
+
+SYNTAX:
+.exit:
+halt:
+break_c:
+ADDRESS VALUE ADR
+'UNLOCKGUI'
+TAB SIZE 7
+exit retc

@@ -1,0 +1,185 @@
+MODULE 'graphics/copper'
+
+
+CONST	GENLOCK_VIDEO=2,
+		V_LACE=4,
+		V_DOUBLESCAN=8,
+		V_SUPERHIRES=$20,
+		V_PFBA=$40,
+		V_EXTRA_HALFBRITE=$80,
+		GENLOCK_AUDIO=$100,
+		V_DUALPF=$400,
+		V_HAM=$800,
+		V_EXTENDED_MODE=$1000,
+		V_VP_HIDE=$2000,
+		V_SPRITES=$4000,
+		V_HIRES=$8000,
+		EXTEND_VSTRUCT=$1000,
+		VPF_A2024=$40,
+		VPF_TENHZ=16,
+		VPB_A2024=6,
+		VPB_TENHZ=4
+
+OBJECT ColorMap
+	Flags:UBYTE,
+	Type:UBYTE,
+	Count:UWORD,
+	ColorTable:APTR,
+	vpe|VPE:PTR TO ViewPortExtra,
+	LowColorBits:APTR,
+	TransparencyPlane:UBYTE,
+	SpriteResolution:UBYTE,
+	SpriteResDefault:UBYTE,
+	AuxFlags:UBYTE,
+	vp|VP:PTR TO ViewPort,
+	NormalDisplayInfo:APTR,
+	CoerceDisplayInfo:APTR,
+	cm_batch_items:PTR TO TagItem,
+	VPModeID:ULONG,
+	PalExtra:PTR TO PaletteExtra,
+	SpriteBase_Even:UWORD,
+	SpriteBase_Odd:UWORD,
+	Bp_0_base:UWORD,
+	Bp_1_base:UWORD
+
+CONST	CM_TRANSPARENYPLANE=16,
+		COLORMAP_TYPE_V1_2=0,
+		COLORMAP_TYPE_V1_4=1,
+		COLORMAP_TYPE_V36=1,
+		COLORMAP_TYPE_V39=2,
+		COLORMAP_TRANSPARENCY=1,
+		COLORPLANE_TRANSPARENCY=2,
+		BORDER_BLANKING=4,
+		BORDER_NOTRANSPARENCY=8,
+		VIDEOCONTROL_BATCH=16,
+		USER_COPPER_CLIP=$20,
+		BORDER_SPRITES=$40,
+		CMF_CMTRANS=1,
+		CMF_CPTRANS=2,
+		CMF_BRDRBLNK=4,
+		CMF_BRDNTRAN=8,
+		CMF_BRDRSPRT=$40,
+		CMB_CMTRANS=0,
+		CMB_CPTRANS=1,
+		CMB_BRDRBLNK=2,
+		CMB_BRDNTRAN=3,
+		CMB_BRDRSPRT=6,
+		SPRITERESN_ECS=0,
+		SPRITERESN_140NS=1,
+		SPRITERESN_70NS=2,
+		SPRITERESN_35NS=3,
+		SPRITERESN_DEFAULT=-1,
+		CMAF_FULLPALETTE=1,
+		CMAB_FULLPALETTE=0,
+		CMAF_NO_INTERMED_UPDATE=2,
+		CMAB_NO_INTERMED_UPDATE=1,
+		CMAF_NO_COLOR_LOAD=4,
+		CMAB_NO_COLOR_LOAD=2,
+		CMAF_DUALPF_DISABLE=3,
+		CMAB_DUALPF_DISABLE=8
+
+OBJECT PaletteExtra
+	Semaphore:SS,
+	FirstFree:UWORD,
+	NFree:UWORD,
+	FirstShared:UWORD,
+	NShared:UWORD,
+	RefCnt:PTR TO UBYTE,
+	AllocList:PTR TO UBYTE,
+	ViewPort:PTR TO ViewPort,
+	SharableColors:UWORD
+
+CONST	PRECISION_EXACT=-1,
+		PRECISION_IMAGE=0,
+		PRECISION_ICON=16,
+		PRECISION_GUI=$20,
+		OBP_Precision=$84000000,
+		OBP_FailIfBad=$84000001,
+		PEN_EXCLUSIVE=1,
+		PEN_NO_SETCOLOR=2,
+		PENF_EXCLUSIVE=1,
+		PENF_NO_SETCOLOR=2,
+		PENB_EXCLUSIVE=0,
+		PENB_NO_SETCOLOR=1
+
+OBJECT ViewPort
+	Next:PTR TO ViewPort,
+	ColorMap:PTR TO ColorMap,
+	DspIns:PTR TO CopList,
+	SprIns:PTR TO CopList,
+	ClrIns:PTR TO CopList,
+	UCopIns:PTR TO UCopList,
+	DWidth:WORD,
+	DHeight:WORD,
+	DxOffset:WORD,
+	DyOffset:WORD,
+	Modes:UWORD,
+	SpritePriorities:UBYTE,
+	ExtendedModes:UBYTE,
+	RasInfo:PTR TO RasInfo
+
+OBJECT View
+	ViewPort:PTR TO ViewPort,
+	LOFCprList:PTR TO CprList,
+	SHFCprList:PTR TO CprList,
+	DyOffset:WORD,
+	DxOffset:WORD,
+	Modes:UWORD
+
+OBJECT ViewExtra
+	n|XLN:XLN,
+	View:PTR TO View,
+	Monitor:PTR TO MonitorSpec,
+	TopLine:UWORD
+
+OBJECT ViewPortExtra
+	n|XLN:XLN,
+	ViewPort:PTR TO ViewPort,
+	DisplayClip:Rectangle,
+	VecTable:APTR,
+	DriverData[2]:APTR,
+	Flags:UWORD,
+	Origin[2]:tPoint,
+	cop1ptr:ULONG,
+	cop2ptr:ULONG
+
+CONST	VPXB_FREE_ME=0,
+		VPXF_FREE_ME=1,
+		VPXB_VP_LAST=1,
+		VPXF_VP_LAST=2,
+		VPXB_STRADDLES_256=4,
+		VPXF_STRADDLES_256=16,
+		VPXB_STRADDLES_512=5,
+		VPXF_STRADDLES_512=$20
+
+OBJECT RasInfo
+	Next:PTR TO RasInfo,
+	BitMap:PTR TO BitMap,
+	RyOffset:WORD,
+	RyOffset:WORD
+
+CONST	MVP_OK=0,
+		MVP_NO_MEM=1,
+		MVP_NO_VPE=2,
+		MVP_NO_DSPINS=3,
+		MVP_NO_DISPLAY=4,
+		MVP_OFF_BOTTOM=5,
+		MCOP_OK=0,
+		MCOP_NO_MEM=1,
+		MCOP_NOP=2
+
+OBJECT DBufInfo
+	Link1:APTR,
+	Count1:ULONG,
+	SafeMessage:MN,
+	UserData1:APTR,
+	Link2:APTR,
+	Count2:ULONG,
+	DispMessage:MN,
+	UserData2:APTR,
+	MatchLong:ULONG,
+	CopPtr1:APTR,
+	CopPtr2:APTR,
+	CopPtr3:APTR,
+	BeamPos1:UWORD,
+	BeamPos2:UWORD

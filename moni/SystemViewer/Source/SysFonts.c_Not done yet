@@ -1,0 +1,412 @@
+/****h* SysFonts [1.0] *************************************************
+*
+* NAME
+*    SysFonts
+*
+* DESCRIPTION
+*    Display the contents of ENVARC:sys/font.prefs
+*
+*  GUI Designed by : Jim Steichen
+************************************************************************
+*
+*/
+
+#include <string.h>
+
+#include <exec/types.h>
+
+#include <intuition/intuition.h>
+#include <intuition/classes.h>
+#include <intuition/classusr.h>
+#include <intuition/gadgetclass.h>
+
+#include <libraries/gadtools.h>
+#include <libraries/asl.h>        // For the Font Requester.
+#include <libraries/iffparse.h>
+
+#include <graphics/displayinfo.h>
+#include <graphics/gfxbase.h>
+#include <graphics/text.h>
+
+#include <prefs/font.h>           // struct FontPrefs
+
+#include <clib/exec_protos.h>
+#include <clib/intuition_protos.h>
+#include <clib/gadtools_protos.h>
+#include <clib/graphics_protos.h>
+#include <clib/utility_protos.h>
+#include <clib/diskfont_protos.h>
+
+#include "CPGM:GlobalObjects/CommonFuncs.h"
+
+#include "SysLists.h"
+
+#define FLV     0
+#define Update  1
+#define Cancel  2
+#define Remove  3
+#define Change  4
+
+#define SF_CNT  5
+
+PRIVATE char ver[] = "$VER: SysFonts 1.0 (13-Mar-2001) by J.T. Steichen";
+
+PRIVATE struct TextFont     *SFFont  = NULL;
+PRIVATE struct Window       *SFWnd   = NULL;
+PRIVATE struct Gadget       *SFGList = NULL;
+PRIVATE struct IntuiMessage  SFMsg;
+PRIVATE struct Gadget       *SFGadgets[ SF_CNT ];
+
+PRIVATE UWORD  SFLeft   = 0;
+PRIVATE UWORD  SFTop    = 16;
+PRIVATE UWORD  SFWidth  = 635;
+PRIVATE UWORD  SFHeight = 230;
+PRIVATE UBYTE *SFWdt    = (UBYTE *) "System Fonts Info:";
+
+PRIVATE char ltitle[] = "Cnt Y  X  Style Flags LoChar HiChar Type  Name";
+PRIVATE char fmt[]    = "%3d %3d %3d %s %08LX %3d %3d %s %s";
+
+/*
+   ENVARC:sys/font.prefs 1st chunk: 'FORM' size 'PREF' 'PRHD'
+   ENVARC:sys/font.prefs contains 3 'FONT' chunks with the following in them:
+
+struct FontPrefs {
+
+   LONG            fp_Reserved[3];
+   UWORD           fp_Reserved2;
+   UWORD           fp_Type;       // 0, 1, 0r 2
+   UBYTE           fp_FrontPen;
+   UBYTE           fp_BackPen;
+   UBYTE           fp_DrawMode;
+   struct TextAttr fp_TextAttr;
+   BYTE            fp_Name[ FONTNAMESIZE ]; // FONTNAMESIZE = 128
+};
+
+*/
+
+PRIVATE struct bfont {
+
+   struct TextAttr *bf_TTextAttr;
+   struct TextFont *bf_TextFont;   
+};
+
+PRIVATE struct TextAttr iconTextAttr    = { 0, };
+PRIVATE struct TextAttr defaultTextAttr = { 0, };
+PRIVATE struct TextAttr screenTextAttr  = { 0, };
+    
+PRIVATE struct TextFont iconTextFont    = { 0, };
+PRIVATE struct TextFont defaultTextFont = { 0, };
+PRIVATE struct TextFont screenTextFont  = { 0, };
+
+PRIVATE struct bfont IconFont    = { &iconTextAttr,    &iconTextFont    };
+PRIVATE struct bfont DefaultFont = { &defaultTextAttr, &defaultTextFont };
+PRIVATE struct bfont ScreenFont  = { &screenTextAttr,  &screenTextFont  };
+    
+// --------------------------------------------------------------------
+
+#define NODELENGTH 80
+#define MAXNODES   10
+
+PRIVATE UBYTE NodeStrs[ MAXNODES * NODELENGTH ] = "";
+
+PRIVATE struct Node FLV0Nodes[] = { 0, };
+PRIVATE struct List FLV0List    = { 0, };
+
+// --------------------------------------------------------------------
+
+PRIVATE UWORD SFGTypes[] = {
+
+   LISTVIEW_KIND, BUTTON_KIND, BUTTON_KIND,
+   BUTTON_KIND, BUTTON_KIND
+};
+
+PRIVATE int FLVClicked(    int whichitem );
+PRIVATE int UpdateClicked( int dummy     );
+PRIVATE int CancelClicked( int dummy     );
+PRIVATE int RemoveClicked( int dummy     );
+PRIVATE int ChangeClicked( int dummy     );
+
+PRIVATE struct NewGadget SFNGad[] = {
+
+     2,   3, 627, 200,                NULL, NULL, FLV,    0,
+   NULL, (APTR) FLVClicked,
+
+     4, 205,  71,  17, (UBYTE *) "_Update", NULL, Update, PLACETEXT_IN, 
+   NULL, (APTR) UpdateClicked,
+
+   554, 205,  72,  17, (UBYTE *) "_Cancel", NULL, Cancel, PLACETEXT_IN,
+   NULL, (APTR) CancelClicked,
+
+    82, 205,  71,  17, (UBYTE *) "Remove",  NULL, Remove, PLACETEXT_IN,
+   NULL, (APTR) RemoveClicked,
+
+   155, 205,  71,  17, (UBYTE *) "Change",  NULL, Change, PLACETEXT_IN,
+   NULL, (APTR) ChangeClicked
+};
+
+PRIVATE ULONG SFGTags[] = {
+
+   GTLV_ShowSelected, TRUE, LAYOUTA_Spacing, 2, TAG_DONE,
+
+   GT_Underscore,  '_', TAG_DONE,
+   GT_Underscore,  '_', TAG_DONE,
+
+   GA_Disabled,   TRUE, TAG_DONE,
+
+   TAG_DONE
+};
+
+// ----------------------------------------------------------------
+
+PRIVATE void CloseSFWindow( void )
+{
+   if (SFWnd != NULL)
+      {
+      CloseWindow( SFWnd );
+      SFWnd = NULL;
+      }
+
+   if (SFGList != NULL)
+      {
+      FreeGadgets( SFGList );
+      SFGList = NULL;
+      }
+
+   if (SFFont != NULL)
+      {
+      CloseFont( SFFont );
+      SFFont = NULL;
+      }
+
+   return;
+}
+
+PRIVATE int SFCloseWindow( void )
+{
+   CloseSFWindow();
+   return( (int) FALSE );
+}
+
+// ----------------------------------------------------------------
+
+PRIVATE int ReadFontPrefs( void )
+{
+   FILE *infile = fopen( "ENVARC:sys/font.prefs", "r" );
+
+   fclose( infile );
+   return( 0 );
+}
+
+// ----------------------------------------------------------------
+
+PRIVATE int FLVClicked( int whichitem )
+{
+   return( (int) TRUE );
+}
+
+PRIVATE int UpdateClicked( int dummy )
+{
+   return( (int) TRUE );
+}
+
+PRIVATE int RemoveClicked( int dummy )
+{
+   return( (int) TRUE );
+}
+
+
+PRIVATE int ChangeClicked( int dummy )
+{
+   return( (int) TRUE );
+}
+
+PRIVATE int CancelClicked( int dummy )
+{
+   return( SFCloseWindow() );
+}
+
+// ----------------------------------------------------------------
+
+PRIVATE int OpenSFWindow( void )
+{
+   struct NewGadget  ng;
+   struct Gadget    *g;
+   UWORD             lc, tc;
+   UWORD             wleft = SFLeft, wtop = SFTop, ww, wh;
+
+   ComputeFont( Scr, Font, &CFont, SFWidth, SFHeight );
+
+   ww = ComputeX( CFont.FontX, SFWidth );
+   wh = ComputeY( CFont.FontY, SFHeight );
+
+   if ((wleft + ww + CFont.OffX + Scr->WBorRight) > Scr->Width)
+      wleft = Scr->Width - ww;
+
+   if ((wtop + wh + CFont.OffY + Scr->WBorBottom) > Scr->Height)
+      wtop = Scr->Height - wh;
+
+   if ((SFFont = OpenDiskFont( Font )) == NULL)
+      return( -5 );
+
+   if ((g = CreateContext( &SFGList )) == NULL)
+      return( -1 );
+
+   for (lc = 0, tc = 0; lc < SF_CNT; lc++)
+      {
+      CopyMem( (char *) &SFNGad[lc], (char *) &ng, 
+               (long) sizeof( struct NewGadget )
+             );
+
+      ng.ng_VisualInfo = VisualInfo;
+      ng.ng_TextAttr   = Font;
+
+      ng.ng_LeftEdge   = CFont.OffX + ComputeX( CFont.FontX, 
+                                                ng.ng_LeftEdge
+                                              );
+
+      ng.ng_TopEdge    = CFont.OffY + ComputeY( CFont.FontY, 
+                                                ng.ng_TopEdge
+                                              );
+
+      ng.ng_Width      = ComputeX( CFont.FontX, ng.ng_Width );
+      ng.ng_Height     = ComputeY( CFont.FontY, ng.ng_Height );
+
+      SFGadgets[lc] = g = CreateGadgetA( (ULONG) SFGTypes[lc], 
+                            g, 
+                            &ng, 
+                            (struct TagItem *) &SFGTags[tc] );
+
+      while (SFGTags[tc] != NULL)
+         tc += 2;
+
+      tc++;
+
+      if (g == NULL)
+         return( -2 );
+      }
+
+   if ((SFWnd = OpenWindowTags( NULL,
+
+                 WA_Left,        wleft,
+                 WA_Top,         wtop,
+                 WA_Width,       ww + CFont.OffX + Scr->WBorRight,
+                 WA_Height,      wh + CFont.OffY + Scr->WBorBottom,
+                 
+                 WA_IDCMP,       LISTVIEWIDCMP | BUTTONIDCMP 
+                   | IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW 
+                   | IDCMP_VANILLAKEY,
+                 
+                 WA_Flags,       WFLG_DRAGBAR | WFLG_DEPTHGADGET 
+                   | WFLG_CLOSEGADGET | WFLG_SMART_REFRESH 
+                   | WFLG_ACTIVATE | WFLG_RMBTRAP,
+                 
+                 WA_Gadgets,     SFGList,
+                 WA_Title,       SFWdt,
+                 WA_ScreenTitle, ScrTitle,
+                 TAG_DONE )
+      ) == NULL)
+      return( -4 );
+
+   GT_RefreshWindow( SFWnd, NULL );
+
+   return( 0 );
+}
+
+PRIVATE int SFVanillaKey( int whichkey )
+{
+   int rval = TRUE;
+   
+   switch (whichkey)
+      {
+      case 'c':
+      case 'C':
+      case 'x':
+      case 'X':
+      case 'q':
+      case 'Q':
+         rval = CancelClicked();
+         break;
+         
+      case 'u':
+      case 'U':
+         rval = UpdateClicked();
+
+      default:
+         break;
+      }
+      
+   return( rval );
+}
+
+PRIVATE int HandleSFIDCMP( void )
+{
+   struct IntuiMessage *m;
+   int                (*func)( int code );
+   BOOL                 running = TRUE;
+
+   while (running == TRUE)
+      {
+      if ((m = GT_GetIMsg( SFWnd->UserPort )) == NULL)
+         {
+         (void) Wait( 1L << SFWnd->UserPort->mp_SigBit );
+         continue;
+         }
+
+      CopyMem( (char *) m, (char *) &SFMsg, 
+               (long) sizeof( struct IntuiMessage )
+             );
+
+      GT_ReplyIMsg( m );
+
+      switch (SFMsg.Class)
+         {
+         case IDCMP_REFRESHWINDOW:
+            GT_BeginRefresh( SFWnd );
+            GT_EndRefresh( SFWnd, TRUE );
+            break;
+
+         case IDCMP_CLOSEWINDOW:
+            running = SFCloseWindow();
+            break;
+
+         case IDCMP_VANILLAKEY:
+            running = SFVanillaKey( SFMsg.Code );
+            break;
+            
+         case IDCMP_GADGETUP:
+         case IDCMP_GADGETDOWN:
+            func = (void *) ((struct Gadget *) SFMsg.IAddress)->UserData;
+
+            if (func != NULL)
+               running = func( SFMsg.Code );
+
+            break;
+         }
+      }
+
+   return ( running );
+}
+
+PUBLIC int HandleSysFont( void )
+{
+   if (OpenSFWindow() < 0)
+      {
+      }
+
+   (void) HandleSFIDCMP();
+
+   CloseSFWindow(); // Just in case.
+            
+   return( RETURN_OK );
+}
+
+#ifdef DEBUG
+
+PUBLIC int main( void )
+{
+   return( HandleSysFont() );
+}
+
+#endif
+
+/* ------------------- END of SysFonts.c file! -------------------- */

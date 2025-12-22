@@ -1,0 +1,6 @@
+*charÅPOTGONAMEÅ=Å"potgo.resource";
+
+extern
+ÑAllocPotBits(ulongÅbits)ulong,
+ÑFreePotBits(ulongÅbits)void,
+ÑWritePotgo(ulongÅtheWord,Åmask)void;

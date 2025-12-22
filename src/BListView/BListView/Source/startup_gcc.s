@@ -1,0 +1,2 @@
+.text
+	jmp	__main

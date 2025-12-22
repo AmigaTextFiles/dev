@@ -1,0 +1,322 @@
+/* cityflow, Copyright (c) 2014 Jamie Zawinski <jwz@jwz.org>
+ *
+ * Ported to Hollywood by Andreas Falkenhahn
+ * 
+ * Permission to use, copy, modify, distribute, and sell this software and its
+ * documentation for any purpose is hereby granted without fee, provided that
+ * the above copyright notice appear in all copies and that both that
+ * copyright notice and this permission notice appear in supporting
+ * documentation.  No representations are made about the suitability of this
+ * software for any purpose.  It is provided "as is" without express or 
+ * implied warranty.
+ */
+
+@VERSION 6,0
+
+@REQUIRE "glgalore"
+
+@DISPLAY {Sizeable = True, Title = "Cityflow"}
+
+Const #DEF_SKEW = 12
+Const #DEF_WAVES = 6
+Const #DEF_WAVE_SPEED = 10
+Const #DEF_WAVE_RADIUS = 256
+
+texture_size = 512
+
+wave_count = #DEF_WAVES
+wave_speed = #DEF_WAVE_SPEED
+wave_radius = #DEF_WAVE_RADIUS
+skew = #DEF_SKEW
+
+Function p_FRnd(m)
+	Return(RndF() * m)
+EndFunction	
+
+Function p_Reshape(msg)
+
+	Local h = msg.height / msg.width
+
+  	gl.Viewport(0, 0, msg.width, msg.height)
+
+	gl.MatrixMode(#GL_PROJECTION)
+  	gl.LoadIdentity()
+
+	; For this one it's really important to minimize the distance between
+	; near and far.
+  	glu.Perspective (30, 1/h, 10, 50)
+  	gl.MatrixMode(#GL_MODELVIEW)
+  	gl.LoadIdentity()
+  	glu.LookAt(0.0, 0.0, 30.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+
+	gl.Clear(#GL_COLOR_BUFFER_BIT)
+
+EndFunction
+
+Function p_ResetColors(cc)
+	
+	cc.colors = {}
+	cc.ncolors = 256
+
+	CreateGradientBrush(1, 256, 256, #LINEAR, #RED, #BLUE, 90, {Colors = {#RED, 0, #BLUE, 0.4, #FUCHSIA, 1}})
+
+	For Local k = 0 To 255
+		Local c = ReadBrushPixel(1, k, 0)
+		cc.colors[k] = {Red = Red(c) / 255, Green = Green(c) / 255, Blue = Blue(c) / 255}
+	Next
+	
+	FreeBrush(1)
+	
+	gl.ClearColor(cc.colors[0].red, cc.colors[0].green, cc.colors[0].blue, 1)
+	
+EndFunction
+
+Function p_TweakCubes(cc)
+	
+	For Local i = 0 To cc.ncubes - 1
+
+		Local cube = cc.cubes[i]
+      		cube.x = cube.x + (p_FRnd(2)-1)*0.01
+      		cube.y = cube.y + (p_FRnd(2)-1)*0.01
+      		cube.z = cube.z + (p_FRnd(2)-1)*0.01
+    	Next
+    	
+EndFunction    	
+
+; Waves.
+;   Adapted from ../hacks/interference.c by Hannu Mallat.
+Function p_InitWave(cc)
+
+	cc.waves = {}
+	Local ww = cc.waves
+	
+	ww.nwaves = wave_count
+  	ww.radius = wave_radius
+  	ww.speed  = wave_speed
+  	ww.heights = {}
+	ww.srcs = {}
+
+	For Local i = 0 To ww.radius - 1
+      		Local m = cc.ncolors * (ww.radius - i) / ww.radius
+      		ww.heights[i] = ((m + m * Cos(i / 50)) / 2)
+    	Next
+
+	For Local i = 0 To ww.nwaves - 1 Do ww.srcs[i] = {xth = p_FRnd(2) * #PI, yth = p_FRnd(2) * #PI}
+		
+	cc.texture_width  = texture_size
+  	cc.texture_height = texture_size
+
+EndFunction
+
+; Compute the effect of the waves on a pixel.
+Function p_InterferencePoint(cc, x, y)
+	
+	Local ww = cc.waves
+	Local result = 0
+  
+  	For Local i = 0 To ww.nwaves - 1
+		Local dx = x - ww.srcs[i].x
+      		Local dy = y - ww.srcs[i].y
+      		Local dist = Int(Sqrt(dx*dx + dy*dy))
+      		If dist < ww.radius Then result = result + ww.heights[dist]
+      	Next		
+    
+  	result = Int(result * 0.4)  	
+  	If result > 255 Then result = 255
+
+	Return(result)
+
+EndFunction
+
+Function p_Interference(cc)
+
+	Local ww = cc.waves
+	
+	; Move the wave origins around
+	For Local i = 0 To ww.nwaves - 1
+
+      		ww.srcs[i].xth = ww.srcs[i].xth + (ww.speed / 1000)
+      		If ww.srcs[i].xth > 2*#PI Then ww.srcs[i].xth = ww.srcs[i].xth - 2*#PI
+		ww.srcs[i].yth = ww.srcs[i].yth + (ww.speed / 1000)
+		If ww.srcs[i].yth > 2*#PI Then ww.srcs[i].yth = ww.srcs[i].yth - 2*#PI
+
+      		ww.srcs[i].x = Int(cc.texture_width\2 + Cos(ww.srcs[i].xth) * cc.texture_width \ 2)
+      		ww.srcs[i].y = Int(cc.texture_height\2 + Cos(ww.srcs[i].yth) * cc.texture_height \ 2)
+    	Next
+    	
+EndFunction    	
+
+Function p_InitCube(msg)
+	
+	p_Reshape(msg)
+	
+	Local cc = {min_x = 0, min_y = 0, max_x = 0, max_y = 0}
+
+  	p_ResetColors(cc)
+	p_InitWave(cc)
+
+	cc.ncubes = 800
+	cc.cubes = {}
+	
+	For Local i = 0 To cc.ncubes - 1
+		
+		; Set the size to roughly cover a 2x2 square on average. 
+      		Local scale = 1.8 / Sqrt(cc.ncubes)
+      		
+      		cc.cubes[i] = {}
+      		
+		Local cube = cc.cubes[i]
+ 
+      		cube.x = (p_FRnd(1)-0.5)
+      		cube.y = (p_FRnd(1)-0.5)
+		cube.z = p_FRnd(0.12)
+      
+      		Local th = -(IIf(skew, p_FRnd(skew), 0)) * #PI / 180
+		cube.cth = Cos(th)
+      		cube.sth = Sin(th)
+
+		cube.w = scale * (p_FRnd(1) + 0.2)
+      		cube.d = scale * (p_FRnd(1) + 0.2)
+
+		If cube.x < cc.min_x Then cc.min_x = cube.x
+      		If cube.y < cc.min_y Then cc.min_y = cube.y
+      		If cube.x > cc.max_x Then cc.max_x = cube.x
+      		If cube.y > cc.max_y Then cc.max_y = cube.y
+    	Next
+
+	ccs = cc
+	
+EndFunction	
+
+Function p_AnimateCubes(cc)
+	
+	For Local i = 0 To cc.ncubes - 1
+
+		Local cube = cc.cubes[i]
+		Local fx = (cube.x - cc.min_x) / (cc.max_x - cc.min_x)
+      		Local fy = (cube.y - cc.min_y) / (cc.max_y - cc.min_y)
+      		Local x = Int(cc.texture_width  * fx) % cc.texture_width
+      		Local y = Int(cc.texture_height * fy) % cc.texture_height
+      		Local v = p_InterferencePoint(cc, x, y)
+      		cube.h = cube.z + (v / 256 / 2.5) + 0.1    	
+	Next
+
+EndFunction
+
+Function p_DrawCube(cc)
+	
+	p_Interference(cc)
+  	p_AnimateCubes(cc)
+
+	gl.ShadeModel(#GL_FLAT)
+
+	gl.Enable(#GL_DEPTH_TEST)
+  	gl.Enable(#GL_NORMALIZE)
+  	gl.Enable(#GL_CULL_FACE)
+
+	gl.Clear(#GL_COLOR_BUFFER_BIT|#GL_DEPTH_BUFFER_BIT)
+
+	gl.PushMatrix ()
+
+	gl.Rotate(-180, 1, 0, 0)
+	gl.Scale(15, 15, 15)
+	gl.Rotate(-90, 1, 0, 0)
+  	gl.Rotate(0, 0, 1, 0)
+
+	gl.Translate(-0.18, 0, -0.18)
+  	gl.Rotate(37, 1, 0, 0)
+  	gl.Rotate(20, 0, 0, 1)
+
+	gl.Scale(2.1, 2.1, 2.1)
+
+	; Position lights after device rotation.
+	Local pos = {0.0, 0.25, -1.0, 0.0}
+      	Local amb = {0.2, 0.2, 0.2, 1.0}
+      	Local dif = {1.0, 1.0, 1.0, 1.0}
+
+	gl.Light(#GL_LIGHT0, #GL_POSITION, pos)
+      	gl.Light(#GL_LIGHT0, #GL_AMBIENT,  amb)
+      	gl.Light(#GL_LIGHT0, #GL_DIFFUSE,  dif)
+
+      	gl.Enable(#GL_LIGHTING)
+      	gl.Enable(#GL_LIGHT0)
+      	gl.Enable(#GL_DEPTH_TEST)
+      	gl.Enable(#GL_CULL_FACE)
+ 
+ 	gl.Begin(#GL_QUADS)
+
+	For Local i = 0 To cc.ncubes - 1
+    
+    		Local cube = cc.cubes[i]
+      		Local cth = cube.cth
+      		Local sth = cube.sth
+      		Local x =  cth*cube.x + sth*cube.y
+      		Local y = -sth*cube.x + cth*cube.y
+      		Local w = cube.w/2
+      		Local h = cube.h/2
+      		Local d = cube.d/2
+      		Local bottom = 5
+
+      		Local xw =  cth*w
+      		Local xd = sth*d
+      		Local yw = -sth*w
+      		Local yd = cth*d
+
+      		Local c = Int(cube.h * cc.ncolors * 0.7)
+      		c = c % cc.ncolors
+
+		Local color = {cc.colors[c].red, cc.colors[c].green, cc.colors[c].blue, 1}
+			
+		gl.Material(#GL_FRONT, #GL_AMBIENT_AND_DIFFUSE, color)
+
+      		; Putting this in a display list makes no performance difference.
+
+		gl.Normal(0, 0, -1)				; top 
+          	gl.Vertex(x+xw+xd, y+yw+yd, -h)
+          	gl.Vertex(x+xw-xd, y+yw-yd, -h)
+          	gl.Vertex(x-xw-xd, y-yw-yd, -h)
+          	gl.Vertex(x-xw+xd, y-yw+yd, -h)
+
+		gl.Normal(sth, cth, 0)				; front 
+          	gl.Vertex(x+xw+xd, y+yw+yd, bottom)
+          	gl.Vertex(x+xw+xd, y+yw+yd, -h)
+          	gl.Vertex(x-xw+xd, y-yw+yd, -h)
+          	gl.Vertex(x-xw+xd, y-yw+yd, bottom)
+
+          	gl.Normal(cth, -sth, 0)				; right 
+          	gl.Vertex(x+xw-xd, y+yw-yd, -h)
+          	gl.Vertex(x+xw+xd, y+yw+yd, -h)
+          	gl.Vertex(x+xw+xd, y+yw+yd, bottom)
+          	gl.Vertex(x+xw-xd, y+yw-yd, bottom)
+	Next
+	
+	gl.End()
+
+	gl.PolygonOffset(0, 0)
+
+	gl.PopMatrix()
+
+	gl.Finish()
+
+EndFunction
+
+p_InitCube({width = 640, height = 480})
+
+InstallEventHandler({SizeWindow = Function(msg) p_Reshape(msg) EndFunction,
+	ModeSwitch = Function(msg) p_InitCube(msg) EndFunction})
+	
+; Setup a hardware doublebuffer managed by GL Galore		
+BeginDoubleBuffer(True)
+
+EscapeQuit(True)
+
+Repeat
+	DisableLineHook()
+	p_DrawCube(ccs)
+	EnableLineHook()
+	
+	; Swap buffers
+	Flip
+
+	CheckEvent
+Forever

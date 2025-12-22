@@ -1,0 +1,16 @@
+OPT MODULE
+OPT EXPORT
+
+OPT PREPROCESS
+
+#define DOSNAME 'dos.library'
+#define BADDR(x) (Shl(x, 2))
+#define MKBADDR(x) (Shr(x, 2))
+
+CONST DOSTRUE=-1,
+      DOSFALSE=0,
+      MODE_OLDFILE=$3ED,
+      MODE_NEWFILE=$3EE,
+      MODE_READWRITE=$3EC,
+      OFFSET_BEGINNING=-1,
+      OFFSET_CURRENT=0

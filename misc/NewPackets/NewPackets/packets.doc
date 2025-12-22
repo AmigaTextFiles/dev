@@ -1,0 +1,268 @@
+==========================
+amiga.dev/docs #4, from cscheppner, 11077 chars, Tue Feb 24 18:21:20 1987
+--------------------------
+              NEW PACKETS AND STRUCTURES IN 1.2 AMIGADOS
+              ==========================================
+                         Carolyn Scheppner
+
+      AmigaDOS contains many features which can only be accessed
+   by sending a packet directly to a process.  One example is the
+   ACTION_INHIBIT packet which can be sent to the handler process
+   of a disk drive to stop the verification which normally occurs
+   when disks are inserted.  This packet is used by Diskcopy and
+   Format to prevent disk verification and "Not a DOS Disk"
+   requestors during the format or backup process.  The packet is
+   sent to the MsgPort of a drive's handler.
+
+      The handler MsgPort of most named AmigaDOS devices (like DF0:)
+   can be found with the DeviceProc() function.  Note that DeviceProc()
+   can not be used to find a CON: or RAW: handler because there may be
+   many handlers for each of these.  The handler MsgPort (ProcessID)
+   of a CON: or RAW: window is in its FileHandle structure (fh_Type).
+   The MsgPort of a CLI process's "*" window is process->pr_ConsoleTask.
+
+   Examples:
+
+   1. port = (struct MsgPort *)DeviceProc("DF1:");
+
+   2. fh = Open("CON:0/40/640/140/Test",MODE_NEWFILE);
+      port = (struct MsgPort *)(((struct FileHandle *)(fh<<2))->fh_Type);
+
+   3. myCliProc = (struct Process *)FindTask(NULL);
+      port = myCliProc->pr_ConsoleTask;
+
+
+      A struct StandardPacket contains an exec Message structure
+   and an AmigaDOS DosPacket structure.
+
+      struct StandardPacket {
+         struct Message    sp_Msg;
+         struct DosPacket  sp_Pkt;
+         };
+
+      This combined structure is only used for convenience since
+   the DosPacket structure does not have to directly follow the
+   Message structure in memory.
+
+      The actual linkage between the Message and the Packet are
+   pointers in each structure which point to each other.  The
+   Message's mn_Node.ln_Name member must be initialized to point
+   to the DosPacket, and the Packet's dp_Link field must point
+   to the exec Message.
+
+      packet->sp_Msg.mn_Node.ln_Name = (char *)&(packet->sp_Pkt);
+      packet->sp_Pkt.dp_Link         = &(packet->sp_Msg);
+
+      StandardPacket or DosPacket structures must be longword aligned
+   and should be dynamically allocated in any language where such
+   alignment can not be specified for variables.  The same is true
+   for any structures you are asking DOS to fill, such as the InfoData
+   structure initialized via the ACTION_DISK_INFO packet.
+
+      struct DosPacket {
+         struct Message  *dp_Link;   /* Link to the Exec Message  */
+         struct MsgPort  *dp_Port;   /* Reply port for the packet */
+         LONG  dp_Type;              /* Packet action number/type */
+         LONG  dp_Res1;              /* Return value 1            */
+         LONG  dp_Res2;              /* Return value 2            */
+         LONG  dp_Arg1;              /* Packet arguments          */
+           through
+         LONG  dp_Arg7;
+         };
+
+
+      The Technical Reference portion of the AmigaDOS manual details
+   the arguments and usage of most packet types.  There are several
+   new packet types in 1.2 AmigaDOS, and an enhancement to the
+   existing DiskInfo packet.  Note that the new packet numbers are
+   not defined in the libraries/dosextens headers.  You can define
+   these new packet numbers in your own code.
+
+
+         DESCRIPTIONS OF NEW AND ENHANCED DOS PACKET TYPES
+         =================================================
+
+      If your program uses new 1.2 functions or features such as the
+   new packets, your code should make sure that it is being run on
+   a system booted with at least v1.2.  To do this, specify version
+   number 33 in your OpenLibrary() calls and abort gracefully if
+   the OpenLibrary() returns NULL.
+
+      The Res1 result of most of these packets is BOOLEAN (0L = failure).
+   But DiskInfo is documented as always returning TRUE (-1L) and it
+   appears that SetRawCon does the same.  
+
+   1) SetFileDate ( ACTION_SET_DATE = 34L )
+      Sets the date of a file or directory to specified date.
+      The packet is sent to the MsgPort returned by DeviceProc(filename).
+      The args for the packet are
+         arg[0] = NULL
+         arg[1] = lock on ParentDir of file
+         arg[2] = BPTR to BSTR of filename
+         arg[3] = APTR to a DateStamp structure
+
+      A new CLI command SetDate <file> <date> [<time>] is also provided.
+      Note that SetFileDate packet and SetDate command did not work
+      properly on both ram and disk files until Release version of 1.2.
+
+   2) SetRawMode ( ACTION_SCREEN_MODE = 994L )
+      Switches CON: into raw mode and back again. The single argument
+      is DOS TRUE (-1L) for raw mode (as if RAW: had been requested)
+      and DOS FALSE (0L) to turn it back to CON: style.  The packet is
+      sent to a (struct MsgPort *)process->pr_ConsoleTask.
+
+      Note that in addition to this, an escape sequence may be sent
+      to turn on or off the automatic translation of LF to CR/LF.
+      Normally RAW: does not enable this and CON: does.  SetRawMode
+      does not affect the translation.  The escape sequences are
+      CSI 20h to enable, and CSI 20l to disable this translation.
+
+   3) Flush ( ACTION_FLUSH = 27L )
+      Cause pending blocks to be written out and motor turned off.
+      This is expensive, so should not be done after every write.
+      It is used by the system before putting up a requestor saying
+      "Change Disk" and the packet is only returned when the job
+      is done.  This action would be useful in a database when it
+      wished to commit.
+
+   4) MoreCache ( ACTION_MORE_CACHE = 18L )
+      The single argument indicates the number of extra cache buffers
+      to be obtained for use.  Used by ADDBUFFERS command.
+
+   5) DiskInfo ( ACTION_DISK_INFO = 25L )
+      When sent to a console handler, this packet now returns not only
+      the window pointer in the id_VolumeNode field, but also a pointer
+      to the console handler's console IO block in the id_InUse field.
+      (These fields are part of the InfoData structure initialized by
+      ACTION_DISK_INFO).  Remember that you must AllocMem your InfoData
+      structure to assure longword alignment since a BPTR to this
+      structure is arg[0] for the packet.
+
+      A pointer to the ConUnit structure (see devices/conunit.h, .i)
+      can be found from the returned console IO block pointer:
+
+         conUnit = (struct ConUnit *)
+                      ((struct IOStdReq *)infoData->id_InUse)->io_Unit;
+
+      There is a lot of useful information in the ConUnit structure
+      such as text cursor position and limits.  If you are using the
+      exec console.device directly, you should be able to get the
+      ConUnit pointer from yourIoRequest->io_Unit.
+
+
+                   EXAMPLE PACKET SENDING FUNCTION
+                   ===============================
+
+#include <exec/types.h>
+#include <exec/memory.h>
+#include <libraries/dos.h>
+#include <libraries/dosextens.h>
+...
+/*
+ * sendpkt() by A. Finkel, P. Lindsay, C. Scheppner
+ *  returns Res1 of the reply packet
+ */
+
+LONG sendpkt(pid,action,args,nargs)
+struct MsgPort *pid;  /* process indentifier (handler message port) */
+LONG action,          /* packet type (desired action) */
+     args[],          /* a pointer to a argument list */
+     nargs;           /* number of arguments in list  */
+   {
+   struct MsgPort        *replyport;
+   struct StandardPacket *packet;
+
+   LONG  count, *pargs, res1;
+
+   replyport = (struct MsgPort *) CreatePort(NULL,0);
+   if(!replyport) return(NULL);
+
+   packet = (struct StandardPacket *)
+      AllocMem((long)sizeof(struct StandardPacket),MEMF_PUBLIC|MEMF_CLEAR);
+   if(!packet)
+      {
+      DeletePort(replyport);
+      return(NULL);
+      }
+
+   packet->sp_Msg.mn_Node.ln_Name = (char *)&(packet->sp_Pkt);
+   packet->sp_Pkt.dp_Link         = &(packet->sp_Msg);
+   packet->sp_Pkt.dp_Port         = replyport;
+   packet->sp_Pkt.dp_Type         = action;
+
+   /* copy the args into the packet */
+   pargs = &(packet->sp_Pkt.dp_Arg1);   /* address of first argument */
+   for(count=0;count < nargs;count++)
+      pargs[count]=args[count];
+
+   PutMsg(pid,packet); /* send packet */
+
+   WaitPort(replyport);
+   GetMsg(replyport);
+
+   res1 = packet->sp_Pkt.dp_Res1;
+
+   FreeMem(packet,(long)sizeof(struct StandardPacket));
+   DeletePort(replyport);
+
+   return(res1);
+   }
+
+
+                    AMIGADOS 1.2 STRUCTURE CHANGES
+                    ==============================
+
+   PATH LIST:
+      The path list is held as a BPTR in the CommandDir member of the
+      CommandLineInterface structure.  Although currently documented
+      as the lock on the command directory, this is either 0 or a
+      BPTR to a list of path elements, each consisting of:
+         BPTR NextPath     (BPTR to next list entry)
+         BPTR PathLock     (a lock on the directory)
+
+   RESIDENT SEGMENT LIST:
+      The resident segment list is held as a BPTR in the DosInfo
+      substructure within the global data structure.  The segment
+      list replaces the slot currently defined as NetHand, and is
+      byte offset 16 from the DosInfo base.  Each entry is:
+         BPTR  NextEntry    (BPTR to next list entry)
+         LONG  UseCount     (Use count for segment, -1 if unloadable)
+         BPTR  SegPtr       (Segment pointer)
+         BSTR  SegName      (Segment Name)
+
+   DEVINFO STRUCTURE:
+      The specification of the DevInfo structure has been expanded.
+      The GlobVec member used when the DevInfo refers to a device
+      (Type = DLT_DEVICE = 0) is documented as being a global
+      vector pointer or 0.  Now this value may be -1 indicating
+      that the handler process does not need a global vector and
+      should be called as a C process.
+
+      The DevInfo structure is described in the AmigaDOS Technical
+      reference manual, but does not appear in the dosextens headers.
+      It is basically the same as the DeviceList structure described
+      in dosextens, with device-specific redefinitions of the fifth
+      through tenth longwords in the structure.
+
+      struct DevInfo
+         {
+         BPTR  Next;       /* Next list entry or 0 */
+         LONG  Type;       /* Entry Type (0=device,1=dir,2=vol ?) */
+         APTR  Task;       /* Handler process msgport or 0 */
+         BPTR  Lock;       /* File system lock or 0 */
+         BSTR  Handler;    /* File name of handler or 0 */
+         LONG  Stacksize;  /* Stack size for handler process */
+         LONG  Priority;   /* Priority for handler process */
+         LONG  Startup;    /* Startup value passed to handler */
+         BPTR  SegList;    /* SegList for handler process or 0 */
+         BPTR  GlobVec;    /* Global vector, or 0, or - 1 */
+         BSTR  Name;       /* Name of device or ASSIGN'd name */
+         };
+
+      The AmigaDOS device list can be found from DosBase.
+         dl =  (struct DosLibrary *)DosBase;
+         rn =  (struct RootNode *)dl->dl_Root;
+         di =  (struct DosInfo *)BADDR(rn->rn_Info);
+         dev = (struct DevInfo *)BADDR(di->di_DevInfo);
+
+

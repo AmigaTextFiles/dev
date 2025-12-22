@@ -1,0 +1,182 @@
+<!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01 Transitional//EN" "http://www.w3.org/TR/html4/loose.dtd">
+<html>
+<head>
+<meta name="author" content="Stuart Caie">
+<title>Kyzer -&gt; Coding -&gt; DiskReader</title>
+</head>
+<body bgcolor="#ffffff" text="#000000">
+
+<h1>DiskReader</h1>
+
+DiskReader is a short, concise piece of code which contains all the basic
+requirements of a system friendly disk imager. All you have to do is insert
+an <tt>include diskreader.asm</tt> at the top of your program.
+
+The general concept is that you read one track, decode it, save it, read
+another and so on. This track is either DOS readable or held in a raw
+format that is word-synchronized, this covers 99% of disk formats used in
+games. You can either write to a single diskfile, or write several files.
+Diskreader may seem restricitive, and it is - but there are very few disk
+reading requirements which cannot be solved this way. If you need an extra
+feature (like seeking backwards in the disk file, saving several files in
+more than one chunk) then simply add the required code yourself in the
+ripper, I quite allow it.
+
+<br><br><a href="diskreader.asm">download diskreader.asm</a>, or <a
+href="adfreader.asm">adfreader.asm</a> which is a 100% compatible
+replacement for diskreader, except that it sources data from an ADF disk
+image file, rather than the trackdisk device.
+
+<h2>Writing installers with diskreader</h2>
+
+Initial decisions: <tt>diskreader.asm</tt> has some special flags which you
+can define before including it. To specify, for example, <tt>FILEMODE</tt>
+to be on, write <tt>FILEMODE=1</tt> in your code. To prevent switching on
+<tt>FILEMODE</tt>, either write <tt>FILEMODE=0</tt>, or simply do not write
+it.
+
+<ul>
+
+<li><b><tt>TRACKMODE=1</tt>:</b> This says 'I will only read DOS tracks'.
+This enables the user to choose the device instead of it just being
+trackdisk. The <tt>RAWREAD</tt> and <tt>RESYNC</tt> macros and the
+<tt>__rawrd</tt> and <tt>__sync</tt> functions are removed.
+
+<li><b><tt>FILEMODE=1</tt>:</b> This says 'I will save several files and I
+will choose their names myself'. The user may no longer specify the name of
+an image file to create - instead, you save individual files with their
+filenames. The <tt>__write</tt> function and the <tt>WRITE</tt> and
+<tt>WRITEDOS</tt> macros are removed, and a new <tt>SAVEF</tt> macro and
+<tt>__savef</tt> function are included.
+
+<li><b><tt>MESSAGES=1</tt>:</b> This simply makes the <tt>RAWREAD</tt> and
+<tt>DOSREAD</tt> macros (and corresponding functions) print out to the user
+the track they are about to read, the cursor is kept on the same line. This
+makes a very simple progress indicator.
+
+</ul>
+
+Now <tt>include diskreader.asm</tt>. You can now start writing code to read
+the disk. For example,
+
+<pre>
+        WRITEDOS #0
+        WRITEDOS #1
+
+        moveq   #2,d7   ; d7 = tracknumber
+.nxttrk RAWREAD d7      ; read track
+        RESYNC  #$9521  ; resync track
+        bsr     decode  ;... not included
+        beq.s   .ok     ; checksum ok?
+FAILURE cksum(pc)
+.ok     WRITE   #6800
+        addq.w  #1,d7
+        cmp.w   #160,d7
+        bne.s   .nxttrk
+        rts
+
+cksum   dc.b    'bad checksum',0
+</pre>
+
+This program reads tracks 0 and 1 as normal DOS tracks, and writes them to
+the diskfile as 5632 bytes each, then reads all the other tracks as raw
+tracks with wordsync=$9521, writing them to the diskfile as 6800 bytes
+each. If decoding fails, the user sees the message "bad checksum: not a DOS
+disk".
+
+As you can see, the reading and writing of disk data is very simple, so the
+majority of the code will be the task of decoding the disk data, which was
+not included in that example.
+
+<h3>Major concepts</h3>
+
+<ul>
+
+<li><b>Working with a track buffer:</b> diskreader creates a 32k chipram
+BSS area for holding track data. All the read and write macros use this
+buffer by default, so your normal method should be to read a track in,
+decode it, then write it out. You can access the buffer with the internal
+name <tt>__trk</tt>, or you can use the <tt>BUFFER</tt> directive to give
+another name to it.
+
+<li><b>Accepting failure:</b> all routines will, on error, automatically
+leave the program (whatever the stack is like) and go to the cleanup
+routine. Therefore you should not need to do things like allocate memory,
+as there is no guarantee you can get all the way through your program to
+free it (instead, use some BSS memory). You are also encouraged to use the
+<tt>FAILURE</tt> macro to quit the reader on your own errors (such as the
+disk data failing the checksum).
+
+<li><b>Use the internals:</b> all the internal labels and variables of the
+diskreader start with two underlines, and they look pretty 'internal' - but
+I certainly allow you to access them. For example, the DOS file handle for
+the diskimage is held in <tt>__outfh(a5)</tt>, and DOSBase is in
+<tt>dosbase(a5)</tt>. You can do anything with DOS and this filehandle you
+like. Also, rather than always use the macro <tt>RAWREAD</tt>, you can set
+A0 to the trackbuffer and D0 to the required track, then call
+<tt>__rawrd</tt>.
+
+<li><b>Preserve A5 for the routines, don't rely on D0/D1/A0/A1:</b> using
+any of the macros or disk routines require that A5 remain intact - it
+points to the variables. The usual scratch registers will be trashed, but
+all others will be preserved.
+
+</ul>
+
+<h3>Command reference</h3>
+<ul>
+
+<li><tt><b>BUFFER</b> buffername</tt>: Lets you declare a name to access
+the trackbuffer with. This is a BSS Chip area which is used by all the
+other macros.
+
+<li><tt><b>FAILURE</b> [reason]</tt>: Fail the reading of the disk.
+Everything will be cleaned up and the disk motor will be switched off. You
+can optionally specify a parameter which points to a text message to print
+to the user.
+
+<li><tt><b>DOSREAD</b> track</tt>: This will read the 5632 bytes of the
+disk track specified into the start of the track buffer.
+
+<li><tt><b>RAWREAD</b> track</tt>: This will read 32766 bytes of raw,
+undecoded disk data stream from the track specified, into the whole track
+buffer. This large a stream guarantees that there is at least one entire
+copy of the track in question, so you can therefore search forwards to find
+the first matching bitstream and assume that this is correct - you are best
+to use the <tt>RESYNC</tt> macro to do this. This macro is not available in
+<tt>TRACKMODE</tt>.
+
+<li><tt><b>RESYNC</b> wordsync</tt>: This will search through the bitstream
+contained in the track buffer for the specified wordsync value and - if it
+finds it - will shift all the data in the the bitstream backwards so that
+the first word of the track buffer is now the matched wordsync. This macro
+is not available in <tt>TRACKMODE</tt>.
+
+<li><tt><b>WRITE</b> length, [offset]</tt>: This will save to this diskfile
+the specified number of bytes from the start of the track buffer. If the
+<tt>offset</tt> parameter is specified, the bytes saved will start at this
+offset in the track buffer. This macro is not available in
+<tt>FILEMODE</tt>.
+
+<li><tt><b>WRITEDOS</b> track</tt>: This macro simply reads the specified
+DOS track, and writes it straight to the diskfile. This macro is not
+available in <tt>FILEMODE</tt>.
+
+<li><tt><b>SAVEF</b> filename, buffer, length</tt>: This will save any
+particular length of bytes from any particular buffer to a file with the
+given filename. This macro is only available in <tt>FILEMODE</tt>.
+
+</ul>
+
+<h2>Examples</h2>
+
+<ul>
+<a href="disk2file.asm">disk2file.asm</a> - does a simple disk copy to a file
+<a href="readplanetdisk.asm">readplanetdisk.asm</a> - extracts the files of the original "Captain Planet" game disk
+<a href="readturr2disk.asm">readturr2disk.asm</a> - makes an image file of the original "Turrican 2" disk
+<a href="readturr3disk.asm">readturr3disk.asm</a> - makes an image file of the original "Turrican 3" disk
+</ul>
+
+<hr><em>Kyzer/CSG</em>
+</body>
+</html>

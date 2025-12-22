@@ -1,0 +1,639 @@
+/****h *SysVectors/SysVectors.c **************************************
+**
+** NAME
+**    SysVectors.c
+**
+** DESCRIPTION
+**    Display the following info from ExecBase:
+**
+**      ->SoftVer;
+**      ->ColdCapture;
+**      ->CoolCapture;
+**      ->WarmCapture;
+**      ->DebugEntry;
+**      ->DebugData;
+**      ->TaskTrapCode;
+**      ->TaskExceptCode;
+**      ->KickMemPtr;
+**      ->KickTagPtr;
+**      ->KickCheckSum;
+**
+** FUNCTIONAL INTERFACE:
+**    PUBLIC int ShowVectors( void );
+**
+**********************************************************************
+*/
+
+#include <string.h>
+
+#include <exec/types.h>
+#include <exec/execbase.h>
+
+#include <intuition/intuition.h>
+#include <intuition/classes.h>
+#include <intuition/classusr.h>
+#include <intuition/gadgetclass.h>
+
+#include <libraries/gadtools.h>
+
+#include <graphics/displayinfo.h>
+#include <graphics/gfxbase.h>
+
+#include <clib/exec_protos.h>
+#include <clib/intuition_protos.h>
+#include <clib/gadtools_protos.h>
+#include <clib/graphics_protos.h>
+#include <clib/utility_protos.h>
+#include <clib/diskfont_protos.h>
+
+#include "CPGM:GlobalObjects/CommonFuncs.h"
+
+#include "SysLists.h"
+
+#define VLV     0
+#define Clear   1
+#define Cancel  2
+
+#define Vec_CNT 3
+
+IMPORT struct ExecBase *SysBase; // setup by SAS-C.
+IMPORT struct Screen   *Scr;
+
+PRIVATE char ver[] = "$VER: SysVectors 1.0 (12/20/1999) by J.T. Steichen";
+
+PRIVATE struct TextFont *VecFont = NULL;
+
+PRIVATE struct Window       *VecWnd   = NULL;
+PRIVATE struct Gadget       *VecGList = NULL;
+PRIVATE struct IntuiMessage  VecMsg;
+PRIVATE struct Gadget       *VecGadgets[ Vec_CNT ];
+
+PRIVATE UWORD  VecLeft   = 0;
+PRIVATE UWORD  VecTop    = 16;
+PRIVATE UWORD  VecWidth  = 635;
+PRIVATE UWORD  VecHeight = 230;
+PRIVATE UBYTE *VecWdt    = "System Vectors Info:";
+
+PRIVATE char tstr[] = "Address     Contents    Name";
+PRIVATE char fmt[]  = "%08LX -> %08LX -> %-50.50s";
+
+#define MAXNODES 15
+
+PRIVATE struct MinList VecList;
+
+PRIVATE struct Node VecNode;
+PRIVATE struct Node VecNodes[ MAXNODES ] = { NULL, };
+
+PRIVATE UBYTE       NodeStrs[ MAXNODES * 80 ] = "";
+
+PRIVATE UWORD VecGTypes[] = {
+
+   LISTVIEW_KIND,   BUTTON_KIND,   BUTTON_KIND
+};
+
+PRIVATE int VLVClicked(    int whichitem );
+PRIVATE int ClearClicked(  int dummy     );
+PRIVATE int CancelClicked( int dummy     );
+
+PRIVATE struct NewGadget VecNGad[] = {
+
+     2,   3, 627, 200,                NULL, NULL, VLV,               0, 
+   NULL, (APTR) VLVClicked,
+
+   317, 205,  72,  17, (UBYTE *) "Clear",   NULL, Clear,  PLACETEXT_IN,
+   NULL, (APTR) ClearClicked,
+
+   554, 205,  72,  17, (UBYTE *) "_Cancel", NULL, Cancel, PLACETEXT_IN,
+   NULL, (APTR) CancelClicked
+};
+
+PRIVATE ULONG VecGTags[] = {
+
+   GTLV_ShowSelected, NULL, LAYOUTA_Spacing, 2, TAG_DONE,
+
+   GA_Disabled,     TRUE, TAG_DONE,
+   GT_Underscore,   '_',  TAG_DONE
+};
+
+PRIVATE APTR  Vectors[ MAXNODES ] = { 0, };
+
+PRIVATE ULONG VecAddress = 0L; // What did User click on?
+
+// -----------------------------------------------------------------
+
+PRIVATE void SetupVectorList( void )
+{
+   IMPORT struct ExecBase *SysBase;
+
+   int i = 0;
+
+   sprintf( &NodeStrs[ i++ ], "%s", &tstr[0] ); // Title of contents.
+      
+   Forbid();
+   
+      Vectors[0 ] = (APTR) SysBase->SoftVer;
+      Vectors[1 ] = SysBase->ColdCapture;
+      Vectors[2 ] = SysBase->CoolCapture;
+      Vectors[3 ] = SysBase->WarmCapture;
+      Vectors[4 ] = SysBase->DebugEntry;
+      Vectors[5 ] = SysBase->DebugData;
+      Vectors[6 ] = SysBase->TaskTrapCode;
+      Vectors[7 ] = SysBase->TaskExceptCode;
+      Vectors[8 ] = SysBase->KickMemPtr;
+      Vectors[9 ] = SysBase->KickTagPtr;
+      Vectors[10] = SysBase->KickCheckSum;
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->SoftVer), Vectors[0], "Software Version" 
+             );
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->ColdCapture), Vectors[1], "Cold Capture" 
+             );
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->CoolCapture), Vectors[2], "Cool Capture" 
+             );
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->WarmCapture), Vectors[3], "Warm Capture" 
+             );
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->DebugEntry), Vectors[4], "Debug Entry point" 
+             );
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->DebugData), Vectors[5], "Debug Data start" 
+             );
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->TaskTrapCode), Vectors[6], "Task Trap Code start"
+             );
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->TaskExceptCode), Vectors[7], 
+               "Task Exception Code start"
+             );
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->KickMemPtr), Vectors[8], "Kick Memory pointer"
+             );
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->KickTagPtr), Vectors[9], "Kick Tag pointer"
+             );
+
+      sprintf( &NodeStrs[ i++ * 80 ], &fmt[0],
+               &(SysBase->KickCheckSum), Vectors[10], 
+               "Kick Memory CheckSum"
+             );
+
+   Permit();
+
+   return;
+}
+
+
+PRIVATE void CloseVecWindow( void )
+{
+   if (VecWnd != NULL)
+      {
+      CloseWindow( VecWnd );
+      VecWnd = NULL;
+      }
+
+   if (VecGList != NULL)
+      {
+      FreeGadgets( VecGList );
+      VecGList = NULL;
+      }
+
+   if (VecFont != NULL)
+      {
+      CloseFont( VecFont );
+      VecFont = NULL;
+      }
+
+   return;
+}
+
+PRIVATE int VecCloseWindow( void )
+{
+   CloseVecWindow();
+   return( (int) FALSE );
+}
+
+PRIVATE int VLVClicked( int whichitem )
+{
+   ULONG addr = 0L;
+
+//#  ifdef DEBUG
+//   fprintf( stderr, "%-80.80s\n", VecNodes[ whichitem ].ln_Name );
+//#  endif
+
+   if (whichitem != 0)
+      {
+      GT_SetGadgetAttrs( VecGadgets[ Clear ], VecWnd, NULL,
+                         GA_Disabled, FALSE, TAG_DONE
+                       );
+
+      // Now get address from the item:
+      (void) stch_l( VecNodes[ whichitem ].ln_Name, (long *) &addr );
+
+      VecAddress = addr;
+      }
+   else
+      {
+      GT_SetGadgetAttrs( VecGadgets[ Clear ], VecWnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE
+                       );
+      
+      VecAddress = 0;
+      }
+
+   return( (int) TRUE );
+}
+
+PRIVATE int ClearAVector( ULONG vaddress )
+{
+   int rval = TRUE;
+
+   Forbid();
+
+      if (vaddress == (ULONG) &SysBase->SoftVer)
+         { 
+         Vectors[0]                    = 0;
+         *((char *) &SysBase->SoftVer) = 0;
+
+         Permit();
+         }
+      else if (vaddress == (ULONG) &SysBase->ColdCapture)
+         {
+         Vectors[1]                        = 0;
+         *((char *) &SysBase->ColdCapture) = 0;
+
+         Permit();
+         }
+      else if (vaddress == (ULONG) &SysBase->CoolCapture)
+         {
+         Vectors[2]                        = 0;
+         *((char *) &SysBase->CoolCapture) = 0;
+
+         Permit();
+         }
+      else if (vaddress == (ULONG) &SysBase->WarmCapture)
+         {
+         Vectors[3]                        = 0;
+         *((char *) &SysBase->WarmCapture) = 0;
+
+         Permit();
+         }
+      else if (vaddress == (ULONG) &SysBase->DebugEntry)
+         {
+         Vectors[4]                       = 0;
+         *((char *) &SysBase->DebugEntry) = 0;
+
+         Permit();
+         }
+      else if (vaddress == (ULONG) &SysBase->DebugData)
+         {
+         Vectors[5]                      = 0;
+         *((char *) &SysBase->DebugData) = 0;
+
+         Permit();
+         }
+      else if (vaddress == (ULONG) &SysBase->TaskTrapCode)
+         {
+         Vectors[6]                         = 0;
+         *((char *) &SysBase->TaskTrapCode) = 0;
+
+         Permit();
+         }
+      else if (vaddress == (ULONG) &SysBase->TaskExceptCode)
+         {
+         Vectors[7]                           = 0;
+         *((char *) &SysBase->TaskExceptCode) = 0;
+
+         Permit();
+         }
+      else if (vaddress == (ULONG) &SysBase->KickMemPtr)
+         {
+         Vectors[8]                       = 0;
+         *((char *) &SysBase->KickMemPtr) = 0;
+
+         Permit();
+         }
+      else if (vaddress == (ULONG) &SysBase->KickTagPtr)
+         {
+         Vectors[9]                       = 0;
+         *((char *) &SysBase->KickTagPtr) = 0;
+
+         Permit();
+         }
+      else if (vaddress == (ULONG) &SysBase->KickCheckSum)
+         {
+         Vectors[10]                        = 0;
+         *((char *) &SysBase->KickCheckSum) = 0;
+      
+         Permit();
+         }
+      else
+         {
+         int ans = 0;
+
+         Permit();          
+
+         sprintf( ErrMsg, "Unknown vector in ClearAVector()!\n"
+                          "Continue?" 
+                );
+
+         ans = Handle_Problem( ErrMsg, "Program ERROR!", NULL );
+         
+         if (ans != 0)
+            rval = FALSE;
+         }
+
+   return( rval );
+}
+
+PRIVATE int ClearClicked( int dummy )
+{
+   int rval = TRUE;
+
+   if (VecAddress == 0)
+      {
+      SetReqButtons( "OKAY!" );
+
+      (void) Handle_Problem( "Select a Vector to clear first!", 
+                             "User ERROR:", NULL
+                           );
+
+      SetReqButtons( "CONTINUE|ABORT!" );
+      
+      return( rval );
+      }
+   else
+      {
+      int ans = 0;
+      
+      sprintf( ErrMsg, "WARNING!:  What you're about to do may\n"
+                       "           CRASH the Operating System!"
+                       "   Continue?" 
+             );
+
+      ans = Handle_Problem( ErrMsg, "User Sanity Check:", NULL );
+
+      if (ans != 0)
+         return( rval );
+      }
+
+   // Crazy User decided to Continue!:
+
+   HideListFromView( VecGadgets[ VLV ], VecWnd );
+
+   rval = ClearAVector( VecAddress );
+   
+   SetupVectorList(); // Make the list.
+
+   ModifyListView( VecGadgets[ VLV ], VecWnd, 
+                   (struct List *) &VecList, NULL
+                 );
+
+   GT_RefreshWindow( VecWnd, NULL );
+
+   return( rval );
+}
+
+PRIVATE int CancelClicked( int dummy )
+{
+   return( VecCloseWindow() );
+}
+
+// ------------------------------------------------------------------
+
+PRIVATE int OpenVecWindow( void )
+{
+   struct NewGadget  ng;
+   struct Gadget    *g;
+   UWORD             lc, tc;
+   UWORD             wleft = VecLeft, wtop = VecTop, ww, wh;
+
+   ComputeFont( Scr, Font, &CFont, VecWidth, VecHeight );
+
+   ww = ComputeX( CFont.FontX, VecWidth );
+   wh = ComputeY( CFont.FontY, VecHeight );
+
+   if ((wleft + ww + CFont.OffX + Scr->WBorRight) > Scr->Width)
+      wleft = Scr->Width - ww;
+
+   if ((wtop + wh + CFont.OffY + Scr->WBorBottom) > Scr->Height)
+      wtop = Scr->Height - wh;
+
+   if ((VecFont = OpenDiskFont( Font )) == NULL)
+      return( -5 );
+
+   if ((g = CreateContext( &VecGList )) == NULL)
+      return( -1 );
+
+   for (lc = 0, tc = 0; lc < Vec_CNT; lc++)
+      {
+      CopyMem( (char *) &VecNGad[lc], (char *) &ng, 
+               (long) sizeof( struct NewGadget )
+             );
+
+      ng.ng_VisualInfo = VisualInfo;
+      ng.ng_TextAttr   = Font;
+
+      ng.ng_LeftEdge   = CFont.OffX + ComputeX( CFont.FontX, 
+                                                ng.ng_LeftEdge
+                                              );
+ 
+      ng.ng_TopEdge    = CFont.OffY + ComputeY( CFont.FontY, 
+                                                ng.ng_TopEdge
+                                              );
+
+      ng.ng_Width      = ComputeX( CFont.FontX, ng.ng_Width );
+      ng.ng_Height     = ComputeY( CFont.FontY, ng.ng_Height );
+
+      VecGadgets[lc] = g = CreateGadgetA( (ULONG) VecGTypes[lc], 
+                             g, 
+                             &ng, 
+                             (struct TagItem *) &VecGTags[tc] );
+
+      while (VecGTags[tc] != NULL)
+         tc += 2;
+
+      tc++;
+
+      if (NOT g)
+         return( -2 );
+      }
+
+   if ((VecWnd = OpenWindowTags( NULL,
+
+                   WA_Left,        wleft,
+                   WA_Top,         wtop,
+                   WA_Width,       ww + CFont.OffX + Scr->WBorRight,
+                   WA_Height,      wh + CFont.OffY + Scr->WBorBottom,
+                   
+                   WA_IDCMP,       LISTVIEWIDCMP | BUTTONIDCMP 
+                     | IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW 
+                     | IDCMP_VANILLAKEY,
+
+                   WA_Flags,       WFLG_DRAGBAR | WFLG_DEPTHGADGET 
+                     | WFLG_CLOSEGADGET | WFLG_SMART_REFRESH 
+                     | WFLG_ACTIVATE | WFLG_RMBTRAP,
+                   
+                   WA_Gadgets,     VecGList,
+                   WA_Title,       VecWdt,
+                   WA_ScreenTitle, ScrTitle,
+                   TAG_DONE )
+      ) == NULL)
+      return( -4 );
+
+   GT_RefreshWindow( VecWnd, NULL );
+
+   return( 0L );
+}
+
+PRIVATE int VecVanillaKey( int whichkey )
+{
+   int rval = TRUE;
+   
+   switch (whichkey)
+      {
+      case 'c':
+      case 'C':
+      case 'x':
+      case 'X':
+      case 'q':
+      case 'Q':
+         rval = CancelClicked( 0 );
+         break;
+         
+      default:
+         break;
+      }
+      
+   return( rval );
+}
+
+PRIVATE int HandleVecIDCMP( void )
+{
+   struct IntuiMessage  *m;
+   int                 (*func)( int code );
+   BOOL                  running = TRUE;
+
+   while (running == TRUE)
+      {
+      if ((m = GT_GetIMsg( VecWnd->UserPort )) == NULL)
+         {
+         (void) Wait( 1L << VecWnd->UserPort->mp_SigBit );
+         continue;
+         }
+
+      CopyMem( (char *) m, (char *) &VecMsg, 
+               (long) sizeof( struct IntuiMessage )
+             );
+
+      GT_ReplyIMsg( m );
+
+      switch (VecMsg.Class)
+         {
+         case IDCMP_REFRESHWINDOW:
+            GT_BeginRefresh( VecWnd );
+            GT_EndRefresh( VecWnd, TRUE );
+            break;
+
+         case IDCMP_CLOSEWINDOW:
+            running = VecCloseWindow();
+            break;
+
+         case IDCMP_VANILLAKEY:
+            running = VecVanillaKey( (int) VecMsg.Code );
+            break;
+            
+         case IDCMP_GADGETUP:
+         case IDCMP_GADGETDOWN:
+            func = (void *) ((struct Gadget *) VecMsg.IAddress)->UserData;
+            if (func != NULL)
+               running = func( (int) VecMsg.Code );
+
+            break;
+         }
+      }
+
+   return( running );
+}
+
+PUBLIC int HandleVectorLV( void )
+{
+   int i = 0;
+   
+   VecNode.ln_Succ = (struct Node *) VecList.mlh_Tail;
+   VecNode.ln_Pred = (struct Node *) VecList.mlh_Head;
+   VecNode.ln_Type = 0;
+   VecNode.ln_Pri  = 100;
+   VecNode.ln_Name = &tstr[0];
+
+   VecNodes[0] = VecNode;
+
+   // Open Libraries, Screen & Window:
+   if (SetupSystemList( &OpenVecWindow ) < 0)
+      {
+      fprintf( stderr, "Couldn't open a System ListViewer!\n" );
+      return( -1 );
+      }
+   
+   SetNotifyWindow( VecWnd );
+
+   for (i = 1; i <= MAXNODES; i++)
+      {
+      VecNodes[i].ln_Name = &NodeStrs[ i * 80 ];
+      VecNodes[i].ln_Pri  = MAXNODES - i;
+      }
+
+   NewList( (struct List *) &VecList );      
+
+   for (i = 0; i < MAXNODES; i++)
+      Enqueue( (struct List *) &VecList, &VecNodes[ i ] );
+
+   HideListFromView( VecGadgets[ VLV ], VecWnd );
+
+   SetupVectorList(); // Make the list.
+
+   ModifyListView( VecGadgets[ VLV ], VecWnd, 
+                   (struct List *) &VecList, NULL
+                 );
+
+   GT_RefreshWindow( VecWnd, NULL );
+
+   (void) HandleVecIDCMP();
+   
+   // Close Libraries, Screen & Window:
+   ShutdownSystemList();
+
+   return( 0 );
+}
+
+
+PUBLIC int ShowVectors( void )
+{
+   int rval = 0;
+
+   rval = HandleVectorLV();
+   
+   return( rval );
+}
+
+#ifdef DEBUG
+
+PUBLIC int main( void )
+{
+   return( ShowVectors() );
+}
+
+#endif
+
+/* ------------------ END of SysVectors.c file! ---------------------- */

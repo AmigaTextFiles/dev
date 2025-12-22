@@ -1,0 +1,41 @@
+
+#define RASSIZE(w,h) ((h)*(((w)+15)>>3)&$FFFE)
+
+CONST	BITSET=$8000,
+		BITCLR=0,
+		AGNUS=1,
+		DENISE=1
+
+OBJECT Rectangle
+	MinX:WORD,
+	MinY:WORD,
+	MaxX:WORD,
+	MaxY:WORD
+
+OBJECT Rect32
+	MinX:LONG,
+	MinY:LONG,
+	MaxX:LONG,
+	MaxY:LONG
+
+OBJECT tPoint|TPoint
+	X|x:WORD,
+	Y|y:WORD
+
+OBJECT BitMap
+	BytesPerRow:UWORD,
+	Rows:UWORD,
+	Flags:UBYTE,
+	Depth:UBYTE,
+	pad:UWORD,
+	Planes[8]:PTR TO UBYTE
+
+FLAG	BM_CLEAR,
+		BM_DISPLAYABLE,
+		BM_INTERLEAVED,
+		BM_STANDARD,
+		BM_MINPLANES
+CONST	BMA_HEIGHT=0,
+		BMA_DEPTH=4,
+		BMA_WIDTH=8,
+		BMA_FLAGS=12

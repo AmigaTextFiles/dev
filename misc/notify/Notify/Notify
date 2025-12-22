@@ -1,0 +1,439 @@
+/* Notify 1.02 */
+/* Copyright © Michael Tanzer, 1991, 1992 */
+/* See additional notices in accompanying documentation */
+
+twentyfour = 0                             /* 0 = 12-hour; 1 = 24-hour     */
+
+/* Make sure the necessary libraries are available */
+if ~show('L','rexxsupport.library') then
+  call addlib('rexxsupport.library',0,-30)
+if ~show('L','rexxarplib.library') then
+  call addlib('rexxarplib.library',0,-30)
+
+if twentyfour then do                      /* Adjust for 24-hour clock     */
+  colmax = screencols()%8-16               /*   Get max msg length         */
+  lprompt1 = '  · Message list ·\'
+  lprompt2 = '  Nº hh:mm Message'
+  end
+else do                                    /* Adjust for 12-hour clock     */
+  colmax = screencols()%8-18               /*   Get max msg length         */
+  lprompt1 = '  ·  Message list  ·\'
+  lprompt2 = '  Nº  Time   Message'
+  end
+linemax = (screenrows()-94)%9              /* Get maximum lines            */
+aprompt  = 'Adding new message.\Enter time and optional message text:'
+
+arg request .                              /* Get first argument           */
+
+/* Handle list request */
+if request='LIST' | request='' then do
+  call showlist
+  exit
+  end
+
+/* Handle delete request */
+if request='DELETE' then do
+  parse arg . dellist                      /* Get list of msgs numbers     */
+  call delmsgs                             /* Go delete messages           */
+  say response                             /* Type response                */
+  exit result                              /* Exit with appropriate code   */
+  end
+
+/* Handle edit request */
+if request='EDIT' then do
+  parse arg . thismsg .                    /* Get message number           */
+  call edmsg                               /* Go edit the message          */
+  say response                             /* Type response                */
+  exit result                              /* Exit with appropriate code   */
+  end
+
+/* Handle help request */
+if request='HELP' | request='?' then do
+  call help
+  exit
+  end
+
+/* Handle quiet request */
+if request='QUIET' then do
+  call setenv('Notify.quiet',1)
+  say 'Quiet flag set.'
+  exit
+  end
+
+/* Handle noisy request */
+if request='NOISY' then do
+  call setenv('Notify.quiet')
+  say 'Quiet flag deleted.'
+  exit
+  end
+
+/* Handle invalid request */
+if request~='ADD' then do
+  say 'Invalid request.'
+  exit 99
+  end
+
+/* Add a new message */
+parse arg . time message                   /* Get time and message         */
+message = strip(message,'B')               /* Remove blanks fore and aft   */
+if words(time)=0 then do                   /* If no time specified...      */
+  prompt = aprompt
+  timemsg = ''
+  call getmsg                              /* Go get new time/message      */
+  if result=0 then do                      /* Exit if no message           */
+    say response
+    exit 0
+    end
+  end
+else do                                    /*  Time was specified          */
+  if ~vertime(time) then do                /*  If time is invalid...       */
+    say 'Invalid time specified.'
+    exit 98
+    end
+  if length(message)>colmax then do        /*  If message is too long...   */
+    say 'Maximum message length is' colmax 'characters.'
+    exit 97
+    end
+  end
+call addmsg                                /* Go add message to list       */
+say response
+exit
+
+/* Subroutines */
+
+addmsg:                                    /* Add message to list          */
+  call forbid()                            /* Hold other tasks             */
+  timemsg = strip(time,'B') strip(message,'B') /* Combine time and message */
+  msglist = getenv('Notify.list')          /* Get list of msg numbers      */
+  msgcnt = words(msglist)                  /* Get number of msgs in list   */
+  do mx = 1 to msgcnt                      /* See if msg already in list   */
+    thismsg = word(msglist,mx)             /* Get msg number from list     */
+    w = getenv('Notify.'thismsg)           /* Get time and message         */
+    if timemsg=w then do                   /* Msg already in list          */
+      call permit()                        /* Free other tasks             */
+      response = 'Message already in list (Nº' thismsg').'
+      return                               /* Don't add duplicate msg      */
+      end
+    end
+  lastmsg = getenv('Notify.lastmsg')       /* Get last msg number          */
+  if words(lastmsg)=0 then lastmsg = 0     /* Use zero first time          */
+  thismsg = lastmsg+1                      /* Bump msg number              */
+  if thismsg>9999 then thismsg = 1         /* Limit number to 4 digits     */
+  call setenv('Notify.lastmsg',thismsg)    /* Store it                     */
+  msglist = msglist thismsg                /* Add new msg number to list   */
+  call setenv('Notify.list',msglist)       /* Store new list               */
+  call setenv('Notify.twentyfour',twentyfour) /* Store for NotifyTimer     */
+  call setenv('Notify.'thismsg,timemsg)    /* Store time and message       */
+  call permit()                            /* Free other tasks             */
+  response = 'Message' thismsg 'added.'    /* Set the response             */
+  address arexx 'NotifyTimer' time thismsg /* Launch timer task            */
+  return
+
+delmsg:                                    /* Delete message from list     */
+  call forbid()                            /* Hold other tasks             */
+  msglist = getenv('Notify.list')          /* Get list of msg numbers      */
+  w = find(msglist,thismsg)                /* Get word number of our msg   */
+  if w=0 then do                           /* If msg already deleted...    */
+    call permit()                          /*   Free other tasks           */
+    return 0                               /*   Indicate failure           */
+    end
+  msglist = strip(delword(msglist,w,1),'B')/* Delete our msg from list     */
+  call setenv('Notify.list',msglist)       /* Store new list               */
+  call permit()                            /* Free other tasks             */
+  call setenv('Notify.'thismsg)            /* Delete the message           */
+  return 1                                 /* Indicate success             */
+
+getmsg:                                    /* Get new time and/or message  */
+  do forever                               /* Prompt for time and msg      */
+    timemsg = request(0,0,prompt,timemsg,'OK','Never mind!')
+    if words(timemsg)=0 then do            /* Return if no time entered    */
+      response = 'Add operation aborted.'
+      return 0
+      end
+    time = word(timemsg,1)                 /* Get the time                 */
+    message = subword(timemsg,2)           /* Get the message              */
+    if length(message)>colmax then do      /* If message is too long...    */
+      prompt = aprompt'\Message truncated to' colmax 'characters.'
+      message = substr(message,1,colmax)   /*   Truncate message           */
+      timemsg = time message
+      iterate
+      end
+    if ~vertime(time) then do              /* If time is invalid...        */
+      prompt = aprompt'\Invalid time specified.'
+      iterate
+      end
+    return 1                               /*  All is well                 */
+    end
+
+edmsg:                                     /* Edit message                 */
+  if words(thismsg)=0 then do              /* Handle no message specified  */
+    response = 'No message number specified.'
+    return 96
+    end
+  timemsg = getenv('Notify.'thismsg)       /* Get the time and message     */
+  time =  word(timemsg,1)                  /* Get the time                 */
+  if words(time)=0 then do                 /* Handle no such message       */
+     response = 'Message' thismsg 'not found.'
+     return 95
+    end
+  message = subword(timemsg,2)             /* Get the message              */
+  call addsuffix                           /* Adjust for 12-hour clock     */
+  eprompt = 'Editing message number' thismsg 'for' strip(showtime,'B')
+  prompt = eprompt                         /* Get heading                  */
+  do forever                               /* Prompt for time and msg      */
+    message = request(0,0,prompt,message,'OK','Never mind!')
+    if words(message)=0 then do            /* Return if no time entered    */
+      response = 'Edit operation aborted.'
+      return 0
+      end
+    message = strip(message,'B')           /* Drop some blanks             */
+    if length(message)>colmax then do      /* If message is too long...    */
+      prompt = eprompt'\Message truncated to' colmax 'characters.'
+      message = substr(message,1,colmax)   /* Truncate message             */
+      iterate
+      end
+    leave                                  /*  All is well                 */
+    end
+  timemsg = time message                   /* Get time and message         */
+  call forbid()                            /* Hold other tasks             */
+  msglist = getenv('Notify.list')          /* Get message list             */
+  if find(msglist,thismsg)=0 then do       /* If message has been deleted, */
+    call permit()
+    response = 'Message' thismsg 'has been deleted.'
+    return 94
+    end
+  call setenv('Notify.'thismsg,timemsg)    /* Store time and message       */
+  call permit()                            /* Free other tasks             */
+  response = 'Message revised.'
+  return 0
+
+delmsgs:                                   /* Delete a list of messages    */
+  delcnt = words(dellist)                  /* Get number of msg numbers    */
+  if upper(dellist)='ALL' then do          /* If ALL specified...          */
+    dellist = getenv(Notify.list)          /*   Get list of all messages   */
+    delcnt = words(dellist)                /*   Get number of messages     */
+    if delcnt=0 then do                    /*   Handle no msg numbers      */
+      response = 'No messages found.'
+      return 0
+      end
+    end
+  else if delcnt=0 then do                 /* No message numbers specified */
+    response = 'No message number specified.'
+    return 93
+    end
+  msglist = getenv('Notify.list')          /* Get message list             */
+  do dx = 1 to delcnt                      /* Verify the msg numbers       */
+    thismsg = word(dellist,dx)             /*   Get a msg number           */
+    if find(msglist,thismsg)=0 then do     /*   If not found...            */
+      response = 'Message number' thismsg 'not found.'
+      return 92
+      end
+    end
+  do dx = 1 to delcnt                      /* Delete the messages          */
+    thismsg = word(dellist,dx)             /*   Get a msg number           */
+    call delmsg                            /*   Go delete the message      */
+    end
+  if delcnt>1 then response = 'Messages deleted.'
+  else response = 'Message deleted.'
+  return 0
+
+vertime:                                   /* Verify time                  */
+  arg uctime                               /* Get time in upper case       */
+  if uctime='NOW' then return 1            /* 'NOW' is valid               */
+  parse var uctime hh':'mm                 /* Get hour and minute          */
+  if ~datatype(hh,'W') then return 0       /* HH must be a whole number    */
+  if hh<0 then return 0                    /* HH must be positive          */
+  if length(mm)<2 then mm = right(mm,2,'0')/* MM must have 2 digits        */
+  w = length(mm)                           /* Get length of MM             */
+  select                                   /* Handle different formats     */
+    when substr(mm,w-1)='AM' then do       /*   AM; 12-hour clock          */
+      mm = substr(mm,1,w-2)                /*     Drop 'AM'                */
+      if hh<1 | hh>12 then return 0        /*     HH must be between 1 & 12*/
+      hh = hh//12                          /*     Change 12 to 0           */
+      end
+    when substr(mm,w)='A' then do          /*   A; 12-hour clock           */
+      mm = substr(mm,1,w-1)                /*     Drop 'A'                 */
+      if hh<1 | hh>12 then return 0        /*     HH must be between 1 & 12*/
+      hh = hh//12                          /*     Change 12 to 0           */
+      end
+    when substr(mm,w-1)='PM' then do       /*   PM; 12-hour clock          */
+      mm = substr(mm,1,w-2)                /*     Drop 'PM'                */
+      if hh<1 | hh>12 then return 0        /*     HH must be between 1 & 12*/
+      hh = hh//12+12                       /*     Change 12 to 0, add 12   */
+      end
+    when substr(mm,w)='P' then do          /*   P; 12-hour clock           */
+      mm = substr(mm,1,w-1)                /*     Drop 'P'                 */
+      if hh<1 | hh>12 then return 0        /*     HH must be between 1 & 12*/
+      hh = hh//12+12                       /*     Change 12 to 0, add 12   */
+      end
+    when hh=0 | hh>12 then do              /*   24-hour time specified     */
+      if hh>23 then return 0               /*     HH must be less than 24  */
+      end
+    when twentyfour then nop               /*   24-hour time expected      */
+    otherwise do                           /*   May be either AM or PM     */
+      if ~datatype(mm,'W') then return 0   /*     MM must be a whole number*/
+      now = substr(time(),1,5)             /*     Get current time...      */
+      decnow = substr(now,1,2)||substr(now,4,2)   /* ... as decimal value  */
+      hh = hh//12                          /*     Change 12 to 0           */
+      dectime = hh||right(mm,2,'0')        /*     Get time as decimal value*/
+      dectimepm = dectime+1200             /*     Get decimal time for PM  */
+      select                               /*     Adjust HH as required    */
+        when dectime>decnow then nop       /*       Now=AM Time=Later AM   */
+        when decnow<1200 then hh = hh+12   /*       Now=AM Time=PM         */
+        when dectimepm>decnow then hh = hh+12/*     Now=PM Time=Later PM   */
+        otherwise nop                      /*       Now=PM Time=Tomorrow AM*/
+        end /* select */
+      end /* otherwise do */
+    end /* select */
+  if ~datatype(mm,'W') then return 0       /* MM must be a whole number    */
+  if mm<0 | mm>59 then return 0            /* MM must be between 0 and 59  */
+  time = right(hh,2,'0')':'right(mm,2,'0') /* Ensure 2 digits for HH, MM   */
+  return 1                                 /* Indicate success             */
+
+addsuffix:                                 /* Get time to be displayed     */
+  if ~twentyfour then do                   /* Adjust for 12-hour clock     */
+    parse var time hh':'mm                 /*   Separate hour and minute   */
+    if hh<12 then suffix = 'am'            /*   Set for am...              */
+    else suffix = 'pm'                     /*   ...or pm                   */
+    hh = hh//12                            /*   Limit hour to 12           */
+    if hh=0 then hh = '12'                 /*   Handle 12                  */
+    showtime = right(hh':'mm,5)||suffix    /*   Build time for display     */
+    end
+  else showtime = time                     /* No change for 24-hour clock  */
+  return
+
+showlist:                                  /* Show list of pending msgs    */
+  call screentofront()                     /* Allow for hot keys           */
+  response = ''                            /* No response yet              */
+  listmax = linemax                        /* Set maximum message lines    */
+  do forever
+    msglist = getenv('Notify.list')        /* Get list of msg numbers      */
+    msgcnt = words(msglist)                /* Get number of messages       */
+    linecnt = 0                            /* Clear line count             */
+    prompt = lprompt1||lprompt2            /* Build heading                */
+    if msgcnt=0 then do                    /* Handle no messages           */
+      prompt = lprompt1||'No messages found.'
+      linecnt = 1
+      end
+    else do mx = 1 to msgcnt               /* Get each message...          */
+      if linecnt=listmax then do           /*   If max lines done...       */
+        linecnt = 0                        /*     Clear line count         */
+        if length(response)>0 then prompt = prompt'\'response
+        input = request(0,0,prompt,'More...',,'Quit')
+        if words(input)=0 then return      /*     Return if cancelled      */
+        if input~='More...' then leave     /*     Something was typed in   */
+        response = ''                      /*     Clear response           */
+        listmax = linemax                  /*     Reset maximum            */
+        prompt = lprompt1||lprompt2        /*     Refresh heading          */
+        end
+      thismsg = word(msglist,mx)           /*   Get next message number    */
+      timemsg = getenv('Notify.'thismsg)   /*   Get next message           */
+      if words(timemsg)=0 then iterate     /*   Bypass deleted message     */
+      time = upper(word(timemsg,1))        /*   Get time                   */
+      if time='NOW' then time =  substr(time(),1,5)
+      call addsuffix                       /*   Adjust for 12-hour clock   */
+      message = subword(timemsg,2)         /*   Get message                */
+      w = right(thismsg,4) showtime translate(message,'/','\')
+      prompt = prompt'\'w                  /*   Add message on new line    */
+      linecnt = linecnt+1                  /*   Bump line count            */
+      end
+    if linecnt>0 then do                   /* Display remaining messages   */
+      if length(response)>0 then prompt = prompt'\'response
+      input = request(0,0,prompt,'',,'Quit')
+      end
+    if words(input)=0 then return          /* Return if cancelled          */
+    response = ''                          /* Clear response               */
+    listmax = linemax                      /* Reset maximum                */
+    parse upper var input request .        /* Isolate request              */
+    if request='LIST' then iterate         /* Back to top for re-display   */
+    if request='EDIT' then do              /* Handle edit request          */
+      parse var input . thismsg .          /*   Get message number         */
+      call edmsg                           /*   Go edit the message        */
+      if result~=0 then call listerror     /*   Handle error if any        */
+      else listmax = listmax-1             /*   Set to display response    */
+      iterate
+      end
+    if request='DELETE' then do            /* Handle delete request        */
+      parse var input . dellist            /*   Get list of msgs numbers   */
+      call delmsgs                         /*   Go delete messages         */
+      if result~=0 then call listerror     /*   Handle error if any        */
+      else listmax = listmax-1             /*   Set to display response    */
+      iterate
+      end
+    if request='HELP' | request='?' then do/* Handle help request          */
+      call help
+      iterate
+      end
+    if request='QUIET' then do             /* Handle quiet request         */
+      call setenv('Notify.quiet',1)
+      response = 'Quiet flag set.'
+      listmax = listmax-1
+      iterate
+      end
+    if request='NOISY' then do             /* Handle noisy request         */
+      call setenv('Notify.quiet')
+      response = 'Noisy flag set.'
+      listmax = listmax-1
+      iterate
+      end
+    if request~='ADD' then do              /* Handle invalid request       */
+      response = 'Invalid request.'
+      call listerror
+      iterate
+      end
+    time = word(input,2)                   /* Get the time                 */
+    message = subword(input,3)             /* Get the message              */
+    if words(time)=0 then do               /* If no time specified...      */
+      prompt = aprompt
+      timemsg = ''
+      call getmsg                          /*   Go get new time/message    */
+      listmax = listmax-1                  /*   Set to display response    */
+      if result=0 then iterate             /*   Back to top if no message  */
+      end
+    else do                                /* Time was specified           */
+      if ~vertime(time) then do            /*   If time is invalid...      */
+        prompt = aprompt'\Invalid time specified.'
+        timemsg = time message
+        call getmsg                        /*     Go get message           */
+        listmax = listmax-1                /*     Set to display response  */
+        if result=0 then iterate           /*     To top if no message     */
+        end
+      if length(message)>colmax then do    /*   If message is too long...  */
+        prompt = aprompt'\Maximum message length is' colmax 'characters.'
+        timemsg = time message
+        call getmsg                        /*     Go get message           */
+        listmax = listmax-1                /*     Set to display response  */
+        if result=0 then iterate           /*     To top if no message     */
+        end
+      end
+    call addmsg                            /* Go add message to list       */
+    listmax = listmax-1                    /* Set to display response      */
+    end
+
+listerror:                                 /* Handle list request error    */
+  w = request(0,0,response,,'Return to list','Quit')
+  response = ''                            /* Clear response               */
+  if w='OKAY' then return
+  exit
+
+help:                                      /* Give help                    */
+  if twentyfour then w = '24'
+  else w = '12'
+  w = 'NOTIFY issues messages at specified times of day.\'              || ,
+      'Valid requests are:\'                                            || ,
+      'ADD time <message text>         Add a message\'                  || ,
+      'DELETE msgno <msgno <msgno...>> Delete one or more messages\'    || ,
+      'EDIT msgno                      Edit the text of a message\'     || ,
+      'LIST                            List pending messages (default)\'|| ,
+      'HELP                            You are here\'                   || ,
+      'QUIET                           Keeps messages quiet\'           || ,
+      'NOISY                           Makes messages noisy (default)\' || ,
+      '· The time may be expressed as ''hh:mm'' ('w'-hour clock)\'      || ,
+      '  or as ''NOW'' to cause a message to be issued immediately.\'   || ,
+      '· Inserting a backslash into the text of a message will cause\'  || ,
+      '  the following characters to be written on the next line.\'     || ,
+      '· If the first word of a message is ''CMD'' the remainder of\'   || ,
+      '  the message will be passed to Amiga DOS as a command.\'        || ,
+      '· Maximum message text length is' colmax 'characters.\'
+  call request(0,0,w,,'Oh, thank you!')
+  return

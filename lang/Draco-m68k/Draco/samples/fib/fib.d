@@ -1,0 +1,23 @@
+int NTIMES = 10,	/* number of times to compute Fibonacci value */
+    NUMBER = 24;	/* biggest one we can compute with 16 bits */
+
+proc fib(uint x)uint:
+
+    if x > 2 then
+	fib(x - 1) + fib(x - 2)
+    else
+	1
+    fi
+corp;
+
+proc main()void:
+    uint i, value;
+
+    writeln(NTIMES, " iterations.");
+
+    for i from 1 upto NTIMES do
+	value := fib(NUMBER);
+    od;
+
+    writeln("Fibonacci(", NUMBER, ") = ", value, ".");
+corp;

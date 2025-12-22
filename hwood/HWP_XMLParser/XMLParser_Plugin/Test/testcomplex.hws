@@ -1,0 +1,325 @@
+@VERSION 5,0
+
+@REQUIRE "xmlparser"
+
+;-- basic test with no preamble
+Local p = xmlparser.new({})
+p:setencoding("ISO-8859-1")
+assert(p:parse([[<tag cap="5">hi</tag>]]))
+p:close()
+
+preamble = [[
+<?xml version="1.0" encoding="ISO-8859-1"?>
+
+<!DOCTYPE greeting [
+  <!ENTITY xuxu "is this a xuxu?">
+
+  <!ATTLIST to
+     method  CDATA   #FIXED "POST"
+  >
+
+  <!ENTITY test-entity
+	   SYSTEM "entity1.xml">
+
+  <!NOTATION TXT SYSTEM "txt">
+
+  <!ENTITY test-unparsed SYSTEM "unparsed.txt" NDATA txt>
+
+  <!ATTLIST hihi
+      explanation ENTITY #REQUIRED>
+
+]>
+]]
+
+function getargs (...)
+	xm = arg
+endfunction
+
+function xgetargs (c)
+
+  return(function (...)
+    insertitem(arg, c, 0)
+    insertitem(xm, arg)
+  endfunction)
+  
+endfunction
+
+;-------------------------------
+
+debugprint("testing start/end tags")
+callbacks = {
+  StartElement = getargs,
+  EndElement = getargs,
+}
+p = xmlparser.new(callbacks)
+assert(p:getcallbacks() = callbacks)
+assert(p:parse(preamble))
+assert(p:parse([[
+<to priority="10" xu = "hi">
+]]))
+assert(xm.n = 3 and xm[0] = p and xm[1] = "to")
+x = xm[2]
+assert(x.priority="10" and x.xu="hi" and x.method="POST")
+assert(x[0] = "priority" and x[1] = "xu" and listitems(x) = 2)
+assert(p:parse("</to>"))
+assert(p:parse())
+p:close() 
+
+;-------------------------------
+
+debugprint("testing CharacterData/Cdata")
+callbacks = {
+  CharacterData = getargs,
+}
+p = xmlparser.new(callbacks)
+assert(p:parse(preamble))
+assert(p:parse("<to>a basic text&lt;<![CDATA[<<ha>>]]></to>"))
+assert(xm[0] = p and xm[1] = "a basic text<<<ha>>")
+callbacks.chardata = error   ;-- no more calls to `chardata'
+assert(p:parse(""))
+assert(p:parse())
+;-- assert(p:parse())   -- no problem to finish twice. alas, it has problems
+assert(p:getcallbacks() = callbacks)
+p:close() 
+
+;-------------------------------
+
+callbacks = {
+  CharacterData = xgetargs("c"),
+  StartCdataSection = xgetargs("s"),
+  EndCdataSection = xgetargs("e"), 
+}
+xm = {}
+p = xmlparser.new(callbacks)
+assert(p:parse(preamble))
+assert(p:parse("<to>"))
+assert(p:parse("<![CDATA[hi]]>"))
+assert(listitems(xm) = 3)
+assert(xm[0][0] = "s" and xm[0][1] = p)
+assert(xm[1][0] = "c" and xm[1][1] = p and xm[1][2] = "hi")
+assert(xm[2][0] = "e" and xm[2][1] = p)
+assert(p:parse("</to>"))
+p:close()
+
+;-------------------------------
+
+debugprint("testing ProcessingInstruction")
+callbacks = {ProcessingInstruction = getargs}
+p = xmlparser.new(callbacks)
+assert(p:parse([[
+<to>
+  <?lua how is this passed to <here>? ?>
+</to>
+]]))
+assert(xm[0] = p and xm[1] = "lua" and
+       xm[2] = "how is this passed to <here>? ")
+p:close()
+
+;------------------------------
+
+debugprint("testing Comment")
+callbacks = {Comment = xgetargs("c"), CharacterData = xgetargs("t")}
+xm = {}
+p = xmlparser.new(callbacks)
+assert(p:parse([[
+<to>some text
+<!-- <a comment> with some & symbols -->
+some more text</to>
+
+]]))
+p:close()
+
+assert(xm[0][0] = "t" and xm[1][0] = "c" and xm[2][0] = "t")
+assert(xm[0][1] = xm[1][1] and xm[1][1] = xm[2][1] and xm[2][1] = p)
+assert(xm[0][2] = "some text\n")
+assert(xm[1][2] = " <a comment> with some & symbols ")
+assert(xm[2][2] = "\nsome more text")
+
+;----------------------------
+
+debugprint("testing ExternalEntity")
+entities = {
+["entity1.xml"] = "<hi/>"
+}
+
+callbacks = {StartElement = xgetargs("s"), EndElement = xgetargs("e"),
+  ExternalEntityRef = function (p, context, base, systemID, publicId)
+    assert(base = "/base")
+    return(context:parse(entities[systemID]))
+  endfunction}
+
+xm = {}
+p = xmlparser.new(callbacks)
+p:setbase("/base")
+assert(p:parse(preamble))
+assert(p:parse([[
+<to> &test-entity;
+</to>
+]]))
+assert(p:getbase() = "/base")
+p:close()
+assert(xm[0][0] = "s" and xm[0][2] = "to")
+assert(xm[1][0] = "s" and xm[1][2] = "hi")
+assert(xm[2][0] = "e" and xm[2][2] = "hi")
+assert(xm[3][0] = "e" and xm[3][2] = "to")
+
+;----------------------------
+
+debugprint("testing default handles")
+text = [[<to> hi &xuxu; </to>]]
+local t = ""
+
+callbacks = { DefaultHandler = function (p, s) t = t .. s endfunction }
+p = xmlparser.new(callbacks)
+assert(p:parse(preamble))
+assert(p:parse(text))
+p:close()
+assert(t = preamble..text)
+
+t = ""
+callbacks = { DefaultExpand = function (p, s) t = t .. s endfunction }
+p = xmlparser.new(callbacks)
+assert(p:parse(preamble))
+assert(p:parse(text))
+p:close()
+assert(t = preamble..patternreplacestr(text, "&xuxu;", "is this a xuxu?"))
+
+;----------------------------
+
+debugprint("testing notation declarations and unparsed entities")
+
+callbacks = {
+  UnparsedEntityDecl = getargs,
+  NotationDecl = function (p, name, base, systemId, publicId)
+    assert(name = "TXT" and systemId = "txt" and base = "/base")
+  endfunction,
+ }
+p = xmlparser.new(callbacks)
+p:setbase("/base")
+assert(p:parse(preamble))
+assert(p:parse([[<hihi explanation="test-unparsed"/>]]))
+p:close()
+assert(xm[1] = "test-unparsed" and xm[2] = "/base" and
+       xm[3] = "unparsed.txt" and xm[5] = "txt" and xm.n = 6)
+
+;----------------------------
+
+debugprint("testing namespace declarations")
+callbacks = { StartNamespaceDecl = xgetargs("sn"),
+	      EndNamespaceDecl = xgetargs("en"),
+	      StartElement = xgetargs("s"),
+	      EndElement = xgetargs("e"),
+}
+xm = {}
+p = xmlparser.new(callbacks, "?")
+assert(p:parse([[
+<x xmlns:space='a/namespace'>
+  <space:a/>
+</x>
+]]))
+p:close()
+x = xm[0]
+assert(x[0] = "sn" and x[2] = "space" and x[3] = "a/namespace" and listitems(x) = 4)
+x = xm[2]
+assert(x[0] = "s" and x[2] = "a/namespace?a")
+x = xm[3]
+assert(x[0] = "e" and x[2] = "a/namespace?a")
+x = xm[5]
+assert(x[0] = "en" and x[2] = "space" and listitems(x) = 3)
+
+;----------------------------
+
+debugprint("testing doctype declarations")
+
+callbacks = {
+  StartDoctypeDecl = getargs
+ }
+p = xmlparser.new(callbacks)
+assert(p:parse([[<!DOCTYPE root PUBLIC "foo" "hello-world">]]))
+assert(p:parse([[<root/>]]))
+p:close()
+assert(xm[1] = "root" and xm[2] = "hello-world" and xm[3] = "foo" and
+       xm[4] = false)
+
+;-- Error reporting
+p = xmlparser.new({})
+data = [[
+<tag>
+  <other< </other>
+</tag>
+]]
+local status, msg, line, col, byte = p:parse(data)
+assert(gettype(status) = #nil and gettype(msg) = #string and line = 2 and col = 9)
+assert(midstr(data, byte - 1, 1) = "<")
+
+p = xmlparser.new({})
+p:parse("<to>")
+local status, msg, line, col, byte = p:parse()
+assert(gettype(status) = nil and line = 1 and col = 5 and byte = 5)
+
+;-- position reporting
+callbacks = { ProcessingInstruction = function (p)
+  xm = {p:pos()}
+endfunction
+}
+
+p = xmlparser.new(callbacks)
+assert(p:parse([[
+<to> <?test where is `pos'? ?>
+</to>
+]]))
+p:close()
+assert(xm[0] = 1 and xm[1] = 6 and xm[2] = 6)  ;-- line, column, abs. position
+
+debugprint("testing errors")
+;-- invalid keys
+;assert(not pcall(xmlparser.new, {StatCdata=print}))
+;assert(pcall(xmlparser.new, {StatCdata=print, _nonstrict = true}))
+
+;-- invalid sequences
+p = xmlparser.new({})
+assert(p:parse([[<to></to>]]))
+assert(p:parse())
+assert(gettype((p:parse(" "))) = #nil)
+
+;-- closing unfinished document
+;p = xmlparser.new({})
+;assert(p:parse([[<to>]]))
+;local status, err = pcall(p.close, p)
+;assert(not status and string.find(err, "error closing parser"))
+
+;-- closing unfinished document
+debugprint("testing parser:stop()");
+local stopped
+p = xmlparser.new({
+	StartElement = function (parser, name, attr)
+		if name = "stop" 
+			parser:stop()
+			stopped = true
+		else
+			stopped = false
+		endif
+	endfunction
+})
+local ok, err = p:parse([[<root><parseme>Hello</parseme><stop>here</stop><notparsed/></root>]])
+assert(not ok)
+assert(err = "parsing aborted")
+assert(stopped = true)
+
+;-- test for GC
+debugprint("testing garbage collection")
+collectgarbage()
+collectgarbage()
+local x = gcinfo()
+for local i=1 to 100000
+  if mod(i, 100) = 0 then collectgarbage()
+  xmlparser.new({})
+next
+collectgarbage()
+collectgarbage()
+assert(abs(gcinfo() - x) <= 2)
+
+debugprint("OK")
+ 
+waitleftmouse
+end

@@ -1,0 +1,209 @@
+* 1 Bob Interleaved Blitted Or'd With the Background
+	SECTION		Chipmemory,data_c	
+							;BY BLAINE EVANS
+							;1 ERITH WAY
+							;PONTYBODKIN
+							;NR MOLD
+							;CLWYD
+							;CH7 4TR
+							;TEL O352-771673
+		Opt	C-,D+
+
+Height			equ	256
+Width			equ	40
+Depth			equ	3
+
+ScreenSize		equ	Height*Width
+MemoryRequired		equ	ScreenSize*Depth
+
+BobHeight		equ	16
+BobWidth		equ	2
+BobDepth		equ	3
+
+BobSize			equ	BobHeight*(BobWidth*2)
+
+		Incdir	Sys:Include/
+		Include	Source:Include/hardware.i
+
+	Move.l	4.w,a6			;FIND EXEC BASE
+	Lea	Gfxlib(pc),a1		;LOAD GRAPHICS LIBRARY IN A1
+	Moveq.l	#$00,d0			;VERSION 0
+	Jsr	-552(a6)		;OPEN LIBRARY
+	Move.l	d0,_Gfxbase		;STORE D0 (GFX ADDRESS )
+	Beq.s	NoLib_Exit		;ELSE EXIT
+
+	Move.l	4.w,a6
+	Move.l	#MemoryRequired,d0	; Amount of memory
+	Moveq.l	#2,d1			; Chip memory
+	Jsr	-198(a6)		; Allocate memory
+	Move.l	d0,ScreenPointer	; Save area of memory
+	Beq.s	NoMem_Exit		; Error-End
+
+	Bsr	Plane_Addresses		
+	Bsr	Clear_Display
+	Bsr	Init
+
+	Lea	$dff000,a6
+	Move.l	_Gfxbase,a0		;LOAD ADDRESS OF GRAPHICS LIB IN A0
+	Move.l	50(a0),Oldcop		;STORE CURRENT COPPER,ETC TO RETRIEVE LATER
+S
+	Move.l	#Newcop,50(a0)		;POINT TO OUR COPPERLIST
+
+Wait					;WAIT LOOP
+	Cmp.b	#255,$dff006		;VERTICAL BLANKING GAP 
+	Bne.s	Wait			;
+;	Move.w	#$fff,$180(a6)		;REMove TO MEASURE RASTER TIME
+
+	Bsr	Or_Blit
+
+;	Move.w	#$000,$180(a6)		;REMove TO MEASURE RASTER TIME
+	Btst	#$6,$bfe001		;QUIT LEFT MOUSE PRESSED
+	Bne.s	Wait
+Ended					;ELSE LOOP TO WAIT
+	Move.l	_Gfxbase,a0		;LOAD GRAPHICS LIB ADDRESS IN A0
+	Move.l	Oldcop,50(a0)		;RESTORE OLD COPPER TO RETURN TO EDITTER
+NoMem_Exit	
+	Move.l	4.w,a6
+	Move.l	ScreenPointer,a1	; Address to release from
+	Move.l	#MemoryRequired,d0	; Size to release
+	Jsr	-210(a6)		; Free memory
+NoLib_Exit
+	Move.l	4.w,a6			;FIND EXEC BASE
+	Move.l	_Gfxbase,a1		;LOAD GRAPHICS BASE IN A1
+	Jsr	-414(a6)		;CLOSE LIBRARY
+Exit
+	Rts				;RETURN TO EDITER
+
+Plane_Addresses				
+	Move.l	ScreenPointer,d0	; Start of Screen Memory
+	Lea	Planes,a0		; BitPlane Control Words
+	Moveq.l	#(Depth)-1,d1		; Number of Planes-1
+PlaneLoop
+	Move.w	d0,6(a0)		; Low Word of Bit-Plane 
+	Swap	d0				
+	Move.w	d0,2(a0)		; High Word of Bit-Plane
+	Swap	d0
+	Add.l	#Width,d0		; Interleaved Bit-Planes
+	Add.l	#8,a0			; Increment to Next Control Word
+	DBra	d1,PlaneLoop
+	Rts
+
+Init
+	Move.l	ScreenPointer,d0
+	Add.l	#(Width*Depth)*(Height/2)+(Width/2),d0	; Centre of Screen
+	Move.l	d0,BobAddress				; Save Address
+	Rts
+
+Clear_Display
+	Move.l	ScreenPointer,a0	; Start of Screen memory
+	Move.l	#(MemoryRequired/4)-1,d0; Number of long words 
+Clear
+	Move.l	#$fff00fff,(a0)+	; Transfer Data
+	DBra	d0,Clear		; Loop till 0
+	Rts
+
+Or_Blit
+	Lea	$dff000,a6				* Custom base
+	Move.l	#Mask,a4				* A
+	Move.l	#BobGraphics,a2				* B
+	Move.l	BobAddress,a1				* C
+	Move.l	BobAddress,a3				* D
+Or_Bob					* LOAD BLITTER WITH VALUES
+	Bsr	Wfblit
+	Move.l	a4,Bltapth(a6)				* Mask
+	Move.l	a2,Bltbpth(a6)   			* Source	
+	Move.l	a1,Bltcpth(a6)				* Background
+	Move.l	a3,Bltdpth(a6)				* Designation
+	Move.w	#-2,Bltamod(a6)				* Mask Modula
+	Move.w	#-2,Bltbmod(a6)				* Source Modula
+	Move.w	#Width-(BobWidth*2),Bltcmod(a6)		* Designation Modula
+	Move.w	#Width-(BobWidth*2),Bltdmod(a6)  	* Designation Modula
+	Move.l	#$0fca0000,Bltcon0(a6)			* Bplcon0
+	Move.l	#0,Bltcon1(a6)				* Bplcon1
+	Move.w	#$ffff,Bltafwm(a6)			* First word mask
+	Move.w	#$0000,Bltalwm(a6)  			* Last word mask
+	Move.w	#((BobHeight*BobDepth)*64)+(BobWidth),Bltsize(a6)  * Blitsize
+	Rts
+
+Wfblit
+	Btst	#14,Dmaconr(a6)				* Dmaconr
+	Bne.s	Wfblit					* Test Blitter State
+	Rts	
+
+Gfxlib	Dc.b	"graphics.library",0	
+	Even
+_Gfxbase	Dc.l	0			;LONG WORD TO STORE GFX ADDRESS
+Oldcop		Dc.l	0			;OLD COPPERLIST ADDRESS
+ScreenPointer	Dc.l	0
+BobAddress	Dc.l	0
+	Even
+
+
+Newcop
+	Dc.w	BplCon0,%0011001000000000
+	Dc.w	BplCon1,$0000			; SCROLL VALUE
+	Dc.w	BplCon2,%0000000000000001	; PRIORITIES
+	Dc.w	Bpl1Mod,Width*(Depth-1)		; Modula1
+	Dc.w	Bpl2Mod,Width*(Depth-1)		; Modula2
+	Dc.w	DdfStrt,$0038
+	Dc.w	DdfStop,$00d0		
+	Dc.w	DiwStrt,$2c81
+	Dc.w	DiwStop,$2cc1		
+						
+Planes
+	Dc.w	Bpl1pth
+	Dc.w	$0000,Bpl1ptl
+	Dc.w	$0000,Bpl2pth
+	Dc.w	$0000,Bpl2ptl
+	Dc.w	$0000,Bpl3pth
+	Dc.w	$0000,Bpl3ptl
+	Dc.w	$0000,Bpl4pth
+	Dc.w	$0000,Bpl4ptl
+	Dc.w	$0000,Bpl5pth
+	Dc.w	$0000,Bpl5ptl
+	Dc.w	$0000,Bpl6pth
+	Dc.w	$0000,Bpl6ptl
+	Dc.w	$0000
+
+Sprites						;SPRITES
+	Dc.w	Spr0pth
+	Dc.w	$0000,Spr0ptl
+	Dc.w	$0000,Spr1pth
+	Dc.w	$0000,Spr1ptl
+	Dc.w	$0000,Spr2pth
+	Dc.w	$0000,Spr2ptl
+	Dc.w	$0000,Spr3pth
+	Dc.w	$0000,Spr3ptl
+	Dc.w	$0000,Spr4pth
+	Dc.w	$0000,Spr4ptl
+	Dc.w	$0000,Spr5pth
+	Dc.w	$0000,Spr5ptl
+	Dc.w	$0000,Spr6pth
+	Dc.w	$0000,Spr6ptl
+	Dc.w	$0000,Spr7pth
+	Dc.w	$0000,Spr7ptl
+	Dc.w	$0000
+
+	Dc.w	Color00,$0000,Color01,$0ffa
+	Dc.w	Color02,$0ab0,Color03,$0a80
+	Dc.w	Color04,$0960,Color05,$0730
+	Dc.w	Color06,$0610,Color07,$0500
+
+	Dc.w	Color08,$0000,Color09,$0283
+	Dc.w	Color10,$08f4,Color11,$0095
+	Dc.w	Color12,$0243,Color13,$00ff
+	Dc.w	Color14,$0ff0,Color15,$0f0f
+
+	Dc.w	Color16,$0f00,Color17,$0b00
+	Dc.w	Color18,$0600,Color19,$0F40
+	Dc.w	Color20,$0F80,Color21,$0Fa0
+	Dc.w	Color22,$0Ff0,Color23,$000f
+	Dc.w	Color24,$004f,Color25,$008f
+	Dc.w	Color26,$00ff,Color27,$00f0
+	Dc.w	Color28,$0283,Color29,$0ff0
+	Dc.w	Color30,$0456,Color31,$0f00
+
+	Dc.w	$ffff,$fffe			;END OF COPPERLIST
+
+Mask		IncBin	Source:FM/Balls.IntMask-2
+BobGraphics	IncBin	Source:FM/Balls.IntRaw-2

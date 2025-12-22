@@ -1,0 +1,210 @@
+; Qt so install (c) Chris Young 2011
+
+(procedure p_failedsobjs
+	(if #failedsobjs
+		(message "The following shared objects failed to copy.  These will be updated on next reboot.\n\n" #failedsobjs)
+	)
+)
+
+(procedure p_schedulesobj #sobj
+	(transcript "Scheduling update of " #sobj " for next reboot")
+
+	(set #failedsobjs (cat #failedsobjs "\n" #sobj))
+
+	(makedir "Qt:lib/so-installer")
+
+	(copyfiles
+		(source (tackon #so-src #sobj))
+		(dest "Qt:lib/so-installer")
+	)
+
+	(startup "Shared object installer Qt"
+		(prompt "Adding commands to user-startup to schedule copy of " #sobj " on next reboot")
+		(help @startup-help)
+		(command "if EXISTS Qt:lib/so-installer\n")
+		(command "  copy Qt:lib/so-installer Qt:lib CLONE FORCE QUIET\n")
+		(command "  delete Qt:lib/so-installer ALL FORCE QUIET\n")
+		(command "endif\n")
+	)
+)
+
+(procedure p_comparesobj #sobj
+	(set #same 0)
+	(set #sobj-version (getversion (tackon #so-src #sobj)))
+	(if (= #sobj-version 0)
+		(
+			(if (exists (tackon "Qt:lib" #sobj))
+				(
+					(set #file-newer (earlier (tackon "Qt:lib" #sobj) (tackon #so-src #sobj)))
+					(set #old-size (getsize (tackon "Qt:lib" #sobj)))
+					(set #new-size (getsize (tackon #so-src #sobj)))
+
+					(if (AND (= #old-size #new-size) (= #file-newer 0)) (set #same 1))
+				)
+			)
+		)
+		; else if version info is available
+		(
+			(set #sobj-oldversion (getversion (tackon "Qt:lib" #sobj)))
+
+			(if (<= #sobj-version #sobj-oldversion) (set #same 1))
+		)
+	)
+)
+
+(procedure p_copysobj #sobj
+	(set #sobj-version (getversion (tackon #so-src #sobj)))
+
+	(if (= #sobj-version 0)
+		(
+			(transcript "Date compare " #sobj)
+
+			(if (exists (tackon "Qt:lib" #sobj))
+				(
+					(set #file-newer (earlier (tackon "Qt:lib" #sobj) (tackon #so-src #sobj)))
+
+					(if (= #file-newer 0)
+						(
+							(set #newer-text "has an older datestamp")
+						)
+						;else
+						(
+							(set #newer-text "has a newer datestamp")
+						)
+					)
+
+					(set #old-size (getsize (tackon "Qt:lib" #sobj)))
+					(set #new-size (getsize (tackon #so-src #sobj)))
+
+					(if (AND (= #old-size #new-size) (= #file-newer 0))
+						(
+							(set #copy 0)
+						)
+						;else
+						(
+							(if (OR (= @user-level 2) (AND (= @user-level 1) (<> #file-newer 0)))
+; Expert users are always prompted
+; Average users are prompted if the file trying to be copied is newer
+; Novice users are never prompted
+; This is roughly equivalent to (copylib (confirm))
+; No prompting occurs if the destination does not exist (silent copy)
+; or the files are the same size and the one being copied isn't newer (don't copy)
+								(
+									(set #copy
+										(askbool
+											(prompt "Copying " #sobj "...\n\n"
+												"Version to install: " #new-size " bytes\n"
+												"Version currently installed: " #old-size " bytes\n\n"
+												"The file to copy " #newer-text)
+											(help @askbool-help)
+											(default #file-newer)
+											(choices "Proceed with copy" "Skip this part")
+										)
+									)
+								)
+								;else
+								(
+									(set #copy #file-newer)
+								)
+							)
+						)
+					)
+				)
+				; else if dest file does not exist
+				(
+					(set #copy 1)
+				)
+			)
+
+			(if (<> #copy 0)
+				(
+					(if (<> #AutoInstall 1)
+						(
+							(copyfiles
+								(prompt "Copying " #sobj "...")
+								(help @copyfiles-help)
+								(source (tackon #so-src #sobj))
+								(dest "Qt:lib")
+								(optional "nofail" "force")
+							)
+						)
+						;else
+						(
+							(run "CopyStore " (tackon #so-src #sobj) " Qt:lib")
+						)
+					)
+
+					(p_comparesobj #sobj)
+					(if (= #same 0)
+						(
+							(p_schedulesobj #sobj)
+						)
+					)
+				)
+			)
+		)
+		; else if version info is available
+		(
+			(if (<> #AutoInstall 1)
+				(
+					(copylib
+						(prompt "Copying " #sobj "...")
+						(help @copylib-help)
+						(source (tackon #so-src #sobj))
+						(dest "Qt:lib")
+						(optional "nofail" "force")
+						(confirm "expert")
+					)
+				)
+				;else
+				(
+					(run "CopyStore " (tackon #so-src #sobj) " Qt:lib")
+				)
+			)
+
+			(p_comparesobj #sobj)
+			(if (= #same 0)
+				(
+					(p_schedulesobj #sobj)
+				)
+			)
+		)
+	)
+)
+
+
+(welcome)
+
+(set @default-dest "Qt:lib")
+
+(if (<> (exists "Qt:" (noreq)))
+	(
+		(message "This library requires Qt 4.7 (AmigaOS-native)")
+		(exit (quiet))
+	)
+)
+
+(set #so-src "Qt4")
+
+(p_copysobj "libqscintilla2.so")
+
+(copyfiles
+	(prompt "Copying libqscintilla2.prl")
+	(help @copyfiles-help)
+	(source "Qt4/libqscintilla2.prl")
+	(dest "Qt:lib")
+	(optional "nofail" "force")
+)
+
+(if (exists "Qt:include" (noreq))
+	(
+		(copyfiles
+			(prompt "Copying SDK files...")
+			(help @copyfiles-help)
+			(source "include")
+			(dest "Qt:include/QSci")
+			(optional "nofail" "force")
+			(all)
+		)
+	)
+)

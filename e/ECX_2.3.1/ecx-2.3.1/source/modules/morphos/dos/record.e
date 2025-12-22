@@ -1,0 +1,24 @@
+OPT MODULE
+OPT EXPORT
+
+CONST REC_EXCLUSIVE=0,
+      REC_EXCLUSIVE_IMMED=1,
+      REC_SHARED=2,
+      REC_SHARED_IMMED=3
+
+OBJECT recordlock
+  fh:LONG
+  offset:LONG
+  length:LONG
+  mode:LONG
+ENDOBJECT     /* SIZEOF=16 */
+
+/* 64bit DOS extensions - V51 */
+
+OBJECT recordlock64
+  fh:LONG
+  offset:WIDE
+  length:WIDE
+  mode:LONG
+ENDOBJECT     /* SIZEOF=24 */
+

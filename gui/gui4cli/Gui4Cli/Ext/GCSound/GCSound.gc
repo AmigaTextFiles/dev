@@ -1,0 +1,815 @@
+G4C
+
+WINBIG 40 11 226 84 'GCSound 8SVX Player'
+WinType 11110001
+resinfo 8 640 256
+
+; ===============================================================
+;       general events
+; ===============================================================
+
+xOnLoad
+   mode = DIR                             ; can be SAMPLE or DIR
+   FAVFLAG = 0
+   selswitch = 0                          ; delect/deselect dir lv switch
+   setgad #this 10 hide                   ; hide the samples lv
+   setgad gcsound.gc 2 HIDE               ; and it's text box
+   setgad gcsound.gc 11 HIDE              ; the fav lv
+   extract gcsound.gc guipath mypath      ; save lists of files -
+   JoinFile $mypath Lists prefs           ; in my dir/Lists
+   joinfile $prefs List_1 prefs
+   GuiOpen #this
+   name = ''                              ; set these for safety
+   volume = 64
+   speed = -1
+   times = 0
+   status = IDLE
+   setwin = CLOSED
+   gcsound.set/oldspeed = -1
+   run 'guis:ext/gcsound/gcsound'         ; load extension
+
+xOnClose
+   guiclose #this
+   setgad #this 5 on                      ; appicon on
+
+xOnQuit
+   guiquit gcsound.pop
+   guiquit gcsound.dirpop
+   guiquit gcsound.set
+   call gcsound quit
+	ifexists port HIPPOPLAYER
+   	sendrexx HIPPOPLAYER QUIT
+	endif
+
+xOnRMB
+   if $mode = SAMPLE
+      guiopen gcsound.pop
+   else
+		if $FAVFLAG != 0
+			FAVFLAG = 0
+			lvuse #this 1
+			lvmode DIR
+			lvdir #$lastdir
+	   	setwintitle #this '$$lv.dir'
+			setgad #this 50 on
+		endif
+		guiopen gcsound.dirpop
+   endif
+
+xAppicon -1 -1 :gcsound.gc 'GCSound' '' OFF
+   gadid 5
+   guiopen #this
+   setgad #this 5 off
+
+xOnFail
+   guiwindow #this resume
+	setwintitle #this '* Error: $$retcode'
+
+; ===============================================================
+;       the dir listview
+; ===============================================================
+
+XLISTVIEW 0 0 204 85 "" file "" 0 DIR
+   gadid 1
+	attr resize 0022
+   gadfont #mono 8 000
+   ; LVColors   2 1 3 2 ; uncomment this line for genlocking
+
+	; if this flag is set we're in fav choose mode..
+	if $FAVFLAG = 1
+		FAVFLAG = 0
+		cutvar file cut word -1 file
+		extract file clean file
+		lvmode DIR
+		lvdir #$file
+   	setwintitle #this '$$lv.dir'
+		lastdir = $$lv.dir
+		setgad #this 50 on
+		stop
+	endif
+
+	; get file name for .mod checking
+	local fname	
+	extract file file fname
+
+   ; on choosing a file by double click, play it..	
+   if $file H= 'FORM????8SVX'
+      call gcsound sound $file 0 64 -1
+
+	; check for module..
+	elseif $fname[-4][4] == .mod
+	or $fname[0][4] == mod.
+		ifexists port HIPPOPLAYER
+			sendrexx HIPPOPLAYER EJECT
+			sendrexx HIPPOPLAYER 'PLAY $file'
+   	else
+      	guiload guis:tools/rtn/filepop $file
+   	endif
+
+   else
+      guiload guis:tools/rtn/filepop $file
+   endif
+
+xlvdirhook 1
+	lastdir = $$lv.dir
+	if $$lv.dir > ''
+	   setwintitle #this '$$lv.dir'
+	else
+		setwintitle #this 'Disks'
+	endif
+
+XLISTVIEW 0 0 204 85 "" favfile "" 0 MULTI		; for favourites
+   gadid 11
+
+; ===============================================================
+;       the samples listview - (should make it DBase)
+; ===============================================================
+
+XLISTVIEW 0 0 204 84 "" sample t:soundtemp 5 MULTI
+   gadid 10
+	attr resize 0022
+   gadfont #mono 8 000
+   ;LVColors   2 1 3 2        ; uncomment this line for genlocking
+
+   gosub gcsound.gc splitline '$sample'
+   if $status = LOAD
+      call gcsound play $name $times $volume $speed
+      status = PLAY
+      gosub gcsound.gc joinline
+      lvput '$rec'
+   elseif $status = IDLE
+      call gcsound load $path $name
+      call gcsound play $name $times $volume $speed
+      status = PLAY
+      gosub gcsound.gc joinline
+      lvput '$rec'
+   endif
+   lvsort ASC
+
+; ===============================================================
+;       dir lv control buttons
+; ===============================================================
+ 
+XBUTTON 206 0 20 12 "P"
+   gadid 50
+	attr resize 2000
+   lvuse #this 1
+   lvdir parent
+   setwintitle #this '$$lv.dir'
+
+XBUTTON 206 12 20 12 "D"
+   gadid 50
+	attr resize 2000
+   lvuse #this 1
+   lvdir disks
+   setwintitle #this 'Disks'
+
+XBUTTON 206 24 20 12 "S"
+	gadhelp 'Select/Unselect all items'
+   gadid 50
+	attr resize 2000
+   lvuse #this 1
+   if $selswitch = 1
+      lvdir all
+      selswitch = 0
+   else
+      lvdir none
+      selswitch = 1
+   endif
+
+XBUTTON 206 36 20 12 "X"
+	gadhelp 'Delete selected files'
+	attr resize 2000
+	gadid 50
+	lvuse #this 1
+	lvaction delete ask
+
+; ===============================================================
+;       dir lv - add selected
+; ===============================================================
+
+XBUTTON 206 48 20 12 +
+	gadhelp	'Add selected to list'
+   gadid 50
+	attr resize 2000
+   lvuse gcsound.gc 1
+   lvmulti first
+   while $$lv.line > ''            ; skip dirs
+   and $$lv.type == DIR
+      lvmulti next
+   endwhile
+   while $$lv.line > ''            ; skip dirs
+      if $file H= 'FORM????8SVX'
+         lvuse gcsound.gc 10
+         lvsearch '$file' ci first ; avoid duplicate entries
+         if $$lv.line = ''
+            extract file file fname
+            rec = '                              '
+            rec[0][30] = $fname
+            appvar rec '0 64 -1 $file'
+            lvadd $rec
+         endif
+         lvuse gcsound.gc 1
+      endif
+      lvmulti off
+      lvmulti next
+   endwhile
+
+; ===============================================================
+;       Store dir
+; ===============================================================
+
+XBUTTON 206 60 20 12 "f+"
+	gadhelp 'Store current dir into favourites'
+	gadid 50
+	attr resize 2000
+	lvuse #this 1
+	dir = $$lv.dir
+	lvuse #this 11 		; the dir store
+	lvsearch '$dir' cs first
+	if $$search.pos > ''
+		stop	; dir already exists..
+	endif
+	extract dir file dname	; get the dir name
+	lvadd '$dname\t\t\t\t$dir'
+
+; ===============================================================
+;       dir lv - switch to samples lv
+; ===============================================================
+
+XBUTTON 206 72 20 12 "Ok"
+	gadhelp 'Goto file list'
+   gadid 50
+	attr resize 2000
+	gosub #this SetSampleMode
+
+; ===============================================================
+;       Select lv - buttons
+; ===============================================================
+
+XBUTTON 206 0 20 12 "<"
+   Gadhelp 'Select samples'
+   gadid 2
+	attr resize 2000
+   gosub #this setdirmode
+
+XBUTTON 206 12 20 12 "P"
+   Gadhelp 'Play selected samples'
+   gadid 2
+	attr resize 2000
+   gosub gcsound.pop playsamp
+
+XBUTTON 206 24 20 12 "?"
+   Gadhelp 'Adjust sample'
+   gadid 2
+	attr resize 2000
+   lvuse gcsound.gc 10
+   lvmulti first
+   if $$lv.line > '' 
+      gosub gcsound.set settings '$gcsound.gc/sample'
+   endif
+
+XBUTTON 206 36 20 12 "U"
+   Gadhelp 'Unload all samples'
+   gadid 2
+	attr resize 2000
+   lvuse gcsound.gc 10
+   lvmulti all
+   setgad gcsound.gc 10 HIDE
+   guiwindow gcsound.gc wait
+   gosub gcsound.pop unload
+   setgad gcsound.gc 10 SHOW
+   guiwindow gcsound.gc resume
+   lvmulti none
+
+XBUTTON 206 48 20 12 "R"
+   Gadhelp 'Remove selected from list'
+   gadid 2
+	attr resize 2000
+   gosub gcsound.pop remove
+
+XBUTTON 206 60 20 12 "L"
+   Gadhelp 'Load new list'
+   gadid 2
+	attr resize 2000
+   local loadname
+   loadname = ''
+   ReqFile -1 -1 300 -40 'Load list:' LOAD loadname #$prefs
+   if $loadname > ''
+      lvuse #this 10
+      lvchange $loadname
+      prefs = $loadname
+   endif
+
+XBUTTON 206 72 20 12 "S"
+   Gadhelp 'Save list'
+   gadid 2
+	attr resize 2000
+   local savename
+   savename = ''
+   ReqFile -1 -1 300 -40 'Save list:' SAVE savename #$prefs
+   if $savename > ''
+      lvuse #this 10
+      lvsave $savename
+   endif
+
+; ===============================================================
+;       ROUTINE - Split the line into it's components
+; ===============================================================
+
+xRoutine splitline line
+   ; split the line into it's components
+
+   origline = '$line'   ; store original line
+   parsevar line
+
+   ; get name & mode
+   name = $$parse.0
+   if $name[0][5] = '[32m'
+      status = LOAD
+      name = $name[5]
+   elseif $name[0][7] = '[32;8m'
+      status = PLAY
+      name = $name[7]
+   else
+      status = IDLE
+   endif
+   extract name clean name
+
+   times  = $$parse.1
+   extract times clean times
+   volume = $$parse.2
+   extract volume clean volume
+   speed  = $$parse.3
+   extract speed clean speed
+   path = $$parse.4
+   extract path clean path
+
+   if $setwin = OPEN
+      gosub gcsound.set initsetgads
+   endif
+
+; ===============================================================
+;       ROUTINE - Join the line & put it back in the list
+; ===============================================================
+
+xRoutine joinline
+   rec = '                              '
+   rec[0][30] = $name
+   appvar rec '$times $volume $speed $path'
+
+   ; add esc seq
+   if $status = PLAY
+      rec = '[32;8m$rec'
+   elseif $status = LOAD
+      rec = '[32m$rec'
+   endif
+
+; ===============================================================
+;       ROUTINE - find line place & put it
+; ===============================================================
+
+xRoutine putline
+   ; look for old line & replace it
+
+   lvuse gcsound.gc 10
+   lvsearch '$path' ci first
+   if $$lv.line > ''
+      lvput '$rec'
+   else
+      ezreq 'Sample $name was removed!' OK ''
+   endif
+
+; ===============================================================
+;       ROUTINE - Set gui looks
+; ===============================================================
+
+xRoutine SetDirMode              ; Set dir lv mode
+	setgad gcsound.gc 1  SHOW
+	setgad gcsound.gc 50  SHOW
+	setgad gcsound.gc 10 HIDE
+	setgad gcsound.gc 2 HIDE
+	redraw gcsound.gc
+	gcsound.gc/mode = DIR
+	lvuse gcsound.gc 1
+	if $$lv.dir > ''
+		setwintitle gcsound.gc '$$lv.dir'
+	else
+		setwintitle gcsound.gc 'Disks'
+	endif
+	; lvuse gcsound.gc 10
+	; lvmulti all
+	; gosub gcsound.pop abort    ; abort all playing sounds
+
+xRoutine SetSampleMode
+   gcsound.gc/mode = SAMPLE
+   setgad gcsound.gc 10 SHOW               ; show the samples lv
+   setgad gcsound.gc 2 SHOW                ; show the textin gad
+   setgad gcsound.gc 1  HIDE               ; hide dir lv
+   setgad gcsound.gc 50  HIDE              ; hide all dir lv gads
+   redraw gcsound.gc
+   setwintitle gcsound.gc 'GCSound 8SVX player'
+
+
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+; ###############################################################
+
+        NEWFILE gcsound.pop     ; pop-up on RMB - SAMPLE mode
+
+; ###############################################################
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+WinBig 0 0 80 120 ""
+WinType 00001000
+winonmouse 30 22 
+varpath gcsound.gc
+
+xOnRMB 
+guiclose #this
+
+xOnInactive
+guiclose #this
+
+; ===============================================================
+;       Change to dir lv
+; ===============================================================
+
+XBUTTON 0 0 0 15 "<< Select"
+	guiclose #this
+	gosub gcsound.gc setdirmode
+
+; ===============================================================
+;       Play selected sample
+; ===============================================================
+
+XBUTTON 0 15 0 15 "Play"
+	gadhelp 'Play first selected samples'
+	guiclose #this
+	gosub gcsound.pop playsamp
+
+XRoutine playsamp
+	lvuse gcsound.gc 10
+	lvmulti first
+	while $$lv.line > ''
+	   gosub gcsound.gc splitline '$sample'
+	   if $status = LOAD
+	      call gcsound play $name $times $volume $speed
+	      status = PLAY
+	      gosub gcsound.gc joinline
+	      lvput '$rec'
+	   elseif $status = IDLE
+	      call gcsound load $path $name
+	      call gcsound play $name $times $volume $speed
+	      status = PLAY
+	      gosub gcsound.gc joinline
+	      lvput '$rec'
+	   endif
+	   if $$retcode > 0     ; error = audio is full
+	      lvmulti none
+	      stop
+	   endif
+	   lvmulti off
+	   lvmulti next
+	endwhile
+	lvsort ASC
+
+; ===============================================================
+;       stop current/All sample
+; ===============================================================
+
+XBUTTON  0 30 60 15 "Stop"
+	gadhelp 'Abort selected sample'
+	guiclose #this
+	lvuse gcsound.gc 10
+	gosub #this abort
+
+xroutine abort  ; also used below
+	lvmulti first
+	while $$lv.line > ''
+	   if $sample[4][1] = ';'
+	      gosub gcsound.gc splitline '$sample'
+	      call gcsound stop $name
+	      status = LOAD
+	      gosub gcsound.gc joinline
+	      lvput '$rec'   ; set plain white
+	   endif
+	   lvmulti off
+	   lvmulti next
+	endwhile
+
+XBUTTON 60 30 20 15 "A"         ; stop all samples
+	gadhelp 'Abort all samples'
+	guiclose #this
+	lvuse gcsound.gc 10
+	lvmulti all
+	setgad gcsound.gc 10 HIDE       ; for speed
+	guiwindow gcsound.gc wait
+	gosub #this abort
+	setgad gcsound.gc 10 SHOW
+	guiwindow gcsound.gc resume
+	lvmulti none
+
+; ===============================================================
+;       UnLoad selected samples
+; ===============================================================
+
+XBUTTON 0 45 60 15 "Unload"
+	gadhelp 'Unload selected samples from memory'
+	guiclose #this
+	lvuse gcsound.gc 10
+	gosub #this unload
+
+xRoutine unload
+	lvmulti first
+	while $$lv.line > ''
+	   if $sample[0][1] = ''       ; if loaded or playing   
+	      gosub gcsound.gc splitline '$sample'
+	      call gcsound unload $name
+	      status = IDLE
+	      gosub gcsound.gc joinline
+	      lvput '$rec'  ; put here for speed
+	   endif
+	   lvmulti off
+	   lvmulti next
+	endwhile
+
+XBUTTON 60 45 20 15 "A"         ; unload all samples
+	gadhelp 'Abort all samples'
+	guiclose #this
+	lvuse gcsound.gc 10
+	lvmulti all
+	setgad gcsound.gc 10 HIDE       ; for speed
+	guiwindow gcsound.gc wait
+	gosub #this unload
+	setgad gcsound.gc 10 SHOW
+	guiwindow gcsound.gc resume
+	lvmulti none
+
+; ===============================================================
+;       Load selected samples
+; ===============================================================
+
+XBUTTON 0 60 0 15 "Load"
+	gadhelp 'Load selected samples into memory for fast starting..'
+	guiclose #this
+	lvuse gcsound.gc 10
+	lvmulti first
+	while $$lv.line > ''
+	   gosub gcsound.gc splitline '$sample'
+	   if $status = IDLE
+	      call gcsound load '$path' '$name'
+	      lvput '[32m$sample'
+	   endif
+	   lvmulti off
+	   lvmulti next
+	endwhile
+
+
+; ===============================================================
+;       Settings
+; ===============================================================
+
+XBUTTON 0 75 0 15 "Settings"
+	lvuse gcsound.gc 10
+	lvmulti first
+	if $$lv.line > '' 
+	   gosub gcsound.set settings '$gcsound.gc/sample'    ; set vol, speed etc
+	endif
+
+; ===============================================================
+;       remove sample
+; ===============================================================
+
+XBUTTON 0 90 0 15 "Remove"
+	gadhelp 'Unload and remove selected samples from list'
+	guiclose #this
+	gosub #this remove
+
+xroutine remove
+	lvuse gcsound.gc 10
+	lvmulti first
+	while $$lv.line > ''
+	   if $sample[0][1] = ''
+	      gosub gcsound.gc splitline '$sample'
+	      call gcsound unload $name
+	   endif
+	   lvdel -1
+	   lvmulti next
+	endwhile
+
+; ===============================================================
+;       quit
+; ===============================================================
+
+XBUTTON 0 105 0 15 "Quit"
+	gadhelp 'Stop all sounds and quit'
+	guiclose #this
+	ezreq 'Quit GCSound ?' Quit|CANCEL choice
+	if $choice = 1
+	   GuiQuit gcsound.gc
+	endif
+
+
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+; ###############################################################
+
+        NEWFILE gcsound.dirpop   ; pop-up on RMB - DIR mode
+
+; ###############################################################
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+WinBig 0 0 80 90 ""
+WinType 00001000
+winonmouse 30 22 
+varpath gcsound.gc
+
+xOnRMB 
+	guiclose #this
+
+xOnInactive
+	guiclose #this
+
+xBefore
+	guiclose #this
+
+; ===============================================================
+;   Stop sounds
+; ===============================================================
+
+XBUTTON 0 0 0 15 "Stop"
+	gadhelp 'Stop & unload all sounds'
+	call gcsound stop ; stop all sounds
+	ifexists port HIPPOPLAYER
+		sendrexx HIPPOPLAYER EJECT
+		sendrexx HIPPOPLAYER CLEAR
+	endif
+
+; ===============================================================
+;   Choose from favourites
+; ===============================================================
+
+XBUTTON 0 15 0 15 "Fav"
+	gadhelp 'Choose dir from favourites list'
+	lvuse gcsound.gc 11
+	lvgo first
+	lvclip copy -1 paste gcsound.gc 1
+	lvuse gcsound.gc 1
+	lvmode multi
+	gcsound.gc/FAVFLAG = 1
+	setgad gcsound.gc 50 on
+
+XBUTTON 0 30 0 15 ""
+XBUTTON 0 45 0 15 ""
+XBUTTON 0 60 0 15 ""
+
+XBUTTON 0 75 0 15 "Quit"
+	gadhelp 'Stop all sounds and quit'
+	ezreq 'Quit GCSound ?' Quit|CANCEL choice
+	if $choice = 1
+	   GuiQuit gcsound.gc
+	endif
+
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+; ###############################################################
+
+        NEWFILE gcsound.set     ; pop-up on dblclk - SAMPLE mode
+
+; ###############################################################
+; +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+; %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+WINBIG 26 32 302 88 gcsound.set
+WinType 11110001
+varpath gcsound.gc
+BOX 0 0 0 0 out button
+
+xOnOpen
+	setwin = OPEN
+
+xOnClose
+	setwin = CLOSED
+
+; ===============================================================
+;       the routine that gets called
+; ===============================================================
+
+xroutine settings sample
+	guiopen #this
+	setgad #this 43 on              ; set on play button (if it was off)
+
+	gosub gcsound.gc splitline '$sample'
+
+	if $status != LOAD              ; play button
+	   setgad #this 43 OFF
+	endif
+
+	; if sample is loaded, get actual values
+	if $status != IDLE
+	   call gcsound info $name
+	   info = $$call.ret
+	   cutvar info cut word 1 volume
+	   extract volume clean volume
+	   extract info clean speed
+	endif
+	gosub #this initsetgads
+
+
+xRoutine initsetgads    ; also called from gcsound.gc
+	update #this 2 $times
+	update #this 1 $volume
+	update #this 3 $speed
+	update #this 31 $speed
+	setwintitle #this '$name'
+
+	; init speed gads
+	if $speed = -1
+	   update #this 32 1
+	   setgad #this 3  OFF
+	   setgad #this 31 OFF
+	   usedef = ON
+	else
+	   update #this 32 0
+	   setgad #this 31 ON
+	   setgad #this 3  ON
+	   usedef = OFF
+	endif
+
+; ===============================================================
+;       volume
+; ===============================================================
+
+CTEXT 15 3 "Volume (0-64):" #screen 8 2 0 "0001"
+XHSLIDER 9 15 254 12 "" volume 0 64 64 "%ld"
+	gadid 1
+	call gcsound volume $name $volume
+	gosub gcsound.gc joinline
+	gosub gcsound.gc putline
+
+; ===============================================================
+;       times (doesn't work well yet..)
+; ===============================================================
+
+CTEXT 15 27 "Times (0=forever):" #screen 8 2 0 "0001"
+XHSLIDER 9 39 254 12 "" times 0 100 0 "%ld"
+	gadid 2
+	call gcsound times $name $times
+	gosub gcsound.gc joinline
+	gosub gcsound.gc putline
+
+; ===============================================================
+;       speed
+; ===============================================================
+
+CTEXT 15 57 "Speed:" #screen 8 2 0 "0001"
+
+; ============== textin gad
+
+XTEXTIN 69 54 83 14 "" speed "214" 100
+	gadid 31
+	if $speed > 124
+	and $speed < 301
+	    setgad #this 3 ON
+	    update #this 3 $speed
+	else
+	    setgad #this 3 OFF
+	endif
+	call gcsound speed $name $speed
+	gosub gcsound.gc joinline
+	gosub gcsound.gc putline
+
+; ============== checkbox
+
+XCHECKBOX 234 57 26 11 "Default" usedef ON OFF ON
+	gadid 32
+	if $usedef = ON
+	   oldspeed = $speed
+	   speed = -1
+	   call gcsound speed $name -1
+	   setgad #this 3 OFF           ; set slider off        
+	   setgad #this 31 OFF          ; set textin off        
+	else 
+	   speed = $oldspeed
+	   call gcsound speed $name $speed
+	   setgad #this 3 ON            ; set slider on 
+	   setgad #this 31 ON           ; set textin on
+	endif
+	gosub gcsound.gc joinline
+	gosub gcsound.gc putline
+
+; ============== slider
+
+XHSLIDER 9 69 254 12 "" speed 125 300 214 "%ld"
+	gadid 3
+	update #this 31 $speed
+	call gcsound speed $name $speed
+	gosub gcsound.gc joinline
+	gosub gcsound.gc putline
+
+
+
+

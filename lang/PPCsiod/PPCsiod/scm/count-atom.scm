@@ -1,0 +1,17 @@
+(define (c-atom l)
+        (define (count-a l)
+                (do ((count 0)
+                     (pila (make-pila)))
+                    ((and (atom? l) (empty-pila? pila)) 
+                     (set! count (+ count 1)) count)
+                    (cond ((atom? l) (set! count (+ count 1))
+                                     (set! l (top pila))
+                                     (pop! pila))
+                          (else (push! (car l) pila)
+                                (set! l (cdr l))))))
+         (count-a l))
+
+(define (count-atom l)
+        (if (atom? l)
+            1
+            (+ (count-atom (car l)) (count-atom (cdr l)))))

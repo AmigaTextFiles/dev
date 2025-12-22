@@ -1,0 +1,373 @@
+CREATING A SMARTFIELDS PROGRAM
+
+
+The following section describes the basic items you need to incorporate into
+your programs to use SmartFields.  The code segments were taken from the e.c
+example program.  You may wish to print a copy of the source code to follow
+along.
+
+
+    #include <console/console.h>
+    #include <console/fields.h>
+    #include <console/functions.h>
+
+You will most likely need the first two include files in all of your
+programs.  The console/functions.h file was provided for your convenience so
+that you do not have to redeclare the SmartFields functions throughout your
+program.
+
+    struct IntuitionBase *IntuitionBase = NULL;
+    struct GfxBase       *GfxBase = NULL;
+    struct Window        *win = NULL;
+    struct RastPort      *rp;
+
+You need to open both the intuition.library and the graphics.library, as well
+as your own window.  The method above uses the library and window pointers
+themselves as flags indicating whether they have been opened.  By initially
+setting them to NULL, the end_program() function can detect whether it needs
+to close them.
+
+    #define STRING_TEXT 1,0,JAM1,-3,-11,NULL
+    struct IntuiText name_text = { STRING_TEXT, (STRPTR)"Name", NULL };
+
+A quick word on structure initialization:  We feel that pre-initializing
+Intuition (and SmartFields) structures is not only easier, but quicker and
+clearer than dynamically initializing them.  The exception to this, of
+course, is when you have multiple identical or nearly identical structures.
+
+Pre-initialize IntuiText structures to hold your field titles.  The above
+settings are recommended as shown in the "Field Layout" section of this
+manual.
+
+    SHORT name_pairs2[] = { 2,11, 274,11, 274, 1, 275, 1, 275,11 };
+    SHORT name_pairs1[] = { 0, 0, 273, 0, 273,10,   0,10,   0, 0 };
+
+    #define BORDER2 -3,-2,2,0,JAM1,5
+    #define BORDER1 -3,-2,1,0,JAM1,5
+    struct Border name_border2 = { BORDER1, name_pairs1, NULL };
+    struct Border name_border1 = { BORDER2, name_pairs2, &name_border2 };
+
+Pre-initialize your border pairs and Border structures.  The above method
+creates a white-line border around the field with a thin black "shadow"
+background.
+
+Also initialize any Image structures which you may have.  Remember that
+graphics data must reside in CHIP RAM to be displayed properly.
+
+    #define NAME_SIZE 30
+    UBYTE name_input[NAME_SIZE];
+    UBYTE name_undo[NAME_SIZE];
+    UBYTE name_dup[NAME_SIZE];
+
+Define your Buffer, UndoBuffer, and DupBuffer for each field to be at least
+MaxChars large.  Remember that an UndoBuffer and a DupBuffer are not
+required, but are nice for users.
+
+    #define NAME_FIELD 1
+
+Create meaningful FieldID definitions for field identification throughout
+your program.  This parameter is especially handy in switch statements where
+you cannot check for field addresses.
+
+    struct FieldMask phon_mask = MASK_ENTIRE_DISABLED;
+
+Define any masks and set them equal to either MASK_ENTIRE_DISABLED or
+MASK_ENTIRE_ENABLED as defined in console/fields.h.  Remember, a C program
+does not automatically set variables to zero upon execution.
+
+    #define FIRST_FIELD name_field
+    struct Field name_field = {
+      NULL, LATER, name_input, name_undo, name_dup, 1, 0,
+      CON_PLAIN, FIELD_ENABLED, NULL, NULL, LEFT_EDGE, 28,
+      0, 0, NAME_SIZE, 0, 0, 0, 0, &name_text, &name_border1,
+      NULL, NAME_FIELD, NULL, NULL, NULL
+    };
+    ...
+    struct Field numb_field = {
+      &phon_field, NULL, numb_input, numb_undo, numb_dup, 1, 0,
+      CON_PLAIN, FIELD_ENABLED, &numb_mask, NULL, RIGHT_EDGE, 138,
+      0, 0, NUMBER_SIZE, 0, 0, 0, 0, &numb_text, &numb_border1,
+      NULL, NUMB_FIELD, NULL, NULL, NULL
+    };
+    #define FINAL_FIELD numb_field
+
+Initialize your Field structures.  Note that the PrevField pointer for the
+first field and the NextField pointer for the final field are set to NULL
+because they are at each end of the list.  Also notice that the PrevField
+pointers are set to the previous field listed, but the NextField pointer is
+set to the value LATER (NULL) as defined in toolkit/toolkit.h.  This is
+because the field_link() function (called by the field_open() function) sets
+these links.  The FIRST_FIELD and FINAL_FIELD definitions are not necessary,
+but are often convenient.
+
+    struct FieldHeader field_header = { INIT_FIELD_HEADER };
+
+Define a FieldHeader structure to be used for the field list in your window
+and initialize it using the INIT_FIELD_HEADER definition.  This sets all
+pointers to NULL to indicate that none of the required devices have been
+opened yet (which is important in case your program terminates prematurely).
+
+    #define CURRENT_FIELD field_header.CurrentField
+
+This definition is not required but often helpful.
+
+    UBYTE con_buffer[CONSOLE_BUFFER_SIZE];
+
+Define the console buffer (which is used to store console input) to be at
+least as large as CONSOLE_BUFFER_SIZE as defined in console/console.h.  A
+pointer to this buffer is stored in the FieldHeader structure by the
+field_open() function.
+
+    struct NewWindow new_window = {
+      0, 0, 430, 200, 0, 1, CLOSEWINDOW | MENUPICK |
+      MOUSEBUTTONS | REFRESHWINDOW, ACTIVATE | SMART_REFRESH |
+      WINDOWCLOSE | WINDOWDEPTH | WINDOWDRAG | WINDOWSIZING,
+      NULL, NULL, (STRPTR)"SmartFields Example Program v1.0",
+      NULL, NULL, 50, 25, 430, 200, WBENCHSCREEN
+    };
+
+The only item in the NewWindow structure required by SmartFields is the
+MOUSEBUTTONS flag in the IDCMPFlags parameter.  This lets Intuition know that
+you want to be notified each time the user clicks a mouse button so that the
+field_click() function can determine if the mouse was clicked in a field.  In
+most cases, you will also want the REFRESHWINDOW flag to notify you when you
+need to refresh the field display.
+
+    #define WAIT_FOR_INPUT Wait(1L<<field_header.ReadPort->mp_SigBit|\
+                           1L<<win->UserPort->mp_SigBit)
+    #define CONSOLE_INPUT  message=(struct Message *)\
+                           GetMsg(field_header.ReadPort)
+    #define WINDOW_INPUT   imessage=(struct IntuiMessage *)\
+                           GetMsg(win->UserPort)
+
+These definitions make your Amiga C program seem just a little bit less
+cryptic.
+
+    main()
+    {
+      open_all();
+      initialize();
+      get_inputs();
+    }
+
+Just a personal opinion here: keep your main() segment short and sweet.
+
+    draw_screen()
+    {
+      field_refresh( &field_header, &FIRST_FIELD, -1, CURRENT_FIELD );
+    }
+
+This function was set up to be called 1) when the window is first displayed,
+and 2) each time the window needs refreshing.  The field_refresh() function
+draws each field's title, border, imagery, and contents.  This also moves the
+cursor to the first field because CURRENT_FIELD is initially set to point to
+the first field by the field_open() function.
+
+    end_program( return_code )
+      int return_code;
+    {
+      field_close( &field_header );
+      if (win)           { ClearMenuStrip( win ); CloseWindow( win );
+    }
+      if (GfxBase)         CloseLibrary( GfxBase );
+      if (IntuitionBase)   CloseLibrary( IntuitionBase );
+      exit( return_code );
+    }
+
+Another programming hint: have a single program-ending function, and use the
+window/device/library pointers themselves as flags.  If there was the
+possibility that this end_program() function might be executed more than once
+during the program (for example, if this program is actually a sub-program of
+a larger program), you would need to reset the pointers (win, GfxBase,
+IntuitionBase) back to NULL after you closed their corresponding devices.
+
+The field_close() function closes the console and other required devices that
+were opened by the field_open() function.  This must occur BEFORE the window
+is closed, otherwise the program may crash.
+
+Notice the libraries are closed only if they were opened.  All good
+programmers clean up after themselves.  Also, using the exit() function to
+pass a return code back to the CLI is a good debugging method.
+
+    get_inputs()
+    {
+      struct  IntuiMessage *imessage;
+      ULONG   key;
+      struct  Message *message;
+      struct  Field *where;
+
+Although this is not perfectly structured programming, it is easier to make
+the get_inputs() function a forever-loop and call the end_program() function
+when the user clicks the close gadget.  The imessage variable is used to
+point to Intuition messages, and the message variable is used to point to
+console messages.
+
+    FOREVER {
+      WAIT_FOR_INPUT;
+
+This is NOT a busy wait.  The task sleeps until the user presses a key or
+clicks the mouse while the window is active.
+
+    if (CONSOLE_INPUT) {
+      key = field_input( &field_header );
+      switch (key) {
+        case FIELD_SWALLOW:  break;
+        case FIELD_RETURN:
+        case FIELD_NEXT:     next_field(); break;
+        case FIELD_PREVIOUS: previous_field(); break;
+        case FIELD_FIRST:
+          if (working_ven)
+            field_goto( &field_header, &add1_field );
+          break;
+        case FIELD_FINAL:
+          if (working_ven)
+            field_goto( &field_header, &FINAL_FIELD );
+          break;
+      } /* switch key */
+    }   /* if keyboard input */
+
+Note that there are only a few possible codes returned by the field_input()
+function (listed in console/fields.h).  Because the field_input() function
+handles most of the necessary commands, the most common return code will be
+FIELD_SWALLOW, and therefore this should be at the top of the list.  Notice
+that it is up to you to decide what you want to do when the user presses one
+of the function, control, or cursor keys (ignoring the control keys used by
+SmartFields).
+
+    while (WINDOW_INPUT) {
+      switch (imessage->Class) {
+
+You need to use a while() statement when checking for Intuition messages, for
+they may be queued up.
+
+    case MOUSEBUTTONS:
+      if (imessage->Code == LEFT_MOUSE_BUTTON)
+        if (where = field_click( &field_header,
+                    imessage->MouseX, imessage->MouseY ))
+          if (working_ven ||
+            (!working_ven && where->FieldID == NAME_FIELD)) {
+            where->BufferPos = field_header.BufferPos;
+            field_goto( &field_header, where );
+          }
+      break;
+
+Since a mouse click is the most common input event, this should be the first
+case after the switch() statement.  Note that you must also check for the
+LEFT_MOUSE_BUTTON code because a MOUSEBUTTONS event is generated for both
+left and right mouse button clicks.
+
+If you are interested in which field the mouse was clicked, call the
+field_click() function.  It will return to you a pointer to the field in
+which the mouse was clicked or NULL if it was not clicked in any field.
+Notice that it is up to you whether the cursor should actually move to that
+field.  If you do, you need to set the BufferPos parameter of the field to
+which you are moving equal to the BufferPos in which the mouse was clicked
+(returned in the FieldHeader structure by the field_click() function).  Then
+you need to call the field_goto() function to move the cursor to that field.
+
+    case REFRESHWINDOW:
+      draw_screen();
+      BeginRefresh( win );
+      EndRefresh( win, TRUE );
+      break;
+
+As mentioned earlier, you can create a single function to not only draw in
+the window initially, but also when it needs refreshing.  Note that if this
+function contains any console function (the draw_screen() function contains
+the field_refresh() function), it must be called BEFORE the BeginRefresh()/
+EndRefresh() pair, because the BeginRefresh() function locks the layers the
+console device uses to render to cursor.  If you place it between the pair,
+the cursor may partially or completely disappear.
+
+    case CLOSEWINDOW:
+      end_program( 0 );
+      break;
+
+This is how you break out of the forever-loop.
+
+    ReplyMsg( imessage );
+
+Don't forget to respond to your Intuition messages so the system doesn't get
+bogged down.  The field_input() function automatically responds to the
+console messages.
+
+    initialize()
+    {
+      mask_chars( &phon_mask, "0123456789()-/ ", MASK_ENABLE );
+      mask_range( &numb_mask, '0', '9', MASK_ENABLE );
+      draw_screen();
+    }
+
+You will want to initialize your masks before rendering the fields, however
+you may change the masks at any time.  Notice the initial call to the
+draw_screen() function.
+
+    open_all()
+    {
+      int error;
+
+      if (!(IntuitionBase = (struct IntuitionBase *)
+            OpenLibrary( "intuition.library", LIBRARY_VERSION )))
+        end_program( 0x0100 );
+      if (!(GfxBase = (struct GfxBase *)
+            OpenLibrary( "graphics.library", 0L )))
+        end_program( 0x0101 );
+
+     if (!(win = OpenWindow( &new_window )))
+        end_program( 0x0102 );
+      rp = win->RPort;
+
+      if (error = field_open( win, &field_header, &FIRST_FIELD,
+                              &FINAL_FIELD, con_buffer ))
+        end_program( error );
+    }
+
+This is where you need to open the required libraries, windows, and devices.
+Notice that if any of these fail to open, the end_program() function is
+called immediately and sent a return code for debugging purposes.  The
+field_open() function opens the console and other devices required for
+SmartFields operation.  Notice the FIRST_FIELD and LAST_FIELD definitions.
+The FIRST_FIELD is made current by this function.
+
+    field_clear( &field_header, &FIRST_FIELD, -1, &FIRST_FIELD );
+
+This line is contained in the new_vendor() function of the e.c source code.
+It is used to clear all of the fields when 1) the user has decided to start
+over, or 2) the user has successfully entered a vendor record.
+
+    previous_field()
+    {
+      if (CURRENT_FIELD->FieldID == CONT_FIELD) {
+             if (add4_input[0]) field_goto( &field_header, &add4_field );
+        else if (add3_input[0]) field_goto( &field_header, &add3_field );
+        else if (add2_input[0]) field_goto( &field_header, &add2_field );
+        else                    field_goto( &field_header, &add1_field );
+      }
+      ...
+
+Notice how tricky you can get with the cursor movements.
+
+    field_redisplay( &field_header, &add1_field, -1 );
+
+This function was called when a vendor record was being changed, and all of
+the fields needed to be redisplayed with the contents of the record.
+
+    vendor_number()
+    {
+      int number, atoi();
+      number = atoi( numb_input );
+      sprintf( numb_input, "%04d", number );
+      field_redisplay( &field_header, &numb_field, 1, &add1_field );
+    }
+
+This is an example of how you can have formatted input fields.  Just change
+the contents of the Buffer to how you want it (as long as the length of the
+Buffer including the terminal null is still less than MaxChars) and call the
+field_redisplay() function to redisplay the field with its new contents.
+
+
+Create Program  01/13/90
+© Copyright 1990 Timm Martin
+All Rights Reserved Worldwide
+
+/*-- END --*/

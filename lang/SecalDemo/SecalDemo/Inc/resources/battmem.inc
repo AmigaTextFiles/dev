@@ -1,0 +1,2 @@
+def BATTMEMNAME = "battmem.resource";
+

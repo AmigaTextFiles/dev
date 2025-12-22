@@ -1,0 +1,37 @@
+/* window.c */
+void gversion(char *string);
+long getgdesc(long inquiry);
+void foreground(void);
+void cmode(void);
+void RGBmode(void);
+void doublebuffer(void);
+void singlebuffer(void);
+long getdisplaymode(void);
+void clone_new_bitmap(void);
+void gconfig(void);
+void swapbuffers(void);
+void set_rasterport(void);
+void winpush(void);
+void winpop(void);
+long winget(void);
+void winset(long wid);
+short get_dimensions(long wid,long whole,long *x,long *y,long *lenx,long *leny);
+void sleep(long seconds);
+void minsize(long x,long y);
+void maxsize(long x,long y);
+void prefposition(long x1,long x2,long y1,long y2);
+void prefsize(long x,long y);
+void noborder(void);
+void winposition(long x1,long x2,long y1,long y2);
+void winmove(long orgx,long orgy);
+void wintitle(char *name);
+void getsize(long *x,long *y);
+void getorigin(long *x,long *y);
+long winopen(char *title);
+void gexit(void);
+void winclose(long wid);
+void initialize_nextwindow(void);
+long AGLconfig(short screenx,short screeny,short bitplanes);
+void gfxinit(void);
+void GL_error(char *message);
+

@@ -1,0 +1,229 @@
+* Exercise in Assembly Language: A memory meter.
+* Same trouble as Screen program: eats a little ram at every
+* WB startup, probably the WBenchMsg not being deallocated
+* or something similarily intricate
+
+   option nl
+   INCLUDE "intuition/intuition.i"
+   INCLUDE "graphics/text.i"
+   INCLUDE "graphics/rastport.i"
+
+   option l
+   XREF _AbsExecBase
+
+   XREF _LVOOpenLibrary
+   XREF _LVOCloseLibrary
+   XREF _LVODelay
+   XREF _LVOAvailMem
+   XREF _LVOText
+   XREF _LVOMove
+   XREF _LVOSetBPen
+   XREF _LVOWaitPort
+   XREF _LVOGetMsg
+   XREF _LVOSetWindowTitle
+   XREF _LVODisplayBeep
+   XREF _LVOOpenWindow
+   XREF _LVOCloseWindow
+   XREF _LVOSetWindowTitles
+   XREF _LVOExit
+
+CHIPMEM EQU 2
+FASTMEM EQU 4
+
+   lea      DosName,a1
+   clr.l    d0
+   movea.l  _AbsExecBase,a6
+   jsr      _LVOOpenLibrary(a6)
+   move.l   d0,DosBase
+   tst.l    d0                          ; Ought to make things secure.
+   bne      1$			; Got DosBase
+   rts      ; Can't even get Dos library, let's get out of here!!!
+
+1$ lea      IntuitionName,a1
+   clr.l    d0
+   movea.l  _AbsExecBase,a6
+   jsr      _LVOOpenLibrary(a6)
+   move.l   d0,IntuiBase
+   tst.l    d0                          ; Ought to make things secure.
+   beq      error
+
+   lea      GraphicsName,a1
+   clr.l    d0
+   movea.l  _AbsExecBase,a6
+   jsr      _LVOOpenLibrary(a6)
+   move.l   d0,GraphicsBase
+   tst.l    d0                          ; Ought to make things secure.
+   beq      error
+
+   movea.l  IntuiBase,a6
+   lea      MyNewWindow,a0
+   jsr      _LVOOpenWindow(a6)          ; Error checking
+   tst.l    d0
+   beq      error
+   move.l   d0,MyWindow
+
+* To Set Screen Title:
+   move.l   d0,a0
+   lea      WindowTitle,a1
+   lea      ScreenTitle,a2
+   movea.l  IntuiBase,a6
+   jsr      _LVOSetWindowTitles(a6)
+
+DisplayMem:
+* First, make sure there are spaces in the string, not old digits:
+   move.l   #$20202020,d3       ; Four Spaces
+   move.l   d3,ChipCount+6
+   move.l   d3,ChipCount+10
+   move.l   d3,FastCount+6
+   move.l   d3,FastCount+10
+   
+* Now, get and display ram figures
+   movea.l  _AbsExecBase,a6
+   moveq    #FASTMEM,d1
+   jsr      _LVOAvailMem(a6)    ; Gets Fast ram count
+   move.l   d0,d4		; Save result to test for ram low
+   lea      FastCount+15,a0
+   jsr      Convert
+
+   movea.l  _AbsExecBase,a6
+   moveq    #CHIPMEM,d1
+   jsr      _LVOAvailMem(a6)
+   add.l    d0,d4
+   cmpi.l   #$C000,d4	; If ram is < 48k, we commit suicide
+   ble	    Suicide
+   lea      ChipCount+15,a0
+   jsr      Convert
+
+* Here, we've got the text strings. 
+
+* Get a proper position to put text
+   movea.l  GraphicsBase,a6
+   move.l   MyWindow,a2
+   move.l   wd_RPort(a2),a1
+   moveq    #17,d1              ; Desired position
+   moveq    #6,d0
+   jsr      _LVOMove(a6)
+
+* Put it:
+   movea.l  GraphicsBase,a6
+   move.l   MyWindow,a2
+   move.l   wd_RPort(a2),a1
+   lea      FastCount,a0
+   moveq    #15,d0              ; String Length
+   jsr      _LVOText(a6)
+
+* Do the same with chip text
+   movea.l  GraphicsBase,a6
+   move.l   MyWindow,a2
+   move.l   wd_RPort(a2),a1
+   moveq    #27,d1              : Where we want to write
+   moveq    #6,d0
+   jsr      _LVOMove(a6)
+
+   movea.l  GraphicsBase,a6
+   move.l   MyWindow,a2
+   move.l   wd_RPort(a2),a1
+   lea      ChipCount,a0
+   moveq    #15,d0              ; String Length
+   jsr      _LVOText(a6)
+
+   movea.l  DosBase,a6
+   moveq    #100,d1                     ; Wait 2 seconds
+   jsr      _LVODelay(a6)
+
+   move.l   MyWindow,a0
+   move.l   wd_UserPort(a0),a0          ;Get the IDCMP Port of the window
+   movea.l  _AbsExecBase,a6
+   jsr      _LVOGetMsg(a6)            ; Test for close gadget
+   tst.l    d0                  ; Only Message we can get is CLOSEWINDOW
+   beq      DisplayMem          ; If NULL ptr, loop back
+
+* Getting Near the end.
+exit:
+   movea.l  IntuiBase,a6
+   movea.l  MyWindow,a0
+   jsr      _LVOCloseWindow(a6)
+
+error:	    ; OpenWindow or some OpenLibrary failed
+   movea.l  _AbsExecBase,a6
+   move.l   IntuiBase,a1
+   jsr      _LVOCloseLibrary(a6) ; This is not really needed
+   clr.l    d1			; Return Code always zero
+   jsr	    _LVOExit(a6)	; Done
+   clr.l    d0
+   rts                          ; Well, almost done. It seems Exit sends us
+                                ; back here. We'll return completely now.
+
+Suicide:		; If ram is running low, we'll give ours up.
+	lea	0,a0	; To beep every screen. This is not a very
+	movea.l	IntuiBase,a6	; polite thing to do, but low ram is a disaster
+	jsr	_LVODisplayBeep(a6) 
+	bra	exit	; Now leave
+	
+Convert:
+* Inputs: adress in a0, data i d0.
+* Output: Numeric string in ASCII before the address, data spent.
+   move.l   d0,d1       ; Divide long word by 10 may cause overflow.
+   andi.l   #$FFFF0000,d1
+   swap     d1
+
+nextdigit:
+   divu     #10,d1
+   move.w   d1,d2       ; The very high part of the number
+   ext.l    d2
+   andi.l   #$FFFF0000,d1
+   andi.l   #$0000FFFF,d0
+   add.l    d1,d0
+   divu     #10,d0
+   swap     d0
+   addi.b   #48,d0      ; low byte now contains ASCII digit
+   move.b   d0,-(a0)    ; Move to string
+   swap d0              ; Move remaining number back
+   andi.l   #$0000FFFF,d0 ; Wipe out the digit.
+   move.l   d2,d1       ; Put the high part where we need it
+   add.l    d0,d2       ; This to test for the end: d2 is scratch, containing
+   bne      nextdigit   ; data that have been copied to d1. We can then use it
+                        ; to determine if we're done.
+
+   rts                          ; All digits gone to the string.
+
+* Data section
+
+**************** Window data
+
+MyWindow:
+   dc.l 0
+
+MyFlags       EQU SMART_REFRESH!WINDOWDEPTH!WINDOWDRAG!WINDOWCLOSE
+MyNewWindow:  dc.w 0,30,132,30
+              dc.b 1,2          ; Colours
+              dc.l CLOSEWINDOW  ; IDCMP Flags
+              dc.l MyFlags
+              dc.l 0,0
+              dc.l WindowTitle
+              dc.l 0            ; Screen to be filled in later
+              dc.l 0            ; Pointer to bitmap
+              dc.w 0,0,0,0
+              dc.w WBENCHSCREEN
+
+WindowTitle:
+   dc.b 'Memory:',0
+ScreenTitle
+   dc.b 'Assembly Language is fun!',0
+IntuitionName:
+   dc.b 'intuition.library',0
+IntuiBase:
+   dc.l 0
+GraphicsName:
+   dc.b 'graphics.library',0,0
+GraphicsBase:
+   dc.l 0
+DosName:
+   dc.b 'dos.library',0
+DosBase:
+   dc.l 0
+ChipCount:
+   dc.b 'Chip:          ',0
+FastCount:
+   dc.b 'Fast:          ',0
+

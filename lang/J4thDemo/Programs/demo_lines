@@ -1,0 +1,174 @@
+\ Copyright 1986  Delta Research
+
+\ a 'LINES' demo for JForth...Mike Haas, 18-jan-87
+
+exists? module   exists? wd_width 0=   and
+.if
+	getmodule includes
+.then
+
+
+include? gr-currport    ju:Amiga_Graph
+include? choose         ju:random
+include? ev.getclass    ju:Amiga_Events
+
+
+ANEW TASK-DEMO_LINES
+
+
+\ an interface to the RectFill() routine...
+
+: GR.RECTFILL  ( l t r b -- )
+	4 x>r   gr-currport @  4 xr>    RectFill()  ;
+
+\ a data type to support 4 points...
+
+: rect   ( -- create rectangle data type )
+	create  0 , 0 , 0 , 0 ,
+	does> ;
+
+: rect@  ( rect-address -- l t r b )
+	dup [ 4 cells ] literal + swap
+	DO  i @  cell
+	+LOOP   ;
+
+: rect!  ( l t r b rect-address -- )  >r
+	swap 2 x>r  swap  2 xr>  2swap  r>
+	dup [ 4 cells ] literal + swap
+	DO  i !  cell
+	+LOOP   ;
+
+: rect+!  ( deltaleft deltatop deltaright deltabottom rect-addr -- )
+	>r   \ save base-addr
+	r@  [ 3 cells ] literal +  +!
+	r@  [ 2 cells ] literal +  +!
+	r@  cell+ +!
+	r>  +!   ;
+
+: shiftup  ( '16 shift' 4 numbers )
+	3 x>r   16 shift  r> 16 shift  r> 16 shift  r> 16 shift   ;
+
+: shiftdown  ( '-16 shift' 4 numbers )
+	3 x>r -16 shift  r> -16 shift  r> -16 shift  r> -16 shift   ;
+
+\ storage for the last drawn line endpoints...
+rect lastpoints
+
+\ storage for the last window size...
+variable lastheight
+variable lastwidth
+
+\ storage for how much to correct each for this pass...
+rect deltapoints
+
+
+: 2CHOOSES  ( n1 -- random1 random2 , both less than or equal to n1 )
+	dup choose swap choose  ;
+
+: >LTRB  ( width height -- left top right bottom , 2cnd pair > 1st pair )
+	2chooses   ( -- w y y , Generate two random Y values )
+	2sort >r  ( -- w y1 , push highest Y value )
+	swap 2chooses  ( -- y1 x x )
+	2sort >r swap r> r>    ( -- x1 y1 x2 y2 )   ;
+
+: TWO-POINTS  ( width height -- x1 y1 x2 y2 , 2 points without a sort )
+	2chooses  >r >r  \ get 2 'y' values
+	2chooses  r> swap r>  ;
+
+variable #lines/pass  50 #lines/pass !
+variable #lines-done
+
+: RANDOM.LINE  ( -- , draw random box in bounds , in current color)
+	\ move toward the destination...
+	deltapoints lastpoints  4 0
+	DO   ( -- deltabase lastbase )
+		over @  over @  +
+		over !  cell+ swap cell+ swap
+	LOOP 2drop
+	lastpoints rect@ shiftdown  2swap  gr.move gr.draw    ;
+
+.need ?closed
+: ?CLOSED ( -- flag , true if close button hit )
+	gr-curwindow @ ev.getclass
+	CLOSEWINDOW =
+;
+.then
+
+: CHANGE-COLOR  ( -- )
+\ This only works on V1.2 Beta-4 of Amiga-DOS.
+\ Other versions do not change color. They always use 3 .
+	gr.color@ 1+ 3 and gr.color!  ( Cycle colors. )
+;
+
+variable delays
+
+: check-speed  ( -- )
+	?terminal
+	IF   key dup ascii 0 ascii 9 within?
+		IF   dup $ 30 - delays !
+		THEN drop
+	THEN ;
+
+variable #shifts  9 #shifts !
+: delay?  ( -- )  delays @ -dup
+	IF    #shifts @ shift  0 do loop
+	THEN ;
+
+: RANDOM.LINES (  -- , draw lines in multiple colors )
+\ make sure 1st line gets drawn...
+	lastwidth on
+	lastheight on
+\ get random place to start...
+	gr-curwindow @  ..@ wd_width   dup lastwidth !
+	gr-curwindow @  ..@ wd_height  10 - dup lastheight !
+	two-points shiftup lastpoints rect!
+	BEGIN change-color  check-speed
+		\ get some new points, calculate deltapoints
+		gr-curwindow @  ..@ wd_width
+		gr-curwindow @  ..@ wd_height 10 - two-points  ( -- l t r b )
+		shiftup deltapoints rect!
+		lastpoints deltapoints  4 0
+		DO   ( -- adrlast adrnew )  dup @  2 pick @  -
+			#lines/pass @ / over !
+			cell+ swap cell+ swap
+		LOOP 2drop
+		\ now go ahead and draw the lines...
+		#lines/pass @  0
+		DO  delay?
+\ Stay within bounds of current window.
+\ Access window structure. ( In 'C':   gr_currentw->width )
+			gr-curwindow @  ..@ wd_width
+			gr-curwindow @  ..@ wd_height
+			10 -  \ compensate for title-bar
+			over lastwidth @ = over lastheight @ = and 0=
+			IF   \ window was changed...  ( -- width height )
+				0 gr.color!  0 0 2over  gr.rectfill
+				2dup lastheight !  lastwidth !
+				two-points  ( -- l t r b ) shiftup lastpoints rect!
+				leave
+			ELSE 2drop   random.line  1 #lines-done +!
+			THEN
+		LOOP
+		?closed
+	UNTIL
+;
+
+.need boxwindow
+NewWindow BoxWindow   ( Create a template for the new window. )
+.then
+
+: LINES ( -- )
+	cr ." LINES - Hit CLOSE BOX to stop!" cr
+	gr.init            ( Initialize graphics system. )
+	BoxWindow NewWindow.Setup     ( Set defaults for window )
+\ Create window from template and make it the current window.
+	BoxWindow  gr.opencurw
+	IF  0 #lines-done !
+		random.lines
+		gr.closecurw
+		cr #lines-done @ u. ." lines drawn!" cr
+	THEN
+	gr.term
+;
+
+cr ." Enter:    LINES    for graphics demo." cr cr

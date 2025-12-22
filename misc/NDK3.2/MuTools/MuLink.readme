@@ -1,0 +1,256 @@
+MuLink
+_____________________________________________________________________________
+
+Purpose of MuLink:
+
+MuLink is a linker for post-processing final executable binaries. It will
+write-protect selected hunks - by default the CODE segment - of the binary,
+and will hence protect them from getting modified or overwritten by faulty
+code. Hence, MuLink'd programs will benefit from a feature native to most
+operating systems but AmigaOs - protection of executable code.
+
+Needless to say that programs that use self-modifying code cannot be MuLink'd,
+more about the caveats below.
+
+MuLink is mainly a developer tool that should be run on a file as soon as it
+is out of the debugging stage and runs clean. MuLink'd programs cannot be
+debugged with a standard monitor (e.g. MonAm) because breakpoints can't be
+set in the - then writeprotected - code. See below for how to write a 
+debugger without this shortcoming.
+
+MuLink'd programs use the "OVERLAY" mechanism of the AmigaOs. This means
+that part of the code is no longer read by the default AmigaOs loader,
+LoadSeg() namely. This has good and bad side effects. The bad is that most
+programs operating on executable files will not be able to process it,
+including "Hunk" for example. Additionally, some virus scanners might 
+indicate failures because they do not implement overlay scanning correctly.
+The good is that this effect might be desired for commercial programs, 
+and that virii will, too, most likely not be able to infect the program. 
+An infected overlayed program will most likely not work at all. After all,
+you should keep an un-MuLink'd version of the program private, and should
+publish the MuLink'd version.
+
+_____________________________________________________________________________
+
+Synopsis:
+
+MuLink OVLYMGR/K,FROM=ROOT/A,TO/A,HUNKS/K,BUFSIZE/N,VERBOSE/S: 
+
+
+OVYLMGR:		The file name of the overlay manager, i.e. the
+			part of the file that replaces the AmigaOs loader.
+			This part will be linked to the beginning of your
+			binary. By default, this is 
+
+			MMU:MuOVLYMGR
+
+			and there's little reason to use a different
+			overlay manager.
+			It's actually that little file that does all the
+			MMU magic for you, using the mmu.library of course.
+
+FROM=ROOT:		The file to be MuLink'd. This MUST be a final
+			executable, no object modules are allowed here.			
+			All debugging information will be stripped from this
+			file; furthermore, overlays are not allowed here
+			because the extended loader - the MuOVLYMGR - is
+			not yet able to process them. This might change in
+			the future.
+
+TO:			The final output file. This will be an executable,
+			again. MUST be different from the root file or
+			strange and wonderful things may happen.
+
+HUNKS:			Defines which hunks should be write-protected. By
+			default, all CODE hunks - and only these hunks -
+			get write protected. 
+	
+			This option is given by a comma-separated list
+			of an exclude/include indicator and a hunk 
+			specification:
+
+			o) A plus or a minus sign, specifying whether the
+			   specified hunk should be included or excluded
+			   from the protection. 
+
+			o) A hunk specification. This is either one of
+			   the following strings, or the number of the hunk
+			   as decimal string, counting from zero for the 
+			   first hunk:
+
+			CODE		all code hunks
+			DATA		all data hunks
+			BSS		all blank space segment hunks
+			CODE_C		all code hunks that are to be
+					loaded into CHIP memory (rare!)
+			DATA_C		all data hunks to be loaded into
+					CHIP memory
+			BSS_C		all bss hunks for CHIP memory
+			CODE_F		all code hunks to be loaded into
+					FAST memory
+			DATA_F		data hunks for FAST memory
+			BSS_F		BSS hunks for FAST memory
+
+			The list is processed item by item, hence latter
+			items of the list override former ones. For example,
+			
+			HUNK="+CODE,-DATA,-BSS"
+
+			would be the build-in default, whereas
+
+			HUNK="+CODE,+DATA,-BSS,-DATA_C"
+
+			would protect all code and data hunks except those	
+			data hunks that contain CHIP memory data. 
+
+			As a side remark you should note that the MMU - and
+			hence MuLink - will not be able to protect data from
+			write access by the blitter anyhow. 
+
+
+BUFSIZE/N:		Defines the size of the I/O buffers used by MuLink.
+			This defaults to 4K (4096) and should be something
+			between 256 bytes and 32K. There's rarely need to
+			adjust this since the I/O routines used by MuLink are
+			pretty fast anyhow.
+
+VERBOSE/S: 		Turns on additional debug information that gets
+			printed onto the output console.
+
+_____________________________________________________________________________
+
+Special caveats of MuLink:
+
+
+- The final binary will REQUIRE the mmu.library. It will hence NOT run on
+P5 boards using the (original) ppc.library. This library is obsolete anyhow
+and not supported. The binary will request and open the mmu.library and will
+refuse to load in case the library is not available.
+
+- It makes usually no sense to protect the data or bss segments, even though
+this might work in some cases. Some compilers will produce only DATA segments
+instead of DATA and BSS segments, reserving BSS space in the DATA segment.
+
+For optimal performance, you should configure your compiler either to place
+constant strings in one separate hunk, or to merge them with the CODE hunk
+so to allow MuLink to protect them apart from the remaining (alterable) data.
+
+- MuLink will not be able to protect overlayed segments. This is a 
+shortcoming of the current loader MuOVLYMGR.
+
+- MuLink'd programs are NO LONGER pure. This is because the loader is
+REQUIRED to enable and disable protection. Besides that, protecting tiny
+programs - as most pure programs are - will waste a lot of memory because
+the loader has to round the hunk start addresses to page boundaries.
+
+- MuLink will usually not work on "run-back and stay-resident" programs
+because most of these programs will attempt to modify their code hunk to
+build a faked segment list. A modified loader might allow that in future.
+
+- The loader will choose one of the the two available MMU protection modes,
+depending on whether "MuForce" is running in your system. In case it is not,
+"defensive" MAPP_ROM protection is used. This means that write accesses will
+be silently ignored, even though they will not modify the code at all. If
+"MuForce" is active, though, it will choose "aggressive" MAPP_WRITEPROTECTED
+protection, causing a "MuForce hit". This will help you debugging your 
+software.
+
+- MuLink'd programs will only write protect the code for user mode accesses.
+Supervisor mode write accesses remain valid. This means that a debugger
+should switch to supervisor mode before setting a break point into the code,
+then flush the cache line and then return to user mode. 
+
+_____________________________________________________________________________
+
+Internal information for the experts - how a MuLink'd program looks like:
+
+
+HUNK_HEADER	of the loader.
+
+HUNK_CODE	The loader. 
+	This is a standard AmigaOs binary. However, the HUNK_HEADER does not
+	indicate a overlayed program. First because it was easier to do so,
+	second to fake some virus protection software, and third to avoid
+	memory waste and to keep the overlay hunk table as small as possible.
+	The DOS "Majik Word" $ABCD is, however, as usual in the second long
+	word of the binary. Besides that, there is no identifier as the 
+	overlay manager = the loader is a custom loader.
+
+HUNK_OVERLAY	The overlay node: All entries are longs 
+
+	HUNK_OVERLAY		0x000003f5
+	size-1			size of the overlay data in longs, minus one.
+	fileofs			file offset from the beginning of the file
+				to the offset where the first HUNK_CODE of
+				the main program starts. NOT to its 
+				HUNK_HEADER, though!
+	ovlsize			size of the loader segment in long words.
+				This is required, too, because the loader
+				write-protects itself after having done its
+				job.
+	loaderofs		byte offset of the loader into its module
+	loadermodule		module in which the loader is put for
+				protection.
+
+A "module" is a common memory space for hunks sharing the same memory and
+protection requirements. Unlike the Os loader, the MuOVLYMGR does not allocate
+the memory for the hunks individually, but in blocks called "modules". This
+was done mainly to reduce the memory waste due to round-off problems when
+rounding to MMU page boundaries. Hence, if hunk 0 and 3 are code hunks and to
+be protected, both will end up in one module. The loader will mimik the
+standard BCPL segment linkage for the file though, so this "module" technique
+is transparent to the file and will not cause compatibility problems.
+Especially, the loader code is always put into a "protected" module.
+
+	num_modules		the number of modules for the file
+
+	For each module:
+
+		module_id	a unique module identifier, counted from
+				zero up. Currently not needed by the loader.
+
+		memory_attrs	memory attributes passed to AllocMem() on
+				allocation of the module. Reflects the
+				flags in the HUNK_HEADER of the source.
+
+		properties	memory properties to be passed to the MMU
+				library. Currently, only one bit is 
+				recognized, MAPP_ROM, namely, to enable the
+				protection. The loader will modify this to
+				MAPP_WRITEPROTECTED in case it finds
+				"MuForce" active.
+
+		length		length of the module, again in LONG WORDS.
+
+	
+	num_hunks		the number of hunks in the source executable.
+		
+	For each hunk:
+
+		hunk_type	type of the hunk, i.e. HUNK_CODE,HUNK_DATA or
+				HUNK_BSS. Currently ignored by the loader.
+
+		hunkofs		byte offset of the hunk from the beginning 
+				of its module.
+
+		hunksize	size of the hunk in LONG WORDS, including
+				the memory attributes. The memory attributes
+				are, however, currently ignored.
+
+		hunkmodule	module the hunk is placed in, counting from
+				zero.
+
+
+HUNK_HEADER	The HUNK_HEADER of the main file. This is here to allow
+		easier unlinking, if required, but this part is completely
+		ignored by the loader.
+
+HUNK_CODE	The first code hunk of the main binary. The "fileofs" entry
+		above points to this identifier.
+
+Below that:	The usual executable hunk structure as for all other loadable 
+		binaries.
+_____________________________________________________________________________
+
+So long,
+		Thomas Richter (June 1999)

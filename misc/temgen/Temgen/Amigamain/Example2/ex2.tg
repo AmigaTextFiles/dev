@@ -1,0 +1,868 @@
+# generic.tg
+# universal TemGen template to generate amigamain.c and amigamain.h
+# support for libraries, tooltypes, readargs, locale
+
+
+@ $true = 1
+@ $false = 0
+
+
+# ************************************************************
+# Configuration part I
+# (part II is at end of file)
+# ************************************************************
+
+# Version string "Name Version.Revision (Day.Month.Year)"
+@ $version = "MyApp 0.1 (26.6.2004)"
+
+# start function, cleanup function and header file
+@ $application = ["APP_run()", "APP_clean()", "app.h"]
+
+# true forbids start from Workbech
+@ $forbidwb = $false
+
+# true forbids start from Shell
+@ $forbidcli = $false
+
+# true inserts code to reopen Output(), stdin and stdout as con:
+# only useful for start from Workbench
+@ $opencon = $true
+
+# delay in 1/50 seconds after cleanup
+# only used when opencon is true
+# this gives the user some time to read the message in the con: windows
+@ $delay = 200
+
+# vmessagef function uses EasyRequest
+@ $message_request = $true
+
+# vmessagef function prints to Output()
+@ $message_output = $true
+
+# Title for EasyRequest, only used in non locale mode
+@ $request_title = "Message"
+
+# tooltypes support
+@ $tooltypes = $true
+
+# ReadArgs support
+@ $readargs = $true
+
+# Locale support
+@ $locale = $false
+@ $loc_builtin = "english"
+@ $loc_header = "app_strings.h"
+@ $loc_catalog = "app.catalog"
+
+# ************************************************************
+# End of configuration part I
+# ************************************************************
+
+# variable initialisation, don't change
+@ $argtemplate = ""
+@ $argnr = 0
+@ if ( $locale )
+@   $messagefunc = "messagef_loc"
+@ else
+@   $messagefunc = "messagef"
+@ endif
+
+# ************************************************************
+# amigamain.c
+# ************************************************************
+
+@output "amigamain.c"
+
+# ============================================================
+# includes
+# ============================================================
+
+\#include <proto/exec.h>
+\#include <proto/dos.h>
+\#include <proto/intuition.h>
+
+@ if ( $tooltypes )
+\#include <proto/icon.h>
+\#include <workbench/startup.h>
+@ endif
+
+@ if ( $locale )
+\#include <proto/locale.h>
+\#define CATCOMP_NUMBERS
+\#define CATCOMP_CODE
+\#define CATCOMP_BLOCK
+\#include \"$loc_header\"
+@ endif
+
+\#include <stdlib.h>
+\#include <stdio.h>
+\#include <stdarg.h>
+\#include <string.h>
+\#include "amigamain.h"
+
+@ if ($application[2] != "")
+\#include \"$application[2]\"
+@ endif
+
+\
+
+# ============================================================
+# variables
+# ============================================================
+
+struct Config config;
+char *vers=\"\\0\$VER: $version\";
+static BPTR oldout, newout;
+\
+
+@ embed "libbase"
+
+@ if ( $locale )
+struct LocaleBase *LocaleBase = NULL;
+struct LocaleInfo li;  /* extern */
+@ endif
+
+\
+
+@ if ( !$locale )
+\#define MSG_OK            "OK"
+\#define MSG_REQTITLE      \"$request_title\"
+\#define MSG_ERR_LIB       "Couldn't open %s V%ld\\n"
+\#define MSG_ERR_SHELL     "Application can't be started from Shell\\n"
+\#define MSG_ERR_WB        "Application can't be started from Workbench\\n"
+\#define MSG_ERR_RAM       "Couldn't allocate RAM in function %s\\n"
+\#define MSG_ERR_TOOLTYPES "Couldn't read tooltypes\\n"
+\#define MSG_ERR_READARGS  "Couldn't read command line arguments\\n"
+\#define MSG_ERR_OPEN      "Couldn't open stream %s\\n"
+@ endif
+
+\
+# ============================================================
+# prototypes
+# ============================================================
+
+static void cleanexit( void );
+static struct Library *save_open_library( UBYTE *libName, ULONG version);
+
+@ if ( $tooltypes )
+static void handle_tooltypes( struct WBStartup *wbmessage );
+@ endif
+
+@ if ( $readargs )
+static void handle_readargs( void );
+@ endif
+
+\
+
+# ============================================================
+# main
+# ============================================================
+
+int
+main(int argc, char *argv[] )
+{
+    atexit( cleanexit );
+
+@ if ( $locale )
+    if (LocaleBase = (struct LocaleBase*) OpenLibrary("locale.library",38))
+    {
+        li.li_LocaleBase = LocaleBase;
+        li.li_Catalog    = OpenCatalog(NULL , \"$loc_catalog\" ,
+            OC_BuiltInLanguage , (ULONG)\"$loc_builtin\" , TAG_DONE );
+    }
+@ endif
+
+@ embed "config_init"
+
+    if ( argc == 0 )
+    {
+        /* started from Workbench */
+        config.start_from_wb = TRUE;
+
+@ if ( $opencon )
+        if ( ! freopen( "con:10/50/300/100/stdin/AUTO"  , "r", stdin  ))
+        {
+            $messagefunc\( MSG_ERR_OPEN, "'stdin'" );
+            exit( EXIT_FAILURE );
+        }
+
+        if ( ! freopen( "con:10/150/300/100/stdout/AUTO", "w", stdout ))
+        {
+            $messagefunc\( MSG_ERR_OPEN, "'stdout'" );
+            exit( EXIT_FAILURE );
+        }
+\
+        newout = Open("con:10/250/300/100/AmigaDos/AUTO", MODE_OLDFILE);
+        if ( ! newout )
+        {
+            $messagefunc\( MSG_ERR_OPEN, "'AmigaDos'" );
+            exit( EXIT_FAILURE );
+        }
+        oldout = SelectOutput(newout );
+@ endif
+    }
+
+@ embed "libopen"
+
+    config.all_libraries_open = TRUE;
+
+    if ( config.start_from_wb )
+    {
+
+@ if ( $forbidwb )
+        $messagefunc\( MSG_ERR_WB );
+        exit( EXIT_FAILURE );
+@ endif
+
+@ if ( $tooltypes )
+        handle_tooltypes( (struct WBStartup *) argv );
+@ endif
+
+    }
+    else
+    {
+
+@ if ( $forbidcli )
+        $messagefunc\( MSG_ERR_SHELL );
+        exit( EXIT_FAILURE );
+@ endif
+
+@ if ( $readargs )
+        handle_readargs();
+@ endif
+
+    }
+@ if ($application[0] != "")
+    $application[0];
+@ endif
+
+    return EXIT_SUCCESS;
+}
+\
+# ============================================================
+# show_request
+# ============================================================
+
+/*
+  open EasyRequest
+*/
+LONG
+show_request( char *title, char *text, char *button, ... )
+{
+    va_list ap;
+    va_start(ap, button );
+    return show_request_args(title, text, button, ap);
+    va_end(ap );
+}
+\
+
+# ============================================================
+# show_request_args
+# ============================================================
+
+/*
+  open EasyRequest (va_list)
+*/
+LONG
+show_request_args( char *title, char *text, char *button, va_list ap )
+{
+    struct EasyStruct es = {sizeof (struct EasyStruct), 0, 0, 0, 0};
+
+    es.es_Title = title;
+    es.es_TextFormat = text;
+    es.es_GadgetFormat = button;
+
+    return EasyRequestArgs(config.reqwin, &es, 0, ap);
+}
+\
+
+# ============================================================
+# vmessagef
+# ============================================================
+
+/*
+  formated output to Output() and/or Workbench
+  parameters like vprintf
+*/
+void
+vmessagef( char *format, va_list ap )
+{
+    if ( ! format) return;
+
+    if ( config.message_output )
+    {
+        VPrintf(format, ap);
+        Flush( Output() );
+    }
+
+    if ( config.message_request && IntuitionBase )
+    {
+
+@ if ( $locale )
+        show_request_args(
+            GetString(&li, MSG_REQTITLE), format,
+            GetString(&li , MSG_OK), ap);
+@ else
+        show_request_args( MSG_REQTITLE, format, MSG_OK, ap);
+@ endif
+
+    }
+}
+\
+
+# ============================================================
+# messagef
+# ============================================================
+
+/*
+  messagef (like printf)
+*/
+void
+messagef( char *format, ... )
+{
+    va_list ap;
+
+    va_start(ap, format);
+    vmessagef(format, ap);
+    va_end(ap);
+}
+\
+
+# ============================================================
+# messagef_loc
+# ============================================================
+
+@ if ( $locale)
+
+/*
+  message_f with locale support
+*/
+void
+messagef_loc( LONG msg_id, ... )
+{
+    va_list ap;
+    char *format;
+
+    format = GetString(&li , msg_id);
+
+    va_start(ap, msg_id);
+    vmessagef(format, ap);
+    va_end(ap);
+}
+\
+
+@ endif
+
+# ============================================================
+# strcpy_malloc
+# ============================================================
+
+/*
+  copies string s to new allocated RAM
+*/
+char *
+strcpy_malloc(const char *s )
+{
+    char *dest;
+    if ( ! s)
+        return NULL;
+
+    dest = malloc( strlen( s ) + 1);
+    if ( ! dest )
+    {
+        $messagefunc\( MSG_ERR_RAM , "strcpy_malloc");
+        exit( EXIT_FAILURE );
+    }
+    strcpy(dest, s);
+    return dest;
+}
+\
+
+
+# ============================================================
+# save_open_library
+# ============================================================
+
+/*
+  OpenLibrary with check of return value
+*/
+static struct Library *
+save_open_library(UBYTE *libName, ULONG version)
+{
+    struct Library *lib;
+    lib = OpenLibrary(libName, version);
+    if ( ! lib )
+    {
+        $messagefunc\( MSG_ERR_LIB ,libName, version );
+        exit( EXIT_FAILURE);
+    }
+    return lib;
+}
+\
+
+
+# ============================================================
+# handle_tooltypes
+# ============================================================
+
+@ if ($tooltypes)
+
+/*
+  qearies diskobject for tooltype entries
+*/
+static void
+handle_tooltypes( struct WBStartup *wbmessage )
+{
+    struct DiskObject *dobj;
+    struct WBArg *wbarg;
+    STRPTR *toolarray;
+    STRPTR s;
+
+    wbarg = wbmessage->sm_ArgList;
+    if (( *wbarg->wa_Name ) && ( dobj = GetDiskObject( wbarg->wa_Name )))
+    {
+        toolarray = dobj->do_ToolTypes;
+
+@ embed "tooltype"
+
+        FreeDiskObject( dobj );
+    }
+    else
+    {
+        $messagefunc\( MSG_ERR_TOOLTYPES );
+        exit( EXIT_FAILURE );
+    }
+}
+
+@ endif
+\
+
+
+# ============================================================
+# handle_readargs
+# ============================================================
+
+@ if ($readargs)
+
+/*
+  qearies command line args
+*/
+static void
+handle_readargs( void )
+{
+    struct RDArgs *rda;
+
+@ embed "initarg"
+
+    if ( rda )
+    {
+
+@ embed "readarg"
+
+        FreeArgs(rda );
+    }
+    else
+    {
+        $messagefunc\( MSG_ERR_READARGS );
+        exit( EXIT_FAILURE );
+    }
+}
+
+\
+
+@ endif
+
+# ============================================================
+# cleanexit
+# ============================================================
+
+/*
+  cleanup function for atexit
+*/
+static void
+cleanexit( void )
+{
+    $application[1];
+
+@ if ( $opencon && ( $delay > 0 ))
+    if ( config.start_from_wb )
+        Delay( $delay );
+@ endif
+
+    if ( config.all_libraries_open )
+    {
+@ if ( $locale )
+        CloseCatalog(li.li_Catalog);
+@ endif
+        if ( newout )
+        {
+            SelectOutput(oldout );
+            Close(newout );
+        }
+    }
+
+@ embed "libclose"
+@ if ( $locale )
+    CloseLibrary((struct Library*)LocaleBase);
+@ endif
+
+}
+
+
+# ************************************************************
+# amigamain.h
+# ************************************************************
+
+@output "amigamain.h"
+
+\#ifndef AMIGAMAIN_H
+\#define AMIGAMAIN_H
+\
+\#include <exec/types.h>
+\#include <intuition/intuition.h>
+\
+\#include <stdarg.h>
+\
+struct Config
+{
+    /* true if libraries have successful been opened */
+    BOOL all_libraries_open;
+\
+    /* true if application was started from Workbench */
+    BOOL start_from_wb;
+\
+    /* reference window for EasyRequest */
+    struct Window *reqwin;
+\
+
+@ embed "config"
+};
+\
+extern struct Config config;
+
+@ if ( $locale)
+extern struct LocaleInfo li;
+@ endif
+
+\
+LONG show_request( char *title, char *text, char *button, ... );
+LONG show_request_args( char *title, char *text, char *button, va_list ap );
+void vmessagef(char *format, va_list ap);
+void messagef(char *format, ... );
+
+@if ( $locale)
+void messagef_loc(LONG msgid, ...);
+@ endif
+
+char *strcpy_malloc(const char *s );
+\
+\#endif
+
+
+# ************************************************************
+# FUNCTIONS
+# ************************************************************
+
+
+# ============================================================
+# function: library
+# ============================================================
+
+@ function library( basename , libraryname , minversion , basetype)
+
+@ emit "libbase"
+@ if ( $basetype == "" )
+struct Library *$basename = NULL;
+@ else
+struct $basetype *$basename = NULL;
+@ endif
+
+@ if ( $libraryname != "" )
+@   emit "libopen"
+@   if ($basetype == "" )
+    $basename = save_open_library(\"$libraryname\", $minversion);
+@   else
+    $basename = (struct $basetype *)
+        save_open_library(\"$libraryname\", $minversion);
+@   endif
+
+@   emit "libclose"
+@   if ( $basetype == "" )
+    CloseLibrary($basename );
+@   else
+    CloseLibrary((struct Library *) $basename );
+@   endif
+@ endif
+@ endfunction
+
+
+# ============================================================
+# function: add_config
+# ============================================================
+
+@ function add_config(type, name, default)
+@ emit "config"
+@ switch ($type)
+@   case "S":
+    STRPTR $name;
+@     break
+@   case "B":
+    BOOL $name;
+@     break
+@   case "L":
+    LONG $name;
+@     break
+@   endswitch
+
+@ if ( $default  != "" )
+@   emit "config_init"
+
+@   switch ($type)
+@     case "S":
+    config.$name = strcpy_malloc( \"$default\" );
+@       break
+@     case "B":
+@     case "L":
+    config.$name = $default;
+@       break
+@     endswitch
+@   endif
+
+
+@ endfunction
+
+
+# ============================================================
+# function: add_tooltype
+# ============================================================
+
+@ function add_tooltype(tooltype, variable, type)
+@ emit "tooltype"
+        if (( s = FindToolType( toolarray, \"$tooltype\" )))
+        {
+@ switch $type
+@   case "S":
+            free( config.$variable );
+            config.$variable = strcpy_malloc( s );
+@   break
+@   case "B":
+            config.$variable = TRUE;
+@   break
+@   case "L":
+            config.$variable = atol( s );
+@   break
+
+@ endswitch
+        }
+\
+
+@ endfunction
+
+
+# ============================================================
+# function: add_arg
+# ============================================================
+
+@ function add_arg(arg, variable, type)
+@ if ( $argtemplate == "" )
+@   $argtemplate = $arg
+@ else
+@   $argtemplate = $argtemplate + "," + $arg
+@ endif
+
+@ emit "readarg"
+
+@ switch $type
+@   case "S":
+        if ( options[ $argnr ] )
+        {
+            free( config.$variable );
+            config.$variable = strcpy_malloc( (STRPTR)options[ $argnr ] );
+        }
+@   break
+@   case "B":
+        config.$variable = options[ $argnr ] ? TRUE : FALSE;
+@   break
+@   case "L":
+        if ( options[ $argnr] )
+        {
+            config.$variable = *(LONG *)options[ $argnr ];
+        }
+@   break
+
+@ endswitch
+
+@ $argnr++
+\
+
+@ endfunction
+
+
+# ============================================================
+# function: finish_arg
+# ============================================================
+@ function finish_arg()
+@ emit "initarg"
+    LONG options[ $argnr ] = { 0 };
+    rda = ReadArgs( \"$argtemplate\" , options, NULL);
+
+@ endfunction
+
+
+# ************************************************************
+# Configuration Part II
+# ************************************************************
+
+# ============================================================
+# libraries
+# $library(basename, libraryname, minversion, basetype)
+# if no bastype is specified then basetpye is 'Library'
+# remove comment char to switch library call on
+# remember: exec and dos are always open
+# ============================================================
+
+@ $library( "IntuitionBase" , "intuition.library" , 40, "IntuitionBase")
+
+@ if ( $tooltypes )
+@   $library( "IconBase" , "icon.library" , 40 , "" )
+@ endif
+
+#@ $library( "AmigaGuideBase"        , "amigaguide.library" , 40 , "" )
+#@ $library( "AmlBase"               , "aml.library" , 40 , ""  , "" )
+#@ $library( "AslBase"               , "asl.library" , 40 , "" )
+#@ $library( "BulletBase"            , "bullet.library" , 40 , "" )
+#@ $library( "CxBase"                , "commodities.library" , 40 , "" )
+#@ $library( "CyberGfxBase"          , "cybergraphics.library" , 40 , "" )
+#@ $library( "DataTypesBase"         , "datatypes.library" , 40 , "" )
+#@ $library( "DiskfontBase"          , "diskfont.library" , 40 , "" )
+#@ $library( "ExpansionBase"         , "expansion.library" , 40 , "" )
+#@ $library( "GadToolsBase"          , "gadtools.library" , 40 , "" )
+#@ $library( "GfxBase"               , "graphics.library" , 40 , "" )
+#@ $library( "IFFParseBase"          , "iffparse.library" , 40 , "" )
+#@ $library( "KeymapBase"            , "keymap.library" , 40 , "" )
+#@ $library( "LayersBase"            , "layers.library" , 40 , "" )
+#@ $library( "LocaleBase"            , "locale.library" , 40 , "" )
+#@ $library( "LowLevelBase"          , "lowlevel.library" , 40 , "" )
+#@ $library( "MathBase"              , "mathffp.library" , 37 , "" )
+#@ $library( "MathIeeeDoubBasBase"   , "mathieeedoubbas.library" , 37 , "" )
+#@ $library( "MathIeeeDoubTransBase" , "mathieeedoubtrans.library" , 37 , "" )
+#@ $library( "MathIeeeSingBasBase"   , "mathieeesingbas.library" , 37 , "" )
+#@ $library( "MathIeeeSingTransBase" , "mathieeesingtrans.library" , 37 , "" )
+#@ $library( "MathTransBase"         , "mathtrans.library" , 37 , "" )
+#@ $library( "NVBase"                , "nonvolatile.library" , 40 , "" )
+#@ $library( "RealTimeBase"          , "realtime.library" , 40 , "" )
+#@ $library( "ResourceBase"          , "resource.library" , 40 , "" )
+#@ $library( "RexxSysBase"           , "rexxsyslib.library" , 40 , "" )
+#@ $library( "UtilityBase"           , "utility.library" , 40 , "" )
+#@ $library( "WorkbenchBase"         , "workbench.library" , 40 , "" )
+
+# Classes
+# -------
+#@ $library( "ARexxBase"     , "arexx.class" , 44 , "" )
+#@ $library( "RequesterBase" , "requester.class" , 42 , "" )
+#@ $library( "WindowBase"    , "window.class" , 44 , "" )
+
+# Gadgets
+# -------
+#@ $library( "ButtonBase"        , "gadgets/button.gadget" , 44 , "" )
+#@ $library( "CheckBoxBase"      , "gadgets/checkbox.gadget" , 44 , "" )
+#@ $library( "ChooserBase"       , "gadgets/chooser.gadget" , 44 , "" )
+#@ $library( "ClickTabBase"      , "gadgets/clicktab.gadget" , 44 , "" )
+#@ $library( "ColorWheelBase"    , "gadgets/colorwheel.gadget" , 44 , "" )
+#@ $library( "DateBrowserBase"   , "gadgets/datebrowser.gadget" , 44 , "" )
+#@ $library( "FuelGaugeBase"     , "gadgets/fuelgauge.gadget" , 44 , "" )
+#@ $library( "GetFileBase"       , "gadgets/getfile.gadget" , 44 , "" )
+#@ $library( "GetFontBase"       , "gadgets/getfont.gadget" , 44 , "" )
+#@ $library( "GetScreenModeBase" , "gadgets/getscreenmode.gadget" , 44 , "" )
+#@ $library( "IntegerBase"       , "gadgets/integer.gadget" , 44 , "" )
+#@ $library( "LayoutBase"        , "gadgets/layout.gadget" , 44 , "" )
+#@ $library( "ListBrowserBase"   , "gadgets/listbrowser.gadget" , 44 , "" )
+#@ $library( "PaletteBase"       , "gadgets/palette.gadget" , 44 , "" )
+#@ $library( "PopCycleBase"      , "gadgets/popcycle.gadget" , 44 , "" )
+#@ $library( "RadioButtonBase"   , "gadgets/radiobutton.gadget" , 44 , "" )
+#@ $library( "ScrollerBase"      , "gadgets/scroller.gadget" , 44 , "" )
+#@ $library( "SliderBase"        , "gadgets/slider.gadget" , 44 , "" )
+#@ $library( "SpaceBase"         , "gadgets/space.gadget" , 44 , "" )
+#@ $library( "SpeedBarBase"      , "gadgets/speedbar.gadget" , 44 , "" )
+#@ $library( "StringBase"        , "gadgets/string.gadget" , 44 , "" )
+#@ $library( "TextEditorBase"    , "gadgets/texteditor.gadget" , 15 , "" )
+#@ $library( "VirtualBase"       , "gadgets/virtual.gadget" , 44 , "" )
+
+# Images
+# ------
+#@ $library( "BevelBase"    , "images/bevel.image" , 44 , "" )
+#@ $library( "BitMapBase"   , "images/bitmap.image" , 44 , "" )
+#@ $library( "DrawListBase" , "images/drawlist.image" , 44 , "" )
+#@ $library( "GlyphBase"    , "images/glyph.image" , 44 , "" )
+#@ $library( "LabelBase"    , "images/label.image" , 44 , "" )
+#@ $library( "PenMapBase"   , "images/penmap.image" , 44 , "" )
+
+# Resources
+# ---------
+#@ $library( "BattClockBase"  , "" , 0 , "" )
+#@ $library( "BattMemBase"    , "" , 0 , "" )
+#@ $library( "CardResource"   , "" , 0 , "" )
+#@ $library( "DiskBase"       , "" , 0 , "" )
+#@ $library( "MiscBase"       , "" , 0 , "" )
+#@ $library( "PotgoBase"      , "" , 0 , "" )
+
+# Devices
+# -------
+#@ $library( "ConsoleDevice"  , "" , 0 , "" )
+#@ $library( "InputBase"      , "" , 0 , "" )
+#@ $library( "RamdriveDevice" , "" , 0 , "" )
+#@ $library( "TimerBase"      , "" , 0 , "" )
+
+
+# ============================================================
+# add entries to struct Config
+# @ $add_config( type, variable name, default value)
+# type can be: S, B, L
+# S: STRPTR, B: BOOL, L: LONG
+# ============================================================
+
+# don't remove the 2 following
+@ $add_config("B", "message_request", $message_request)
+@ $add_config("B", "message_output", $message_output)
+
+@ $add_config("B", "jingle" , "")
+@ $add_config("S", "pubscreen" , "")
+@ $add_config("L", "nr", 5)
+
+
+# ============================================================
+# tooltype entries to query, results are stored in struct Config
+# @ $add_tooltype( tooltype, config variable, type)
+# the config variables must be created be $add_config()
+# type can be S, B or L
+# S: string -> the parameter is copied in a new allocated memory
+# B: bool   -> if the tooltype exists the config parameter is set TRUE
+# L: value  -> parameter is set with atol()
+# ============================================================
+
+@ $add_tooltype("PUBSCREEN", "pubscreen", "S")
+@ $add_tooltype("JINGLE", "jingle", "B")
+@ $add_tooltype("NR", "nr", "L")
+
+
+# ============================================================
+# ReadArg entries to query, results are stored in struct Config
+# @ $add_arg( arg, config variable, type)
+# the config variables must be created be $add_config()
+# type can be S, B or L
+# S: string -> the parameter is copied in a new allocated memory
+# B: bool   -> if the tooltype exists the config parameter is set TRUE
+# L: value  -> parameter is set with atol()
+# ============================================================
+
+@ $add_arg( "P=PUBSCREEN/K", "pubscreen", "S")
+@ $add_arg( "J=JINGLE/S", "jingle", "B")
+@ $add_arg( "NR/N", "nr", "L")
+
+
+# ============================================================
+# call this after the last $add_arg
+# ============================================================
+
+@ $finish_arg()
+

@@ -1,0 +1,240 @@
+/* ------------------------------------------------------------------------
+  :Program.       OCmd.ced
+  :Contents.      Start Oberon tools with Ced & OberonPrefs
+  :Author.        Kai Bolay [kai] & Franz Schwarz
+  :Copyright.     FD
+  :History.       v1.0 [fSchwarz]
+  :Version.       $VER: Options 1.0 (25.6.93)
+  :Language.      ARexx
+  :Translator.    RexxMast
+  :Remarks.       fSchwarz says: Due to the billions of changes and new
+  :Remarks.       concepts introduced into this script since Kai's v1.2
+  :Remarks.       release of Cmd.ced, I decided to drop the history and
+  :Remarks.       reset version count to 1.0.
+------------------------------------------------------------------------ */
+
+options results
+
+
+errcmd = "rexx:OErr.ced"
+window = "CON:0/100//200/ExeOberon/SCREENCygnusEdScreen1"
+minstack=20000
+enddelay = 2 
+endwait = 'TRUE'   /* 'TRUE', 'OK', 'FAIL', 'FALSE' */
+
+address 'rexx_ced'
+
+libname='oberonsupport.library'
+if ~show('l',libname) then if ~addlib(libname,0,-30) then do
+  'Okay1 No 'libname'!'
+  exit
+end  
+libname='rexxsupport.library'
+if ~show('l',libname) then if ~addlib(libname,0,-30) then do
+  'Okay1 No 'libname'!'
+  exit
+end  
+
+unique=pragma('ID') || time('S')
+
+portnam='ocmd'unique
+
+status 21 /* filename */
+clipname = 'CMDActive' || result;
+if getclip(clipname)~='' then do
+  Okay1 "Datei wird bereits von Script bearbeitet!"
+  exit 20;
+end
+
+
+if ~setclip(clipname,'TRUE') then do
+  Okay1 "Kann Datei nicht als 'Busy' markieren!"
+  call cleanup 20;
+end
+
+signal on halt
+signal on error
+signal on syntax
+signal on break_c
+signal on break_d
+signal on break_e
+signal on break_f
+
+arg tool
+
+select
+  when tool = "COMPILE" then  scriptname = "T:Compiler-Start"unique
+  when tool = "MAKE" then scriptname = "T:Make-Start"unique
+  when tool = "LINK" then scriptname = "T:Linker-Start"unique
+  otherwise do
+    Okay1 "Fehler: Falscher Aufruf!"
+    call cleanup 20
+  end
+end
+
+status 21 /* Nur Filnamen (ohne Pfad) holen */
+filename = result
+optsname = 'OberonOpts'compress(filename)
+opts = GetClip(optsname)
+
+if filename = "" then do
+  Okay1 "Fehler: Kein Filename"
+  call cleanup 20
+end
+
+if upper(right(filename,4)) ~= ".MOD" then do
+  Okay1 "Fehler: Filename endet nicht auf '.mod'"
+  call cleanup 20
+end
+
+filename = left(filename,length(filename)-4)
+
+status 20 /* Nur Pfad (ohne Filenamen) holen */
+path = result
+
+if upper(right(path,4)) == "/TXT" | upper(right(path,4)) == ':TXT' then
+  path = left(path,length(path)-4)
+
+status 18 /* changes */
+if result~=0 then select
+  when tool = "COMPILE" then save
+  when tool = "MAKE" then save
+  otherwise nop
+end
+
+'status 19' /* Filename mit Pfad */
+filepath = result
+status 21 /* Nur Filnamen (ohne Pfad) holen */
+optsname = 'OberonOpts'compress(result)
+uniqueoptsname = 'OberonOpts'unique
+opts1 = GetClip(optsname); opts = opts1
+if opts = '' then do
+  address command 'rxset 'uniqueoptsname' `OberonPrefs nogui omakeout settings 965 '||,
+    'from "'filepath'"`'
+  opts = GetClip(uniqueoptsname)
+  call setclip uniqueoptsname
+end
+if opts = '' then opts = 'c- l-'
+parse var opts 'c' oberonopts ' l' olinkopts
+
+
+if ~open(script,scriptname,'W') then do
+  Okay1 "Fehler: Kann Script nicht öffnen"
+  call cleanup 20
+end
+
+
+call writeln(script,".bra {")
+call writeln(script,".ket }")
+call writeln(script,"Failat 2147483647")
+call writeln script,'stack `rx "say max('minstack",pragma('stack',10000))"||'"`' /* ensure minstack, but don't bother if more */
+call writeln script,'cd "'path'"'
+call writeln script,'delete >nil: OBP'unique
+call writeln script,'rename >nil: Oberon.Prefs to OBP'unique
+call writeln script,'echo >Oberon.Prefs ""'
+call writeln script,'delete >nil: OLP'unique
+call writeln script,'rename >nil: OLink.Prefs to OLP'unique
+call writeln script,'echo >OLink.Prefs ""'
+
+select
+  when tool = "COMPILE" then do
+    cmd = "Oberon" AddOpts("OberonOpts")
+  end
+  when tool = "MAKE" then do
+    cmd = "OMake" AddOpts("OMakeOpts") 
+  end
+  when tool = "LINK" then do
+    cmd = "OLink" AddOpts("OLinkOpts")
+  end
+end
+cmd = cmd || ' "' || filename || '"'
+
+call writeln(script,cmd)
+call writeln(script,"set ocmdrc"unique" $rc")
+call writeln script,'delete >nil: Oberon.Prefs'
+call writeln script,'rename >nil: to Oberon.Prefs OBP'unique
+call writeln script,'delete >nil: OLink.Prefs'
+call writeln script,'rename >nil: to OLink.Prefs OLP'unique
+
+select
+  when endwait='TRUE' then call  writeln(script,"if 0 eq 0")
+  when endwait='OK' then call    writeln(script,"if $ocmdrc"unique" eq 0")
+  when endwait='FAIL' then call  writeln(script,"if not $ocmdrc"unique" eq 0")
+  when endwait='FALSE' then call writeln(script,"if 1 eq 0")
+end
+call writeln(script,"  if $ocmdrc"unique" eq 0")
+call writeln(script,"    ask ""*nKeine Fehler - <RETURN>"" ")
+call writeln(script,"  else")
+call writeln(script,"    ask ""*nAufruf fehlgeschlagen! - <RETURN>"" ")
+call writeln(script,"  endif")
+call writeln(script,"else")
+call writeln(script,"  wait "enddelay)
+call writeln(script,"endif")
+call writeln(script,"rx ""options results; address '"portnam"' 'Finished $ocmdrc"unique"'"" ")
+call writeln(script,"endcli")
+
+if ~close(script) then do
+  Okay1 "Fehler: Kann Script nicht schließen"
+  call cleanup 20
+end
+if c2d(OpenPort(portnam))=0 then do
+  okay1 'Fehler: Kann Msgport nicht öffnen'
+  address command 'delete >nil: 'scriptname
+  call cleanup 20
+end
+select
+  when tool = "COMPILE" then address REXX ''errcmd' CLEAR'
+  when tool = "MAKE"    then address REXX ''errcmd' CLEAR'
+  otherwise nop
+end
+address command 'NewShell 'window' from 'scriptname
+do while ~waitpkt(portnam); nop; end
+pkt=getpkt(portnam)
+if c2d(pkt)~=0 then do
+  ret=getarg(pkt)
+  parse upper var ret 'FINISHED' ret dummy
+  call reply pkt,0
+  if ret ~= 0 then do
+    if tool = "COMPILE" then do
+      address REXX ''errcmd' FIRST'
+    end; else do
+      if (endwait~='TRUE') & (endwait~='FAIL') then Okay1 "Fehler: Aufruf fehlgeschlagen!"
+    end
+  end
+end
+
+address command 'delete >nil: 'scriptname
+call cleanup
+
+AddOpts: procedure expose OberonOpts OLinkOpts unique uniqueoptsname
+  arg name 'OPTS'
+  outname = name || 'OUT'
+  address command 'rxset 'uniqueoptsname' `OberonPrefs from default nogui 'outname,
+    ' oberonopts 'oberonopts' olinkopts 'olinkopts'`'
+  ret = getclip(uniqueoptsname)
+  call setclip uniqueoptsname
+  return ret
+
+cleanup:
+  call SetClip clipname
+  exit arg(1)
+
+
+error:
+syntax:
+  call SetClip clipname
+  'okay1 OCmd.ced-Abbruch: Programmfehler'
+  exit
+
+halt:
+  call SetClip clipname
+  exit
+
+break_c:
+break_d:
+break_e:
+break_f:
+  call SetClip clipname
+  'okay1 OCmd.ced-Abbruch: Benutzerunterbrechung'
+  exit
+

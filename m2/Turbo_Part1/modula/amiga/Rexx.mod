@@ -1,0 +1,35 @@
+IMPLEMENTATION MODULE Rexx ;
+
+FROM SYSTEM IMPORT STRING ;
+IMPORT M2Lib ;
+
+PROCEDURE LLOFFSET( rrp : RexxRsrcPtr ) : LONGINT ;
+BEGIN RETURN rrp^.rr_Arg1 ;
+END LLOFFSET ;
+
+PROCEDURE LLVERS( rrp : RexxRsrcPtr ) : LONGINT ;
+BEGIN RETURN rrp^.rr_Arg2 ;
+END LLVERS ;
+
+PROCEDURE CLVALUE( rrp : RexxRsrcPtr ) : STRING ;
+BEGIN RETURN STRING( rrp^.rr_Arg1 ) ;
+END CLVALUE ;
+
+PROCEDURE IVALUE( nsPtr : NexxStrPtr ) : LONGINT ;
+BEGIN RETURN nsPtr^.ns_Ivalue ;
+END IVALUE ;
+
+PROCEDURE ARG0( rmp : RexxMsgPtr) : STRING ;
+BEGIN RETURN rmp^.rm_Args[0] ;
+END ARG0 ;
+
+PROCEDURE ARG1( rmp : RexxMsgPtr ) : STRING ;
+BEGIN RETURN rmp^.rm_Args[1] ;
+END ARG1 ;
+
+PROCEDURE ARG2( rmp : RexxMsgPtr ) : STRING ;
+BEGIN RETURN rmp^.rm_Args[2] ;
+END ARG2 ;
+
+BEGIN RexxSysBase := M2Lib.OpenLib( RXSNAME, VERSION )
+END Rexx.

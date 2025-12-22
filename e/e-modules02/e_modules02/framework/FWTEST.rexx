@@ -1,0 +1,7 @@
+/* test komend AREXXa
+*/
+
+ADDRESS FWTEST
+RAZ
+DWA
+TRZY

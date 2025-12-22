@@ -1,0 +1,8 @@
+_LVOMakePPCT			EQU	-30
+_LVOFreePPCT			EQU	-36
+_LVOFallPPCT			EQU	-42
+_LVOImagePPCT			EQU	-48
+_LVOPaletteToRGB32		EQU	-54
+_LVOFreeRGB32			EQU	-60
+_LVORGB32ToPalette		EQU	-66
+_LVOFreePalette		EQU	-72

@@ -1,0 +1,391 @@
+/*  $VER: ECompile.ced 2.10 (3.9.97) Copyright © 1996-97 Davinja Software
+*/
+
+ECPath='AmigaE:bin/EC'  /* Change path to your EC or if you got a 'path' */
+                        /* to it just write 'EC'.                        */
+ECOptions=''            /* Put the Default Options of the compiler here! */
+
+/* -------------- Don't change anything bellow this line! -------------- */
+
+Options Results
+Options Failat 21
+NL='0A'X
+CEDPort=Address()
+
+If ~Show('L','rexxreqtools.library') then 
+If ~Addlib('rexxreqtools.library',0,-30,0) then do
+   Say 'Could not open rexxreqtools.library.  Quiting.'
+   Exit 20
+End
+
+If ~Show('P',CEDPort) then do
+   RTEZRequest("CygnusEd ARexx Port not found!",'_Quit',,'rt_reqpos=reqpos_centerwin')
+   Exit
+End
+
+Address(CEDPort)
+
+If CEDPort='rexx_ced' then do
+   CEDScreen='CygnusEdScreen1'
+End
+Else do
+   CEDScreen='CygnusEdScreen'Right(CEDPort,1)+1
+End
+RTPAR='rt_reqpos=reqpos_centerwin rt_pubscrname='CEDScreen
+
+If ~Exists(ECPath) then do
+   RTEZRequest('The E compiler could not be found!'NL'Check your EC path!','_Quit',,'rtez_flags=ezreqf_centertext' RTPAR)
+   Exit
+End
+
+Status 'numchanges'
+EDChanges=Result
+
+MAIN:
+Status 'dirname'
+ESourcePath=Result
+Status 'filename'
+ESourceFile=Result
+ESourceFilePref=(Left(ESourceFile,Length(ESourceFile)-2))
+Status 'restname'
+ESourceName=Result
+ESourceNamePref=(Left(ESourceName,Length(ESourceName)-2))
+
+if ESourceName='' then do
+   RTEZRequest('The source is "Untitled"'NL' Should it be saved?','_Save as..|_Quit',' Save Source','rtez_flags=ezreqf_centertext' RTPAR)
+   If RTResult=0 then Exit
+   SAVE
+   Call MAIN
+End
+If (Upper(Right(ESourceFile,5))=='.EBAK') then do
+   RTEZRequest('"'ESourceName'"'NL'is an backup file,'NL'have to be changed!','_Save as...|_Quit',,'rtez_flags=ezreqf_centertext' RTPAR)
+   If RTResult=0 then Exit
+   ESourceFile=rtfilerequest(ESourcePath,,'Save Source as...','_Save','rtfi_flags=freqf_save')
+   'SAVE AS' ESourceFile
+   Call MAIN
+End
+If (Upper(Right(ESourceFile,2))~='.E')then do
+   RTEZRequest('"'ESourceName'"'NL'is not an ".e" file!!!','_Quit',,'rtez_flags=ezreqf_centertext' RTPAR)
+   Exit
+End
+
+Parse Value Date(ORDERED) With YY'/'MM'/'DD
+DD=Trunc(DD)
+MM=Trunc(MM)
+YY=Trunc(YY)
+CURRDATE='('DD'.'MM'.'YY')'
+
+Status 'cursorline'
+CR_LINE=Result+1
+Status 'cursorcolumn'
+CR_COL=Result+1
+Status 'displaylines'
+DISPLINES=Trunc((Result/2)-5)
+
+DM 'Scanning for options...'
+Call GetOption("ECOptions") ; If Result~="ECOPTIONS" then ECOPTIONS=Result
+ECDUPPATH=GetOption("ECDupPath")
+ECBUMPREV=GetOption("ECBumpRev")
+ECNOBUMP=GetOption("ECNoBump")
+ECNOVER=GetOption("ECNoVer")
+ECCOMMENT=GetOption("ECComment")
+ECPPSET=GetOption("ECPPSet")
+
+Call GetVersion
+
+Request:
+MESS='   SOURCE: 'ESourceName||NL
+If VERSTAT=1 then MESS=MESS||'  VERSION: 'VERNAME VERSTR VERDATE||NL
+If ECOPTIONS~='' then MESS=MESS||'  OPTIONS:' ECOPTIONS||NL
+If ECDUPPATH~='ECDUPPATH' then MESS=MESS||'  DUPPATH:' ECDUPPATH||NL
+If EDChanges=0 then do
+   MESS=MESS||'   STATUS: UNCHANGED'
+   ECNOVER=''
+End
+Else MESS=MESS||'   STATUS: CHANGED'
+RTEZRequest(MESS,'_Compile|_BackUp|_RevUp|_FixUp|_NoBump|_?|_Quit','Info Source...',RTPAR)
+If RTResult=6 then do;Call DisplayHelp;Call Request;End
+If RTResult=5 then ECNOBUMP=''
+If RTResult=4 then do;ECNOBUMP='ECNOBUMP';ECNOVER='ECNOVER';End
+If RTResult=3 then do;ECBUMPREV='';ECNOVER='ECNOVER';End
+If RTResult=2 then do;Call MakeBackUp;Call Request;End
+If RTResult=0 then do;'BEG OF FILE';JumpTo CR_LINE+DISPLINES 0;JumpTo CR_LINE CR_COL;Exit;End
+If ECNOVER='ECNOVER' then do
+   VERDATE=CURRDATE
+   If ECBUMPREV~='ECBUMPREV' then do
+      If (Datatype(VERREV,'N')) then do
+         VERREV=VERREV+1
+         VERFIX=0
+      End
+   End
+   Else If (ECNOBUMP='ECNOBUMP')&(VERSTAT=1) then do
+      If (Datatype(VERFIX,'N')) then do
+         VERFIX=VERFIX+1
+      End
+   End
+   If VERSTAT=1 then Call PutVersion
+   Else do
+      RTEZRequest('"'ESourceName'"'||NL'have no version string, add this?'||NL'"'VERNAME VERSTR VERDATE'"','_Add|_No','Add Version String','rtez_flags=ezreqf_centertext' RTPAR)
+      If RTResult=1 then Call PutVersion
+   End
+End
+If (ECPPSET~='ECPPSET')&(VERSTAT=1) then Call PreProSet
+Save
+
+DM 'Compiling E source...'
+Status 'taskaddress'
+TMPFile='T:'||Result||'.tmp'
+Address Command
+ECPath '>'TMPFile ESourceFile ECOptions ' Quiet'
+Address
+
+Call CheckErrors
+
+If VERSTAT=1 then do
+   CTEXT=VERNAME VERSTR VERDATE
+   Call AddComment(ESourceFile)
+End
+If ER_ERROR='ER_ERROR' then do
+   If ECCOMMENT~='ECCOMMENT' then do
+      IF VERSTAT=1 then CTEXT=VERNAME VERSTR VERDATE ECCOMMENT ; Else CTEXT=ECCOMMENT
+      Call AddComment(ESourceFilePref)
+   End
+   If ECDUPPATH~='ECDUPPATH'then Call CopyDuppFile
+End
+
+DM
+MESS=' SOURCE:' ESourceName||NL
+If VERSTAT=1 then MESS=MESS||'VERSION:' VERNAME VERSTR VERDATE||NL
+If ECOPTIONS~='' then MESS=MESS||'OPTIONS:' ECOPTIONS||NL
+If ER_UNREF~='ER_UNREF' then MESS=MESS||'  UNREF:' ER_UNREF||NL
+If ER_ERROR~='ER_ERROR' then MESS=MESS||'  ERROR:' ER_ERROR||NL
+If ER_LINE~='ER_LINE' then MESS=MESS||'   LINE:' ER_LINE||NL
+If ER_TEXT~='ER_TEXT' then MESS=MESS||'   TEXT:' ER_TEXT||NL
+If ER_WITH~='ER_WITH' then MESS=MESS||'   WITH:' ER_WITH||NL
+If ER_ERROR='ER_ERROR' then do
+   MESS=MESS||' STATUS: OK'
+   'BEG OF FILE'
+   JumpTo CR_LINE+DISPLINES 0
+   JumpTo CR_LINE CR_COL
+End
+Else do
+   MESS=MESS||' STATUS: FAILED'
+   If ER_LINE~='ER_LINE' then do
+      'BEG OF FILE'
+      JumpTo ER_LINE+DISPLINES 0
+      JumpTo ER_LINE ER_COL
+   End
+End
+RTEZRequest(MESS,'_Ok','E Compile Result',RTPAR)
+DM
+Exit
+
+/****************************************************************************/
+
+GetOption: Procedure
+Arg KEYWORD
+"BEG OF FILE"
+SEARCH FOR "->"||KEYWORD 1 0 1 1
+If Result ~=0 then do
+   Status 'linebuffer'
+   Parse Var Result '->' OPTION TEMPLATE
+   TEMPLATE=Strip(Compress(TEMPLATE,'0A'X))
+   TEMPLATE=Compress(TEMPLATE,'"')
+End
+Else TEMPLATE=KEYWORD
+Return TEMPLATE
+
+GetVersion:
+DM 'Scanning for version string...'
+"BEG OF FILE"
+SEARCH FOR "$VER:" 1 0 1 1
+If Result ~=0 then do
+   VERSTAT=1
+   Status 'cursorline'
+   VERLINE=Result+1
+   Status 'linebuffer'
+   Parse Var Result VERPRE'$VER:'VERNAME VERSTR'('VERDATE')'VERSUF
+   VERSTR=Strip(VERSTR)
+   Parse Var VERSTR VERVER'.'VERREV'.'VERFIX
+   If VERFIX="" then VERFIX=0
+   VERDATE='('VERDATE')'
+End 
+Else do
+   VERSTAT=0
+   "END OF FILE"
+   Status 'cursorline'
+   VERLINE=Result+1
+   VERPRE="VOID '"
+   VERNAME=(Left(ESourceName,Length(ESourceName)-2))
+   VERSTR='1.0'
+   VERVER=1
+   VERREV=0
+   VERFIX=0
+   VERDATE=CURRDATE
+   VERSUF="'"||NL
+End
+DM
+Return
+
+PutVersion:
+VERSTR=VERVER'.'VERREV
+If VERFIX~=0 then VERSTR=VERSTR||'.'VERFIX
+If VERSTAT=1 then do
+   JumpTo VERLINE 1
+   "DELETE LINE"
+   End
+   Else do
+   JumpTo VERLINE 1
+   Status 'linebuffer'
+   If Result ~=NL then do
+      "END OF LINE"
+      TEXT NL
+   End
+   TEXT NL
+End
+TEXT VERPRE||'$VER:' VERNAME VERSTR VERDATE||VERSUF
+VERSTAT=1
+Return
+
+CopyDuppFile:
+DM 'Making duplicate of exe file...'
+If Exists(ESourceFilePref) then do
+   Address Command
+   'C:Copy >NIL:' ESourceFilePref 'To "'ECDupPath'" Clone Quiet'
+   Address
+End
+Else RC=1
+If RC>0 then do
+   RTEZRequest('Copying of "Duplicate" file failed!!!','_Ok',,RTPAR)
+End
+DM
+Return
+
+MakeBackUp:
+DM 'Making backup of source file...'
+If Exists(ESourceFile) then do
+   If VERSTAT=1 then do
+   BackUpName='_V'VERSTR'.ebak'
+   BackupName=Left(ESourceNamePref,Min(Length(ESourceNamePref),30-Length(BackupName)))||BackupName
+   End
+   Else BackupName=ESourceNamePref||'.ebak'
+   BackupName=rtfilerequest(ESourcePath,BackupName,'Save Source Backup...','_Save','rtfi_flags=freqf_save rt_pubscrname='CEDScreen)
+   If BackupName~='' then do
+      If Exists(BackupName) then do
+         RTEZRequest('"'BackupName'"'NL'already exists,overwrite?','_Yes|_No',,'rtez_flags=ezreqf_centertext' RTPAR)
+         If RTResult=0 then Return
+      End
+      Address Command
+      'C:Copy >NIL:' ESourceFile 'To' BackupName 'Clone Quiet'
+      Address
+   End
+End
+Else RC=1
+If RC>0 then do
+   RTEZRequest('Making a "BackUp" file failed!!!','_Ok',,RTPAR)
+End
+DM
+Return
+
+CheckErrors:
+DM 'Checking for errors...'
+CLine=''
+If ~Open('File',TMPFile,'R') then do
+   RTEZRequest('Could not open "Error" file!!!','_Quit',,RTPAR)
+   DM
+   Exit
+End
+Do Until EOF('File')
+   CLine=ReadLn('File')
+   If Left(Cline,13)='UNREFERENCED:' then do
+      ER_UNREF=Strip(SubStr(CLine,14))
+   End
+   If Left(Cline,6)='ERROR:' then do
+      ER_ERROR=Strip(SubStr(CLine,7))
+   End
+   If Left(Cline,4)='LINE' then do
+      CPOS=Pos(':',Cline)
+      ER_LINE=Strip(SubStr(CLine,5,(CPOS-5)))
+      ER_TEXT=SubStr(Cline,(CPOS+1))
+      CPOS=Pos('[43;32m',ER_TEXT)
+      ER_COL=CPOS-1
+      If CPOS>0 then do
+         ER_TEXT=Delstr(ER_TEXT,CPOS,8)
+         CPOS=Pos('[0m',ER_TEXT)
+         If CPOS>0 then ER_TEXT=Delstr(ER_TEXT,CPOS,4)
+      End
+      ER_TEXT=Strip(ER_TEXT)
+      If Length(ER_TEXT)>60 then ER_TEXT=(Left(ER_TEXT,60)||'...')
+   End
+   If Left(Cline,5)='WITH:' then do
+      ER_WITH=Strip(SubStr(CLine,6))
+      If Length(ER_WITH)>60 then ER_WITH=(Left(ER_WITH,60)||'...')
+   End
+End
+Close('File')
+Address Command
+'C:Delete >NIL:' TMPFile 'Quiet'
+Address
+DM
+Return
+
+AddComment:
+DM 'Adding comment to file...'
+Arg CFILE
+If Exists(CFILE) then do
+   If Length(CTEXT)>79 then CTEXT=Left(CTEXT,79)
+   Address Command
+   'C:FileNote >NIL: File' CFILE 'Comment "'CTEXT'" Quiet'
+   Address
+End
+Else RC=1
+If RC>0 then do
+   RTEZRequest('Could not comment file!','_Ok',,RTPAR)
+End
+DM
+Return
+
+PreProSet:
+DM "Scanning for define's..."
+MACRO=4
+MACRO.1='ECVERNAME' ;BODY.1=VERNAME
+MACRO.2='ECVERSHORT';BODY.2=VERVER'.'VERREV
+MACRO.3='ECVERLONG' ;BODY.3=VERVER'.'VERREV'.'VERFIX
+MACRO.4='ECVERDATE' ;BODY.4=VERDATE
+Do NUM=1 To MACRO
+   "BEG OF FILE"
+  "SEARCH FOR" '"#define '||MACRO.NUM'"' 1 0 1 1
+    If Result~=0 then do
+      Status 'cursorline'
+      DEFLINE=Result+1
+      Status 'linebuffer'
+      Parse Var Result DEFPRE'#define'DEFMACRO DEFSTR DEFSUF
+      DEFSUF=Compress(DEFSUF,'0A'X)
+      DEFMACRO=Compress(DEFMACRO,'0A'X)
+      DEFMACRO=Strip(DEFMACRO)
+      JumpTo DEFLINE 1
+      "DELETE TO EOL"
+      TEXT DEFPRE'#define' DEFMACRO "'"BODY.NUM"'"DEFSUF
+   End
+End
+DM
+Return
+
+DisplayHelp:
+      MESS='                               ECompiler Script V2.10'||NL||NL
+MESS=MESS||'Options:'||NL
+MESS=MESS||'->ECOptions "OPTI DEBUG" :Sets the compiler options OPTI and DEBUG'||NL
+MESS=MESS||'->ECDupPath "Work:Ownprograms/" :Copy a clone of the exe file to Work:Ownprograms/'||NL
+MESS=MESS||'->ECNoVer :Turns off the version handling'||NL
+MESS=MESS||"->ECNoBump :Don't bump the version, but sets the date"||NL
+MESS=MESS||'->ECBumpRev :Bumps the revision'||NL
+MESS=MESS||'->ECComment "-By Me!" :Places -By Me! after verstring in the filenote on exe file'||NL
+MESS=MESS||'->ECPPSet :Makes the script set the defines if they exists'||NL
+MESS=MESS||"   #define ECVERNAME 'programname'"||NL
+MESS=MESS||"   #define ECVERSHORT 'ver.rev'"||NL
+MESS=MESS||"   #define ECVERLONG 'ver.rev.fixrev'"||NL
+MESS=MESS||"   #define ECVERDATE '(d.m.yy)'"||NL||NL
+MESS=MESS||'Send comments, questions and bugreports to: Johan Nilsson (jonils@algonet.se)'||NL
+MESS=MESS||'                    Copyright © 1996-97 Davinja Software'
+RTEZRequest(MESS,'_Ok','Info',RTPAR)
+Return

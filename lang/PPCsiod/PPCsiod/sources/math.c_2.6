@@ -1,0 +1,355 @@
+/* Scheme In One Define.
+ 
+The garbage collector, the name and other parts of this program are
+
+ *                     COPYRIGHT (c) 1989 BY                              *
+ *      PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+
+Conversion  to  full scheme standard, characters, vectors, ports, complex &
+rational numbers, and other major enhancments by
+
+ *      Scaglione Ermanno, v. Pirinoli 16 IMPERIA P.M. 18100 ITALY        * 
+
+Permission  to use, copy, modify, distribute and sell this software and its
+documentation  for  any purpose and without fee is hereby granted, provided
+that  the  above  copyright  notice appear in all copies and that both that
+copyright   notice   and   this  permission  notice  appear  in  supporting
+documentation,  and that the name of Paradigm Associates Inc not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.
+
+PARADIGM  DISCLAIMS  ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL  IMPLIED  WARRANTIES  OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+PARADIGM  BE  LIABLE  FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <math.h>
+#include <limits.h>
+
+#include "siod.h"
+
+#define fixhash(f)((((f)+2357)*1193)%fixarray_dim)
+
+LISP intcons(long x)
+{LISP z,l;
+ long hash,flag;
+ hash = fixhash(x);
+ for(l=fixarray[hash];CONSP(l);l=CDR(l))
+   if (INTNM(CAR(l)) == x)
+      return(CAR(l));
+ flag=no_interrupt(1);
+ NEWCELL(z,tc_intnum);
+ INTNM(z)=x;
+ fixarray[hash] = cons(z,fixarray[hash]);
+ no_interrupt(0);
+ return(z);}
+
+LISP ratcons(double x,double y)
+{double gcd,integ;
+ if(y == 0.) err("division by zero",NIL,ERR_GEN);
+ if(x == 0.) return(intcons(0));
+ if((modf(x,&integ) != 0.) || (modf(y,&integ) != 0.))
+   return flocons(x/y);
+ gcd = cal_gcd_double(x,y);
+ x /= gcd;
+ y /= gcd;
+ if(y<0.)
+  {y=-y;
+   x=-x;}
+ if(y == 1.)
+   return flocons(x);
+ if((x>LONG_MAX) || (x<LONG_MIN) || (y>ULONG_MAX))
+   return flocons(x/y);
+ return(ratco((long)x,(unsigned long)y));}
+
+LISP ratco(long x,unsigned long y)
+{long flag;
+ LISP z;
+ flag=no_interrupt(1);
+ NEWCELL(z,tc_ratnum);
+ RATNUM(z) = x;
+ RATDEN(z) = y;
+ no_interrupt(flag);
+  return(z);}
+
+LISP flocons(double x)
+{double integ,frac;
+ frac = modf(x,&integ); 
+ if((frac==0.) && (integ<LONG_MAX) && (integ>LONG_MIN))
+   return(intcons((long)x));
+ return(floco(x));}
+
+LISP floco(double x)
+{long flag;
+ LISP z;
+ flag=no_interrupt(1);
+ NEWCELL(z,tc_flonum);
+ FLONM(z) = x;
+ no_interrupt(flag);
+  return(z);}
+
+LISP compcons(float x,float y)
+{if(y == 0.) return(flocons((double)x));
+ return(compco(x,y));}
+
+LISP compco(float x,float y)
+{long flag;
+ LISP z;
+ flag=no_interrupt(1);
+ NEWCELL(z,tc_compnum);
+ COMPRE(z) = x;
+ COMPIM(z) = y;
+ no_interrupt(flag);
+  return(z);}
+
+LISP tofloat(LISP x)
+{LISP z;
+ switch(TYPE(x))
+ {case tc_intnum:
+    z = floco((double)INTNM(x));
+    break;
+  case tc_ratnum:
+    z = floco((double)RATNUM(x)/(double)RATDEN(x));
+    break;
+  case tc_flonum:
+    z = floco(FLONM(x));
+    break;   
+  case tc_compnum:
+    if(COMPIM(x)==0.)
+      z = floco((double)COMPRE(x));
+    else
+      z = compcons(COMPRE(x),COMPIM(x));
+    break;}
+ return(z);}
+
+LISP ltofloat(LISP x)
+{if(NNUMBERP(x))
+  err("float",x,ERR_GEN_ARG | ERR_NNUM);
+ return(tofloat(x));}
+
+LISP torational(LISP x)
+{LISP z;
+ double integ;
+ switch(TYPE(x))
+ {case tc_intnum:
+    z = x;
+    break;
+  case tc_ratnum:
+    z = ratco(RATNUM(x),RATDEN(x)); 
+    break;
+  case tc_flonum:
+    modf((FLONM(x) * 100000.),&integ);
+    z = ratcons(integ,100000.);
+    break;   
+  case tc_compnum:
+    if(COMPIM(x)==0.)
+     {modf((COMPRE(x) * 100000.),&integ);
+      z = ratcons(integ,100000.);}
+    else
+      z = compcons(COMPRE(x),COMPIM(x));
+    break;}
+ if(INTNUMP(z))
+    z = ratco(INTNM(x),1);
+ return(z);}
+
+LISP ltorational(LISP x)
+{if(NNUMBERP(x))
+  err("rational",x,ERR_GEN_ARG | ERR_NNUM);
+ return(torational(x));}
+
+LISP tocomplex(LISP x)
+{LISP z;
+ switch(TYPE(x))
+ {case tc_intnum:
+    z = compco((float)INTNM(x),0.F); 
+    break;
+  case tc_ratnum:
+    z = compco((float)((float)RATNUM(x)/(float)RATDEN(x)),0.F);
+    break;
+  case tc_flonum:
+    z = compco((float)FLONM(x),0.F);
+    break;
+  case tc_compnum:
+    z = compco(COMPRE(x),COMPIM(x));
+    break;}
+ return(z);}
+
+LISP ltocomplex(LISP x)
+{if(NNUMBERP(x))
+  err("complex",x,ERR_GEN_ARG | ERR_NNUM);
+ return(tocomplex(x));}
+
+LISP converti(LISP x,short y)
+{LISP z;
+ switch(y)
+  {case tc_intnum:
+     z = ltruncate(x);
+     break;
+   case tc_ratnum:
+     z = torational(x);
+     break;
+   case tc_flonum:
+     z = tofloat(x);
+     break;
+   case tc_compnum:
+     z = tocomplex(x);
+     break;} 
+ return(z);
+}
+
+LISP plus2(LISP x,LISP y)
+{LISP z;
+ if(TYPE(x) > TYPE(y))
+     y=converti(y,TYPE(x));
+ else if(TYPE(x) < TYPE(y))
+     x=converti(x,TYPE(y));
+ switch(TYPE(x))
+ {
+  case tc_intnum:
+    z = flocons(((double)INTNM(x)+(double)INTNM(y)));
+    break;
+  case tc_ratnum:
+    z = ratcons((((double)RATNUM(x) * 
+                        (double)RATDEN(y)) +
+                       ((double)RATNUM(y) * 
+                        (double)RATDEN(x))),
+                ((double)RATDEN(x)*(double)RATDEN(y)));
+    break;
+  case tc_flonum:
+    z = flocons(FLONM(x)+FLONM(y));
+    break;
+  case tc_compnum:
+    z = compcons((float)(COMPRE(x)+COMPRE(y)),(float)(COMPIM(x)+COMPIM(y)));
+    break;}
+  return(z);}
+
+LISP minus2(LISP x,LISP y)
+{LISP z;
+ if(TYPE(x) > TYPE(y))
+     y=converti(y,TYPE(x));
+ else if(TYPE(x) < TYPE(y))
+     x=converti(x,TYPE(y));
+ switch(TYPE(x))
+ {
+  case tc_intnum:
+    z = flocons(((double)INTNM(x)-(double)INTNM(y)));
+    break;
+  case tc_ratnum:
+    z = ratcons((((double)RATNUM(x) * 
+                        (double)RATDEN(y)) -
+                       ((double)RATNUM(y) * 
+                        (double)RATDEN(x))),
+                ((double)RATDEN(x)*(double)RATDEN(y)));
+    break;
+  case tc_flonum:
+    z = flocons(FLONM(x)-FLONM(y));
+    break;
+  case tc_compnum:
+    z = compcons((float)(COMPRE(x)-COMPRE(y)),(float)(COMPIM(x)-COMPIM(y)));
+    break;}
+  return(z);}
+
+LISP times2(LISP x,LISP y)
+{LISP z;
+ if(TYPE(x) > TYPE(y))
+     y=converti(y,TYPE(x));
+ else if(TYPE(x) < TYPE(y))
+     x=converti(x,TYPE(y));
+ switch(TYPE(x))
+ {
+  case tc_intnum:
+    z = flocons(((double)INTNM(x)*(double)INTNM(y)));
+    break;
+  case tc_ratnum:
+    z = ratcons(((double)RATNUM(x)*(double)RATNUM(y)),
+                ((double)RATDEN(x)*(double)RATDEN(y)));
+    break;
+  case tc_flonum:
+    z = flocons(FLONM(x)*FLONM(y));
+    break;
+  case tc_compnum:
+    z = compcons((float)((COMPRE(x)*COMPRE(y))-(COMPIM(x)*COMPIM(y))),
+                 (float)((COMPRE(x)*COMPIM(y))+(COMPRE(y)*COMPIM(x))));
+    break;}
+  return(z);}
+
+LISP divide2(LISP x,LISP y)
+{LISP z;
+ if(TYPE(x) > TYPE(y))
+     y=converti(y,TYPE(x));
+ else if(TYPE(x) < TYPE(y))
+     x=converti(x,TYPE(y));
+ switch(TYPE(x))
+ {
+  case tc_intnum:
+       z = ratcons((double)INTNM(x),(double)INTNM(y));
+    break;
+  case tc_ratnum:
+       z = ratcons(((double)RATNUM(x)*(double)RATDEN(y)),
+                   ((double)RATDEN(x)*fabs((double)RATNUM(y))));
+    break;
+  case tc_flonum:
+    z = flocons(FLONM(x)/FLONM(y));
+    break;
+  case tc_compnum:
+   {float mo = (COMPRE(y)*COMPRE(y))+(COMPIM(y)*COMPIM(y));
+    z = compcons((float)(((COMPRE(x)*COMPRE(y))+(COMPIM(x)*COMPIM(y)))/mo),
+                 (float)(((COMPRE(y)*COMPIM(x))-(COMPRE(x)*COMPIM(y)))/mo));
+    break;}}
+  return(z);}
+
+LISP getnumer(LISP num)
+{LISP z;
+ if(NRATNUMP(num))err("arg to numerator must be a rational",num,ERR_GEN);
+ z = intcons(RATNUM(num));
+ return(z);}
+
+LISP getdenom(LISP num)
+{LISP z;
+ if(NRATNUMP(num))err("arg to denominator must be a rational",num,ERR_GEN);
+ z = intcons(RATDEN(num));
+ return(z);}
+
+LISP makerat(LISP num,LISP den)
+{LISP z;
+ double dum;
+ num = tofloat(num);
+ den = tofloat(den);
+ if(NFLONUMP(num)||(modf(FLONM(num),&dum)!=0.))
+    err("make-rational",num,ERR_GEN_ARG | ERR_NINT);
+ if(NFLONUMP(den)||(modf(FLONM(den),&dum)!=0.))
+    err("make-rational",num,ERR_GEN_ARG | ERR_NINT);
+ z = ratcons(FLONM(num),FLONM(den));
+ return(z);}
+
+LISP makecomp(LISP real,LISP imag)
+{LISP z;
+ real = tofloat(real);
+ imag = tofloat(imag);
+ if(NFLONUMP(real))
+    err("arg to make-complex must be a float",real,ERR_GEN);
+ if(NFLONUMP(imag)) 
+    err("arg to make-complex must be a float",imag,ERR_GEN);
+ z = compcons((float)FLONM(real),(float)FLONM(imag));
+ return(z);}
+
+LISP getreal(LISP num)
+{LISP z;
+ if(NCOMPNUMP(num))err("arg to real must be a complex",num,ERR_GEN);
+ z = flocons((double)COMPRE(num));
+ return(z);}
+
+LISP getimag(LISP num)
+{LISP z;
+ if(NCOMPNUMP(num))err("arg to imaginary must be a complex",num,ERR_GEN);
+ z = flocons((double)COMPIM(num));
+ return(z);}

@@ -1,0 +1,37 @@
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+///////////////////                                        ////////////////////
+///////////////////           file : gscreen.h             ////////////////////
+///////////////////                                        ////////////////////
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+//
+//	Class GScreen :
+//
+//		- Simple graphical screen handling.
+//
+//		- Inherits 'CScreen' and 'CRastPortHdl'
+
+
+#ifndef __GSCREEN__
+#define __GSCREEN__
+
+#include <ipp/cscreen.h>
+#include <ipp/crastporthdl.h>
+
+
+class GScreen : public virtual CScreen, public virtual CRastPortHdl
+{
+public:
+	GScreen();
+	GScreen(struct NewScreen *newscreen);
+	GScreen(struct ExtNewScreen *extnewscreen);
+	GScreen(struct NewScreen *newscreen, struct TagItem *tags);
+	~GScreen();
+
+	virtual BOOL open();
+	virtual void close();
+};
+
+
+#endif //__GSCREEN__

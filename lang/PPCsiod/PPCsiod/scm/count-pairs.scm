@@ -1,0 +1,31 @@
+(define (count-pairs l)
+        (if (atom? l)
+            0
+            (+ 1 (count-pairs (car l))
+                 (count-pairs (cdr l)))))
+
+(define (count-pairs-2 l s)
+        (cond ((atom? l) 0)
+              ((element-of-set? l s) 0)
+              (else (let ((s1 (adjoin-set l s)))
+                         (+ 1 (count-pairs-2 (car l) s1)
+                              (count-pairs-2 (cdr l) s1))))))
+
+(define s the-empty-set)
+
+(define (count-pairs-3 l)
+        (cond ((atom? l) 0)
+              ((element-of-set? l s) 0)
+              (else (set! s (adjoin-set l s))
+                    (+ 1 (count-pairs-3 (car l))
+                         (count-pairs-3 (cdr l))))))
+
+(define (count-pairs-4 l)
+        (define n (empty-set))
+        (define (count l)
+                (cond ((atom? l) 0)
+                      ((element-of-set? l n) 0)
+                      (else (adjoin-set! l n)
+                            (+ 1 (count (car l))
+                                 (count (cdr l))))))
+        (count l))

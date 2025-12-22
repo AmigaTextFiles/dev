@@ -1,0 +1,280 @@
+
+
+** CODE		HORIZONTAL SCROLLER
+** CODER	MARC.B
+
+; this is a basic horizontal scroller
+; which seems to have a slight problem
+; when the screen reaches the end and restars
+; the display jumps down by one line i think this 
+; should be pretty easy to overcome by repeating
+; the first screen at the end of the scroll and resetting
+; the bitplane pointers when this is being displayed so
+; preventing the display from wrapping up by one line
+; ( haven't tried it yet but it should work ) 		
+	   
+******************************************
+*		SYSTEM OFFSETS		 *
+******************************************
+
+execbase	equ	4
+openlibrary	equ	-408
+closelibrary	equ	-414
+allocmem	equ	-198
+freemem		equ	-210
+forbid		equ	-132
+permit		equ	-138
+copymem		equ	-624
+
+
+***	constants	***
+
+chip		equ	2
+clear		equ	$10000
+
+
+
+
+******************************************
+*		INCLUDE FILE		 *
+******************************************
+
+	include	source:include/hardware.i
+	lea	$dff000,a5			;custom base address
+	
+
+
+**********************************************************
+*	OPEN GFX LIBRARY AND SAVE SYSTEM COPPER		 *
+**********************************************************
+
+	move.l	execbase,a6
+	move.l	#gfxname,a1
+	moveq	#0,d0
+	jsr	openlibrary(a6)
+	tst	d0			
+	beq	the_end			
+	move.l	d0,gfxbase		
+	move.l	d0,a0			
+	move.l	38(a0),systemcopper	
+
+
+****************************************************
+*	ALLOCATE MEMORY FOR BIT PLANES		   *
+****************************************************
+
+	move.l	execbase,a6
+	move.l	#(640/8*256)*3,d0	;memory for 2 bitplanes
+	move.l	#chip+clear,d1		;chip memory and wipe it 
+	jsr	allocmem(a6)
+	tst	d0			;fail 
+	beq	exit			;yep exit
+	move.l	d0,bitbase		;save pointer
+
+****************************************************
+*		COPY SCREEN TO DISPLAY RAM	   *
+****************************************************
+
+	move.l	execbase,a6
+	lea	screen,a0
+	move.l	bitbase,a1
+	move.l	#(640/8*256)*3,d0
+	jsr	copymem(a6)
+	
+******************************************************
+*		SET UP CUSTOM FLAGS		     *
+******************************************************
+
+	clr.l	offset
+	clr.b	counter
+	move.w	#$ff,delay
+
+
+
+***************************************************************
+*		START CUSTOM COPPER LIST		      *
+***************************************************************	
+	
+	move.l	bitbase,d0
+	bsr	load_pointers
+	move.l  #copper,COP1LCH(a5)
+	move.l	#0,COPJMP1(a5)
+	move.l	execbase,a6
+	jsr	forbid(a6)
+
+*************************************************************
+*		    MAIN CODE LOOP    			    *
+*************************************************************
+
+wait
+	move.l	VPOSR(a5),d0	;read current beam position
+	and.l	#$0001ff00,d0	;mask all but the vertical pos
+	lsr.l	#8,d0		
+	cmp.w	#$0106,d0	;wait for end of display
+	bne	wait
+	bsr	scroll_display
+	btst	#6,CIAAPRA	;check left mouse button
+	beq	clean_up	;end if pressed
+	bra	wait
+
+**********************************************************
+*			RESTORE SYSTEM 			 *
+**********************************************************
+
+clean_up
+	move.l	systemcopper,COP1LCH(a5)
+	move.l	#0,COPJMP1(a5)
+	move.l	execbase,a6
+	jsr	permit(a6)
+	move.l	execbase,a6		;free bitplane memory
+	move.l	#(640/8*256)*3,d0
+	move.l	bitbase,a1
+	jsr	freemem(a6)
+
+exit
+	move.l	gfxbase,a1		;close the graphics library
+	move.l	execbase,a6
+	jsr	closelibrary(a6)
+	
+the_end
+	rts				;exit from program
+
+	
+*****************************************************************
+*	LOAD BITPLANE AND SPRITE POINTERS INTO COPPER LIST      *
+*****************************************************************
+
+load_pointers
+
+	
+	lea	copper,a0	;d0 is loaded with the bitplane address
+	move.w	d0,6(a0)	;before this routine is called
+	swap	d0
+	move.w	d0,2(a0)
+	swap	d0
+	add.l	#$5000,d0
+	move.w	d0,14(a0)
+	swap	d0
+	move.w	d0,10(a0)
+	swap d0
+	add.l	#$5000,d0
+	move.w	d0,22(a0)
+	swap	d0
+	move.w	d0,18(a0)
+	swap 	d0
+	rts
+
+
+
+********************************************************
+*		 	SCROLL DISPLAY		       *
+********************************************************
+
+scroll_display
+
+	
+	cmpi.b	#40,counter		;reached end
+	beq	reset_pointer		;yes ! reset and begin again
+	
+scroll
+	cmpi.w	#0,delay		;finished scroll
+	beq	update_pointer		;yes ! update pointers
+	subi.w	#$11,delay		;no ! scroll some more
+	rts
+
+reset_pointer
+	move.l	#0,offset		;this routine just resets
+	move.b	#0,counter		;the counters and reloads
+	move.l	bitbase,d0		;the original bitplane pointers
+	bra	load_pointers
+
+update_pointer
+	add.l	#2,offset		;this routine increments the
+	move.l	bitbase,d0		;bitplane pointer and the word
+	add.l	offset,d0		;counter then resets the delay
+	move.w	#$ff,delay
+	add.b	#1,counter
+	bra	load_pointers
+		
+
+
+
+***********************************************************
+*		   CUSTOM COPPER LIST			  *
+***********************************************************
+
+	SECTION	 copper.list,CODE_C
+
+copper
+		dc.w	BPL1PTH,0000		;bitplane pointers
+		dc.w	BPL1PTL,0000		
+		dc.w	BPL2PTH,0000		
+		dc.w	BPL2PTL,0000
+		dc.w	BPL3PTH,0000
+		dc.w	BPL3PTL,0000
+
+sprite.pointers
+		dc.w	SPR0PTH,0000
+		dc.w	SPR0PTL,0000		;sprite 0 pointer
+		dc.w	SPR1PTH,0000
+		dc.w	SPR1PTL,0000		;sprite 1 pointer
+		dc.w	SPR2PTH,0000
+		dc.w	SPR2PTL,0000		;sprite 2 pointer
+		dc.w	SPR3PTH,0000
+		dc.w	SPR3PTL,0000		;sprite 3 pointer
+		dc.w	SPR4PTH,0000
+		dc.w	SPR4PTL,0000		;sprite 4 pointer
+		dc.w	SPR5PTH,0000
+		dc.w	SPR5PTL,0000		;sprite 5 pointer
+		dc.w	SPR6PTH,0000
+		dc.w	SPR6PTL,0000		;sprite 6 pointer
+		dc.w	SPR7PTH,0000
+		dc.w	SPR7PTL,0000		;sprite 7 pointer
+
+display
+		dc.w	DIWSTRT,$2c81		
+		dc.w	DIWSTOP,$2bc1		
+		dc.w	BPLCON0,$0200		
+		dc.w	BPLCON2,$0000		
+		dc.w	DDFSTRT,$0030		
+		dc.w	DDFSTOP,$00d0		
+		dc.w	BPLCON1
+delay		dc.w	$0000
+		dc.w	BPL1MOD,$0026		
+		dc.w	BPL2MOD,$0026
+	
+colour_map	
+		dc.w	COLOR00,$0000		;background colour black
+		dc.w	COLOR01,$0fff		;colour 1 
+		dc.w	COLOR02,$0b52		;colour 2 
+		dc.w	COLOR03,$0a42		;colour 3 
+		dc.w	COLOR04,$0a42
+		dc.w	COLOR05,$0932
+		dc.w	COLOR06,$0832
+		dc.w	COLOR07,$0822
+	
+		dc.l	$2c01fffe		;wait for line 44
+		dc.w	BPLCON0,$3200		;turn on bit planes
+		dc.l	$fffffffe		;wait for the impossible
+endcopper
+
+copperlen	equ	endcopper-copper
+
+	
+************************************************************
+*			VARIABLES	 		   *
+************************************************************
+
+
+gfxbase		dc.l 0
+bitbase		dc.l 0
+copperbase	dc.l 0
+systemcopper	dc.l 0
+offset		dc.l 0
+counter		dc.b 0
+gfxname		dc.b 'graphics.library',0
+
+screen	incbin	graphics/h_scroll.bmap
+
+end
+	

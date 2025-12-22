@@ -1,0 +1,490 @@
+# Generated automatically from Makefile.in by configure.
+# Makefile.in generated automatically by automake 1.4 from Makefile.am
+
+# Copyright (C) 1994, 1995-8, 1999 Free Software Foundation, Inc.
+# This Makefile.in is free software; the Free Software Foundation
+# gives unlimited permission to copy and/or distribute it,
+# with or without modifications, as long as this notice is preserved.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY, to the extent permitted by law; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE.
+
+# Copyright (C) 1999, 2000, 2001  Free Software Foundation, Inc.
+#  
+# This file is part of GNU gengetopt 
+#
+# GNU gengetopt is free software; you can redistribute it and/or modify 
+# it under the terms of the GNU General Public License as published by 
+# the Free Software Foundation; either version 2, or (at your option) 
+# any later version. 
+#
+# GNU gengetopt is distributed in the hope that it will be useful, but 
+# WITHOUT ANY WARRANTY; without even the implied warranty of 
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+# Public License for more details. 
+#
+# You should have received a copy of the GNU General Public License along 
+# with gengetopt; see the file COPYING. If not, write to the Free Software 
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA. 
+
+# .ggonu is used in this test suite for command line parsers that have
+# to be created without --unamed-opt
+
+
+SHELL = /bin/sh
+
+srcdir = .
+top_srcdir = ..
+prefix = /usr
+exec_prefix = ${prefix}
+
+bindir = ${exec_prefix}/bin
+sbindir = ${exec_prefix}/sbin
+libexecdir = ${exec_prefix}/libexec
+datadir = ${prefix}/share
+sysconfdir = ${prefix}/etc
+sharedstatedir = ${prefix}/com
+localstatedir = ${prefix}/var
+libdir = ${exec_prefix}/lib
+infodir = ${prefix}/info
+mandir = ${prefix}/man
+includedir = ${prefix}/include
+oldincludedir = /usr/include
+
+DESTDIR =
+
+pkgdatadir = $(datadir)/gengetopt
+pkglibdir = $(libdir)/gengetopt
+pkgincludedir = $(includedir)/gengetopt
+
+top_builddir = ..
+
+ACLOCAL = aclocal
+AUTOCONF = autoconf
+AUTOMAKE = automake
+AUTOHEADER = autoheader
+
+INSTALL = /bin/install -c
+INSTALL_PROGRAM = ${INSTALL} $(AM_INSTALL_PROGRAM_FLAGS)
+INSTALL_DATA = ${INSTALL} -m 644
+INSTALL_SCRIPT = ${INSTALL_PROGRAM}
+transform = s,x,x,
+
+NORMAL_INSTALL = :
+PRE_INSTALL = :
+POST_INSTALL = :
+NORMAL_UNINSTALL = :
+PRE_UNINSTALL = :
+POST_UNINSTALL = :
+AWK = gawk
+CC = gcc
+CPP2HTML = 
+CXX = c++
+EXEEXT = 
+LEX = flex
+MAKEINFO = makeinfo
+PACKAGE = gengetopt
+TAR = /bin/tar
+TXTC = $(SHELL) $(top_builddir)/txtc.sh
+VERSION = 2.6
+YACC = bison -b y -d -p
+YFLAGS =  -d
+gengetoptdocdir = ${prefix}/share/doc/gengetopt
+gengetoptexamplesdir = ${prefix}/share/doc/gengetopt/examples
+
+SUFFIXES = .ggo .ggonu
+
+PROGNAME = $(top_builddir)/src/gengetopt$(EXEEXT)
+
+GGO_COMPILE = $(PROGNAME) --input $< --unamed-opt --func-name $*_parser --file-name $*
+
+# we don't have to link to anything
+LIBS = 
+GETOPTLONG_O = $(top_builddir)/src/getopt.o $(top_builddir)/src/getopt1.o
+#GETOPTLONG_O = 
+#STRDUP_O = $(top_builddir)/src/strdup.o
+STRDUP_O = 
+
+INCLUDES = -I../src/
+
+# INCLUDES is added to LDFLAGS because .ggo file are sources, and thus
+# the .c files are passed to the linker, which also compiles, thus
+# the include options should be passed to it as well
+LDFLAGS = $(DEFS) $(INCLUDES)
+
+LDADD = $(GETOPTLONG_O) $(STRDUP_O)
+
+EXPECT = 1
+
+TESTS = no_strings no_unamed no_optgiven.sh more_than_once.sh canonize-names default_values default_cmdline
+
+
+check_PROGRAMS = no_strings no_unamed no_optgiven more_than_once canonize-names default_values default_cmdline
+
+
+no_strings_SOURCES = no_strings_cmd.ggo no_strings.c
+no_unamed_SOURCES = no_unamed_cmd.ggonu no_unamed.c
+no_optgiven_SOURCES = no_optgiven_cmd.ggo no_optgiven.c
+more_than_once_SOURCES = more_than_once_cmd.ggo more_than_once.c
+canonize_names_SOURCES = canonize-names-cmd.ggo canonize-names.c
+default_values_SOURCES = default_values_cmd.ggo default_values.c
+default_cmdline_SOURCES = cmdline.ggo default_cmdline.c
+
+EXTRA_DIST = no_optgiven.sh.in more_than_once.sh.in
+
+CLEANFILES = *_cmd.c *_cmd.h cmdline.c cmdline.h
+mkinstalldirs = $(SHELL) $(top_srcdir)/mkinstalldirs
+CONFIG_HEADER = ../config.h
+CONFIG_CLEAN_FILES =  no_optgiven.sh more_than_once.sh
+check_PROGRAMS =  no_strings$(EXEEXT) no_unamed$(EXEEXT) \
+no_optgiven$(EXEEXT) more_than_once$(EXEEXT) canonize-names$(EXEEXT) \
+default_values$(EXEEXT) default_cmdline$(EXEEXT)
+
+DEFS = -DHAVE_CONFIG_H -I. -I$(srcdir) -I..
+CPPFLAGS = 
+no_strings_OBJECTS =  no_strings_cmd.c no_strings.o
+no_strings_LDADD = $(LDADD)
+#no_strings_DEPENDENCIES = 
+#no_strings_DEPENDENCIES =  \
+#$(top_builddir)/src/getopt.o \
+#$(top_builddir)/src/getopt1.o \
+#$(top_builddir)/src/strdup.o
+no_strings_DEPENDENCIES =  \
+$(top_builddir)/src/getopt.o \
+$(top_builddir)/src/getopt1.o
+##no_strings_DEPENDENCIES =  \
+##$(top_builddir)/src/strdup.o
+no_strings_LDFLAGS = 
+no_unamed_OBJECTS =  no_unamed_cmd.c no_unamed.o
+no_unamed_LDADD = $(LDADD)
+#no_unamed_DEPENDENCIES = 
+#no_unamed_DEPENDENCIES =  \
+#$(top_builddir)/src/getopt.o \
+#$(top_builddir)/src/getopt1.o \
+#$(top_builddir)/src/strdup.o
+no_unamed_DEPENDENCIES =  \
+$(top_builddir)/src/getopt.o \
+$(top_builddir)/src/getopt1.o
+##no_unamed_DEPENDENCIES =  \
+##$(top_builddir)/src/strdup.o
+no_unamed_LDFLAGS = 
+no_optgiven_OBJECTS =  no_optgiven_cmd.c no_optgiven.o
+no_optgiven_LDADD = $(LDADD)
+#no_optgiven_DEPENDENCIES = 
+#no_optgiven_DEPENDENCIES =  \
+#$(top_builddir)/src/getopt.o \
+#$(top_builddir)/src/getopt1.o \
+#$(top_builddir)/src/strdup.o
+no_optgiven_DEPENDENCIES =  \
+$(top_builddir)/src/getopt.o \
+$(top_builddir)/src/getopt1.o
+##no_optgiven_DEPENDENCIES =  \
+##$(top_builddir)/src/strdup.o
+no_optgiven_LDFLAGS = 
+more_than_once_OBJECTS =  more_than_once_cmd.c more_than_once.o
+more_than_once_LDADD = $(LDADD)
+#more_than_once_DEPENDENCIES = 
+#more_than_once_DEPENDENCIES =  \
+#$(top_builddir)/src/getopt.o \
+#$(top_builddir)/src/getopt1.o \
+#$(top_builddir)/src/strdup.o
+more_than_once_DEPENDENCIES =  \
+$(top_builddir)/src/getopt.o \
+$(top_builddir)/src/getopt1.o
+##more_than_once_DEPENDENCIES =  \
+##$(top_builddir)/src/strdup.o
+more_than_once_LDFLAGS = 
+canonize_names_OBJECTS =  canonize-names-cmd.c canonize-names.o
+canonize_names_LDADD = $(LDADD)
+#canonize_names_DEPENDENCIES = 
+#canonize_names_DEPENDENCIES =  \
+#$(top_builddir)/src/getopt.o \
+#$(top_builddir)/src/getopt1.o \
+#$(top_builddir)/src/strdup.o
+canonize_names_DEPENDENCIES =  \
+$(top_builddir)/src/getopt.o \
+$(top_builddir)/src/getopt1.o
+##canonize_names_DEPENDENCIES =  \
+##$(top_builddir)/src/strdup.o
+canonize_names_LDFLAGS = 
+default_values_OBJECTS =  default_values_cmd.c default_values.o
+default_values_LDADD = $(LDADD)
+#default_values_DEPENDENCIES = 
+#default_values_DEPENDENCIES =  \
+#$(top_builddir)/src/getopt.o \
+#$(top_builddir)/src/getopt1.o \
+#$(top_builddir)/src/strdup.o
+default_values_DEPENDENCIES =  \
+$(top_builddir)/src/getopt.o \
+$(top_builddir)/src/getopt1.o
+##default_values_DEPENDENCIES =  \
+##$(top_builddir)/src/strdup.o
+default_values_LDFLAGS = 
+default_cmdline_OBJECTS =  cmdline.c default_cmdline.o
+default_cmdline_LDADD = $(LDADD)
+#default_cmdline_DEPENDENCIES = 
+#default_cmdline_DEPENDENCIES =  \
+#$(top_builddir)/src/getopt.o \
+#$(top_builddir)/src/getopt1.o \
+#$(top_builddir)/src/strdup.o
+default_cmdline_DEPENDENCIES =  \
+$(top_builddir)/src/getopt.o \
+$(top_builddir)/src/getopt1.o
+##default_cmdline_DEPENDENCIES =  \
+##$(top_builddir)/src/strdup.o
+default_cmdline_LDFLAGS = 
+CFLAGS = -g -O2
+COMPILE = $(CC) $(DEFS) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
+CCLD = $(CC)
+LINK = $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(LDFLAGS) -o $@
+DIST_COMMON =  Makefile.am Makefile.in more_than_once.sh.in \
+no_optgiven.sh.in
+
+
+DISTFILES = $(DIST_COMMON) $(SOURCES) $(HEADERS) $(TEXINFOS) $(EXTRA_DIST)
+
+GZIP_ENV = --best
+SOURCES = $(no_strings_SOURCES) $(no_unamed_SOURCES) $(no_optgiven_SOURCES) $(more_than_once_SOURCES) $(canonize_names_SOURCES) $(default_values_SOURCES) $(default_cmdline_SOURCES)
+OBJECTS = $(no_strings_OBJECTS) $(no_unamed_OBJECTS) $(no_optgiven_OBJECTS) $(more_than_once_OBJECTS) $(canonize_names_OBJECTS) $(default_values_OBJECTS) $(default_cmdline_OBJECTS)
+
+all: all-redirect
+.SUFFIXES:
+.SUFFIXES: .S .c .ggo .ggonu .o .s
+$(srcdir)/Makefile.in: Makefile.am $(top_srcdir)/configure.in $(ACLOCAL_M4) 
+	cd $(top_srcdir) && $(AUTOMAKE) --gnu --include-deps tests/Makefile
+
+Makefile: $(srcdir)/Makefile.in  $(top_builddir)/config.status
+	cd $(top_builddir) \
+	  && CONFIG_FILES=$(subdir)/$@ CONFIG_HEADERS= $(SHELL) ./config.status
+
+no_optgiven.sh: $(top_builddir)/config.status no_optgiven.sh.in
+	cd $(top_builddir) && CONFIG_FILES=$(subdir)/$@ CONFIG_HEADERS= $(SHELL) ./config.status
+more_than_once.sh: $(top_builddir)/config.status more_than_once.sh.in
+	cd $(top_builddir) && CONFIG_FILES=$(subdir)/$@ CONFIG_HEADERS= $(SHELL) ./config.status
+
+mostlyclean-checkPROGRAMS:
+
+clean-checkPROGRAMS:
+	-test -z "$(check_PROGRAMS)" || rm -f $(check_PROGRAMS)
+
+distclean-checkPROGRAMS:
+
+maintainer-clean-checkPROGRAMS:
+
+.c.o:
+	$(COMPILE) -c $<
+
+.s.o:
+	$(COMPILE) -c $<
+
+.S.o:
+	$(COMPILE) -c $<
+
+mostlyclean-compile:
+	-rm -f *.o core *.core
+
+clean-compile:
+
+distclean-compile:
+	-rm -f *.tab.c
+
+maintainer-clean-compile:
+
+no_strings$(EXEEXT): $(no_strings_OBJECTS) $(no_strings_DEPENDENCIES)
+	@rm -f no_strings$(EXEEXT)
+	$(LINK) $(no_strings_LDFLAGS) $(no_strings_OBJECTS) $(no_strings_LDADD) $(LIBS)
+
+no_unamed$(EXEEXT): $(no_unamed_OBJECTS) $(no_unamed_DEPENDENCIES)
+	@rm -f no_unamed$(EXEEXT)
+	$(LINK) $(no_unamed_LDFLAGS) $(no_unamed_OBJECTS) $(no_unamed_LDADD) $(LIBS)
+
+no_optgiven$(EXEEXT): $(no_optgiven_OBJECTS) $(no_optgiven_DEPENDENCIES)
+	@rm -f no_optgiven$(EXEEXT)
+	$(LINK) $(no_optgiven_LDFLAGS) $(no_optgiven_OBJECTS) $(no_optgiven_LDADD) $(LIBS)
+
+more_than_once$(EXEEXT): $(more_than_once_OBJECTS) $(more_than_once_DEPENDENCIES)
+	@rm -f more_than_once$(EXEEXT)
+	$(LINK) $(more_than_once_LDFLAGS) $(more_than_once_OBJECTS) $(more_than_once_LDADD) $(LIBS)
+
+canonize-names$(EXEEXT): $(canonize_names_OBJECTS) $(canonize_names_DEPENDENCIES)
+	@rm -f canonize-names$(EXEEXT)
+	$(LINK) $(canonize_names_LDFLAGS) $(canonize_names_OBJECTS) $(canonize_names_LDADD) $(LIBS)
+
+default_values$(EXEEXT): $(default_values_OBJECTS) $(default_values_DEPENDENCIES)
+	@rm -f default_values$(EXEEXT)
+	$(LINK) $(default_values_LDFLAGS) $(default_values_OBJECTS) $(default_values_LDADD) $(LIBS)
+
+default_cmdline$(EXEEXT): $(default_cmdline_OBJECTS) $(default_cmdline_DEPENDENCIES)
+	@rm -f default_cmdline$(EXEEXT)
+	$(LINK) $(default_cmdline_LDFLAGS) $(default_cmdline_OBJECTS) $(default_cmdline_LDADD) $(LIBS)
+
+tags: TAGS
+
+ID: $(HEADERS) $(SOURCES) $(LISP)
+	list='$(SOURCES) $(HEADERS)'; \
+	unique=`for i in $$list; do echo $$i; done | \
+	  awk '    { files[$$0] = 1; } \
+	       END { for (i in files) print i; }'`; \
+	here=`pwd` && cd $(srcdir) \
+	  && mkid -f$$here/ID $$unique $(LISP)
+
+TAGS:  $(HEADERS) $(SOURCES)  $(TAGS_DEPENDENCIES) $(LISP)
+	tags=; \
+	here=`pwd`; \
+	list='$(SOURCES) $(HEADERS)'; \
+	unique=`for i in $$list; do echo $$i; done | \
+	  awk '    { files[$$0] = 1; } \
+	       END { for (i in files) print i; }'`; \
+	test -z "$(ETAGS_ARGS)$$unique$(LISP)$$tags" \
+	  || (cd $(srcdir) && etags $(ETAGS_ARGS) $$tags  $$unique $(LISP) -o $$here/TAGS)
+
+mostlyclean-tags:
+
+clean-tags:
+
+distclean-tags:
+	-rm -f TAGS ID
+
+maintainer-clean-tags:
+
+distdir = $(top_builddir)/$(PACKAGE)-$(VERSION)/$(subdir)
+
+subdir = tests
+
+distdir: $(DISTFILES)
+	@for file in $(DISTFILES); do \
+	  d=$(srcdir); \
+	  if test -d $$d/$$file; then \
+	    cp -pr $$/$$file $(distdir)/$$file; \
+	  else \
+	    test -f $(distdir)/$$file \
+	    || ln $$d/$$file $(distdir)/$$file 2> /dev/null \
+	    || cp -p $$d/$$file $(distdir)/$$file || :; \
+	  fi; \
+	done
+canonize-names.o: canonize-names.c canonize-names-cmd.h
+default_cmdline.o: default_cmdline.c cmdline.h
+default_values.o: default_values.c default_values_cmd.h
+more_than_once.o: more_than_once.c more_than_once_cmd.h
+no_optgiven.o: no_optgiven.c no_optgiven_cmd.h
+no_strings.o: no_strings.c no_strings_cmd.h
+no_unamed.o: no_unamed.c no_unamed_cmd.h
+
+check-TESTS: $(TESTS)
+	@failed=0; all=0; \
+	srcdir=$(srcdir); export srcdir; \
+	for tst in $(TESTS); do \
+	  if test -f $$tst; then dir=.; \
+	  else dir="$(srcdir)"; fi; \
+	  if $(TESTS_ENVIRONMENT) $$dir/$$tst; then \
+	    all=`expr $$all + 1`; \
+	    echo "PASS: $$tst"; \
+	  elif test $$? -ne 77; then \
+	    all=`expr $$all + 1`; \
+	    failed=`expr $$failed + 1`; \
+	    echo "FAIL: $$tst"; \
+	  fi; \
+	done; \
+	if test "$$failed" -eq 0; then \
+	  banner="All $$all tests passed"; \
+	else \
+	  banner="$$failed of $$all tests failed"; \
+	fi; \
+	dashes=`echo "$$banner" | sed s/./=/g`; \
+	echo "$$dashes"; \
+	echo "$$banner"; \
+	echo "$$dashes"; \
+	test "$$failed" -eq 0
+info-am:
+info: info-am
+dvi-am:
+dvi: dvi-am
+check-am: all-am
+	$(MAKE) $(AM_MAKEFLAGS) $(check_PROGRAMS)
+	$(MAKE) $(AM_MAKEFLAGS) check-TESTS
+check: check-am
+installcheck-am:
+installcheck: installcheck-am
+install-exec-am:
+install-exec: install-exec-am
+
+install-data-am:
+install-data: install-data-am
+
+install-am: all-am
+	@$(MAKE) $(AM_MAKEFLAGS) install-exec-am install-data-am
+install: install-am
+uninstall-am:
+uninstall: uninstall-am
+all-am: Makefile
+all-redirect: all-am
+install-strip:
+	$(MAKE) $(AM_MAKEFLAGS) AM_INSTALL_PROGRAM_FLAGS=-s install
+installdirs:
+
+
+mostlyclean-generic:
+
+clean-generic:
+	-test -z "$(CLEANFILES)" || rm -f $(CLEANFILES)
+
+distclean-generic:
+	-rm -f Makefile $(CONFIG_CLEAN_FILES)
+	-rm -f config.cache config.log stamp-h stamp-h[0-9]*
+
+maintainer-clean-generic:
+mostlyclean-am:  mostlyclean-checkPROGRAMS mostlyclean-compile \
+		mostlyclean-tags mostlyclean-generic
+
+mostlyclean: mostlyclean-am
+
+clean-am:  clean-checkPROGRAMS clean-compile clean-tags clean-generic \
+		mostlyclean-am
+
+clean: clean-am
+
+distclean-am:  distclean-checkPROGRAMS distclean-compile distclean-tags \
+		distclean-generic clean-am
+
+distclean: distclean-am
+
+maintainer-clean-am:  maintainer-clean-checkPROGRAMS \
+		maintainer-clean-compile maintainer-clean-tags \
+		maintainer-clean-generic distclean-am
+	@echo "This command is intended for maintainers to use;"
+	@echo "it deletes files that may require special tools to rebuild."
+
+maintainer-clean: maintainer-clean-am
+
+.PHONY: mostlyclean-checkPROGRAMS distclean-checkPROGRAMS \
+clean-checkPROGRAMS maintainer-clean-checkPROGRAMS mostlyclean-compile \
+distclean-compile clean-compile maintainer-clean-compile tags \
+mostlyclean-tags distclean-tags clean-tags maintainer-clean-tags \
+distdir check-TESTS info-am info dvi-am dvi check check-am \
+installcheck-am installcheck install-exec-am install-exec \
+install-data-am install-data install-am install uninstall-am uninstall \
+all-redirect all-am all installdirs mostlyclean-generic \
+distclean-generic clean-generic maintainer-clean-generic clean \
+mostlyclean distclean maintainer-clean
+
+
+.ggo.c:
+	$(GGO_COMPILE)
+
+.ggonu.c:
+	$(PROGNAME) --input $< --func-name $*_parser --file-name $*
+
+no_optgiven_cmd.c: no_optgiven_cmd.ggo
+	$(GGO_COMPILE) --no-handle-error
+
+canonize-names-cmd.c: canonize-names-cmd.ggo
+	$(PROGNAME) --input $< --func-name $*-parser --file-name $*
+
+cmdline.c: cmdline.ggo
+	$(PROGNAME) --input $<
+
+# Tell versions [3.59,3.63) of GNU make to not export all variables.
+# Otherwise a system limit (for SysV at least) may be exceeded.
+.NOEXPORT:

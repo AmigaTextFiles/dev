@@ -1,0 +1,8 @@
+OPT MODULE
+OPT EXPORT
+
+OBJECT rpcent
+  name:PTR TO CHAR
+  aliases:PTR TO LONG
+  number
+ENDOBJECT

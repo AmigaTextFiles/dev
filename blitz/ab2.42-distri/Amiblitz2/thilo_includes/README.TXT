@@ -1,0 +1,189 @@
+This is the port of the Includefiles from Thilo Köhler's includefiles
+to the AB2 Object Format to allow handling like real Blitz librarys
+with online Help screenhelp Instructionbrowser dialogsupport
+
+Take a look on the source to see how it work.
+If you make changes please send them back to Thilo so he can merge
+this in the offical source to avoid multiple Versions.
+
+Most sources have a Constant #ownrun=x
+
+If set to 1 it run as a standalone File so you need not build a .res to
+modify and test changes
+Most includes also have near end of file a example which can run too
+when #ownrun=1
+
+If you dont like the use of .res file you can of course use this Port
+in old way as include too
+
+Only set at the beginning of your program #developobject=1
+and then include in old way
+
+Here is a summary of instructions to see what big Progress AB2 take
+thanks to Thilo's include Files
+
+Please ignore the ! before.To see syntax type in command and press help
+or Shift+help or use instructionbrowser.
+Only make sure the macro button is pressed
+
+
+dbl_include
+For writing double bufferd games work on Chipset or GFX Card upto 24bit
+inludes collision support
+
+!dbl_hidepointer
+!dbl_showpointer
+!dbl_getpen
+!dbl_setpen
+!dbl_collision_free
+!dbl_free
+!dbl_flip
+!dbl_init
+!dbl_qblit
+!dbl_qprint
+!dbl_qrefresh
+!dbl_bgblit
+!dbl_bgblitpattern
+!dbl_bgscroll
+!dbl_bgprint
+!dbl_unqueue
+!dbl_collision_init
+!dbl_hit
+!dbl_2imghit
+!dbl_imgmaskhit
+!dbl_reset
+
+See dbl_benchmark.ab2 for a example
+
+ahi_device_easy.include
+
+Load and play mp3 aifc wav iff samples
+
+!ahi_error
+!ahi_bytes2samps
+!ahi_getsampleform
+!ahi_stream_next_buffer
+!ahi_stream_next_ptr
+!ahi_stream_next_size
+!ahi_stream_next_fsize
+!ahi_stream_timeindex
+!ahi_stream_settimeindex
+!ahi_stream_wait
+!ahi_stream_check
+!ahi_stream_wait_finish
+!ahi_stream_isquiet
+!ahi_stream_write
+!ahi_stop
+!ahi_freesound
+!ahi_freesound_all
+!ahi_close
+!ahi_open
+!ahi_stream_init
+!ahi_createsound
+!ahi_playsound
+!ahi_setfreq
+!ahi_setvolume
+!ahi_setpan
+!ahi_loadsound
+
+See audiotest.ab2 for a example
+
+camd.include
+
+For Midi support over camd.library
+
+!camd_free
+!camd_init
+!camd_remove_sender
+!camd_remove_receiver
+!camd_add_sender
+!camd_add_receiver
+!camd_send
+!camd_receive
+!camd_received_issysex
+!camd_echo
+!camd_sysex_length
+!camd_sysex_receive
+!camd_sysex_skip
+!camd_received_status
+!camd_received_mp
+!camd_received_dat1
+!camd_received_dat2
+!camd_received_time
+!camd_sigflag
+!camd_received_clear
+
+vvblank.include
+
+Allows you use of a virtual vblank set to any rate to make smooth running
+games on gfx cards that do not support the real vwait
+
+!vvblank_free
+!vvblank_reset_sync
+!vvblank_set
+!vvblank_wait
+!vvblank_wait_sync
+
+dos.include
+
+!dos_readargs_os
+!dos_nextarg_os
+!dos_readargs
+!dos_nextarg
+!dos_addpart
+!dos_addpart_
+!dos_filepart
+!dos_pathpart
+!dos_filepart_
+!dos_parent
+!dos_exist
+!dos_checkspace
+!dos_progsdir
+!dos_settaskpri
+!dos_ext_remove
+!dos_ext_set
+!dos_createdir
+!dos_checklib
+!dos_delete
+!dos_rename
+!dos_setprotect
+!dos_fsize
+!dos_fsize2
+!dos_run_cli
+!dos_run_wb
+
+image_include.
+If you dont want write games load pictures per datatype
+and display them with or without mask support on every machine per
+automatic colorreduction
+
+!image_pens_free
+!image_release
+!image_free_data
+!image_free
+!image_free_all
+!image_pens_init
+!image_initbmap
+!image_initmask
+!image_load
+!image_blit
+!image_blitmask
+!image_blockcookie
+!image_makecookie
+!image_midhandle:!image_draw
+!image_width:!image_height:!image_setdithermode
+!image_draw_scaled:!image_2shape:!image_loadshape:!image_release_all
+!image_isused
+!image_blitarea
+!image_blitpattern
+!image_read
+!image_method:!image_blitblock
+!image_draw2image
+!image_mix2image
+!image_texture2image
+!image_masktst
+!image_getrgb
+!image_getrgb_rp
+!image_prepare_all
+
+See imageexample.ab2

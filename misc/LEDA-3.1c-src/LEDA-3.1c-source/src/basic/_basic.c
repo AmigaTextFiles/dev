@@ -1,0 +1,209 @@
+/*******************************************************************************
++
++  LEDA  3.1c
++
++
++  _basic.c
++
++
++  Copyright (c) 1994  by  Max-Planck-Institut fuer Informatik
++  Im Stadtwald, 6600 Saarbruecken, FRG     
++  All rights reserved.
++ 
+*******************************************************************************/
+
+
+#include <LEDA/basic.h>
+
+#include <time.h>
+#include <string.h>
+#include <sys/types.h>
+
+#if defined(__MSDOS__)
+#include <dos.h>
+#else
+#include <unistd.h>
+#include <sys/times.h>
+#include <sys/param.h>
+#endif
+
+
+int LEDA::loop_dummy = 0;
+
+
+LEDA::LEDA()
+{ init_list = getenv("LEDA_INIT");
+  init_random();
+ }
+
+
+LEDA::~LEDA() 
+{ 
+  if (init_list && strcmp(init_list,"statistics")==0)
+  { if (version_string) printf("\n%s\n",version_string);
+    printf("\n");
+    print_statistics(); 
+   }
+ } 
+
+
+LEDA L_E_D_A;
+
+
+
+//------------------------------------------------------------------------------
+// Error Handling
+//------------------------------------------------------------------------------
+
+
+PEH p_error_handler = default_error_handler;
+
+void default_error_handler(int i, const char* s)
+{ if (i==0) 
+   cout << "(warning) " << s << "\n";
+  else 
+   { cout << "ERROR "<< s << "\n";
+     cout.flush();
+     abort();
+    }
+}
+
+PEH set_error_handler(PEH handler)
+{ PEH old = error_handler;
+  p_error_handler = handler;
+  return old;
+}
+
+//------------------------------------------------------------------------------
+// useful functions
+//------------------------------------------------------------------------------
+
+LEDA_SIG_PF catch_interrupts(LEDA_SIG_PF handler) 
+{ error_handler(0,"catch_interrupts not implemented.");
+  return handler; 
+ }
+
+
+
+void init_random(int seed)
+{ time_t l = seed;
+  if (l==0) time(&l);
+  srandom(int(l));
+ }
+
+
+#if defined(__MSDOS__) 
+
+#if defined(__GNUG__)
+static long clock()
+{ union REGS regs;
+  regs.h.ah=0x00;
+  int86(0x1A,&regs,&regs);
+  return (regs.x.cx << 16) + regs.x.dx;
+}
+#define CLK_TCK  18.2
+#endif
+ 
+float used_time() { return  float(clock())/CLK_TCK; }
+
+#else
+
+/* For AMIGA */
+#define HZ 50
+float used_time()
+{ tms x;
+  times(&x);
+  return  float(x.tms_utime)/HZ;
+}
+
+#endif
+
+
+float used_time(float& T)
+{ float t = T;
+  T =  used_time();
+  return  T-t;
+}
+
+
+void print_time(string s)
+{ cout << s;
+  cout << string("  time= %.2f sec",used_time());
+  newline;
+}
+
+
+void wait(unsigned int sec) { sleep(sec); }
+  
+
+//------------------------------------------------------------------------------
+// Input/Ouput
+//------------------------------------------------------------------------------
+
+
+int Yes(string s)
+{ char answer = read_char(s);
+  return ((answer == 'y') || (answer == 'Y'));
+}
+
+int read_int(string s)
+{ int answer;
+  char c;
+
+  for(;;)
+  { cout << s;
+    cin >> answer;
+    if (!cin) 
+      { cin.clear();
+        cin.get(c);
+        cout << string("read_int: illegal input \"%c\"\n",c);
+        if (c != '\n') skip_line(cin);
+       }
+    else  
+       break;
+   }
+
+  skip_line(cin);
+
+  return answer;
+}
+
+char read_char(string s)
+{ char c;
+  cout << s;
+  cin.get(c);
+  if (c != '\n') skip_line(cin);
+  return c;
+}
+
+double read_real(string s)
+{ double answer;
+  cout << s;
+  cin >> answer;
+  skip_line(cin);
+  return answer;
+}
+
+string read_line(istream& in)
+{ string result;
+  result.read_line(in); 
+  return result;
+ }
+
+string read_string(string s)
+{ cout << s << flush;
+  return read_line(cin); 
+ }
+
+void skip_line(istream& s)
+{ char c;
+  while(s.get(c) &&  c != '\n');
+ }
+
+
+int     Yes()              { return Yes(""); }
+int     read_int()         { return read_int(""); }
+char    read_char()        { return read_char(""); }
+double  read_real()        { return read_real(""); }
+string  read_string()      { return read_string(""); } 
+

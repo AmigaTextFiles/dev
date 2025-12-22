@@ -1,0 +1,8 @@
+		IFND LIBRARIES_OBJECTS_LIB_I
+LIBRARIES_OBJECTS_LIB_I	SET	1
+
+
+_LVOPullObject              	EQU	-6
+_LVOPullObjectList          	EQU	-12
+
+		ENDC

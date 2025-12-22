@@ -1,0 +1,2 @@
+IMPLEMENTATION MODULE Input ;
+END Input.

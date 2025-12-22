@@ -1,0 +1,81 @@
+/*     HelloLocalWorld.e   */
+
+/****************************************************************
+   This file was created automatically by `FlexCat V1.1'
+   Do not edit by hand!
+****************************************************************/
+
+
+    /* External modules */
+MODULE 'locale', 'libraries/locale'
+MODULE 'utility/tagitem'
+
+    /* Object definitions */
+OBJECT fc_type
+    id  :LONG
+    str :LONG
+ENDOBJECT
+
+    /* Global variables */
+DEF catalog_hellolocalworld:PTR TO catalog
+DEF array_hellolocalworld[1]:ARRAY OF fc_type
+
+    /* Constant definitions */
+CONST MSG_HELLO = 0
+
+
+    /* Opening catalog procedure */
+PROC open_hellolocalworld_catalog(loc:PTR TO locale, language:PTR TO CHAR)
+    DEF tag, tagarg, dummy_var = 0
+
+    array_hellolocalworld[dummy_var].id := MSG_HELLO; array_hellolocalworld[dummy_var++].str := 'Hello, world!'
+
+    IF (localebase AND (catalog_hellolocalworld = NIL))
+        IF language
+            tag := OC_LANGUAGE
+            tagarg := language
+        ELSE
+            tag:= TAG_IGNORE
+        ENDIF
+
+        catalog_hellolocalworld := OpenCatalogA(loc, 'hellolocalworld.catalog',
+                                    [   OC_BUILTINLANGUAGE, 'english',
+                                        tag, tagarg,
+                                        OC_VERSION, 0,
+                                        TAG_DONE    ])
+    ENDIF
+ENDPROC
+    
+    /* Closing catalog procedure */
+PROC close_hellolocalworld_catalog()
+
+    IF localebase THEN CloseCatalog(catalog_hellolocalworld)
+    catalog_hellolocalworld := NIL
+ENDPROC
+
+    /* Procedure which returns the correct string according to the catalog */
+PROC get_hellolocalworld_string(strnum)
+    DEF defaultstr:PTR TO CHAR, i = 0
+
+    WHILE ((i < 1) AND (array_hellolocalworld[i].id <> strnum)) DO INC i
+    defaultstr := IF (i < 1) THEN array_hellolocalworld[i].str ELSE NIL
+
+ENDPROC IF catalog_hellolocalworld THEN GetCatalogStr(catalog_hellolocalworld, strnum, defaultstr) ELSE defaultstr
+/****************************************************************
+   End of the automatically created part!
+****************************************************************/
+
+
+
+
+PROC main()
+   /*  Open Locale.library; No exit, if failure!       */
+   localebase := OpenLibrary('locale.library', 0)
+
+   /*  Open the catalog file.                          */
+   open_hellolocalworld_catalog(NIL, NIL)
+
+   WriteF('\s\n', get_hellolocalworld_string(MSG_HELLO))
+
+   close_hellolocalworld_catalog()
+ENDPROC

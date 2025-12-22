@@ -1,0 +1,16 @@
+(define (merge-list x y)
+        (cond ((null? x) y)
+              ((null? y) x) 
+              (else (if (test (car x) (car y))
+                        (cons (car x) (merge-list (cdr x) y))
+                        (cons (car y) (merge-list x (cdr y)))))))
+
+(define (merge-sort x)
+        (if (null? x)
+            nil
+            (do ((ptr1 x (cdr ptr1))
+                 (ptr2 (cdr x) (cdr ptr2)))
+                ((or (null? ptr2) 
+                     (not (test (car x) (car ptr2)))) 
+                 (set-cdr! ptr1 nil)
+                 (merge-list x (merge-sort ptr2))))))

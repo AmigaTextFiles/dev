@@ -1,0 +1,63 @@
+ IFND    OPAL_REQ_LIB_I
+OPAL_REQ_LIB_I   SET     1
+
+
+ IFND EXEC_TYPES_I
+ INCLUDE "exec/types.i"
+ ENDC
+
+ IFND EXEC_LIBRARIES_I
+ INCLUDE "exec/libraries.i"
+ ENDC
+
+ IFND OPAL_I
+ INCLUDE "opal/opallib.h"
+ ENDC
+
+		LIBINIT
+	 	LIBDEF	_LVOOpalRequester
+
+
+CALLOPALREQ	MACRO
+		move.l	_OpalReqBase,a6
+		jsr	_LVO\1(a6)
+		ENDM
+
+
+OPALREQLIBNAME	MACRO
+		dc.b	"opalreq.library",0
+		EVEN
+		ENDM
+
+
+	STRUCTURE OpalReqLib,LIB_SIZE
+		ULONG	OR_SegList
+	LABEL	OpalReqLib_Sizeof
+
+
+	STRUCTURE	OR,0
+		UWORD	OR_TopEdge
+		APTR	OR_Hail
+		APTR	OR_File
+		APTR	OR_Dir
+		APTR	OR_Extension
+		APTR	OR_Window
+		APTR	OR_OScrn
+		APTR	OR_Pointer
+		UWORD	OR_OKHit
+		UWORD	OR_NeedRefresh
+		ULONG	OR_Flags
+		UWORD	OR_BackPen
+		UWORD	OR_PrimaryPen
+		UWORD	OR_SecondaryPen
+	LABEL	OR_SIZEOF
+
+NO_INFO		EQU	1
+LASTPATH	EQU	2
+
+OR_ERR_OUTOFMEM	EQU	1
+OR_ERR_INUSE	EQU	2
+
+OPALREQ_HEIGHT	EQU	345
+
+ ENDC

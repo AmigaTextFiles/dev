@@ -1,0 +1,14 @@
+VERSION		EQU	1
+REVISION	EQU	212
+DATE	MACRO
+		dc.b	'28.1.96'
+	ENDM
+VERS	MACRO
+		dc.b	'Umentiler 1.212'
+	ENDM
+VSTRING	MACRO
+		dc.b	'Umentiler 1.212 (28.1.96)',13,10,0
+	ENDM
+VERSTAG	MACRO
+		dc.b	0,'$VER: Umentiler 1.212 (28.1.96)',0
+	ENDM

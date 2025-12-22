@@ -1,0 +1,10 @@
+PROGRAM PruebaLSL
+
+VAR c: INTEGER
+
+BEGIN
+
+  c=4
+  WRITELN c
+
+END

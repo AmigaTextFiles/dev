@@ -1,0 +1,346 @@
+
+ Two enquires on using the Blitter this month. Here is a quick run-down
+plus you will find your code in this directory with a single Bob being
+displayed.
+
+ The basics of using the blitter are:
+
+ Wait for the Blitter to finish it's current blit.
+ Set up source and destination address registers.
+ Set modulos ( in same way as for playfields ) for these memory blocks.
+ Define the minterm ( bit combination defenition ) required.
+ If required, set masks and shift values.
+ Tell the Blitter which channels to use.
+ Set the size of the Blit -- this starts the Blitter off.
+
+ A very quick and simple example. Suppose you have a playfield defined in
+your program as follows:
+
+MyGfx		incbin		df0:bitmaps/somerawgfx.bm
+
+ and also a 'bob' defined elsewhere:
+
+Bob1		dc.w		%0000000000000000
+		dc.w		%0000111111110000
+		dc.w		%0000100000010000
+		dc.w		%0000111111110000
+		dc.w		%0000000000000000
+
+ ( that's a really interesting bob! )
+
+ You wish to put the bob onto the screen, or blit it into the playfield.
+Lets take each step at a time. First then, set the source and destination
+address registers. This requires some consideration, otherwise known as
+horizontal thinking.
+
+ We cannot just copy the bob into the playfield, since all 0 bytes will
+destroy the background gfx in the playfield. We need to OR the bob with the
+playfield and then copy the result into the playfield ( on older 8 bit
+machines, bobs were EOR'd with the playfield so that the background could
+be restored quickly. The Blitter is fast enough to save a copy of the
+background before blitting a bob into it, but I'm not covering that here.
+There is plenty of source on ACC disks that will show you how to do this ).
+
+ The effect we desire is achieved by setting source A to point at the bob,
+source B to point at the playfield and setting the destination as the
+playfield. The Blitter reads all source data, carries out some logical bit
+operation on this data and the copies the resultant data into the
+destination. This is why the destination can be used as both a source and a
+destination in Blitter operations. The code ( I always set register a5 to
+point to the start of the hardware registers and define individual
+registers as an offset from this address ):
+
+		***************************************
+
+		lea		$dff000,a5		a5->hardware base
+
+		 |		 |      |
+		 |               |      |
+
+StuffBlitter	btst		#14,DMACONR(a5)		blitter busy?
+		bne.s		StuffBlitter		if so wait for it
+
+; Set Blitter address registers
+
+		move.l		#Bob1,BLTASRC(a5)	set source A
+		move.l		#MyGfx,BLTBSRC(a5)	set source B
+		move.l		#MyGfx,BLTDSRC(a5)	set destination
+
+		***************************************
+
+ Because the destination is set to the start of the playfield, the bob will
+appear in the top left hand corner of the playfield. Add the appropriate
+offset to source B and the destination to define some other position in the
+playfield.
+
+ With the address registers set, proceed by setting the modulos. This
+requires some explanation. The modulo is the number of BYTES to be skipped
+after the end of one row of data, to arrive at the start of the next row of
+data. Confused? The bob's data lies at consecutive memory addresses, so the
+rows are placed one after the other. The modulo for the bob is therefor 0:
+
+Bob ( showes as bits in memory )
+
+	0000000000000000
+	0000111111110000
+	0000100000010000
+	0000111111110000
+	0000000000000000
+
+ Which is stored in memory as
+
+00000000000000000000111111110000000010000001000000001111111100000000000000000000
+
+ So no modulo is required. This bob is being blitted into a playfield
+though and to ensure each row of the bob appears under it's predecessor, a
+modulo value must be set for the playfield:
+
+Playfield width	=	40 bytes  ( 40 bytes = 320 pixels in this example )  
+Bob width	=	2  bytes
+
+Playfield modulo=	40-2 bytes, ie 38.
+
+ Read this as: After each row of the bob is fetched, 0 is added to the
+address pointer to arrive at the data for the next row of the bob. After
+the section of a row in the playfield that the bob will be blitted into has
+been fetched, 38 is added to the address register to arrive at the address 
+at which the next row of the bob will be blitted.
+
+ If you are wondering why 38 is added and not 40, it is because the Blitter
+increments it's hardware address register as a blit is preformed. So after
+the two bytes of the bob have been blitted, the destination ( and source B )
+address registers will have been incremented by 2.
+
+ The code to set these modulo values then:
+
+		***************************************
+
+; set modulo values
+
+		move.w		#0,BLTAMOD(a5)
+		move.w		#38,BLTBMOD(a5)
+		move.w		#38,BLTDMOD(a5)
+
+		***************************************
+
+ The minterm defines how the source data blocks are logicaly combined to
+produce the destination. I cannot describe this here in detail, I have to
+go to work tomorrow. If you are really stuck on this, write again and
+expect a rather long delay in the reply!
+
+ Let me just say that for this example, we wish to OR source A and B to
+produce the required destination data. This is written
+
+		D = A + B
+
+ ( ANDing the sources is written:  D = AB )
+
+ If you are familiar with Boolean Algebra, go and take a peak at the
+Hardware Reference Manual. After a few hours ( days or even weeks ) you
+will be able to pick a minterm 'just like that'.
+
+ The minterm is defined in hardware register BLTCON0, but this register is
+also used to define what channels to use and any shift values required. For
+this reason, I will just quote the byte value that relates to the minterm
+required and show how it is inserted shortly.
+
+Minterm	= $fc		( D = A + B )
+
+ For this example, no shift or mask will be used. These come into play when
+pixel positioning is required. For now lets concentrate on getting a block
+on the screen. Set the shift value to $0, this is also defined in BLTCON0
+so I will leave this to later to show you how to set it.
+
+ Set the first and last word masks to $ffffffff. This will ensure no data
+is masked out ( a 0 bit in a mask will stop the blitter acting on the
+relevant bit of the destination ):
+
+		***************************************
+
+		move.w		#0,BLTAFWM(a5)
+		move.w		#0,BLTALWM(a5)
+
+		***************************************
+
+ To tell the Blitter which channels to use ( A, B, C or D ), you must set
+the appropriate bits in BLTCON0. As you can see, this is a very important
+register when using the Blitter, so here is it's bit defenition:
+
+	Bit's				Function
+	0 -> 7			Define the minterm ( low byte of word )
+	8 -> 11			which channels the blitter should use:
+
+				bit 8		Use A
+				bit 9		Use B
+				bit 10		Use C
+				bit 11		Use D
+
+	12 -> 15		Shift value for source A
+
+ So, for this example, we want:
+
+	minterm: D = A + B		$fc in low byte
+	use A, B and D			$d ( %1101 ) in next nibble
+	no shift			$0 in highest nibble
+
+ Bringing all this together yields th result $0dfc to be written into
+BLTCON0:
+
+		***************************************
+
+		move.w		#$0dfc,BLTCON0
+
+		***************************************
+
+ All that is now required is to tell the blitter the size of the data block
+to blit. The size should be specified in rows and coloumns. Each coloumn is
+one WORD and each row is one rasterline. Our bob is 16 pixels wide ( 1
+word ) and 4 pixels high, so for the blitter this is 1x4. The size of the
+blit is written into register BLTSIZE. When this value is written, the
+blitter will start the blit.
+
+ Here is a defenition of BLTSIZE:
+
+	Bits				Function
+
+	0->5			defines word width of blit
+	6->15			defines pixel height of bob
+
+ Hence a bob with dimensions 1x4 will require a BLTSIZE value of:
+
+	%0000000100000001
+or	$0101
+
+		***************************************
+
+		move.w		#$0101,BLTSIZE(a5)
+
+		***************************************
+
+ That's it! The bob is copied into the playfield.
+
+ I know this looks complicated, but skim back through the above text and
+you will see that the source is only a few lines. I expect to see your bob
+source submitted at some time soon!
+
+ Bobs Consisting Of More Than I Bitplane
+ ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+ The above example explained how to blit a single bitplane bob into a
+playfield. A Single bitplane bob can only be one of two colours and so
+is very seldom used. It is more common to use bobs of at least 3 bitplanes
+( allowing up to eight colours ).
+
+ The bitplanes for a bob are normaly saved one after the other in memory.
+This allows a very handy short cut to be taken when blitting a bob. Since
+the Blitter alters its source address registers, after blitting one
+bitplane of a bob, the address registers are conveniently pointing at the
+second bitplane. This means only the destination address needs to be set
+for all but the first bitplane of a bob.
+
+ An example. You are using a screen of the following dimensions, 320x256x4.
+You have a bob of dimension 32x16x3 that you are going to blit into the
+playfield. Assume the playfield graphics data is located at the label
+'Planes' and the bob graphics data at label 'Bob1', proceed as follows:
+
+		***************************************
+
+		lea		$dff000,a5		set base pointer
+
+		 |		  |	|
+
+; First, wait for Blitter to finish last blit.
+
+BlitBob		btst		#14,DMACONR(a5)		blitter busy?
+		bne.s		BlitBob			if so loop
+
+; Tell Blitter where to find data
+
+		lea		Planes,a1		a1->Playfield data
+		move.l		#Bob1,BLTASRC(a5)	set source A
+		move.l		a1,BLTBSRC(a5)		set source B
+		move.l		a1,BLTDSRC(a5)		set destination
+
+; Define block modulos ( playfield modulo = 40 bytes   -  4 bytes )
+;					ie. playfield  -    bob
+
+		move.w		#0,BLTAMOD(a5)		no source modulo
+		move.w		#36,BLTBMOD(a5)		dest modulo
+		move.w		#36,BLTDMOD(a5)
+
+; Clear mask, not used for this example.
+
+		move.w		#0,BLTAFWM(a5)		no mask value
+		move.w		#0,BLTALWM(a5)
+
+; Define shift value ( $0 ), channel usage ( $d ) and minterm ( $fc )
+;		no shift         use A,B,D             D = A + B
+
+		move.w		#$0dfc,BLTCON0(a5)	set bits
+
+;--------------	Now the loop to blit each playfield
+
+; set counter and start blitting the bob
+
+		moveq.l		#3,d1			bob depth
+BlitLoop	move.w		#$0802 ,BLTSIZE(a5)	start blitter
+
+; Check if all planes of bob blitted, exit loop if so
+
+		subq.w		#1,d1			dec counter
+		beq.s		BlitDone		skip if bob finished
+
+; Bump playfield pointer to point to next bitplane of display
+
+		adda.l		#(320/8)*256,a0		update dest pointer
+
+; Wait for Blitter to finish current playfield
+
+BLoop		btst		#14,DMACONR(a5)		blitter busy
+		bne.s		BLoop			if so wait
+
+; Update blitter data address pointers ( Blitter will have updated BLTASRC
+;to the correct address itself ).
+
+		move.l		a1,BLTBSRC(a5)		set next playfield
+		move.l		a1,BLTDSRC(a5)		pointer
+
+; now loop back and blit next bitplane of bob
+
+		bra.s		BlitLoop		loop!
+
+; When bob has been blitted, return to Main
+
+BlitDone	rts
+
+		***************************************
+
+ I have tried to add enough comments to the above source to make it self
+explanitory. However, this is how the BLTSIZE is determined:
+
+Width of Bob		= 4 bytes		= 2 word coloumns
+
+			= 00010			binary
+
+Height of Bob		= 32 lines		= 32 rasterline rows
+
+			= 0000100000		binary
+
+BLTSIZE = hhhhhhhhhhwwwwww		{ h -> bit for height value
+					  w -> bit for width value  }
+
+	= 0000100000000010		binary
+
+	= $0802				hex
+
+
+ Hope this is of some help! MM
+
+
+
+
+
+
+
+
+
+

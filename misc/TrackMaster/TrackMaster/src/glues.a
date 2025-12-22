@@ -1,0 +1,92 @@
+
+	IncDir  sys:asmtools/include/
+	Include	exec/exec_lib.i
+	INCLUDE	exec/memory.i
+	include	exec/devices.i
+	include	exec/io.i
+	include	devices/trackdisk.i
+	include hardware/custom.i
+
+	MODULE	glues
+               CODE
+	XDEF  	_BBChkSum
+
+_BBChkSum:
+	MOVEM.L	d2,-(sp)
+	MOVE.L 	#0,4(a0)		;alte  Checksumme  auf  Null  setzen
+	MOVE.L	a0,a1
+
+	CLR.L 	d0
+	CLR.L 	d2
+	MOVE.L 	#$ff,d1 		;Bootblocklänge  in  Worten
+	MOVE 	#4,ccr
+.2:
+	MOVE.L 	(a1)+,d2
+	ADDX.l 	d2,d0
+	DBRA 	d1,.2
+
+	MOVEQ 	#-1,d1
+	SUBX.l 	d0,d1
+
+	MOVE.L 	d1,4(a0)		;neue  checksumme
+	MOVEM.L	(sp)+,d2
+	RTS
+
+;­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­­
+
+	SECTION	Bootblock_V3.0,DATA_C
+	XDEF	_BootBlock
+	XDEF    _LoaderLength
+	XDEF	_LoaderOffset
+               XDEF	_NumFiles
+	OPT	P+,o+
+
+AllRegs	REG	d0-d7/a0-a6
+
+_BootBlock:	DC.B 	"DOS",0	; Bootblock ID
+	DC.L 	0,880
+
+	MOVE.L 	4.w,A6
+	MOVEM.l AllRegs,-(sp)
+	MOVE.L	a1,a5	; IO-Zeiger retten
+
+	MOVE.L  _LoaderLength(pc),d0
+	move.L	#MEMF_PUBLIC|MEMF_CHIP|MEMF_CLEAR,d1
+	JSR	_LVOAllocMem(a6)
+	move.l	d0,a4
+	tst.l	d0
+	beq.s	.failed               ; Speicher für Loadprg reservieren
+
+	move.l	a5,a1
+	MOVE 	#CMD_READ,IO_COMMAND(a1)
+	MOVE.L 	a4,IO_DATA(a1)	; TableLoc
+	MOVE.L 	_LoaderLength(pc),IO_LENGTH(a1)
+	MOVE.L 	_LoaderOffset(pc),IO_OFFSET(a1)
+	JSR	_LVODoIO(a6)
+	TST.B	d0
+	bne.s	.failed
+	move.l	a5,a1
+               move.l	_NumFiles(pc),d0
+               JSR     (a4)	; Rückkehr in DOS möglich, man weiß ja nie
+.failed	MOVEM.l	(sp)+,AllRegs
+
+	LEA 	DosL(pc),A1
+	JSR	_LVOFindResident(a6)
+	MOVE.L 	D0,A0
+	MOVE.L 	22(A0),A0
+	MOVEQ 	#$00,D0
+	RTS
+
+DosL:	DC.B 	"dos.library",0
+
+_LoaderOffset:	DC.L	0	; Hier muss der DiskOffset rein
+_LoaderLength:	DC.L    0	; Loaderlänge in Blöcken * 512 !!!
+_NumFiles:     dc.L	0
+
+	DC.B	"TrackMaster V1.0 ©1991 by Cranium Software   "
+	DC.B	"Coding by Carsten Schlote, Egelseeweg 52, 6302 Lich 1 / Germany"
+	EVEN
+BBEnde:	DS.B	1024 - (BBEnde-BootBlock)
+	even
+	OPT	P-
+

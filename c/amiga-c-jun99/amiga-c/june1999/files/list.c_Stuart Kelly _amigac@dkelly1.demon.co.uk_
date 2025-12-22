@@ -1,0 +1,152 @@
+/*
+** list.c
+**
+** A simple 2 column MUI listview
+**
+** crashes on destructor hook!
+*/
+#include "demo.h"
+
+
+struct TBF
+{
+ char Name[50];
+ char SName[50];
+};
+
+/* display hook for our list */
+SAVEDS ASM LONG list_main_dispfunc(REG(a0) struct Hook *hook, REG(a2) char **array, REG(a1) struct TBF *tb)
+{
+ if (tb)
+  {
+   *array++ = tb->Name; // col 0
+   *array = tb->SName; // col 1
+  }
+ else /* no entry so titles are required */
+  {
+  *array++ = "\033uName";
+  *array = "\033uSurname";
+  }
+ return(0);
+}
+
+static struct Hook list_main_disphook =
+{
+ {NULL, NULL},
+ (void *)list_main_dispfunc,
+ NULL, NULL
+};
+
+
+static SAVEDS ASM APTR list_main_consfunc(REG(a0) struct Hook *hook, REG(a2) APTR pool, REG(a1) struct TBF *entry)
+{
+ struct TBF *new_entry = NULL;
+
+ new_entry = (struct TBF *)AllocPooled(pool, sizeof(struct TBF));
+
+ if (new_entry)
+  {
+   if(entry) { strcpy(new_entry->Name, entry->Name); strcpy(new_entry->SName, entry->SName); }
+   return(new_entry);
+  }
+  return(NULL);
+}
+
+static VOID SAVEDS ASM list_main_destfunc(REG(a0) struct Hook *hook, REG(a2) APTR pool, REG(a1) struct TBF *entry)
+{
+ if (entry)
+ {
+  // exception 3 will be thrown here - GURU 80000003
+  // same as in MUI docs so why does it crash ?
+  FreePooled(pool, entry, sizeof(struct TBF));
+ }
+}
+
+// construct and destruct hooks for the list
+static struct Hook list_main_conshook = { {NULL, NULL}, (void *)list_main_consfunc, NULL, NULL };
+static struct Hook list_main_desthook = { {NULL, NULL}, (void *)list_main_destfunc, NULL, NULL };
+
+
+/* interface */
+struct interface
+{
+	APTR app;
+	APTR mainwin;
+	APTR LV_Main;
+	APTR LI_List;
+	APTR BT_Quit;
+} App;
+
+int main(int argc, char *argv[])
+{
+ int x = 0;
+
+ struct TBF a;
+
+ strcpy(a.Name, "Test"); strcpy(a.SName, "Name");
+
+ init(); /*  open MUI */
+
+ /* create interface */
+
+ App.app=ApplicationObject,
+ 				MUIA_Application_Title, 		"List1",
+ 				MUIA_Application_Version,		"$VER: List1 1.0",
+ 				MUIA_Application_Author,		"Stuart Kelly",
+ 				MUIA_Application_Description,	"Listview",
+ 				MUIA_Application_Copyright,	"Copyright 1999 © Stuart Kelly",
+ 				MUIA_Application_Base,			"LIST1",
+
+ 				SubWindow, App.mainwin = WindowObject,
+ 					MUIA_Window_Title,	"Listview Example",
+ 					MUIA_Window_ID,		MAKE_ID('L','I','S','T'),
+ 					WindowContents, VGroup,
+ 						Child, App.LV_Main = ListviewObject,
+ 							MUIA_Listview_Input, TRUE,
+ 							MUIA_Listview_List, App.LI_List = ListObject,
+ 								InputListFrame,
+ 								MUIA_List_Title, TRUE,
+ 								MUIA_List_ConstructHook, &list_main_conshook,
+ 								MUIA_List_DestructHook, &list_main_destfunc,
+ 								MUIA_List_DisplayHook, &list_main_disphook,
+ 								MUIA_List_Format, "BAR,",
+ 								End,
+ 						End,
+
+ 						Child, App.BT_Quit = SimpleButton("_Quit"), End,
+
+ 				End, /* end window object */
+
+ 			End; /* application object end */
+
+ if (!App.app) fail(App.app, "Failed to create application.");
+
+ /* mainwin notifcations & help */
+ DoMethod(App.mainwin, MUIM_Notify, MUIA_Window_CloseRequest, TRUE, App.app, 2, MUIM_Application_ReturnID, MUIV_Application_ReturnID_Quit);
+ DoMethod(App.BT_Quit, MUIM_Notify, MUIA_Pressed, FALSE, App.app, 2, MUIM_Application_ReturnID, MUIV_Application_ReturnID_Quit);
+
+ set(App.BT_Quit, MUIA_ShortHelp, "Quit the program");
+ set(App.LV_Main, MUIA_ShortHelp, "A 2 column listview.\nWith Titles.");
+
+ /* insert items into out 2 column list ! */
+ DoMethod(App.LI_List, MUIM_List_InsertSingle, &a, MUIV_List_Insert_Bottom);
+
+
+ set(App.mainwin, MUIA_Window_Open, TRUE);
+ {
+  ULONG sigs = 0;
+
+  while (DoMethod(App.app, MUIM_Application_NewInput, &sigs) != MUIV_Application_ReturnID_Quit)
+   {
+    if (sigs)
+     {
+      sigs = Wait(sigs | SIGBREAKF_CTRL_C);
+      if (sigs & SIGBREAKF_CTRL_C) break;
+     }
+   }
+  }
+ /* close window and dispose interface */
+ set(App.mainwin, MUIA_Window_Open, FALSE);
+
+ fail(App.app, NULL);
+}

@@ -1,0 +1,9 @@
+mber:
+   MOVEM.L D2/D3,-(A7)
+   MOVEQ #10,D1
+   MOVE.L D0,D2
+   CLR.W D2
+   SWAP D2
+   DIVU D1,D2
+   CLR.L D3
+   MOVE.W D2

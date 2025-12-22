@@ -1,0 +1,618 @@
+G4C
+
+; $VER: CedBar.gc 3.5 ( by dck - 20.8.98 )
+; ----------------------------------------------------------------------
+; A GUI providing a toolbar for the CygnusEd text editor.
+; This is a work in perpetual progress, as I use it myself..
+; CygnusEd is a commercial product from ASDG Inc. (AFAIK)
+
+; What we do is define various icons, which we use as if they 
+; were buttons and send the appropriate rexx command to $cedport, 
+; which contains the name of the current CEd's arexx port.
+
+; According to your monitor/resolution/font etc the Icon-buttons may 
+; seem too small or too big - just redesign them to your liking.
+
+; =======================================================================
+
+WINBIG -1 0 625 14 "" ; note : no title - since don't want borders
+WinType 000010
+; winbackground pattern 3 2 ; try it..
+varpath 'cedbar.g/cedmark.g'
+UseTopaz        ; because it's a non-resizable window
+
+; -----------------------------------------------------------
+;       on loading
+; -----------------------------------------------------------
+
+xOnLoad                       ; On Loading set the default values...
+
+	cedname = CEd     ; << **** PUT HERE THE FULL PATH OF CED ********
+
+	cedClip = 0
+	cedMark = 1
+	cedSend = ""
+	cedFile = ""
+	newflag = 0
+	Update cedbar.gc 1 $cedClip
+	setgad cedbar.gc 20 HIDE   ; hide listview
+	setgad cedbar.gc 11/12 HIDE   ; hide amiga guide & launch mode icons
+	barmode = NORMAL     ; or GUIDE - can add more..
+	GuiClose cedbar.g       ; Close the small window (if it was open)
+
+	gosub cedbar.gc StartUpCed      ; See which ced is calling us
+	if $$sys.fsn[0][6] != 'Cygnus'  ; if we are called from an other screen
+	   cedscreen = CygnusEdScreen   ; get the 1st ced's screen name
+	   instance = $cedport[-1][1]
+	   if $instance > 0
+	   and $instance <= 9
+	       appvar cedscreen $($instance + 1) 
+	   else
+	       appvar cedscreen 1 
+	   endif
+
+		setscreen #this $cedscreen
+		guiopen cedbar.gc
+		guiscreen #this front
+		setscreen #this '*'
+
+	else
+		GuiOpen  cedbar.gc
+	endif
+
+	GuiLoad :cedbar.g    ; the small bar
+	GuiLoad :cedMark.g      ; the Mark Set/Go window
+	GuiLoad :cedclip.g      ; clipboard viewer
+	guiload :filereq.gc        ; the file requester
+
+	; see under which ced we're running..
+	info gui cedbar.gc
+	cedscreen = $$win.screen
+	cedport = rexx_ced
+	if $cedscreen[0][6] == 'Cygnus'   ; make sure it's a ced pubscreen
+	   instance = $cedscreen[-1][1]   ; get last letter
+	   if $instance > 1
+	   and $instance <= 9        ; adjust port name (if needed)
+	       appvar cedport $($instance - 1) 
+	   endif
+	endif
+
+	; find & load the Gui4Cli extension which provides us with 
+	; extra commands we can use with the CALL command
+	ifexists port LVFormat
+	   call LVFormat Register         ; notify it that we want it too
+	else
+	   ; look in our dir..
+	   extract cedbar.gc guipath mypath
+	   joinfile $mypath lvformat progname
+	   joinfile $progname lvformat progname
+	   ifexists file $progname
+	      run $progname
+	   elseifexists file guis:ext/lvformat/lvformat
+	      run guis:ext/lvformat/lvformat
+	   else  ; look for it in our path..
+	   	progname = lvformat
+	   	extract progname fullpath progname
+	   	if $progname > ''
+	   		run '$progname'
+			else
+		      ezreq 'Could not find LVFormat!' OK ''
+			endif
+	   endif
+	endif
+
+; -----------------------------------------------------------
+;       ending events
+; -----------------------------------------------------------
+
+xONQuit
+	GuiQuit cedbar.g        ; unload all the other GUIs
+	GuiQuit cedmark.g
+	guiquit cedclip.g
+	guiquit addlink.g
+	guiquit addeffect.g
+	guiquit addnode.g
+	guiquit indent.g
+	guiquit GuideEd.g
+	guiquit wrap.g
+	guiquit filereq.gc
+	ifexists port LVFormat  ; quit out handler
+	   call LVFormat quit
+	endif
+	ifexists file t:tempnode
+	   delete t:tempnode
+	endif
+
+xOnFail
+   guiwindow cedbar.gc resume
+
+; -----------------------------------------------------------
+;       Routine - Find ced
+; -----------------------------------------------------------
+
+xRoutine StartUpCed
+	local count
+	count = 1
+
+	portname = rexx_ced
+
+	; look for any instance of ced
+	ifexists port ~rexx_ced
+	   while $count < 10
+	      IfExists PORT 'rexx_ced$count'
+	         portname = 'rexx_ced$count'
+	         return
+	      endif
+	      ++count
+	   endwhile
+	else
+	   return
+	endif
+
+	run '$cedname'    ; not found - start it up
+	Wait PORT rexx_ced 30   ; wait for ced to load
+	if $$RETCODE > 0
+	   ezreq "CygnusEd was not found!" EXIT ""
+	   GuiQuit cedbar.gc
+	   Stop
+	endif
+	Wait SCREEN CygnusEdScreen1 30     ; if Screen does not open, use WB
+	portname = rexx_ced
+
+; -----------------------------------------------------------
+;       window handling events
+; -----------------------------------------------------------
+
+xOnRMB              ; rotate the last 8 buttons
+	; GuiClose cedbar.gc
+	; GuiOpen cedbar.g
+	gosub cedbar.gc guichange
+
+XICON 2 0 :icons/wnClose   ; the Q icon
+	ezreq "Last chance..\nQuit ?" YES|CANCEL choice
+	if $choice = 1
+	   GuiQuit cedbar.gc
+	endif
+
+XICON 15 1 :icons/right    ; the > icon togle big/small windows
+	GuiClose cedbar.gc
+	GuiOpen cedbar.g
+
+; -----------------------------------------------------------
+;       New file
+; -----------------------------------------------------------
+
+XICON 30 0 :icons/New
+	SendRexx $cedport "open new"
+
+; -----------------------------------------------------------
+;       Open file
+; -----------------------------------------------------------
+; ----- use "filereq.gc" (if it exists in our dir - else ASL)
+
+XICON 55 0 :icons/Open
+	newflag = 1     ; set flag to know that we pressed the open button
+	extract cedbar.gc guipath frqpath
+	joinfile $frqpath filereq.gc frq
+	joinfile $frqpath CedFav fav
+	ifexists file $frq
+	    ; get the current filename so we can get it's path
+	    sendrexx $cedport 'status filename'
+	    filename = $$rexxret
+	    extract filename path path
+	    ; load & open fireq.gc
+	    extract frq unquote frq
+	    guiload $frq cedbar.gc LoadFile $cedbar.gc/path $fav
+	else
+	    ; if no filereq.gc open normally
+	    SendRexx $cedport "open"
+	endif
+
+; ----- the routine that will be called from filereq.gc for *every*
+;       file chosen in it's listview
+
+xroutine LoadFile filename
+	; if there have been changes made or it's an existing file - open a new file
+	sendrexx $cedport 'status numchanges'
+	changes = $$rexxret
+	if $newflag = 0
+	or $changes > 0
+	   SendRexx $cedport "open new"
+	endif
+	newflag = 0   ; set flag = all next files (multiselected) => open new view
+	SendRexx $cedport 'open $filename'
+
+; ------ add current path to the filename - store it in cedbar.gc/fn
+
+xroutine makefile fn
+	local pth
+	extract cedbar.gc guipath pth
+	joinfile $pth $fn fn
+
+
+; -----------------------------------------------------------
+;       View handling icons
+; -----------------------------------------------------------
+
+XICON 80 0 :icons/Big
+	SendRexx $cedport "expand view"
+
+; -----------------------------------------------------------
+;       Save as.., Save
+; -----------------------------------------------------------
+
+XICON 95 0 :icons/saveas
+	SendRexx $cedport "save as"
+
+XICON 120 0 :icons/save
+	SendRexx $cedport "save"
+
+; -----------------------------------------------------------
+;       Quit
+; -----------------------------------------------------------
+
+XICON 145 0 :icons/quit
+	; get information
+	sendrexx $cedport 'status numchanges'
+	changes = $$rexxret
+	sendrexx $cedport 'status filename'
+	filename = $$rexxret
+	sendrexx $cedport 'status totalnumviews'
+	views = $$rexxret
+	if $changes > 0
+	   ezreq '$changes changes have been made.\nQuit $filename ?\n' 'Quit|Save & Quit|CANCEL' choice
+	   if $choice = 0
+	      stop
+	   elseif $choice = 2
+	      SendRexx $cedport "save"
+	      ; we will quit later..
+	   endif
+	endif
+	if $views = 1   ; this is the last file - jump to next ced, if any..
+		sendrexx $cedport 'activate next ced'	
+		if $$rexxret > 0
+			oldcedport = $cedport
+		   cedport = $$rexxret ; the new port name
+			guiclose cedbar.gc
+		   SendRexx $oldcedport "quit"
+		   SendRexx $cedport "status pubscreenname"
+		   cedscreen = $$rexxret
+			guiopen cedbar.gc
+			stop
+		else	; - give him one more chance..
+		   ezreq 'Really quit ?' "Quit!|CANCEL" choice
+		   if $choice = 0
+	   	   stop
+		   endif
+		   ; the guy just won't listen to reason..
+	   	guiclose cedbar.gc   ; close window so ced can quit
+		   guiclose cedmark.g
+		   guiquit cedbar.gc    ; and quit.. (after all commands have executed)
+		endif
+	endif
+	SendRexx $cedport "quit"
+
+; -----------------------------------------------------------
+;       Cut & Paste
+; -----------------------------------------------------------
+
+XICON 170 0 :icons/cut
+	SendRexx $cedport cut
+	lvuse CedClip.g 1
+	lvchange 'CLIPS:$cedClip'
+
+XICON 195 0 :icons/copy
+	SendRexx $cedport copy
+	lvuse CedClip.g 1
+	lvchange 'CLIPS:$cedClip'
+
+XICON 220 0 :icons/paste
+	SendRexx $cedport paste
+	lvuse CedClip.g 1
+	lvchange 'CLIPS:$cedClip'
+
+; -----------------------------------------------------------
+;       Change the clipboard unit (use cedclip.g)
+; -----------------------------------------------------------
+
+XAREA 246 0 40 14 box   ; use an area gad to get button click over
+	guiopen cedclip.g    ; the text gad below..
+	
+TEXT 246 1 40 12 "" 10 box    ; the number of the clipboard unit
+	GadID 1
+
+XICON 287 1 :icons/Up  ; the up/down icons
+	++cedClip
+	gosub cedclip.g changeunit
+
+XICON 287 7 :icons/Down
+	--cedClip
+	gosub cedclip.g changeunit
+
+; -----------------------------------------------------------
+;       Undo/Redo, Find & Replace
+; -----------------------------------------------------------
+
+XICON 300 0 :icons/undo
+	SendRexx $cedport "undo"
+
+XICON 315 0 :icons/redo
+	SendRexx $cedport "redo"
+
+XICON 330 0 :icons/find
+	SendRexx $cedport "search for"
+
+XICON 356 1 :icons/right
+	SendRexx $cedport "repeat search forwards"
+
+XICON 370 0 :icons/replace
+	SendRexx $cedport "replace"
+
+XICON 396 1 :icons/right
+	SendRexx $cedport "repeat replace"
+
+
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;       change gui..
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+XICON 410 0 :icons/change
+	gosub cedbar.gc guichange
+
+xroutine guichange    ; also called from xOnRMB
+	if $barmode = NORMAL
+	   barmode = ALT1
+	   setgad cedbar.gc 10 HIDE
+	   setgad cedbar.gc 11 SHOW
+	   setgad cedbar.gc 12 HIDE
+	elseif $barmode = ALT1
+		barmode = ALT2
+	   setgad cedbar.gc 10 HIDE
+	   setgad cedbar.gc 11 HIDE
+	   setgad cedbar.gc 12 SHOW
+	else ; ALT2 mode
+	   barmode = NORMAL
+	   setgad cedbar.gc 10 SHOW
+	   setgad cedbar.gc 11 HIDE
+	   setgad cedbar.gc 12 HIDE
+	endif
+	partredraw cedbar.gc 430 0 625 14
+
+
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;	gadid 10
+; ===========================================================
+;	NORMAL mode
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+xICON 425 0 :icons/all
+	gadid 10
+	SendRexx $cedport "beg of file"
+	SendRexx $cedport "mark"
+	SendRexx $cedport "end of file"
+
+xICON 450 0 :icons/goto
+	gadid 10
+	GuiOpen cedmark.g
+
+xICON 475 0 :icons/clear
+	gadid 10
+	SendRexx $cedport "clear"
+
+xICON 500 0 :icons/colmark
+	gadid 10
+	SendRexx $cedport "mark columnar"
+
+xICON 525 0 :icons/brackets
+	gadid 10
+	SendRexx $cedport "find matching bracket"
+
+xICON 550 0 :icons/print
+	gadid 10
+	SendRexx $cedport "print file"
+
+xICON 575 0 :icons/nextjump			; jump to next ced with file
+	gadid 10
+	local newced
+	newced = ''
+	gosub #this getname
+	sendrexx $cedport 'status numchanges'
+	changes = $$rexxret
+	if $changes > 0 ; if there were changes, save file..
+		sendrexx $cedport 'save'
+	endif
+	guiclose cedbar.gc
+	SendRexx $cedport "activate next ced"
+	if $$rexxret <= "0"     ;  if there is no next ced, create one..
+		oldcedport = $cedport
+		SendRexx $cedport "spawn new ced"
+		if $$rexxret = 1
+			cedport = 0
+			while $cedport <= "0"	; wait for ced port
+				delay 5
+				SendRexx $oldcedport "activate next ced"
+				cedport = $$rexxret
+			endwhile
+			newced = NEW		; mark new (see down)
+		else 						; failed to launch new ced
+			flash		
+			stop
+		endif
+	else
+		oldcedport = $cedport
+	   cedport = $$rexxret ; the new port name
+	endif   
+   SendRexx $oldcedport "quit" ; close the file after closing cedbar
+   SendRexx $cedport "status pubscreenname"
+   cedscreen = $$rexxret
+   if $newced != NEW
+		SendRexx $cedport "open new"
+	endif
+	SendRexx $cedport "open $filename"
+	SendRexx $cedport "expand view"
+	guiopen cedbar.gc
+
+xICON 600 0 :icons/nextced				; jump to next ced - no file
+	gadid 10
+	guiclose cedbar.gc
+	SendRexx $cedport "activate next ced"
+	if $$rexxret > "0"     ;  if there is a next ced
+	   cedport = $$rexxret ; the new port name
+	   SendRexx $cedport "status pubscreenname"
+	   cedscreen = $$rexxret
+	endif
+	guiopen cedbar.gc
+
+
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;	gadid 11
+; ===========================================================
+;	ALT1 mode
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+xICON 425 0 :icons/indent
+	gadid 11
+	guiload :indent.g
+
+xICON 450 0 :icons/unindent
+	gadid 11
+	SendRexx $cedport cut
+	lvuse CedClip.g 1
+	lvchange 'CLIPS:$cedClip'
+	call LVFormat UnIndent
+	lvsave 'CLIPS:$cedClip'
+	SendRexx $cedport paste
+
+xICON 475 0 :icons/wrap
+	gadid 11
+	guiload :wrap.g
+
+xICON 500 0 :icons/empty
+	gadid 11
+
+xICON 525 0 :icons/empty
+	gadid 11
+
+xICON 550 0 :icons/empty
+	gadid 11
+
+xICON 575 0 :icons/empty
+	gadid 11
+
+xICON 600 0 :icons/empty		; makeid
+	gadid 11
+	local word/out
+	SendRexx $cedport cut
+	lvuse CedClip.g 1
+	lvchange 'CLIPS:$cedClip'
+	word = $$lv.rec
+	cutvar word cut word 1 word
+	extract word upper word
+	lvclear
+	lvadd "#define $word\t\tMakeID(\'$word[0][1]\',\'$word[1][1]\',\'$word[2][1]\',\'$word[3][1]\')\t// "
+	lvsave 'CLIPS:$cedClip'
+	SendRexx $cedport paste
+
+
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+;	gadid 12
+; ===========================================================
+;	ALT2 mode
+; @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+
+xICON 425 0 :icons/Compile		; C gui
+	gadid 12
+	guiclose sc.gc
+	guiload :sc.gc
+
+xICON 450 0 :icons/AGJoin		; AmigaGuide editor
+	gadid 12
+	guiclose guideed.g
+	guiload :GuideEd.g
+
+xICON 475 0 :icons/empty
+	gadid 12
+
+xICON 500 0 :icons/empty
+	gadid 12
+
+xICON 525 0 :icons/Dir			; dir.gc
+	gadid 12
+	guiclose dir.gc	; in case it's open on another screen
+	guiload guis:dir/dir.gc ; auto-opens..
+
+xICON 550 0 :icons/calc			; calculator
+	gadid 12
+	ifexists gui ~calc.gc 	; if not already loaded
+		ifexists file guis:tools/calc.gc
+			guiload guis:tools/calc.gc
+		else
+			guiload :calc.gc ; same dir ?
+		endif
+	endif
+	guiopen calc.gc
+	guiscreen calc.gc front
+
+xICON 575 0 :icons/search		; search gui
+	gadid 12
+	; get current file path
+	gosub cedbar.gc getname
+	if $textpath < ' '
+	   textpath = sys:
+	endif
+	; get selected text into clip lv
+	SendRexx $cedport copy
+	lvuse CedClip.g 1
+	lvchange 'CLIPS:$cedClip'
+
+	; startup fsearch.gc
+	ifexists gui fsearch.gc	; already open..
+		fsearch.gc/searchpath = $textpath
+		update fsearch.gc 2 $textpath
+		fsearch.gc/findtxt = '$$lv.rec'
+		update fsearch.gc 7 $fsearch.gc/findtxt
+		guiopen fsearch.gc
+		guiscreen fsearch.gc front
+	else
+		; first look in same dir..
+		extract #this guipath progname
+		Joinfile $progname fsearch/fsearch.gc progname
+		ifexists file '$progname'
+			guiload $progname '$textpath' '$$lv.rec'
+		elseifexists file guis:g4c/fsearch/fsearch.gc
+			guiload guis:g4c/fsearch/fsearch.gc '$textpath' '$$lv.rec'
+		else
+			ezreq 'Could not locate FSearch.gc' Abort ''
+		endif
+	endif
+
+xICON 600 0 :icons/info
+	gadid 12
+	local path/guidename ; local vars
+	;  close previous guide if any
+	ifexists port CEDGUIDE
+	   sendrexx CEDGUIDE QUIT
+	endif
+	extract cedbar.gc guipath path
+	joinfile $path CedBar.guide guidename
+	run 'amigaguide $guidename screen=$cedscreen port=CEDGUIDE'
+
+
+; -----------------------------------------------------------
+; 	a hidden listview - used for file manipulation
+; -----------------------------------------------------------
+
+XLISTVIEW 0 0 87 110 '' lvr '' 0 MULTI
+	gadid 20
+
+
+; -----------------------------------------------------------
+; 	routine to get current filename & path
+; -----------------------------------------------------------
+
+xroutine getname
+	sendrexx $cedport 'status filename'
+	filename = $$rexxret
+	extract filename path textpath
+
+

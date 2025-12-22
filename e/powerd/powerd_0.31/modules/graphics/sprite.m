@@ -1,0 +1,22 @@
+OBJECT SimpleSprite
+	posctldata:PTR TO UWORD,
+	height:UWORD,
+	X|x:UWORD,
+	Y|x:UWORD,
+	num:UWORD
+
+OBJECT extsprite
+	SimpleSprite:SimpleSprite,
+	wordwidth:UWORD,
+	flags:UWORD
+
+CONST	SPRITEA_Width=$81000000,
+		SPRITEA_XReplication=$81000002,
+		SPRITEA_YReplication=$81000004,
+		SPRITEA_OutputHeight=$81000006,
+		SPRITEA_Attached=$81000008,
+		SPRITEA_OldDataFormat=$8100000A,
+		GSTAG_SPRITE_NUM=$82000020,
+		GSTAG_ATTACHED=$82000022,
+		GSTAG_SOFTSPRITE=$82000024,
+		GSTAG_SCANDOUBLED=$83000000

@@ -1,0 +1,479 @@
+DEFINITION FOR LIBRARY MODULE Rexx ;
+
+FROM SYSTEM	IMPORT ADDRESS, BADDRESS, SHORTSET, STRING, LONGSET ;
+FROM Dos	IMPORT FileHandlePtr, FileLockPtr, DosLibraryPtr ;
+FROM Exec	IMPORT Node, List, Message, MsgPort, MsgPortPtr, Library ,
+		       ExecBasePtr ;
+
+(* Definitions for ARexx error codes *)
+
+CONST
+  ERRC_MSG  = 0 ;		(*  error code offset           *)
+  ERR10_001 = ERRC_MSG+1 ;	(*  program not found           *)
+  ERR10_002 = ERRC_MSG+2 ;	(*  execution halted            *)
+  ERR10_003 = ERRC_MSG+3 ;	(*  no memory available         *)
+  ERR10_004 = ERRC_MSG+4 ;	(*  invalid character in program*)
+  ERR10_005 = ERRC_MSG+5 ;	(*  unmatched quote             *)
+  ERR10_006 = ERRC_MSG+6 ;	(*  unterminated comment        *)
+  ERR10_007 = ERRC_MSG+7 ;	(*  clause too long             *)
+  ERR10_008 = ERRC_MSG+8 ;	(*  unrecognized token          *)
+  ERR10_009 = ERRC_MSG+9 ;	(*  symbol or string too long   *)
+
+  ERR10_010 = ERRC_MSG+10 ;	(*  invalid message packet      *)
+  ERR10_011 = ERRC_MSG+11 ;	(*  command string error        *)
+  ERR10_012 = ERRC_MSG+12 ;	(*  error return from function  *)
+  ERR10_013 = ERRC_MSG+13 ;	(*  host environment not found  *)
+  ERR10_014 = ERRC_MSG+14 ;	(*  required library not found  *)
+  ERR10_015 = ERRC_MSG+15 ;	(*  function not found          *)
+  ERR10_016 = ERRC_MSG+16 ;	(*  no return value             *)
+  ERR10_017 = ERRC_MSG+17 ;	(*  wrong number of arguments   *)
+  ERR10_018 = ERRC_MSG+18 ;	(*  invalid argument to function*)
+  ERR10_019 = ERRC_MSG+19 ;	(*  invalid PROCEDURE           *)
+
+  ERR10_020 = ERRC_MSG+20 ;	(*  unexpected THEN/ELSE        *)
+  ERR10_021 = ERRC_MSG+21 ;	(*  unexpected WHEN/OTHERWISE   *)
+  ERR10_022 = ERRC_MSG+22 ;	(*  unexpected LEAVE or ITERATE *)
+  ERR10_023 = ERRC_MSG+23 ;	(*  invalid statement in SELECT *)
+  ERR10_024 = ERRC_MSG+24 ;	(*  missing THEN clauses        *)
+  ERR10_025 = ERRC_MSG+25 ;	(*  missing OTHERWISE           *)
+  ERR10_026 = ERRC_MSG+26 ;	(*  missing or unexpected END   *)
+  ERR10_027 = ERRC_MSG+27 ;	(*  symbol mismatch on END      *)
+  ERR10_028 = ERRC_MSG+28 ;	(*  invalid DO syntax           *)
+  ERR10_029 = ERRC_MSG+29 ;	(*  incomplete DO/IF/SELECT     *)
+
+  ERR10_030 = ERRC_MSG+30 ;	(*  label not found             *)
+  ERR10_031 = ERRC_MSG+31 ;	(*  symbol expected             *)
+  ERR10_032 = ERRC_MSG+32 ;	(*  string or symbol expected   *)
+  ERR10_033 = ERRC_MSG+33 ;	(*  invalid sub-keyword         *)
+  ERR10_034 = ERRC_MSG+34 ;	(*  required keyword missing    *)
+  ERR10_035 = ERRC_MSG+35 ;	(*  extraneous characters       *)
+  ERR10_036 = ERRC_MSG+36 ;	(*  sub-keyword conflict        *)
+  ERR10_037 = ERRC_MSG+37 ;	(*  invalid template            *)
+  ERR10_038 = ERRC_MSG+38 ;	(*  invalid TRACE request       *)
+  ERR10_039 = ERRC_MSG+39 ;	(*  uninitialized variable      *)
+
+  ERR10_040 = ERRC_MSG+40 ;	(*  invalid variable name       *)
+  ERR10_041 = ERRC_MSG+41 ;	(*  invalid expression          *)
+  ERR10_042 = ERRC_MSG+42 ;	(*  unbalanced parentheses      *)
+  ERR10_043 = ERRC_MSG+43 ;	(*  nesting level exceeded      *)
+  ERR10_044 = ERRC_MSG+44 ;	(*  invalid expression result   *)
+  ERR10_045 = ERRC_MSG+45 ;	(*  expression required         *)
+  ERR10_046 = ERRC_MSG+46 ;	(*  boolean value not 0 or 1    *)
+  ERR10_047 = ERRC_MSG+47 ;	(*  arithmetic conversion error *)
+  ERR10_048 = ERRC_MSG+48 ;	(*  invalid operand             *)
+
+(* Return Codes for general use *)
+
+  RC_OK	   = 0  ;		(*  success                     *)
+  RC_WARN  = 5  ;		(*  warning only                *)
+  RC_ERROR = 10 ;		(*  something's wrong           *)
+  RC_FATAL = 20 ;		(*  complete or severe failure  *)
+
+(* The NexxStr structure is used to maintain the internal strings in REXX. *)
+(* It includes the buffer area for the string and associated attributes.   *)
+(* This is actually a variable-length structure; it is allocated for a     *)
+(* specific length string, and the length is never modified thereafter	   *)
+(* (since it's used for recycling).					   *)
+
+TYPE
+  NexxStrPtr = POINTER TO NexxStr ;
+  NexxStr = RECORD
+    ns_Ivalue	: LONGINT;	(* integer value                 *)
+    ns_Length	: CARDINAL ;	(* length in bytes (excl null)   *)
+    ns_Flags	: SHORTSET;	(* attribute flags               *)
+    ns_Hash	: SHORTCARD ;	(* hash code                     *)
+    ns_Buff	: ARRAY [0..7] OF CHAR ;
+				(* buffer area for strings       *)
+ END ; (* size: 16 bytes (minimum) *)
+
+ PROCEDURE IVALUE( nsPtr : NexxStrPtr ) : LONGINT ; (* nsPtr->ns_Ivalue *)
+
+CONST
+  NXADDLEN	= 9 ;	(* offset plus null byte         *)
+
+(* String attribute flag bit definitions *)
+
+  NSB_KEEP	= 0 ;	(* permanent string?             *)
+  NSB_STRING	= 1 ;	(* string form valid?            *)
+  NSB_NOTNUM	= 2 ;	(* non-numeric?                  *)
+  NSB_NUMBER	= 3 ;	(* a valid number?               *)
+  NSB_BINARY	= 4 ; 	(* integer value saved?          *)
+  NSB_FLOAT	= 5 ;	(* floating point format?        *)
+  NSB_EXT	= 6 ;	(* an external string?           *)
+  NSB_SOURCE	= 7 ;	(* part of the program source?   *)
+
+(* The flag form of the string attributes *)
+
+  NSF_KEEP	= {0} ;
+  NSF_STRING	= {1} ;
+  NSF_NOTNUM	= {2} ;
+  NSF_NUMBER	= {3} ;
+  NSF_BINARY	= {4} ;
+  NSF_FLOAT	= {5} ;
+  NSF_EXT	= {6} ;
+  NSF_SOURCE	= {7} ;
+
+(* Combinations of flags *)
+
+  NSF_INTNUM	= NSF_NUMBER + NSF_BINARY + NSF_STRING ;
+  NSF_DPNUM	= NSF_NUMBER + NSF_FLOAT ;
+  NSF_ALPHA	= NSF_NOTNUM + NSF_STRING ;
+  NSF_OWNED	= NSF_SOURCE + NSF_EXT + NSF_KEEP ;
+  KEEPSTR	= NSF_STRING + NSF_SOURCE + NSF_NOTNUM ;
+  KEEPNUM	= NSF_STRING + NSF_SOURCE + NSF_NUMBER + NSF_BINARY ;
+
+(* The RexxArg structure is identical to the NexxStr structure, but	   *)
+(* is allocated from system memory rather than from internal storage.	   *)
+(* This structure is used for passing arguments to external programs.	   *)
+(* It is usually passed as an "argstring", a pointer to the string buffer. *)
+
+TYPE
+  RexxArgPtr = POINTER TO RexxArg ;
+  RexxArg = RECORD
+    ra_Size	: LONGINT ;	(* total allocated length        *)
+    ra_Length	: CARDINAL ;	(* length of string              *)
+    ra_Flags	: SHORTSET ;	(* attribute flags               *)
+    ra_Hash	: SHORTCARD ;	(* hash code                     *)
+    ra_Buff	: ARRAY [0..7] OF CHAR ;
+				(* buffer area                   *)
+  END ;				(* size: 16 bytes (minimum)      *)
+
+(* The RexxMsg structure is used for all communications with REXX    *)
+(* programs.  It is an EXEC message with a parameter block appended. *)
+
+  RexxMsgPtr = POINTER TO RexxMsg ;
+  RexxMsg = RECORD
+    rm_Node	: Message ;	(* EXEC message structure        *)
+    rm_TaskBlock: ADDRESS ;	(* global structure (private)    *)
+    rm_LibBase	: ADDRESS ;	(* library base (private)        *)
+    rm_Action	: LONGINT ;	(* command (action) code         *)
+    rm_Result1	: LONGINT ;	(* primary result (return code)  *)
+    rm_Result2	: LONGINT ;	(* secondary result              *)
+    rm_Args	: ARRAY [0..15] OF STRING ;
+				(* argument block (ARG0-ARG15)   *)
+
+    rm_PassPort	: MsgPortPtr;	(* forwarding port               *)
+    rm_CommAddr	: STRING ;	(* host address (port name)      *)
+    rm_FileExt	: STRING ;	(* file extension                *)
+    rm_Stdin	: FileHandlePtr;(* input stream (filehandle)     *)
+    rm_Stdout	: FileHandlePtr;(* output stream (filehandle)    *)
+    rm_avail	: LONGINT;	(* future expansion              *)
+  END ;	(* size: 128 bytes *)
+
+(* Field definitions macros *)
+  PROCEDURE ARG0( rmp : RexxMsgPtr ) : STRING ; (* start of argblock	*)
+  PROCEDURE ARG1( rmp : RexxMsgPtr ) : STRING ; (* first argument	*)
+  PROCEDURE ARG2( rmp : RexxMsgPtr ) : STRING ; (* second argument	*)
+
+CONST
+
+  MAXRMARG = 15 ; (* maximum arguments *)
+
+(* Command (action) codes for message packets *)
+
+  RXCOMM	= 01000000H ;	(* a command-level invocation    *)
+  RXFUNC	= 02000000H ;	(* a function call               *)
+  RXCLOSE	= 03000000H ;	(* close the REXX server         *)
+  RXQUERY	= 04000000H ;	(* query for information         *)
+  RXADDFH	= 07000000H ;	(* add a function host           *)
+  RXADDLIB	= 08000000H ;	(* add a function library        *)
+  RXREMLIB	= 09000000H ;	(* remove a function library     *)
+  RXADDCON	= 0A000000H ;	(* add/update a ClipList string  *)
+  RXREMCON	= 0B000000H ;	(* remove a ClipList string      *)
+  RXTCOPN	= 0C000000H ;	(* open the trace console        *)
+  RXTCCLS	= 0D000000H ;	(* close the trace console       *)
+
+(* Command modifier flag bits *)
+
+  RXFB_NOIO	 = 16 ;	(* suppress I/O inheritance?     *)
+  RXFB_RESULT	 = 17 ;	(* result string expected?       *)
+  RXFB_STRING	 = 18 ;	(* program is a "string file"?   *)
+  RXFB_TOKEN	 = 19 ;	(* tokenize the command line?    *)
+  RXFB_NONRET	 = 20 ;	(* a "no-return" message?        *)
+
+(* The flag form of the command modifiers *)
+
+  RXFF_NOIO	 = 00010000H ;
+  RXFF_RESULT	 = 00020000H ;
+  RXFF_STRING	 = 00040000H ;
+  RXFF_TOKEN	 = 00080000H ;
+  RXFF_NONRET	 = 00100000H ;
+
+  RXCODEMASK	 = 0FF000000H ;
+  RXARGMASK	 = 00000000FH ;
+
+(* The RexxRsrc structure is used to manage global resources.  Each node   *)
+(* has a name string created as a RexxArg structure, and the total size    *)
+(* of the node is saved in the "rr_Size" field.  The REXX systems library  *)
+(* provides functions to allocate and release resource nodes.  If special  *)
+(* deletion operations are required, an offset and base can be provided in *)
+(* "rr_Func" and "rr_Base", respectively.  This "autodelete" function will *)
+(* be called with the base in register A6 and the node in A0.		   *)
+
+TYPE
+  RexxRsrcPtr = POINTER TO RexxRsrc ;
+  RexxRsrc = RECORD
+    rr_Node : Node ;
+    rr_Func : INTEGER ; (* "auto-delete" offset          *)
+    rr_Base : ADDRESS ; (* "auto-delete" base            *)
+    rr_Size : LONGINT ; (* total size of node            *)
+    rr_Arg1 : LONGINT ; (* available ...                 *)
+    rr_Arg2 : LONGINT ; (* available ...                 *)
+  END ;	(* size: 32 bytes *)
+
+CONST
+(* Resource node types *)
+
+  RRT_ANY   = 0 ; (* any node type ...             *)
+  RRT_LIB   = 1 ; (* a function library            *)
+  RRT_PORT  = 2 ; (* a public port                 *)
+  RRT_FILE  = 3 ; (* a file IoBuff                 *)
+  RRT_HOST  = 4 ; (* a function host               *)
+  RRT_CLIP  = 5 ; (* a Clip List node              *)
+
+(* The RexxTask structure holds the fields used by REXX to communicate with *)
+(* external processes, including the client task.  It includes the global   *)
+(* data structure (and the base environment).  The structure is passed to   *)
+(* the newly-created task in its "wake-up" message.			    *)
+
+  GLOBALSZ = 200 ; (* total size of GlobalData *)
+
+TYPE
+  RexxTaskPtr = POINTER TO RexxTask ;
+  RexxTask = RECORD
+    rt_Global	: ARRAY [0..GLOBALSZ-1] OF SHORTINT ;
+				(* global data structure         *)
+    rt_MsgPort	: MsgPort  ;	(* global message port           *)
+    rt_Flags	: SHORTSET ;	(* task flag bits                *)
+    rt_SigBit	: SHORTINT ;	(* signal bit                    *)
+
+    rt_ClientID	: ADDRESS ; 	(* the client's task ID          *)
+    rt_MsgPkt	: ADDRESS ;	(* the packet being processed    *)
+    rt_TaskID	: ADDRESS ;	(* our task ID                   *)
+    rt_RexxPort	: ADDRESS ;	(* the REXX public port          *)
+
+    rt_ErrTrap	: ADDRESS ;	(* Error trap address            *)
+    rt_StackPtr	: ADDRESS ;	(* stack pointer for traps       *)
+
+    rt_Header1	: List ;	(* Environment list              *)
+    rt_Header2	: List ;	(* Memory freelist               *)
+    rt_Header3	: List ;	(* Memory allocation list        *)
+    rt_Header4	: List ;	(* Files list                    *)
+    rt_Header5	: List ;	(* Message Ports List            *)
+  END ;
+
+CONST
+(* Definitions for RexxTask flag bits *)
+
+  RTFB_TRACE	 = 0 ;	 (* external trace flag           *)
+  RTFB_HALT	 = 1 ;	 (* external halt flag            *)
+  RTFB_SUSP	 = 2 ;	 (* suspend task?                 *)
+  RTFB_TCUSE	 = 3 ;	 (* trace console in use?         *)
+  RTFB_WAIT	 = 6 ;	 (* waiting for reply?            *)
+  RTFB_CLOSE	 = 7 ;	 (* task completed?               *)
+
+(* Definitions for memory allocation constants *)
+
+  MEMQUANT	 = 16 ;		(* quantum of memory space       *)
+  MEMMASK	 = 0FFFFFFF0H ;	(* mask for rounding the size    *)
+
+  MEMQUICK	 = 1 ;		(* EXEC flags: MEMF_PUBLIC       *)
+  MEMCLEAR	 = 00010000H ;	(* EXEC flags: MEMF_CLEAR        *)
+
+(* The SrcNode is a temporary structure used to hold values destined for *)
+(* a segment array.  It is also used to maintain the memory freelist.	 *)
+
+TYPE
+  SrcNodePtr = POINTER TO SrcNode ;
+  SrcNode = RECORD
+    sn_Succ : SrcNodePtr ; (* next node      *)
+    sn_Pred : SrcNodePtr ; (* previous node  *)
+    sn_Ptr  : ADDRESS    ; (* pointer value  *)
+    sn_Size : LONGINT    ; (* size of object *)
+  END ; (* size: 16 bytes *)
+
+(* ARexx Input/Output related structures *)
+
+CONST
+  RXBUFFSZ	= 204; (* buffer length *)
+
+(* The IoBuff is a resource node used to maintain the File List.  Nodes *)
+(* are allocated and linked into the list whenever a file is opened.    *)
+
+TYPE
+  IoBuffPtr = POINTER TO IoBuff ;
+  IoBuff = RECORD
+    iobNode	 : RexxRsrc;	 (* structure for files/strings   *)
+    iobRpt	 : ADDRESS;	 (* read/write pointer            *)
+    iobRct	 : LONGINT;	 (* character count               *)
+    iobDFH	 : FileHandlePtr;(* DOS filehandle                *)
+    iobLock	 : FileLockPtr;	 (* DOS lock                      *)
+    iobBct	 : LONGINT;	 (* buffer length                 *)
+    iobArea	 : ARRAY [0..RXBUFFSZ-1] OF SHORTINT ;
+				 (* buffer area                   *)
+  END ; (* size: 256 bytes *)
+
+CONST
+
+(* Access mode definitions *)
+
+  RXIO_EXIST	 = -1 ;	 (* an external filehandle        *)
+  RXIO_STRF	 =  0 ;	 (* a "string file"               *)
+  RXIO_READ	 =  1 ;	 (* read-only access              *)
+  RXIO_WRITE	 =  2 ;	 (* write mode                    *)
+  RXIO_APPEND	 =  3 ;	 (* append mode (existing file)   *)
+
+(* Offset anchors for SeekF() *)
+
+  RXIO_BEGIN	 = -1 ;	 (* relative to start             *)
+  RXIO_CURR	 =  0 ;	 (* relative to current position  *)
+  RXIO_END	 =  1 ;	 (* relative to end               *)
+
+
+(* A message port structure, maintained as a resource node.  The ReplyList *)
+(* holds packets that have been received but haven't been replied.	   *)
+
+TYPE
+  RexxMsgPortPtr = POINTER TO RexxMsgPort ;
+  RexxMsgPort = RECORD
+    rmp_Node	  : RexxRsrc ;	(* linkage node                  *)
+    rmp_Port	  : MsgPort ;	(* the message port              *)
+    rmp_ReplyList : List ;	(* messages awaiting reply       *)
+  END ;
+
+(* The Library List contains just plain resource nodes.	*)
+
+  PROCEDURE LLOFFSET( rrp : RexxRsrcPtr ) : LONGINT ; (* "Query" offset	 *)
+  PROCEDURE LLVERS( rrp : RexxRsrcPtr ) : LONGINT ;   (* library version *)
+
+(* The RexxClipNode structure is used to maintain the Clip List.  The value *)
+(* string is stored as an argstring in the rr_Arg1 field.		    *)
+
+  PROCEDURE CLVALUE( rrp : RexxRsrcPtr ) : STRING ;
+
+CONST
+
+(* DOS Device types *)
+
+  DT_DEV = 0 ;	(* a device                      *)
+  DT_DIR = 1 ;	(* an ASSIGNed directory         *)
+  DT_VOL = 2 ;	(* a volume                      *)
+
+(* Private DOS packet types *)
+
+  ACTION_STACK	= 2002 ; (* stack a line *)
+  ACTION_QUEUE	= 2003 ; (* queue a line *)
+
+CONST
+  RXSNAME  = "rexxsyslib.library" ;
+  RXSDIR   = "REXX" ;
+  RXSTNAME = "ARexx" ;
+
+TYPE
+  RxsLibPtr = POINTER TO RxsLib ;
+
+VAR
+  RexxSysBase : RxsLibPtr ;
+
+(* The REXX systems library structure.  This should be considered as    *)
+(* semi-private and read-only, except for documented exceptions.        *)
+
+TYPE
+  RxsLib = RECORD
+    rl_Node		: Library ;	(* EXEC library node             *)
+    rl_Flags		: SHORTSET ;	(* global flags                  *)
+    rl_pad		: SHORTCARD ;
+    rl_SysBase		: ExecBasePtr ;	(* EXEC library base             *)
+    rl_DOSBase		: DosLibraryPtr;(* DOS library base              *)
+    rl_IeeeDPBase	: ADDRESS ;	(* IEEE DP math library base     *)
+    rl_SegList		: BADDRESS ;	(* library seglist               *)
+    rl_NIL		: FileHandlePtr;(* global NIL: filehandle        *)
+    rl_Chunk		: LONGINT ;	(* allocation quantum            *)
+    rl_MaxNest		: LONGINT ;	(* maximum expression nesting    *)
+    rl_NULL		: NexxStrPtr ;	(* static string: NULL           *)
+    rl_FALSE		: NexxStrPtr ;	(* static string: FALSE          *)
+    rl_TRUE		: NexxStrPtr ;	(* static string: TRUE           *)
+    rl_REXX		: NexxStrPtr ;	(* static string: REXX           *)
+    rl_COMMAND		: NexxStrPtr ;	(* static string: COMMAND        *)
+    rl_STDIN		: NexxStrPtr ;	(* static string: STDIN          *)
+    rl_STDOUT		: NexxStrPtr ;	(* static string: STDOUT         *)
+    rl_STDERR		: NexxStrPtr ;	(* static string: STDERR         *)
+    rl_Version		: STRING ;	(* version/configuration string  *)
+
+    rl_TaskName		: STRING ;	(* name string for tasks         *)
+    rl_TaskPri		: LONGINT ;	(* starting priority             *)
+    rl_TaskSeg		: ADDRESS ;	(* startup seglist               *)
+    rl_StackSize	: LONGINT ;	(* stack size                    *)
+    rl_RexxDir		: STRING ;	(* REXX directory                *)
+    rl_CTABLE		: STRING ;	(* character attribute table     *)
+    rl_Notice		: NexxStrPtr;	(* copyright notice              *)
+
+    rl_RexxPort		: MsgPort ;	(* REXX public port              *)
+    rl_ReadLock		: CARDINAL ;	(* lock count                    *)
+    rl_TraceFH		: ADDRESS ;	(* global trace console          *)
+    rl_TaskList		: List ; 	(* REXX task list                *)
+    rl_NumTask		: INTEGER ;	(* task count                    *)
+    rl_LibList		: List ;	(* Library List header           *)
+    rl_NumLib		: INTEGER ;	(* library count                 *)
+    rl_ClipList		: List ;	(* ClipList header               *)
+    rl_NumClip		: INTEGER;	(* clip node count               *)
+    rl_MsgList		: List ;	(* pending messages              *)
+    rl_NumMsg		: INTEGER ;	(* pending count                 *)
+    rl_PgmList		: List ;	(* cached programs               *)
+    rl_NumPgm		: INTEGER ;	(* program count                 *)
+
+    rl_TraceCnt		: CARDINAL ;	(* usage count for trace console *)
+    rl_avail		: INTEGER ;
+  END ;
+
+CONST
+
+(* Global flag bit definitions for RexxMaster *)
+  RLFB_TRACE	= RTFB_TRACE ;	(* interactive tracing?          *)
+  RLFB_HALT	= RTFB_HALT ;	(* halt execution?               *)
+  RLFB_SUSP	= RTFB_SUSP ;	(* suspend execution?            *)
+  RLFB_STOP	= 6 ;		(* deny further invocations      *)
+  RLFB_CLOSE	= 7 ;		(* close the master              *)
+
+
+  RLFMASK	= {RLFB_TRACE,RLFB_HALT,RLFB_SUSP} ;
+
+(* Initialization constants *)
+
+  RXSCHUNK	= 1024 ;	(* allocation quantum            *)
+  RXSNEST	= 32 ;		(* expression nesting limit      *)
+  RXSTPRI	= 0 ;		(* task priority                 *)
+  RXSSTACK	= 4096 ;	(* stack size                    *)
+
+(* Character attribute flags & bits used in REXX. *)
+
+  CTB_SPACE	= 0 ;  CTF_SPACE	= {0} ;	(* white space characters     *)
+  CTB_DIGIT	= 1 ;  CTF_DIGIT	= {1} ;	(* decimal digits 0-9         *)
+  CTB_ALPHA	= 2 ;  CTF_ALPHA	= {2} ;	(* alphabetic characters      *)
+  CTB_REXXSYM	= 3 ;  CTF_REXXSYM	= {3} ;	(* REXX symbol characters     *)
+  CTB_REXXOPR	= 4 ;  CTF_REXXOPR	= {4} ;	(* REXX operator characters   *)
+  CTB_REXXSPC	= 5 ;  CTF_REXXSPC	= {5} ;	(* REXX special symbols       *)
+  CTB_UPPER	= 6 ;  CTF_UPPER	= {6} ;	(* UPPERCASE alphabetic       *)
+  CTB_LOWER	= 7 ;  CTF_LOWER	= {7} ;	(* lowercase alphabetic       *)
+
+PROCEDURE CreateArgstring( str : STRING ; length : LONGINT ) : STRING ;
+PROCEDURE DeleteArgstring( argstr : STRING ) ;
+PROCEDURE LengthArgstring( argstring : STRING ) : LONGINT ;
+
+PROCEDURE CreateRexxMsg( port : MsgPortPtr ;
+			 extension : STRING ;
+			 host : STRING ) : RexxMsgPtr ;
+
+PROCEDURE DeleteRexxMsg( packet : RexxMsgPtr );
+
+PROCEDURE ClearRexxMsg( msgptr : RexxMsgPtr ; count : LONGINT ) ;
+
+PROCEDURE FillRexxMsg( msgptr : RexxMsgPtr ;
+		       count  : LONGINT ;
+		       mask   : LONGSET ) : BOOLEAN ;
+
+PROCEDURE IsRexxMsg( msgptr : RexxMsgPtr ) : BOOLEAN ;
+PROCEDURE LockRexxBase( resource : LONGINT ) ;
+PROCEDURE UnlockRexxBase( resource : LONGINT ) ;
+
+END Rexx.

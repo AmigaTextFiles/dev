@@ -1,0 +1,612 @@
+<html>
+<title>qbsp3, qvis3, and map-making</title>
+<body bgcolor=000000 text=ffffff link=ff0000 vlink=ff00ff alink=33ff00>
+<h1>qbsp3, qvis3, and map-making</h1>
+
+<h2>Table of Contents</h2>
+<ul>
+  <li><a href="#intro">Introduction</a>
+  <li><a href="#map-basics">What's in a .map file?</a>
+  <li><a href="#qbsp3-basics">What does qbsp3 do to my .map file?</a>
+  <li><a href="#qvis3-basics">What does qvis3 do?</a>
+  <li><a href="#debugging">How do I know my maps aren't being treated well by qbsp3 and qvis3?</a>
+  <li><a href="#fixing">So what do I do to make qbsp3 and qvis3 happy?</a>
+  <li><a href="#examples">Can you give me some examples of hint brush placement?</a>
+  <li><a href="#hintbrushes">So where should I put hint brushes in my maps?</a>
+  <li><a href="#bugs">So what else can go wrong?</a>
+  <li><a href="#tool-download">How about some fixed versions of the tools?</a>
+  <li><a href="#epilogue">So what's coming next?</a>
+</ul>
+
+<a name="intro"><h2>Introduction</h2></a>
+<p>Your favorite map editor will generate a <tt>.map</tt> file when
+  you're ready to test it in the game engine.  But first you must run
+  it through qbsp3, qvis3, and qrad3 -- producing a .bsp file that
+  Quake II can load and run.
+<p>But what do those utilities do?  What do they expect from us?
+  What do you do if the game engine finds parts of your map too
+  complex?  Where do you begin to fix it?  And why does qvis3 take
+  so darn long to run?
+<p>The problem is that there has not been any thorough explanation of
+  how these utilities work.  Sure, the source code is available, but
+  it's poorly commented and seems to require a degree in analytic
+  geometry or something.  Thankfully, there are idiots like me who will
+  slog through it anyway.
+<p>I didn't have much of a choice.  I'd really like to make maps for
+  Quake II!  I'm dying for some new and interesting CTF maps,
+  personally.  But everything I wrote completely blew vis.  And with
+  no ready explanation!  After playing around with map combinations,
+  and reading tutorials, and getting nowhere, I decided I wasn't going
+  to get anywhere without knowing, in gory detail, what the heck was
+  going on.
+<p>So here we go -- everything you need to know to tame the raging
+  beast of bad vis.
+<p>This tutorial is aimed at people that have already spent lots of time
+  in visual editors writing maps, and testing them in the game engine.
+
+<a name="map-basics"><h2>What's in a .map file?</h2></a>
+<p>Brushes and entities.
+<p>Brushes are the three-dimensional textured objects that describe
+  your map layout.  You've no doubt drawn several of them in your
+  favorite editor.  In the <tt>.map</tt> file, they're described as
+  a series of directed <i>faces</i>.
+<p>A face is a two-dimensional plane oriented somehow in
+  three-dimensional space.  They describe a side of a brush.  A face,
+  therefore, in addition to position, also has a <i>texture</i> and a
+  <i>direction</i>.
+<p>Faces are described in the <tt>.map</tt> file in terms of three
+  3-dimensional points.  Those three points describe two vectors,
+  one from point 0 to point 1, and one from point 1 to point 2.
+  Those two vectors, taken together, uniquely define the face, since
+  there is only one two-dimensional plane that intersects with both
+  vectors.  (The vectors formed by these three points cannot be
+  <i>colinear</i>, that is, point 1 can't lie on a line drawn between
+  points 0 and 2.  Otherwise the vectors won't uniquely define a plane.)
+<p>The <i>direction</i> of a plane is determined by the <i>cross
+  product</i> of the two vectors.  You don't need to learn what a
+  cross product is in order to understand Quake II faces, you only
+  need to know the <i>right-hand rule</i>.  It goes like this.
+  Bend your right hand so that the part from your wrist to your
+  knuckles is oriented like the vector from point 0 to point 1,
+  and bend your fingers so they are oriented like the vector from
+  point 1 to point 2.  Now extend your thumb.  Your thumb points in
+  the direction of the cross product, to the "left" of the two vectors.
+<p>You don't need to actually calculate the cross product in order to
+  get the direction of a face; the right-hand rule is sufficient.
+  All you need to know is, the cross product has to point <b>inside</b>
+  the brush.
+<p>The faces describe an entire two-dimensional plane in
+  three-dimensional space, but faces in a brush intersect each other.
+  The lines where two faces intersect are the <i>edges</i> of your
+  brush.  The points where three or more faces intersect are the
+  <i>vertices</i> of your brush.  (If you don't care for "standard"
+  English, you can call them vertexes.)  If all of the faces of your
+  brush don't describe a limited area in three-dimensional space,
+  you'll get an error.  But that's about the simplest sort of error
+  you'll get from qbsp3 and qvis3, and your favorite 3-D editor makes
+  it pretty difficult to make this sort of error.
+<p>If you read the <tt>.map</tt> file, you'll see it has several
+  top-level things, enclosed in curly brackets, and that the first
+  one is called "worldspawn" or something.
+<p>A <tt>.map</tt> file is composed of one or more <i>entities</i>.
+  Each of those entities contains zero or more brushes.  It turns out
+  that the main game area is considered an entity called "worldspawn".
+  That's why you'll find the majority of your brushes there.  Some
+  entities, like "info_player_start", don't have any brushes: none are
+  needed to describe where the player starts.  Some entities, like
+  "func_explosive", have one or more brushes, to describe what gets
+  blown up once it gets triggered or receives enough damage.
+<p>But you don't really need to worry about the internal structure of
+  entities.  Your favorite 3-D editor will create them for you.  Just
+  understand that brushes in the <tt>.map</tt> file are composed of
+  faces.
+<p>A final word on the <tt>.map</tt> file... when you draw a map, your
+  coordinate range in the X/Y/Z directions are limited to the range
+  from -4096 to +4096.  I haven't seen this mentioned anywhere else.
+  But qbsp3 will slice off any parts of your map that extend beyond
+  this bound, which is sure to give you mysterious leaks and whatnot.
+
+<a name="qbsp3-basics"><h2>What does qbsp3 do to my .map file?</h2></a>
+<p>qbsp3 has three big jobs.  The first is to take the <tt>.map</tt>
+  file's face-oriented description of your brush, and calculate
+  the full details of the brush, including the edges, vertices,
+  and <i>windings</i>.  The second is to dissolve your brushes into a
+  <i>binary space partition tree</i>, and write that to a <tt>.bsp</tt>
+  file.  The third is to find all of the <i>portals</i> in your map,
+  and write them to a <tt>.prt</tt> file.
+<p>A winding is a series of points in three-dimensional space that
+  follow the face of a brush, and describe its exact dimensions in the
+  final brush.  After the vertices of your brush have been calculated,
+  the windings are described as a complete circuit through every
+  vertex on that face.  That cuts the face's plane down to only the part
+  that's relevant to your brush.
+<p>Note how the three points of a face in the <tt>.map</tt> file are
+  also a winding, though in this case they don't necessarily pass
+  through the brush's vertices.  Also note that the points in a winding
+  are ordered so that the cross product of any two vectors in the
+  winding point in the same direction, toward the inside of the brush
+  -- just like faces.
+<p>After the map brushes have been parsed into memory, but before
+  binary space partitioning occurs, all intersecting brushes are
+  chopped so that they are no longer intersecting.  You know how
+  you overlap your brushes all the time when constructing your maps,
+  and how you were told it was OK?  It still is, but remember that
+  all separate brushes <b>are</b>going to be created before binary
+  space partitioning occurs.  If your map is already pushing the limits
+  of the tools and game engine (in terms of maximum number of brushes,
+  maximum number of portals, and so on), you might have to reduce your
+  own overlaps to get your map to compile.  (Brush overlaps will have
+  no impact in the game engine.)
+<p>Binary space partitioning is a neat method for describing a
+  three-dimensional space as a binary-searchable tree structure.
+  (And as you probably figured out, it's where qbsp3 gets its name.)
+  As in all tree structures, there are <i>tree nodes</i> and there are
+  <i>leaf nodes</i>.
+<p>The tree nodes in a BSP tree are described by faces that split
+  three-dimensional space into two pieces.  One side of the tree
+  contains everything in <i>front</i> of that face (i.e. in the
+  direction of the cross product), and the other side of the tree
+  contains everything in <i>back</i> of that face (i.e. opposite the
+  direction of the cross product).
+<p>So the top-level node of the tree would divide the entire game
+  space in half.  The second-level nodes would divide each half of
+  the game space in half again.  And so on down, until all parts of
+  the map have been chopped into the smallest possible pieces.  At the
+  bottom of the tree you finally get to the <i>leaf nodes</i>.
+<p>The leaf nodes of the BSP tree, then, are three-dimensional areas,
+  bounded by the faces of all of its parent nodes, and in the direction
+  of the parent face or opposite the direction of the parent face,
+  depending on which side of the tree node that leaf node is on.
+<p>It is helpful to think of the leaf nodes as the brushes that describe
+  every possible part of the map, even the empty space, arranged so
+  that all space was filled exactly.  That's pretty much what BSP does
+  to your map.  It's just that some of those "brushes" it gets at the
+  end, in the leaf nodes, describe player-accessible ("empty") space,
+  and some describe player-inaccessible ("solid") space.
+<p>qbsp3, then, has to find some optimal ordering for the tree.  It
+  uses a heuristic that favors those faces which are visible, which
+  won't cause a lot of brushes to get cut in half, and which split the
+  space so that half of the remaining brushes are on one side and half
+  are on the other.  It also chooses structural brushes over detail
+  brushes, though eventually it <b>will</b> break your map along detail
+  brush lines.  So it will pick your long passageways and the walls
+  of your big rooms, before it starts picking apart the small details.
+  (At least it will on the average.)
+<p>Once qbsp3 has dissolved your map into a binary space partition
+  tree, it is ready to make <i>portals</i>.  Portals are simply the
+  windings that describe how each leaf node is connected to each other
+  leaf node.  Every leaf node is adjacent to another leaf node, one
+  for every face in the "brush" it describes.  The winding that a
+  player must pass through in order to get from one leaf node's area
+  to another leaf node's area, or see through in order to see from
+  one leaf node to another leaf node, is called the portal.
+<p>After the BSP tree is generated and the portals have been calculated,
+  all visible parts of the map are marked.  It determines a part is
+  visible by starting with the entities you've put into your map (like
+  "info_player_start") and flood-filling through all empty space.
+  Nothing complicated here.  The only funny part is that it then uses
+  this information to re-do the binary space partitioning and portal
+  calculations.  This reduces the number of faces it has to deal with
+  to only the set that are visible.  So any overlapping brushes you
+  have, or details that aren't accessible by players, will be factored
+  out and won't affect your results.
+<p>The final data is written to the <tt>.bsp</tt> file and the
+  <tt>.prt</tt> file.
+
+<a name="qvis3-basics"><h2>What does qvis3 do?</h2></a>
+<p>It starts by reading in your map's BSP tree and portal information,
+  as calculated by qbsp3.  It then has to determine which leaf nodes are
+  visible from every other leaf node.  For <b>n</b> player-accessible
+  leaf nodes, the Potentially Visible Set (PVS) consists of a
+  <b>n x n</b> bit array.  Finally, it calculates the Potentially
+  Hearable Set (PHS) and writes it all out to disk, in the <tt>.bsp</tt>
+  file.
+<p>In order to figure out which leaf nodes can see each other, qvis3
+  first has to determine which portals can see each other.  In essence,
+  it works like this.  qvis3 picks two portals that are adjacent to
+  each other, one in the "source" leaf node, and one in an adjacent
+  leaf node.  It then draws a brush that goes through both portals
+  exactly.  It then attempts to continue drawing this brush through
+  all portals it can find in that direction, narrowing the dimensions
+  of the brush so that it neatly fits through all of them.  That brush
+  exactly describes the "line of sight" from the original portal to
+  whatever portal can be seen from there.  Once a brush can find no
+  further portals to extend through, vis is blocked, and every portal
+  that brush was able to pass through, is added to the set of portals
+  visible from the "source" portal.
+<p>Once this is done, every portal knows what other portals can be seen
+  from it.  Leaf node visibility, then, is calculated from portal
+  visibility.  Every one of a leaf node's portals knows what other
+  portals it can see.  It, therefore, knows what other leaf nodes can be
+  seen from that portal.  The union of these sets of leaf nodes visible
+  from each portal in a leaf node, is the visibility for that leaf node.
+<p>That creates the Potentially Visible Set (PVS).  The Potentially
+  Hearable Set (PHS) is calculated from the PVS: the PHS of a leaf node
+  is the union of the PVSs of every leaf node visible from it.  Sort of
+  a second-order blurring.
+<p>Then all of this information is written into the existing
+  <tt>.bsp</tt> file.
+
+<a name="debugging"><h2>How do I know my maps aren't being treated well
+  by qbsp3 and qvis3?</h2>
+  </a>
+<p>Quake II gives you a few tools to determine what the game engine
+  can see.
+<ul>
+  <li><b>r_speeds 1</b> -- Type this from the console to get an
+    ever-updating display of what the rendering engine thinks of
+    your map.  (Turn it off by typing <tt>r_speeds 0</tt> from the
+    console.)
+    <br>In software mode, you'll get five numbers.  The first
+      is the number of milliseconds it took to complete a game cycle.
+      1000 ms divided by that time equals your frames per second.
+      The second number is the number of "triangles" the game engine
+      thinks it can see right now.  (3-D game engines don't draw flat
+      rectangular textured planes; instead, it divides everything into
+      triangles.  I don't know why.  Maybe it's because all Quake II
+      surfaces, no matter how weird, can be drawn as a series of
+      triangles.)  The third number is the number of triangles it
+      actually drew, the fourth number is the number of triangles it
+      thought it could draw but couldn't, and the fifth number is
+      the number of dynamically lit surfaces.
+    <br>The fifth number, the number of dynamically lit surfaces, is
+      an indication of how efficient your qrad3 results were.  I have
+      yet to dive into all the fun of qrad3, so I can't tell you what
+      to do about these numbers or what's good.  You must watch the
+      second number; the "going wisdom" says to keep this number below
+      450 in areas where you expect combat to occur, and it should never
+      stay above 750 because the game engine will start running slowly,
+      or it will draw some areas as grey.  The third number indicates
+      how many triangles it thought it was going to have to draw, given
+      the vis information, but didn't.  This is a measure of how
+      inefficient your vis was.
+    <br>Therefore, the second number is a measure of how complicated
+      your map is, and the third number is a measure of how efficiently
+      qvis3 calculated the PVS information.
+  <li><b>sw_draworder 1</b> -- Type this from the console to reverse
+    the order in which the software 3-D engine draws surfaces.
+    (<tt>sw_draworder 0</tt> turns it off.)
+    <br>Note that there was an <tt>r_draworder 1</tt> in Quake I.
+      It's not present in Quake II.  All we get is
+      <tt>sw_draworder</tt>.
+    <br>Now you get to see far-away areas drawn after close-by areas
+      are drawn.  This is one way to get an idea of what qvis3 thinks
+      is visible from each area.
+  <li><b>gl_showtris 1</b> -- If you are running an OpenGL
+    implementation, you can type this from the console in order to
+    draw a white wire-frame around the edge of every triangle the
+    game engine is drawing.
+    <br>If you do not have hardware-assisted OpenGL on your machine,
+      you can type <tt>gl_allow_software 1</tt> to use the default
+      software implementation of OpenGL on your system.  I've found
+      that I have to try to switch to the "Default OpenGL" in the
+      "Video" menu once, watch it fail, <b>then</b> type
+      <tt>gl_allow_software 1</tt> at the console, or else Quake II
+      doesn't seem to recognize the command.  After it finally
+      recognizes <tt>gl_allow_software</tt>, though, you can switch
+      to the default OpenGL implementation and see your triangles.
+      This is very, very, slow.  The software implementation of OpenGL
+      is the kind of thing you'll want to turn on for very short
+      periods of time.
+    <br>If you have a 3DFX card, you may know that there is no
+      gl_showtris implementation.  Fear not.  Some stud has written
+      a DLL that you put into your Quake2 directory, and then the
+      Default OpenGL will use your 3DFX OpenGL implementation when
+      it can, and use the software implementation when it has to.
+      This makes <tt>gl_showtris 1</tt> nice and fast.  You can
+      download it from
+      <a href="ftp://quake2:fragfest@24.0.172.162/mesa-3dfx-dll.zip">here</a>.
+      I found it originally on the
+      <a href="http://planetquake.com/rust/qtechniques.html">RUST
+        techniques page</a> on
+      <a href="http://www.planetquake.com/">PlanetQuake</a>.
+</ul>
+<p>Of course, all this will only tell you where your problem areas are.
+  You still need to fix them.
+
+<a name="fixing"><h2>So what do I do to make qbsp3 and qvis3 happy?</h2>
+  </a>
+<p>For starters, realize that qbsp3 cannot break your map on a plane
+that doesn't exist in the map.  And qbsp3 specifically works to remove
+all planes, faces, brushes, etc.  that will never be seen by the player.
+Therefore, your map's visible brushes are the only hints that qbsp3 gets
+to decide how to divide your player-accessible space into leaf nodes.
+<p>And this is the root of most mysterious troubles getting a level to
+  vis efficiently.  qbsp3 and qvis3 can't calculate an optimal map
+  if it doesn't have a good distribution of leaf nodes.  If qbsp3
+  can't find a really good plane on which to break the remainder of
+  your map, it'll pick a cruddy one and chop your brushes, and the
+  player-accessible space, into jagged fragments.  This not only slows
+  down qbsp3, because now you've seriously increased its workload,
+  but these fragments form portals that qvis3 must now waste time
+  analyzing, even if they're all hanging in empty space and none of them
+  make a big difference to the final result.
+<p>Thankfully, Quake II has a facility for giving qbsp3 and qvis3
+  hints on where to create leaf nodes, and fittingly, they're called
+  <i>hint brushes</i>.  These are brushes with the "hint" texture.
+  You'll find the "hint" texture in your favorite 3-D editor.  Just
+  draw a brush with faces that you want qbsp3 to consider, place it
+  into what is otherwise player-accessible space, and qbsp3/qvis3 will
+  do what you mean!
+<p>The trick, now, is how to place hint brushes.  It turns out it's not
+  too hard, but it's really easy to screw up.  Screwing up your hint
+  brushes will not only result in poorer results, but may dramatically
+  increase the amount of time it take for qvis3 to complete!
+
+<a name="examples"><h2>Can you give me some examples of hint brush
+  placement?</h2></a>
+<p>My first hint brush example is a very good example of a map that,
+  when the hint brushes are done improperly, chokes qvis3 to a
+  standstill.  You can download it from
+  <a href="ftp://quake2:fragfest@24.0.172.162/vis-ex1.zip">here</a>
+  -- <tt>vis-ex1.zip</tt> contains
+  <tt>vis-ex1.map</tt> and <tt>vis-ex1.bsp</tt>, which you can load into
+  your 3-D editor and run in the game engine, respectively.
+<p>I like to create big outdoorsy maps.  This was the beginnings of
+  something I wanted to turn into a trench-warfare CTF map.  (Until I
+  got distracted unraveling the source to qbsp3 and qvis3, at least.)
+  There are sixteen valleys, and the elevation of every valley edge
+  is arranged so that someone standing on an edge can see into two
+  valleys only, and someone standing on a four-corners point can see
+  into four valleys only.
+<p>Without hint brushes, qvis3 thinks every part of the map can see
+  every other part of the map.  That's because the nodes it creates
+  are aligned with the edges of the valleys -- they extend clear up
+  to the ceiling, where everything is of course visible.  In the game,
+  one can't get to the ceiling if it's a sky texture, even with the
+  grappling hook.  But how to give qvis3 a clue?
+<p>The main lines of sight in this map are aligned with the valley
+  floors (the four sloped planes in each valley) and the "valley
+  ceiling" (the vaguely x/y-oriented plane described by the topmost
+  four corners of a given valley).  In addition, since the player
+  has height, there is another set of planes, aligned with the valley
+  ceilings but raised 64 units.  (A player is actually only 56 units
+  high, but I haven't tried to narrow down exactly where "eye level"
+  is considered to be.  You are welcome to.  I chose 64 because it
+  works and it keeps my map planes aligned on powers-of-two as much
+  as possible.)
+<p>Each valley has two hint brushes associated with it.  One is
+  bound by the valley floors and valley ceiling.  The other is
+  bound by the valley ceiling, the valley ceiling raised 64 units,
+  and the 64-unit-raised valley ceilings of each surrounding valley.
+<p>This might seem overly complicated, but all of it was necessary.
+  These hint brushes, it turns out, describe exactly the leaf-node
+  layout needed to make qvis3 understand what valleys are actually
+  visible from every point.  Note how the second set of hint brushes
+  overlap each other!  Those overlaps will be cut into separate
+  brushes at qbsp3 time, as described earlier.  Those overlapping parts
+  sit on top of the valley edge, and allow both valleys to be seen
+  but no more.
+<p>And, yes, it is totally necessary to draw your hint brushes
+  <b>exactly</b>, or you'll get bad results.  The earlier version of
+  this map had a lazier setup for the hint brushes -- the second set
+  was bounded by the valley floors and the 64-unit-raised valley
+  ceiling.  Pretty close, right?  Wrong.  Not only were the results
+  very spotty, but qvis3 took over ten hours to complete!  (And
+  it was running on a P6/200.)  Ridiculous!  The version with the
+  properly-placed hint brushes took 375 seconds to qvis3 on the same
+  machine.  You can see how proper hint-brush placement will not only
+  cause the game engine to run your maps faster, but will also cause
+  qbsp3/qvis3 to process your maps faster!
+<p>Stand on a valley edge and jump.  Far-away valleys will become
+  visible for a moment.  (This is really noticeable with
+  <tt>gl_showtris 1</tt> turned on.)  I actually need an additional
+  set of hint brushes!  One technically must cut off visibility at
+  eye-level and at jump-level.  Cutting off visibility at jump-level,
+  for this map, would require I also recalculate all of the valley-edge
+  heights, and I really didn't want to do that.
+<p>Now for an easier example (or so you'd think) -- two rectangular
+  rooms connected by a short hallway.  You can download it from
+  <a href="ftp://quake2:fragfest@24.0.172.162/vis-ex2.zip">here</a>
+  -- <tt>vis-ex2.zip</tt> contains
+  <tt>vis-ex2.map</tt> and <tt>vis-ex2.bsp</tt>, which you can load into
+  your 3-D editor and run in the game engine, respectively.
+<p>Without hint brushes, all parts of the map are visible at all times.
+  This is because only three player-accessible leaf nodes are created --
+  the two rooms and the short segment of hallway that's not in any
+  room.  That creates two portals, one at each end of the short hallway.
+  Both portals can see each other, so all nodes can see each other.
+  (Isn't it amazing how qvis3's actions make sense when you know what
+  its darn rules are?)
+<p>I added several hint brushes, each designed to cut off more and
+  more of what's visible.  The first one simply extends the hallway
+  into the rooms.  Now, when the player is in a room, the entire
+  room and extended hallway are visible, but not the other room.
+  If the player is in the extended hallway, everything is visible again.
+<p>The second set of hint brushes are aligned with the corners formed
+  by the hallway and each room, and the point on the east wall opposite
+  the other hallway/room corner point.  Now, when one is in the main
+  part of the room, all one can see is the room and half of the hall.
+  As one moves closer to the hallway, the entire extended hallway
+  becomes visible.  As one enters the extended hallway, nothing changes.
+  Only when the player enters the hallway, and stays close to the right
+  wall, is the other room drawn.  Staying close to the left wall keeps
+  the other room from being drawn!
+<p>The third set of hint brushes are aligned with (again) the corners
+  formed by the hallway and each room, and (different) the midpoint of
+  the hallway on the east wall.  The view from the extended hallway, and
+  just into the hallway, is the same.  But as one moves into the
+  hallway, nothing changes until one crosses the halfway point, at
+  which time all of the other room becomes visible.
+<p>Note how the second set of hint brushes extends into the hallway and
+  cuts up space, but the third set of brushes do not.  It is not
+  necessary to physically extend your hint brush sides into all areas
+  they affect!  As long as the leaf nodes are arranged so that their
+  portals see only what you want them to see, you're done.  In this
+  case, the third set of hint brushes work because I divided the
+  hallway in half with the first set.  I don't need to extend the sloped
+  side of the third set of hint brushes unless I want the majority of
+  the room to remain undrawn if the player continues to hug the left
+  wall after crossing the midpoint the hallway.  The second set of
+  hint brushes work like this, though.  But both work.
+<p>I could add more hint brushes, but I think I made my point.
+
+<a name="hintbrushes"><h2>So where should I put hint brushes in my
+  maps?</h2></a>
+<p>First of all, contrary to earlier tutorials on hint brushes, they
+  do <b>not</b> have to intersect your walls.  If you're dividing
+  up player-accessible space, it is preferable to draw your hint brush
+  so that it doesn't intersect any existing brushes, but rather just
+  meets up with them at the faces.
+<p>The hint brushes definitely SHOULD have planes aligned with the
+  longest lines-of-sight in your map.  The longest line-of-sight in the
+  two-room example starts at the northeast or southeast corner and
+  extends into the other room, bounded by the room/hallway corner just
+  west of the easternmost wall.  Using those true line-of-sight
+  maximums will, not surprisingly, allow qvis3 to do the most efficient
+  job it can.
+<p>The hint brushes need to not only divide up leaf nodes so that very
+  few other leaf nodes are visible from them, but those other leaf nodes
+  need to be arranged so that spurious visibility to them is blocked!
+  You need to think through both sides of the PVS operation -- where
+  you're looking from, and where you're looking to.
+<p>There's another case where hint brushes come in very handy: if your
+  map is outdoorsy or natural, or otherwise has a lot of non-cubic
+  brushes.  It might look great, but qbsp3 has to break up your map
+  on those planes.  This will slow down qbsp3, and create an explosion
+  of portals for qvis3 to analyze.
+<p>The solution is to use hint brushes to delineate the "major
+  corridors" of your map.  qbsp3 will most likely pick those planes
+  on which to break the map, which will help localize the effects of
+  your jagged brushes.  It'll still have to cut your brushes into little
+  pieces, but it's a much smaller group of brushes than it was before,
+  and now they won't be affecting as much of your player-accessible
+  space as they used to.  qvis3 will still have to analyze a lot of
+  portals, but they'll be smaller and lead to fewer places.
+<p>And don't forget to chop z-space at eye-level and at jump-level over
+  every surface the player can walk on, if your map needs it.
+
+<a name="bugs"><h2>So what else can go wrong?</h2></a>
+<p>Surprisingly, qbsp3 starts right out by deciding your map would
+  look better if cut into 1024Xx1024Yx8192Z blocks!  From the source
+  code, I'm guessing that this was an attempt to speed up qbsp3 by
+  arbitrarily dividing the map into pieces, each of which can be
+  processed separately, in a concurrent thread.  But then it didn't
+  seem to do much, so they stopped using it.  But they left in the
+  code that arbitrarily breaks your map into pieces.
+<p>Also, after dividing your map into optimal nodes, you'll sometimes
+  see that extra parts of your map are STILL getting drawn!  But this
+  time it's just a stray surface or two, not entire nodes.  What is
+  going on?  It turns out that qbsp3 tries to merge brush faces that
+  have the same content.  It'll do this across leaf-node boundaries
+  and mess up your expected PVS.  Use the -nomerge option to qbsp3 to
+  keep it from doing this merge, and everything will go back to the
+  way you expected.
+<p>But, sadly, that's not enough.
+<p>It turns out that the current crop of 3-D map editors are implemented
+  in a cheesy manner, and average map manipulations will slowly start
+  introducing subtle errors in your map.  For instance, even though
+  all of the vertices of your brush are aligned with integer
+  coordinates, a sloped face on your brush won't be described as a
+  winding through three of those vertices, but some floating-point
+  approximation of a plane that would align with those three vertices.
+  Qoole is especially guilty of this, and WorldCraft is also to a
+  lesser degree.
+<p>In the normal course of mapmaking, these errors can cause very
+  narrow but very deep "cracks" in your map.  You'll think two walls
+  come together, but really there's a one-unit-wide crack that qbsp3
+  and qvis3 can of course see just fine.  I first noticed this with
+  the <tt>r_speeds 1</tt> command; I moved over very similar parts of
+  my map and watched my vis rates jump all over the place, with no
+  apparent pattern!
+<p>You'll get the same sort of problem with your hint brushes,
+  eventually.
+<p>So what editor do I use?  I don't.  I learned how to deal with
+  maps on the face/brush level, and I wrote a Perl script that helps
+  me generate <tt>.map</tt> files.  I have a <tt>&cube()</tt>
+  function that takes the x/y/z low/high coordinates and the texture,
+  and it generates the face descriptions needed to realize the cube.
+  I also have <tt>&xFace (x, direction, texture)</tt>, which creates
+  a face at the given position on the X axis, pointing in the given
+  direction (+1 == toward positive X, -1 == toward negative X).  I have
+  <tt>&yFace()</tt> and <tt>&zFace()</tt> also.  I have rudimentary
+  functions to move, scale, and flip brushes.  But beyond that, there
+  isn't much.  I just code a bunch of face descriptions from my sketches
+  on graph paper.
+<p>This might seem bizarre and unnecessary, but now I can create faces
+  aligned EXACTLY with the vertices they need to be aligned to!  If you
+  need a hint brush to align exactly with a few existing points,
+  you can actually put those existing points into your description
+  of the face!  You don't have to rely on some crappy floating-point
+  approximation of it.  You also don't have to make those points the
+  vertices of your hint brush!  Your hint brush could actually have a
+  completely different set of vertices, and it won't matter because
+  the planes are still aligned with what they need to be aligned to.
+  And never underestimate the power of <b>programmed</b> prefabs.
+  <tt>vis-ex1.map</tt> was generated by a 5x5 array of the elevations
+  of the valley-edge peaks, a 4x4 array of the elevations of the valley
+  floors, and a bunch of code that works with those in an abstract way.
+  It was far easier for me to experiment with those valleys using a
+  Perl program than it ever would have been in a visual editor.
+<p>It's totally possible to write an editor that's not prone to these
+  sorts of floating-point flaws, but no one seems to have done it.
+  One would simply have to store the integer coordinates of all the
+  vertices of a brush, and describe the faces as moving through those
+  vertices.  qbsp3 could even be written to read this vertex-oriented
+  version directly, and dispense with the intermediate step of chopping
+  up the faces to find the vertices.  If any maintainer of an existing
+  Quake II editor would like to do this, I'll advise and I'll turn out
+  the new version of qbsp3 to read the new <tt>.map</tt> format.
+  Until then, I write maps with Perl scripts, and I only use visual
+  editors when prototyping or when I need a new texture combination.
+  (My Perl code doesn't deal with textures in any sophisticated way;
+  I just copy and paste from what visual editors generate.)
+<p>I think that's everything that can go wrong with mapmaking.  Or at
+  least everything that qbsp3 and qvis3 will punish you for.  Feel free
+  to mail your questions to
+  <a href="mailto:whatis@yyz.com">whatis@yyz.com</a>,
+  and I'll do my best to help you and to improve this tutorial!
+
+<a name="tool-download"><h2>How about some fixed versions of the
+  tools?</h2></a>
+<p>Download them from
+  <a href="ftp://quake2:fragfest@24.0.172.162/qbspvis.zip">here</a>.
+<p>Changes to qbsp3:
+<ul>
+  <li>It no longer arbitrarily divides the map into 1024Xx1024Yx8192Z
+    blocks.  (You'll notice that instead of printing "0..." through
+	"9..." it'll only print "0...".)
+  <li>I fixed a bug that kept it from finding brushes with out-of-range
+	coordinates in the Y and Z directions.  (It stupidly checked the
+	X coordinate 3 times.)
+  <li>I fixed another bug, but I can't figure out how to explain it in
+    a paragraph.  (OK, the bug kept it from subdividing the face of a
+    brush in the Z direction.  Eventually the tutorial will be expanded
+	so you will know what that means.)
+</ul>
+<p>Changes to qvis3:
+<ul>
+  <li>It prints the average number of portals visible/hearable in
+    floating point, instead of integer.
+  <li>I sped it up!  How much it speeds up your vis depends on your
+    map, and I haven't gotten to try it on a lot of maps yet, but
+	it's pretty impressive so far.  Like taking only one quarter of the
+	original time or so.
+</ul>
+<p>Also, I've included another program, one whose source was included
+  in the package that Id Software released.  It's called <i>bspinfo3</i>
+  and it prints out a bunch of statistics related to your <tt>.bsp</tt>
+  file.
+
+<a name="epilogue"><h2>So what's coming next?</h2></a>
+<p>A full gory explanation of the internals of qbsp3 and qvis3,
+  accompanied by a fully commented version of the applicable source
+  code.  Hyperlinks will interweave the source code with my
+  explanation of how qbsp3 and qvis3 work, so you can flip from the
+  explanation to the source code and back again.  And the qbsp3/qvis3
+  explanations will be vastly expanded to account for all the extra
+  detail.
+<p>More optimizations for qvis3.  I can see several potential ones, but
+  some are more complicated than others.  I'm working on them as
+  quickly as I can figure them out.
+<p>qbsp3 and qvis3 produce error messages, but there's no easy way to
+  go from the messages to your map so you can analyze and fix your
+  problems.  It's totally possible to write an "error" file that can
+  be loaded by a visual editor, so that people can browse those errors.
+  But, again, I'd need a willing visual-editor programmer.  Any takers?
+  I'd also be able to describe how to display (and even edit!) the
+  BSP and VIS information itself.
+<p>I suppose I should also release the Perl code I use to write maps.
+
+</body>
+</html>

@@ -1,0 +1,210 @@
+** $Id: AMiX.i 2.2 1994/12/13 03:35:23 stx Exp $
+**
+**	$RCSfile: AMiX.i $
+**	$Revision: 2.2 $
+**	$Date: 1994/12/13 03:35:23 $
+
+* $Log: AMiX.i $
+* Revision 2.2  1994/12/13  03:35:23  stx
+* Added all door commands & environments upto /X3.0ß
+*
+* Revision 2.1  1994/04/19  03:53:40  SiNTAX/WøT
+* Recompiled using extended JHM_Message structure
+*
+* Revision 2.0  1994/02/13  23:41:22  SiNTAX/WøT
+* First release under RCS control
+*
+
+        IFND    AMIX_I
+AMIX_I     SET     1
+
+;---------------------------------------------------------------------------
+AEMAXCHARS	EQU	200
+;---------------------------------------------------------------------------
+;	Amiexpress Message Structure
+;---------------------------------------------------------------------------
+	rsreset
+JHMessage	rs.b	0
+JHM_MN		rs.b	MN_SIZE			;Node structure
+JHM_String	rs.b	AEMAXCHARS		;String
+JHM_Data	rs.l	1			;Data
+JHM_Command	rs.l	1			;Command
+JHM_NodeID	rs.l	1			;Currently not used
+JHM_LineNum	rs.l	1			;Currently not used
+JHM_signal	rs.l	1			;reserved
+JHM_task	rs.l	1			;reserved
+JHM_Semi	rs.l	1			;MultiCom Semaphore
+JHM_Filler1	rs.l	1			;reserved
+JHM_Filler2	rs.l	1			;reserved
+JHM_SIZEOF	rs.w	0
+
+;---------------------------------------------------------------------------
+;	JHM_Command commands
+;---------------------------------------------------------------------------
+JH_LI			EQU	0
+JH_REGISTER		EQU	1
+JH_SHUTDOWN		EQU	2
+JH_WRITE		EQU	3
+JH_SM			EQU	4
+JH_PM			EQU	5
+JH_HK			EQU	6
+JH_SG			EQU	7
+JH_SF			EQU	8
+JH_EF			EQU	9
+JH_CO			EQU	10
+JH_BBSNAME		EQU	11
+JH_SYSOP		EQU	12
+JH_FLAGFILE		EQU	13
+JH_SHOWFLAGS		EQU	14
+JH_ExtHK		EQU	15
+JH_SIGBIT		EQU	16
+JH_FetchKey		EQU	17
+JH_SO			EQU	18
+DT_NAME           	EQU	100
+DT_PASSWORD       	EQU	101
+DT_LOCATION       	EQU	102
+DT_PHONENUMBER    	EQU	103
+DT_SLOTNUMBER     	EQU	104
+DT_SECSTATUS      	EQU	105
+DT_SECBOARD       	EQU	106
+DT_SECLIBRARY     	EQU	107
+DT_SECBULLETIN    	EQU	108
+DT_MESSAGESPOSTED 	EQU	109
+DT_UPLOADS        	EQU	110
+DT_DOWNLOADS      	EQU	111
+DT_TIMESCALLED    	EQU	112
+DT_TIMELASTON     	EQU	113
+DT_TIMEUSED       	EQU	114
+DT_TIMELIMIT      	EQU	115
+DT_TIMETOTAL      	EQU	116
+DT_BYTESUPLOAD    	EQU	117
+DT_BYTEDOWNLOAD   	EQU	118
+DT_DAILYBYTELIMIT 	EQU	119
+DT_DAILYBYTEDLD   	EQU	120
+DT_EXPERT         	EQU	121
+DT_LINELENGTH     	EQU	122
+ACTIVE_NODES      	EQU	123
+DT_DUMP           	EQU	124
+DT_TIMEOUT        	EQU	125
+BB_CONFNAME       	EQU	126
+BB_CONFLOCAL      	EQU	127
+BB_LOCAL          	EQU	128
+BB_STATUS         	EQU	129
+BB_COMMAND        	EQU	130
+BB_MAINLINE       	EQU	131
+NB_LOAD           	EQU	132
+DT_USERLOAD       	EQU	133
+BB_CONFIG         	EQU	134
+CHG_USER          	EQU	135
+RETURNCOMMAND     	EQU	136
+ZMODEMSEND        	EQU	137
+ZMODEMRECEIVE     	EQU	138
+SCREEN_ADDRESS    	EQU	139
+BB_TASKPRI        	EQU	140
+RAWSCREEN_ADDRESS 	EQU	141
+BB_CHATFLAG       	EQU	142
+DT_STAMP_LASTON   	EQU	143
+DT_STAMP_CTIME    	EQU	144
+DT_CURR_TIME      	EQU	145
+DT_CONFACCESS     	EQU	146
+BB_PCONFLOCAL     	EQU	147
+BB_PCONFNAME      	EQU	148
+BB_NODEID         	EQU	149
+BB_CALLERSLOG     	EQU	150
+BB_UDLOG          	EQU	151
+EXPRESS_VERSION   	EQU	152
+SV_UNICONIFY		EQU	153
+BB_CHATSET		EQU	162
+ENVSTAT			EQU	163
+GETKEY			EQU	500
+RAWARROW		EQU	501
+CHAIN			EQU	502
+NODE_DEVICE		EQU	503
+NODE_UNIT		EQU	504
+NODE_BAUD		EQU	505
+NODE_NUMBER		EQU	506
+JH_MCI			EQU	507
+PRV_COMMAND		EQU	508
+PRV_GROUP		EQU	509
+BB_CONFNUM		EQU	510
+BB_DROPDTR		EQU	511
+BB_GETTASK		EQU	512
+BB_REMOVEPORT		EQU	513
+BB_SOPT			EQU	514
+NODE_BAUDRATE		EQU	516
+BB_LOGONTYPE		EQU	517
+BB_SCRLEFT		EQU	518
+BB_SCRTOP		EQU	519
+BB_SCRWIDTH		EQU	520
+BB_SCRHEIGHT		EQU	521
+BB_PURGELINE		EQU	522
+BB_PURGELINESTART	EQU	523
+BB_PURGELINEEND		EQU	524
+BB_NONSTOPTEXT		EQU	525
+BB_LINECOUNT		EQU	526
+DT_LANGUAGE		EQU	527
+DT_QUICKFLAG		EQU	528
+DT_GOODFILE		EQU	529
+DT_ANSICOLOR		EQU	530
+MULTICOM		EQU	531
+LOAD_ACCOUNT		EQU	532
+SAVE_ACCOUNT		EQU	533
+SAVE_CONFDB		EQU	534
+LOAD_CONFDB		EQU	535
+GET_CONFNUM		EQU	536
+SEARCH_ACCOUNT		EQU	537
+APPEND_ACCOUNT		EQU	538
+LAST_ACCOUNTNUM		EQU	539
+MOD_TYPE		EQU	540
+DT_ISANSI		EQU	541
+BATCHZMODEMSEND		EQU	542
+DT_MSGCODE		EQU	543
+ACP_COMMAND		EQU	544
+DT_FILECODE		EQU	545
+EDITOR_STRUCT		EQU	546
+BYPASS_CSI_CHECK	EQU	547
+SENTBY			EQU	548
+SETOVERIDE		EQU	549
+FULLEDIT		EQU	550
+DT_ADDBIT		EQU	1000
+DT_REMBIT		EQU	1001
+DT_QUERYBIT		EQU	1002
+;---------------------------------------------------------------------------
+;	JHM_Data for above commands!
+;---------------------------------------------------------------------------
+READIT			EQU	1
+WRITEIT			EQU	0
+;---------------------------------------------------------------------------
+;	STATS@x values
+;---------------------------------------------------------------------------
+ENV_DROPPED		EQU	-1
+ENV_IDLE		EQU	0
+ENV_DOWNLOADING		EQU	1
+ENV_UPLOADING		EQU	2
+ENV_DOORS		EQU	3
+ENV_MAIL		EQU	4
+ENV_STATS		EQU	5
+ENV_ACCOUNT		EQU	6
+ENV_ZOOM		EQU	7
+ENV_FILES		EQU	8
+ENV_BULLETINS		EQU	9
+ENV_VIEWING		EQU	10
+ENV_LOGON		EQU	11
+ENV_LOGOFF		EQU	12
+ENV_SYSOP		EQU	13
+ENV_SHELL		EQU	14
+ENV_EMACS		EQU	15
+ENV_JOIN		EQU	16
+ENV_CHAT		EQU	17
+ENV_NOTACTIVE		EQU	18
+ENV_REQ_CHAT		EQU	19
+ENV_CONNECT     	EQU	20
+ENV_LOGGINGON   	EQU	21
+ENV_AWAITCONNECT 	EQU	22
+ENV_SCANNING    	EQU	23
+ENV_SHUTDOWN    	EQU	24
+ENV_MULTICHAT		EQU	25
+ENV_SUSPEND		EQU	26
+ENV_RESERVE		EQU	27
+
+	ENDC

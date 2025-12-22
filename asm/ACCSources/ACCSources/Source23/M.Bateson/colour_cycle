@@ -1,0 +1,291 @@
+
+
+** CODE:	COLOUR_CYCLE
+** CODER:	MARC.B
+
+; this code displays a graphic and cycles the colours.
+		
+	   
+*******************************************
+*		SYSTEM OFFSETS		  *
+*******************************************
+
+execbase	equ	4
+openlibrary	equ	-408
+closelibrary	equ	-414
+allocmem	equ	-198
+freemem		equ	-210
+forbid		equ	-132
+permit		equ	-138
+copymem		equ	-624
+
+
+***	constants	***
+
+chip		equ	2
+clear		equ	$10000
+
+
+
+*** 	include	hardware.i	***
+
+	include	source:include/hardware.i
+	lea	$dff000,a5			;custom base address
+
+
+**********************************************************
+*	OPEN GFX LIBRARY AND SAVE SYSTEM COPPER		 *
+**********************************************************
+
+	move.l	execbase,a6
+	move.l	#gfxname,a1
+	moveq	#0,d0
+	jsr	openlibrary(a6)
+	tst	d0			
+	beq	the_end			
+	move.l	d0,gfxbase		
+	move.l	d0,a0			;put gfxbase in a0 
+	move.l	38(a0),systemcopper	;save the copper address 
+
+
+****************************************************
+*	ALLOCATE MEMORY FOR BIT PLANES		   *
+****************************************************
+
+	move.l	execbase,a6
+	move.l	#(320/8*256)*2,d0	;memory for 2 bitplanes
+	move.l	#chip+clear,d1		;chip memory and wipe it 
+	jsr	allocmem(a6)
+	tst	d0			;fail (naah !!)
+	beq	exit			;yep (sell the AMIGA !!!)
+	move.l	d0,bitbase		;save  pointer
+
+*****************************************************
+*		COPY PICCY TO CHIP RAM		    *
+*****************************************************
+
+	move.l	execbase,a6
+	lea	piccy,a0
+	move.l	bitbase,a1
+	move.l	#(320/8*256)*2,d0
+	jsr	copymem(a6)
+
+
+
+*****************************************************************
+*	LOAD BITPLANE AND SPRITE POINTERS INTO COPPER LIST      *
+*****************************************************************
+
+
+	move.l	bitbase,d0
+	lea	copper,a0
+	move.w	d0,6(a0)	;load bitplane pointers into c list
+	swap	d0
+	move.w	d0,2(a0)
+	swap	d0
+	add.l	#320/8*256,d0
+	move.w	d0,14(a0)
+	swap	d0
+	move.w	d0,10(a0)
+	
+
+***************************************************************
+*		START CUSTOM COPPER LIST		      *
+***************************************************************	
+
+	move.l	#copper,COP1LCH(a5)
+	move.l	#0,COPJMP1(a5)
+	move.l	execbase,a6
+	jsr	forbid(a6)
+
+*************************************************************
+*		    MAIN CODE LOOP    			    *
+*************************************************************
+
+	move.w	#$f0f,color_reg1	;set colour register 1
+	move.w	#$ff0,color_reg2	;set colour register 2
+	move.w	#$0ff,color_reg3	;set colour register 3
+wait
+	
+	move.l	VPOSR(a5),d0	;read current beam position
+	and.l	#$0001ff00,d0	;mask all but the vertical pos
+	lsr.l	#8,d0		
+	cmp.w	#$0106,d0	;wait for end of display
+	bne	wait
+	add.b	#1,counter	;increase frame counter
+	btst	#6,CIAAPRA	;check left mouse button
+	beq	clean_up	;end if pressed
+	cmp.b	#15,counter	;wait for 15 frames
+	beq	do_fade
+	bra	wait
+
+do_fade
+	bsr	fader		;this routine is only called 
+	move.b	#0,counter	;every 15 frames otherwise the fade
+	bra	wait		;becomes a flicker !! try it.
+
+**********************************************************
+*			RESTORE SYSTEM 			 *
+**********************************************************
+
+clean_up
+	move.l	systemcopper,COP1LCH(a5)
+	move.l	#0,COPJMP1(a5)
+	move.l	execbase,a6
+	jsr	permit(a6)
+	move.l	execbase,a6		;free bitplane memory
+	move.l	#(320/8*256)*2,d0
+	move.l	bitbase,a1
+	jsr	freemem(a6)
+
+exit
+	move.l	gfxbase,a1		;close the graphics library
+	move.l	execbase,a6
+	jsr	closelibrary(a6)
+	
+the_end
+	rts				;exit from program
+
+
+********************************************
+*		COLOUR FADER		   *
+********************************************
+
+; the fader routines work by removing a colour or colours
+; from the register while adding a different colour or colours
+; this gives the effect of a smooth fade from colour to colour
+; only one register is tested for the end of the fade because
+; all registers start and finish at the same time.
+
+fader
+	cmp.b	#1,fade_direction	;find fade status
+	beq	fade_white
+
+fade_black
+	
+	cmp.w	#$ff0,color_reg1	;reached end of fade ?
+	beq	black_done
+	sub.w	#$1,color_reg1		;take some blue 
+	add.w	#$10,color_reg1		;and add some green
+	sub.w	#$100,color_reg2	;take some red
+	sub.w	#$11,color_reg3		;take green and blue
+	add.w	#$100,color_reg3	;and add red
+	rts
+black_done
+	move.b	#1,fade_direction
+	rts
+
+fade_white
+	cmp.w	#$f0f,color_reg1
+	beq	white_done
+	add.w	#$1,color_reg1		;add some blue
+	sub.w	#$10,color_reg1		;remove some green
+	add.w	#$100,color_reg2	;add some red
+	sub.w	#$100,color_reg3	;remove red
+	add.w	#$11,color_reg3		;add green / blue
+	rts
+white_done
+	move.b	#0,fade_direction
+	rts
+
+	
+***********************************************************
+*		   CUSTOM COPPER LIST			  *
+***********************************************************
+
+	SECTION		copper.list,CODE_C
+copper
+		dc.w	BPL1PTH,0000		;next 4 blank words
+		dc.w	BPL1PTL,0000		;are where we load
+		dc.w	BPL2PTH,0000
+		dc.w	BPL2PTL,0000
+		dc.w	BPL3PTH,0000
+		dc.w	BPL3PTL,0000
+		dc.w	BPL4PTH,0000
+		dc.w	BPL4PTL,0000
+		dc.w	BPL5PTH,0000
+		dc.w	BPL5PTL,0000
+		dc.w	SPR0PTH,0000
+		dc.w	SPR0PTL,0000
+		dc.w	SPR1PTL,0000		;sprite 1 pointer
+		dc.w	SPR2PTH,0000
+		dc.w	SPR2PTL,0000		;sprite 2 pointer
+		dc.w	SPR3PTH,0000
+		dc.w	SPR3PTL,0000		;sprite 3 pointer
+		dc.w	SPR4PTH,0000
+		dc.w	SPR4PTL,0000		;sprite 4 pointer
+		dc.w	SPR5PTH,0000
+		dc.w	SPR5PTL,0000		;sprite 5 pointer
+		dc.w	SPR6PTH,0000
+		dc.w	SPR6PTL,0000		;sprite 6 pointer
+		dc.w	SPR7PTH,0000
+		dc.w	SPR7PTL,0000		;sprite 7 pointer
+		dc.l 	$2b01fffe		;wait for line 43
+		dc.w	DIWSTRT,$2c81		;where we start displaying
+		dc.w	DIWSTOP,$2cc1		;where we stop!
+		dc.w	BPLCON0,$0200		;this is for Amiga 1000 owners
+		dc.w	BPLCON2,$0024		
+		dc.w	DDFSTRT,$0038		;where to start the horizontal display
+		dc.w	DDFSTOP,$00d0		;and where we stop
+		dc.w	BPLCON1,$0000
+		dc.w	BPL1MOD,$0000		;not a scroller
+		dc.w	BPL2MOD,$0000		;so these are blank
+		dc.w	COLOR00,$0000		;background colour black
+		dc.w	COLOR01
+color_reg1	dc.w	$0000			;colour 1 
+		dc.w	COLOR02
+color_reg2	dc.w	$0000			;colour 2 
+		dc.w	COLOR03
+color_reg3	dc.w	$0000			;colour 3 
+		dc.w	COLOR04,$0d80
+		dc.w	COLOR05,$0c70
+		dc.w	COLOR06,$0c71
+		dc.w	COLOR07,$0b61
+		dc.w	COLOR08,$0b62
+		dc.w	COLOR09,$0a52
+		dc.w	COLOR10,$0a52
+		dc.w	COLOR11,$0fb0
+		dc.w	COLOR12,$000f
+		dc.w	COLOR13,$0f00
+		dc.w	COLOR14,$0f82
+		dc.w	COLOR15,$0ff3
+		dc.w	COLOR16,$0000
+		dc.w	COLOR17,$0d80
+		dc.w	COLOR18,$0b61
+		dc.w	COLOR19,$0a52
+		dc.w	COLOR20,$0333
+		dc.w	COLOR21,$0444
+		dc.w	COLOR22,$0555
+		dc.w	COLOR23,$0666
+		dc.w	COLOR24,$0777
+		dc.w	COLOR25,$0888
+		dc.w	COLOR26,$0999
+		dc.w	COLOR27,$0aaa
+		dc.w	COLOR28,$0ccc
+		dc.w	COLOR29,$0ddd
+		dc.w	COLOR30,$0eee
+		dc.w	COLOR31,$06f8
+		dc.l	$2c01fffe		;wait for line 44
+		dc.w	BPLCON0,$2200		;turn on bit planes
+		dc.l	$fffffffe		;wait for the impossible
+endcopper
+
+copperlen	equ	endcopper-copper
+
+	
+************************************************************
+*			VARIABLES	 		   *
+************************************************************
+
+
+gfxbase		dc.l 0
+bitbase		dc.l 0
+systemcopper	dc.l 0
+fade_direction	dc.b 0
+counter		dc.b 0
+
+gfxname		dc.b 'graphics.library',0
+piccy	incbin		graphics/fader.bmap
+
+end
+	

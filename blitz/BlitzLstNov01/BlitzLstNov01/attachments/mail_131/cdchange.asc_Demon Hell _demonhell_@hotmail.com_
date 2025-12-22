@@ -1,0 +1,139 @@
+
+
+;## must have amigalibs.res in compile options
+
+;## SOME CONFIG
+
+dev$="cybscsi.device"
+unit.l=1
+
+
+
+DEFTYPE .IOStdReq *ior
+DEFTYPE .Interrupt *irq
+
+*irq=AllocMem(SizeOf .Interrupt,#MEMF_CLEAR|#MEMF_PUBLIC)
+
+mysignal.l=AllocSignal_(-1)
+If mysignal.l=0
+ NPrint "COULDNT ALLOC SIGNAL"
+ End
+EndIf
+
+mysigmask.l= (1 LSL signal)
+
+myport.l=CreateMsgPort_
+If myport=0
+ NPrint "COULDNT CREATE MSGPORT"
+ Goto cleanup
+EndIf
+
+mytask=FindTask_(0)
+If mytask=0
+ NPrint "CANT FIND MYTASK"
+ Goto cleanup
+EndIf
+
+*ior=CreateIORequest_(myport.l,SizeOf .IOStdReq)
+
+If *ior=0
+ NPrint "COULDNT CREATE REQUEST"
+ Goto cleanup
+EndIf
+
+
+;## OPEN DEVICE  0 if OK !!
+od=OpenDevice_(dev$,unit,*ior,0)
+If od<>0
+ NPrint "FAILED TO OPEN DEVICE"
+ Goto cleanup
+EndIf
+
+
+;## FILL IT UP
+*irq\is_Code=?asmcode
+*irq\is_Data =mytask
+*irq\is_Node\ln_Pri=10
+*irq\is_Node\ln_Type=#NT_INTERRUPT
+*irq\is_Node\ln_Name="CD_CHANGER"
+
+*ior\io_Command =#TD_ADDCHANGEINT
+*ior\io_Flags =0
+*ior\io_Length= SizeOf .Interrupt
+*ior\io_Data=*irq
+
+;## SET SIGNAL IN ASM CODE
+
+Poke.l ?_signal,mysignal.l
+SendIO_(*ior)
+
+If *ior\io_Error =0
+
+ ;## DO SOME WAITING
+ recsig.l=Wait_(#SIGBREAKF_CTRL_C|mysignalmask)
+ NPrint "SIG>",recsig
+
+ ;## REMOVE INTERRUPT
+ *ior\io_Command =#TD_REMCHANGEINT
+ *ior\io_Flags =0
+ *ior\io_Length= SizeOf .Interrupt
+ *ior\io_Data=&irq
+ DoIO_(*ior)
+
+Else
+ NPrint "OOPS...io error"
+EndIf
+
+
+;## CLEANUP
+.cleanup
+If od=0 Then CloseDevice_(*ior)
+If *ior<>0 Then DeleteIORequest_(*ior)
+If mp<>0 Then DeleteMsgPort_(myport)
+If mysignal>0 Then FreeSignal_(mysignal)
+If *irq<>0 Then FreeMem *irq,SizeOf .Interrupt
+
+End
+
+.asmcode
+MOVE.l  a0,-(a7)   ; cpu register a1 contains a pointer to the task to be signalled
+MOVEQ #0,d0
+MOVE.l  _signal,d1
+BSET  d1,d0
+JSR -324(a6)     ; Signal()
+
+MOVE.l  (a7)+,d0
+RTS
+
+_signal: Ds.l 1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

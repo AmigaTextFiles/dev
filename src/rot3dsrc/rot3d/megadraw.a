@@ -1,0 +1,152 @@
+;/****************************************************************
+;This code is copyright 1993. All Rights Reserved. Authors:-
+;
+;  Jason Freund and Gabe Dalbec.
+;  Chris Hames
+;
+;****************************************************************/
+
+;This is the core of the program.  It takes a column from the
+;source bitmap and shrinks/expands and copies it to the fastram offscreen
+;bitmap.
+
+;This cannot be sped up because we spent 75% of the time of the development
+;of the entire program in this file.
+
+;	INCLUDE "defines.i"
+
+
+	section	data
+
+	XDEF	_mdtmps
+
+_mdtmps:
+
+sbit:	EQU 0
+	dc.l	0
+sbitn:	EQU 4
+	dc.l	0
+dbitn:	EQU 8
+	dc.l	0
+roff:	EQU 12
+	dc.l	0
+dbpr:	EQU 16
+	dc.l	0
+sy:	EQU 20
+	dc.l	0
+
+	section	code
+
+	XDEF	_Fill
+
+	XREF	_rowlook
+	XREF	_map
+	XREF	_fastbm
+	XREF	_brushmem
+	XREF	_lightcolor
+	XREF    _lighttable
+
+_Fill:
+	movem.l	d2-d7/a2-a6,-(sp)
+	lea	_fastbm,a5			; get dst bitmap pointer
+	lea	_map,a6				; get address of map struct
+	lea	_mdtmps,a3
+
+	moveq	#0,d0
+	move.w	(a5),d0			; BytesPerRow
+	lsl.w	#3,d0
+	subq.w	#1,d0			; for i=SCREENX to 0
+
+	move.w	d0,d3
+	lsl.w	#3,d3
+	add.w	d3,a6
+
+filoop:
+	move.w	(a6)+,d6		; get map[i].height
+	move.w	(a6)+,d4		; get bitmap no
+	move.w	(a6)+,d2		; get offset
+	lsl.w	#2,d4			; for long word pointer
+	lea     _lightcolor,a1
+	moveq.l #0,d3
+	move.b  (a1,d0.w),d3
+	lea	    _brushmem,a2
+	move.l	0(a2,d4.w),a1	;  get pointer to brush
+	movea.l _lighttable,a2
+	lsl.l   #6,d3
+	add.l   d3,a2
+	asr.w	#6,d6
+	move.w	d6,sy(a3)
+	bge.s	pastneg
+	moveq	#0,d6
+
+pastneg:
+	move.w	d0,-(sp)		; save i counter
+MegaDraw:
+	move.w	d0,d4
+	and.w	#7,d4
+	moveq	#7,d3
+	sub.w	d4,d3
+	move.b	d3,d5			; d5<-dbitn=(7-sx&7)
+
+	add.w	d2,a1
+
+	move.w	d0,d3
+	lsr.w	#3,d3
+	lsl.w	#2,d3			; d3<-rsx=sx/8 * 4
+
+	move.w	(a5),d1			; d1<-dbrp=bitmap->BytesPerRow
+
+	move.w	d1,d7
+	lsl.w	#2,d1
+	muls.w	d6,d1
+	add.w	d3,d1			; d1<-dplus
+
+	move.l	8(a5),a4		; a4<-dptr=bitmap->Planes[0]+dplus
+	adda.l	d1,a4
+	move.w	d7,d1
+	move.b	d5,d4
+
+	move.l	_rowlook,a0
+	move.w	sy(a3),d7		; d7<-sy
+	muls.w	#1024,d7		; d7<-sy*1024   256 longs
+	move.w	2(a5),d0		; d0<-dst->Rows
+	mulu.w	#1536,d0		; d0<-rows*1200
+	add.l	d0,d7			; d7<-rows*1200+sy*1024
+	adda.l	d7,a0			; a0<-_rowlook+rows*1200+sy*1024
+
+	move.w	d6,d7			;
+	lsl.w	#2,d7
+	adda.w  d7,a0
+	move.l	(a0)+,d0
+	lsl.l	#2,d1
+
+	moveq   #0,d7
+	move.w  2(a5),d5
+	lsr.w   #1,d5			; d5<-rows/2
+	sub.w   d6,d5
+	cmp.w   #0,d5
+	ble.s   pastiloop
+	subq.w  #1,d5
+	lsl.w   #1,d5			; do loop twice as long for top to bottom rather than half
+
+	lsl.w   #5,d4			; step into shifted lighttable
+	lsl.w   #5,d4			; dbitn*1024 to get to correct lighttable
+	add.w   d4,a2
+
+iloop:
+	move.b  0(a1,d0.l),d7	; get planes for bit
+	move.l  0(a2,d7.w),d2   ; look up in colortable
+	or.l    d2,(a4)
+	adda.l	d1,a4			; d1 dplus+=dbrp
+	move.l	(a0)+,d0		; use lookup to calculate row
+	dbra.w  d5,iloop
+
+pastiloop:
+	move.w	(sp)+,d0		; get i counter
+past1:
+	suba.w	#8+6,a6
+	dbra.w	d0,filoop
+
+	movem.l	(sp)+,d2-d7/a2-a6
+	rts
+

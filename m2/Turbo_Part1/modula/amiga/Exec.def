@@ -1,0 +1,979 @@
+DEFINITION FOR AMIGALIB MODULE Exec ;
+
+FROM SYSTEM IMPORT STRING, ADDRESS, SHORTSET, BITSET, LONGSET ;
+
+TYPE
+  NodePtr		= POINTER TO Node ;
+  MinNodePtr		= POINTER TO MinNode ;
+  ListPtr		= POINTER TO List ;
+  MinListPtr		= POINTER TO MinList ;
+  ResidentPtr		= POINTER TO Resident ;
+  MemChunkPtr		= POINTER TO MemChunk ;
+  MemHeaderPtr		= POINTER TO MemHeader ;
+  MemEntryPtr		= POINTER TO MemEntry ;
+  MemListPtr		= POINTER TO MemList ;
+  MemHandlerDataPtr	= POINTER TO MemHandlerData ;
+  TaskPtr		= POINTER TO Task ;
+  StackSwapStructPtr	= POINTER TO StackSwapStruct ;
+  MsgPortPtr		= POINTER TO MsgPort ;
+  MessagePtr		= POINTER TO Message ;
+  InterruptPtr		= POINTER TO Interrupt ;
+  IntVectorPtr		= POINTER TO IntVector ;
+  SoftIntListPtr	= POINTER TO SoftIntList ;
+  SemaphoreRequestPtr	= POINTER TO SemaphoreRequest ;
+  SignalSemaphorePtr	= POINTER TO SignalSemaphore ;
+  SemaphoreMessagePtr	= POINTER TO SemaphoreMessage ;
+  SemaphorePtr		= POINTER TO Semaphore ;
+  LibraryPtr		= POINTER TO Library ;
+  IORequestPtr		= POINTER TO IORequest ;
+  IOStdReqPtr		= POINTER TO IOStdReq ;
+  DevicePtr		= POINTER TO Device ;
+  UnitPtr		= POINTER TO Unit ;
+  ExecBasePtr		= POINTER TO ExecBase ;
+
+CONST
+
+  INCLUDE_VERSION = 40 ; (* Version of the include files in use. (Do not *)
+			 (* use this label for OpenLibrary() calls!)	 *)
+
+(* LIBRARY_VERSION is now obsolete.  Please use LIBRARY_MINIMUM     *)
+(* or code the specific minimum library version you require.	    *)
+
+  LIBRARY_MINIMUM = 33 ; (* Lowest version supported by Commodore-Amiga *)
+
+TYPE
+  Node = RECORD
+    ln_Succ : NodePtr   ; (* Pointer to next (successor)	*)
+    ln_Pred : NodePtr   ; (* Pointer to previous (predecessor)	*)
+    ln_Type : SHORTCARD ;
+    ln_Pri  : SHORTINT  ; (* Priority, for sorting		*)
+    ln_Name : STRING    ; (* ID string, null terminated		*)
+  END ;	(* Note: word aligned *)
+
+(* minimal node -- no type checking possible *)
+
+  MinNode = RECORD
+    mln_Succ : MinNodePtr ;
+    mln_Pred : MinNodePtr ;
+  END ;
+
+(* Note: Newly initialized IORequests, and software interrupt structures      *)
+(* used with Cause(), should have type NT_UNKNOWN.  The OS will assign a type *)
+(* when they are first used.						      *)
+
+(*----- Node Types for LN_TYPE -----*)
+CONST
+  NT_UNKNOWN	  = 0  ;
+  NT_TASK	  = 1  ; (* Exec task			        *)
+  NT_INTERRUPT	  = 2  ;
+  NT_DEVICE	  = 3  ;
+  NT_MSGPORT	  = 4  ;
+  NT_MESSAGE	  = 5  ; (* Indicates message currently pending *)
+  NT_FREEMSG	  = 6  ;
+  NT_REPLYMSG	  = 7  ; (* Message has been replied	        *)
+  NT_RESOURCE	  = 8  ;
+  NT_LIBRARY	  = 9  ;
+  NT_MEMORY	  = 10 ;
+  NT_SOFTINT	  = 11 ; (* Internal flag used by SoftInits     *)
+  NT_FONT	  = 12 ;
+  NT_PROCESS	  = 13 ; (* AmigaDOS Process		        *)
+  NT_SEMAPHORE	  = 14 ;
+  NT_SIGNALSEM    = 15 ; (* signal semaphores		        *)
+  NT_BOOTNODE	  = 16 ;
+  NT_KICKMEM	  = 17 ;
+  NT_GRAPHICS	  = 18 ;
+  NT_DEATHMESSAGE = 19 ;
+
+  NT_USER	  = 254 ; (* User node types work down from here *)
+  NT_EXTENDED	  = 255 ;
+
+(* Full featured list header *)
+
+TYPE
+  List = RECORD
+    lh_Head	: NodePtr   ;
+    lh_Tail	: NodePtr   ;
+    lh_TailPred : NodePtr   ;
+    lh_Type	: SHORTCARD ;
+    l_pad	: SHORTCARD ;
+  END ;	(* word aligned *)
+
+(* Minimal List Header - no type checking *)
+
+  MinList = RECORD
+    mlh_Head	 : MinNodePtr ;
+    mlh_Tail	 : MinNodePtr ;
+    mlh_TailPred : MinNodePtr ;
+  END ;	(* longword aligned *)
+
+CONST
+  IOERR_OPENFAIL   = -1 ; (* device/unit failed to open 		  *)
+  IOERR_ABORTED	   = -2 ; (* request terminated early [after AbortIO()]   *)
+  IOERR_NOCMD	   = -3 ; (* command not supported by device 		  *)
+  IOERR_BADLENGTH  = -4 ; (* not a valid length (usually IO_LENGTH) 	  *)
+  IOERR_BADADDRESS = -5 ; (* invalid address (misaligned or bad range)	  *)
+  IOERR_UNITBUSY   = -6 ; (* device opens ok, but requested unit is busy  *)
+  IOERR_SELFTEST   = -7 ; (* hardware failed self-test			  *)
+
+TYPE
+  Resident = RECORD
+    rt_MatchWord : CARDINAL    ; (* word to match on (ILLEGAL)	     *)
+    rt_MatchTag  : ResidentPtr ; (* pointer to the above	     *)
+    rt_EndSkip   : ADDRESS     ; (* address to continue scan	     *)
+    rt_Flags     : SHORTSET    ; (* various tag flags		     *)
+    rt_Version   : SHORTCARD   ; (* release version number	     *)
+    rt_Type      : SHORTCARD   ; (* type of module (NT_XXXXXX)	     *)
+    rt_Pri       : SHORTINT    ; (* initialization priority	     *)
+    rt_Name      : STRING      ; (* pointer to node name	     *)
+    rt_IdString  : STRING      ; (* pointer to identification string *)
+    rt_Init      : ADDRESS     ; (* pointer to init code	     *)
+  END ;
+
+CONST
+  RTC_MATCHWORD	 = 04AFCH ;	(* The 68000 "ILLEGAL" instruction *)
+
+  RTF_AUTOINIT	 = {7} ;	(* rt_Init points to data structure *)
+  RTF_AFTERDOS	 = {2} ;
+  RTF_SINGLETASK = {1} ;
+  RTF_COLDSTART	 = {0} ;
+
+(* Compatibility: (obsolete) *)
+(* RTM_WHEN 3		     *)
+
+  RTW_NEVER	= 0 ;
+  RTW_COLDSTART	= 1 ;
+
+(*----- MemChunk ---------------------------------------------------*)
+
+TYPE
+  MemChunk = RECORD
+    mc_Next  : MemChunkPtr ; (* pointer to next chunk *)
+    mc_Bytes : LONGINT     ; (* chunk byte size	      *)
+  END ;
+
+(*----- MemHeader --------------------------------------------------*)
+
+  MemHeader = RECORD
+    mh_Node	  : Node        ;
+    mh_Attributes : BITSET      ; (* characteristics of this region *)
+    mh_First	  : MemChunkPtr ; (* first free region		    *)
+    mh_Lower	  : ADDRESS     ; (* lower memory bound		    *)
+    mh_Upper	  : ADDRESS     ; (* upper memory bound+1	    *)
+    mh_Free 	  : LONGINT     ; (* total number of free bytes	    *)
+  END ;
+
+(*----- MemEntry ---------------------------------------------------*)
+
+  MemEntry = RECORD
+    me_Un : RECORD
+      CASE :BOOLEAN OF
+      | TRUE  : meu_Reqs : LONGSET
+      | FALSE : meu_Addr : ADDRESS
+      END;
+    END ;
+    me_Length : LONGINT
+  END ;
+
+(*----- MemList ----------------------------------------------------*)
+
+(* Note: sizeof(struct MemList) includes the size of the first MemEntry! *)
+
+  MemList = RECORD
+    ml_Node	  : Node ;
+    ml_NumEntries : CARDINAL ;	(* number of entries in this struct *)
+    ml_ME	  : ARRAY [0..0] OF MemEntry ; (* the first entry	*)
+  END ;
+
+(*----- Memory Requirement Types ---------------------------*)
+(*----- See the AllocMem() documentation for details--------*)
+
+CONST
+  MEMF_ANY      = { }  ; (* Any type of memory will do		     *)
+  MEMF_PUBLIC   = {0}  ;
+  MEMF_CHIP     = {1}  ;
+  MEMF_FAST     = {2}  ;
+  MEMF_LOCAL    = {8}  ; (* Memory that does not go away at RESET    *)
+  MEMF_24BITDMA = {9}  ; (* DMAable memory within 24 bits of address *)
+  MEMF_KICK     = {10} ; (* Memory that can be used for KickTags     *)
+
+  MEMF_CLEAR    = {16} ; (* AllocMem: NULL out area before return    *)
+  MEMF_LARGEST  = {17} ; (* AvailMem: return the largest chunk size  *)
+  MEMF_REVERSE  = {18} ; (* AllocMem: allocate from the top down     *)
+  MEMF_TOTAL    = {19} ; (* AvailMem: return total size of memory    *)
+
+  MEMF_NO_EXPUNGE = {31} ; (* AllocMem: Do not cause expunge on failure *)
+
+(*----- Current alignment rules for memory blocks (may increase) -----*)
+  MEM_BLOCKSIZE	= 8 ;
+  MEM_BLOCKMASK	= {0..2} ;
+
+
+(*----- MemHandlerData ---------------------------------------------*)
+(* Note:  This structure is *READ ONLY* and only EXEC can create it!*)
+
+TYPE
+  MemHandlerData = RECORD
+    memh_RequestSize  : LONGINT ; (* Requested allocation size	*)
+    memh_RequestFlags : LONGSET ; (* Requested allocation flags *)
+    memh_Flags        : LONGSET ; (* Flags (see below)		*)
+  END ;
+
+CONST
+  MEMHF_RECYCLE	= {0} ;	(* 0==First time, 1==recycle *)
+
+(*----- Low Memory handler return values --------------------------*)
+
+  MEM_DID_NOTHING = 0  ; (* Nothing we could do...		  *)
+  MEM_ALL_DONE	  = -1 ; (* We did all we could do		  *)
+  MEM_TRY_AGAIN	  = 1  ; (* We did some, try the allocation again *)
+
+(* Please use Exec functions to modify task structure fields, where available *)
+
+TYPE
+  Task = RECORD
+    tc_Node       : Node     ;
+    tc_Flags      : SHORTSET ;
+    tc_State      : SHORTCARD;
+    tc_IDNestCnt  : SHORTINT ; (* intr disabled nesting			*)
+    tc_TDNestCnt  : SHORTINT ; (* task disabled nesting			*)
+    tc_SigAlloc   : LONGSET  ; (* sigs allocated			*)
+    tc_SigWait    : LONGSET  ; (* sigs we are waiting for		*)
+    tc_SigRecvd   : LONGSET  ; (* sigs we have received			*)
+    tc_SigExcept  : LONGSET  ; (* sigs we will take excepts for		*)
+    tc_TrapAlloc  : CARDINAL ; (* traps allocated			*)
+    tc_TrapAble   : CARDINAL ; (* traps enabled				*)
+    tc_ExceptData : ADDRESS  ; (* points to except data			*)
+    tc_ExceptCode : ADDRESS  ; (* points to except code			*)
+    tc_TrapData   : ADDRESS  ; (* points to trap data			*)
+    tc_TrapCode   : ADDRESS  ; (* points to trap code			*)
+    tc_SPReg	  : ADDRESS  ; (* stack pointer				*)
+    tc_SPLower    : ADDRESS  ; (* stack lower bound			*)
+    tc_SPUpper    : ADDRESS  ; (* stack upper bound + 2			*)
+    tc_Switch     : PROC     ; (* task losing CPU			*)
+    tc_Launch     : PROC     ; (* task getting CPU		        *)
+    tc_MemEntry   : List     ; (* Allocated memory. Freed by RemTask()  *)
+    tc_UserData   : ADDRESS  ; (* For use by the task; no restrictions! *)
+  END ;
+
+(* Stack swap structure as passed to StackSwap() *)
+
+  StackSwapStruct = RECORD
+    stk_Lower   : ADDRESS  ; (* Lowest byte of stack 		   *)
+    stk_Upper   : LONGINT  ; (* Upper end of stack (size + Lowest) *)
+    stk_Pointer : ADDRESS  ; (* Stack pointer at switch point	   *)
+  END ;
+
+(*----- Flag Bits ------------------------------------------*)
+
+CONST
+  TB_PROCTIME	= 0 ;
+  TB_ETASK	= 3 ;
+  TB_STACKCHK	= 4 ;
+  TB_EXCEPT	= 5 ;
+  TB_SWITCH	= 6 ;
+  TB_LAUNCH	= 7 ;
+
+  TF_PROCTIME	= {0} ;
+  TF_ETASK	= {3} ;
+  TF_STACKCHK	= {4} ;
+  TF_EXCEPT	= {5} ;
+  TF_SWITCH	= {6} ;
+  TF_LAUNCH	= {7} ;
+
+(*----- Task States ----------------------------------------*)
+
+  TS_INVALID	= 0 ;
+  TS_ADDED	= 1 ;
+  TS_RUN	= 2 ;
+  TS_READY	= 3 ;
+  TS_WAIT	= 4 ;
+  TS_EXCEPT	= 5 ;
+  TS_REMOVED	= 6 ;
+
+(*----- Predefined Signals -------------------------------------*)
+
+  SIGB_ABORT	 = 0 ;
+  SIGB_CHILD	 = 1 ;
+  SIGB_BLIT	 = 4 ;	(* Note: same as SINGLE *)
+  SIGB_SINGLE	 = 4 ;	(* Note: same as BLIT   *)
+  SIGB_INTUITION = 5 ;
+  SIGB_NET	 = 7 ;
+  SIGB_DOS	 = 8 ;
+
+  SIGF_ABORT	 = {0} ;
+  SIGF_CHILD	 = {1} ;
+  SIGF_BLIT	 = {4} ;
+  SIGF_SINGLE	 = {4} ;
+  SIGF_INTUITION = {5} ;
+  SIGF_NET	 = {7} ;
+  SIGF_DOS	 = {8} ;
+
+(*----- MsgPort ----------------------------------------------------*)
+
+TYPE
+  MsgPort = RECORD
+    mp_Node   : Node      ;
+    mp_Flags  : SHORTCARD ;
+    mp_SigBit : SHORTCARD ; (* signal bit number *)
+    CASE :INTEGER OF
+    |0: mp_SigTask : TaskPtr      ; (* object to be signalled *)
+    |1: mp_SoftInt : InterruptPtr ; (* Alias		      *)
+    |2: sm_LockMsg : ADDRESS	  ;
+    END ;
+    mp_MsgList : List ; (* message linked list *)
+  END ;
+
+CONST
+  (* mp_Flags: Port arrival actions (PutMsg) *)
+
+  PF_ACTION  = {0,1} ; (* Mask						*)
+  PA_SIGNAL  =  0    ; (* Signal task in mp_SigTask			*)
+  PA_SOFTINT =  1    ; (* Signal SoftInt in mp_SoftInt/mp_SigTask	*)
+  PA_IGNORE  =  2    ; (* Ignore arrival				*)
+
+(*----- Message ----------------------------------------------------*)
+
+TYPE
+  Message = RECORD
+    mn_Node      : Node       ;
+    mn_ReplyPort : MsgPortPtr ; (* message reply port		    *)
+    mn_Length    : CARDINAL   ; (* total message length, in bytes   *)
+				(* (include the size of the Message *)
+				(* structure in the length)	    *)
+  END ;
+
+  Interrupt = RECORD
+    is_Node : Node    ;
+    is_Data : ADDRESS ; (* server data segment  *)
+    is_Code : PROC    ; (* server code entry    *)
+  END ;
+
+  IntVector = RECORD	(* For EXEC use ONLY! *)
+    iv_Data : ADDRESS ;
+    iv_Code : PROC    ;
+    iv_Node : NodePtr ;
+  END ;
+
+  SoftIntList = RECORD	(* For EXEC use ONLY! *)
+    sh_List : List ;
+    sh_Pad  : CARDINAL ;
+  END ;
+
+CONST
+  SIH_PRIMASK = 0F0H ;
+
+(* this is a fake INT definition, used only for AddIntServer and the like *)
+  INTB_NMI =  15  ;
+  INTF_NMI = {15} ;
+
+(*----- SignalSemaphore --------------------------------------------*)
+
+(* Private structure used by ObtainSemaphore() *)
+
+TYPE
+  SemaphoreRequest = RECORD
+    sr_Link   : MinNode ;
+    sr_Waiter : TaskPtr ;
+  END ;
+
+(* Signal Semaphore data structure *)
+
+  SignalSemaphore = RECORD
+    ss_Link	    : Node    ;
+    ss_NestCount    : INTEGER ;
+    ss_WaitQueue    : MinList ;
+    ss_MultipleLink : SemaphoreRequest ;
+    ss_Owner	    : TaskPtr ;
+    ss_QueueCount   : INTEGER ;
+  END ;
+
+(*----- Semaphore procure message (for use in V39 Procure/Vacate ---*)
+
+  SemaphoreMessage = RECORD
+    ssm_Message   : Message ;
+    ssm_Semaphore : SignalSemaphorePtr ;
+  END ;
+
+CONST
+  SM_SHARED	= 1 ;
+  SM_EXCLUSIVE	= 0 ;
+
+(*----- Semaphore (Old Procure/Vacate type, not reliable) -------*)
+
+TYPE
+  Semaphore = RECORD	(* Do not use these semaphores! *)
+    sm_MsgPort : MsgPort ;
+    sm_Bids    : INTEGER ;
+  END ;
+
+(*------ Special Constants ---------------------------------------*)
+
+CONST
+  LIB_VECTSIZE	= 6 ;	(* Each library entry takes 6 bytes *)
+  LIB_RESERVED	= 4 ;	(* Exec reserves the first 4 vectors *)
+  LIB_BASE	= -LIB_VECTSIZE ;
+  LIB_USERDEF	= LIB_BASE-(LIB_RESERVED*LIB_VECTSIZE) ;
+  LIB_NONSTD	= LIB_USERDEF ;
+
+(*------ Standard Functions --------------------------------------*)
+
+  LIB_OPEN     = -6  ;
+  LIB_CLOSE    = -12 ;
+  LIB_EXPUNGE  = -18 ;
+  LIB_EXTFUNC  = -24 ;	(* for future expansion *)
+
+(*------ Library Base Structure ----------------------------------*)
+
+(* Also used for Devices and some Resources *)
+TYPE
+  Library = RECORD
+    CASE : INTEGER OF
+    | 0:
+      lib_Node     : Node      ;
+      lib_Flags    : SHORTSET  ;
+      lib_pad      : SHORTCARD ;
+      lib_NegSize  : CARDINAL  ; (* number of bytes before library	*)
+      lib_PosSize  : CARDINAL  ; (* number of bytes after library	*)
+      lib_Version  : CARDINAL  ; (* major				*)
+      lib_Revision : CARDINAL  ; (* minor				*)
+      lib_IdString : STRING    ; (* ASCII identification		*)
+      lib_Sum      : LONGINT   ; (* the checksum itself			*)
+      lib_OpenCnt  : CARDINAL  ; (* number of current opens		*)
+    | 1: (* Temporary Compatibility *)
+      lh_Node     : Node      ;
+      lh_Flags    : SHORTSET  ;
+      lh_pad      : SHORTCARD ;
+      lh_NegSize  : CARDINAL  ;
+      lh_PosSize  : CARDINAL  ;
+      lh_Version  : CARDINAL  ;
+      lh_Revision : CARDINAL  ;
+      lh_IdString : STRING    ;
+      lh_Sum      : LONGINT   ;
+      lh_OpenCnt  : CARDINAL  ;
+    END ;
+  END ;	(* Warning: size is not a longword multiple! *)
+
+(* lib_Flags bit definitions (all others are system reserved) *)
+
+CONST
+  LIBF_SUMMING = {0} ; (* we are currently checksumming  *)
+  LIBF_CHANGED = {1} ; (* we have just changed the lib   *)
+  LIBF_SUMUSED = {2} ; (* set if we should bother to sum *)
+  LIBF_DELEXP  = {3} ; (* delayed expunge		 *)
+
+TYPE
+  IORequest = RECORD
+    io_Message : Message   ;
+    io_Device  : DevicePtr ; (* device node pointer  *)
+    io_Unit    : UnitPtr   ; (* unit (driver private)*)
+    io_Command : CARDINAL  ; (* device command	     *)
+    io_Flags   : SHORTSET  ;
+    io_Error   : SHORTINT  ; (* error or warning num *)
+  END ;
+
+  IOStdReq = RECORD
+    io_Message : Message  ;
+    io_Device  : DevicePtr; (* device node pointer		   *)
+    io_Unit    : UnitPtr  ; (* unit (driver private)		   *)
+    io_Command : CARDINAL ; (* device command			   *)
+    io_Flags   : SHORTSET ;
+    io_Error   : SHORTINT ; (* error or warning num 		   *)
+    io_Actual  : LONGINT  ; (* actual number of bytes transferred  *)
+    io_Length  : LONGINT  ; (* requested number bytes transferred  *)
+    io_Data    : ADDRESS  ; (* points to data area 		   *)
+    io_Offset  : LONGINT  ; (* offset for block structured devices *)
+  END ;
+
+(* library vector offsets for device reserved vectors *)
+
+CONST
+  DEV_BEGINIO =	-30 ;
+  DEV_ABORTIO =	-36 ;
+
+(* io_Flags defined bits *)
+
+CONST
+  IOB_QUICK =  0  ;
+  IOF_QUICK = {0} ;
+
+CONST
+  CMD_INVALID = 0 ;
+  CMD_RESET   = 1 ;
+  CMD_READ    = 2 ;
+  CMD_WRITE   = 3 ;
+  CMD_UPDATE  = 4 ;
+  CMD_CLEAR   = 5 ;
+  CMD_STOP    = 6 ;
+  CMD_START   = 7 ;
+  CMD_FLUSH   = 8 ;
+
+  CMD_NONSTD  = 9 ;
+
+(*----- Device -----------------------------------------------------*)
+
+TYPE
+  Device = RECORD dd_Library : Library END ;
+
+(*----- Unit -------------------------------------------------------*)
+
+TYPE
+  Unit = RECORD
+    unit_MsgPort : MsgPort   ;	(* queue for unprocessed messages	*)
+				(* instance of msgport is recommended	*)
+    unit_flags   : SHORTSET  ;
+    unit_pad     : SHORTCARD ;
+    unit_OpenCnt : CARDINAL  ;	(* number of active opens		*)
+  END ;
+
+CONST
+  UNITF_ACTIVE	= {0} ;
+  UNITF_INTASK	= {1} ;
+
+(* Definition of the Exec library base structure (pointed to by location 4). *)
+(* Most fields are not to be viewed or modified by user programs.  Use	     *)
+(* extreme caution.							     *)
+
+TYPE
+  ExecBase = RECORD
+    LibNode		: Library ; (* Standard library node *)
+
+(*------- Static System Variables -------*)
+
+    SoftVer		: CARDINAL; (* kickstart release number (obs.)	    *)
+    LowMemChkSum	: INTEGER ; (* checksum of 68000 trap vectors	    *)
+    ChkBase     	: LONGINT ; (* system base pointer complement	    *)
+    ColdCapture 	: ADDRESS ; (* coldstart soft capture vector	    *)
+    CoolCapture 	: ADDRESS ; (* coolstart soft capture vector	    *)
+    WarmCapture 	: ADDRESS ; (* warmstart soft capture vector	    *)
+    SysStkUpper 	: ADDRESS ; (* system stack base   (upper bound)    *)
+    SysStkLower 	: ADDRESS ; (* top of system stack (lower bound)    *)
+    MaxLocMem   	: LONGINT ; (* top of chip memory		    *)
+    DebugEntry  	: ADDRESS ; (* global debugger entry point	    *)
+    DebugData   	: ADDRESS ; (* global debugger data segment 	    *)
+    AlertData   	: ADDRESS ; (* alert data segment 		    *)
+    MaxExtMem   	: ADDRESS ; (* top of extended mem, or null if none *)
+
+    ChkSum		: CARDINAL ; 	(* for all of the above (minus 2) *)
+
+(*----- Interrupt Related --------------------------------------------*)
+
+    IntVects		: ARRAY [0..15] OF IntVector ;
+
+(*------ Dynamic System Variables ------------------------------------*)
+
+    ThisTask		: TaskPtr  ;	(* pointer to current task (readable) *)
+
+    IdleCount		: LONGINT  ;	(* idle counter			   *)
+    DispCount		: LONGINT  ;	(* dispatch counter		   *)
+    Quantum		: CARDINAL ;	(* time slice quantum		   *)
+    Elapsed		: CARDINAL ;	(* current quantum ticks	   *)
+    SysFlags		: BITSET   ;	(* misc internal system flags	   *)
+    IDNestCnt		: SHORTINT ;	(* interrupt disable nesting count *)
+    TDNestCnt		: SHORTINT ;	(* task disable nesting count      *)
+
+    AttnFlags		: BITSET   ;	(* special attention flags (readable) *)
+
+    AttnResched		: CARDINAL;	(* rescheduling attention        *)
+    ResModules		: ADDRESS ;	(* resident module array pointer *)
+    TaskTrapCode	: ADDRESS ;
+    TaskExceptCode	: ADDRESS ;
+    TaskExitCode	: ADDRESS ;
+    TaskSigAlloc	: LONGSET ;
+    TaskTrapAlloc	: BITSET  ;
+
+(*----- System Lists (private!) -------------------------------*)
+
+    MemList		: List ;
+    ResourceList	: List ;
+    DeviceList		: List ;
+    IntrList		: List ;
+    LibList		: List ;
+    PortList		: List ;
+    TaskReady		: List ;
+    TaskWait		: List ;
+
+    SoftInts		: ARRAY [0..4] OF SoftIntList ;
+
+(*----- Other Globals ------------------------------------------*)
+
+    LastAlert		: ARRAY [0..3] OF LONGINT ;
+
+    (* these next two variables are provided to allow	  *)
+    (* system developers to have a rough idea of the	  *)
+    (* period of two externally controlled signals --	  *)
+    (* the time between vertical blank interrupts and the *)
+    (* external line rate (which is counted by CIA A's	  *)
+    (* "time of day" clock).  In general these values	  *)
+    (* will be 50 or 60, and may or may not track each	  *)
+    (* other.  These values replace the obsolete AFB_PAL  *)
+    (* and AFB_50HZ flags.				  *)
+
+    VBlankFrequency	: SHORTCARD ;	(* (readable) *)
+    PowerSupplyFrequency: SHORTCARD ;	(* (readable) *)
+
+    SemaphoreList	: List ;
+
+    (* these next two are to be able to kickstart into user ram.*)
+    (* KickMemPtr holds a singly linked list of MemLists which	*)
+    (* will be removed from the memory list via AllocAbs.  If	*)
+    (* all the AllocAbs's succeeded, then the KickTagPtr will	*)
+    (* be added to the rom tag list.				*)
+
+    KickMemPtr		: ADDRESS ;	(* ptr to queue of mem lists *)
+    KickTagPtr		: ADDRESS ;	(* ptr to rom tag queue	     *)
+    KickCheckSum	: ADDRESS ;	(* checksum for mem and tags *)
+
+(*----- V36 Exec additions start here -------------------------------------*)
+
+    ex_Pad0		: CARDINAL ; (* Private internal use     *)
+    ex_LaunchPoint	: LONGINT  ; (* Private to Launch/Switch *)
+    ex_RamLibPrivate	: ADDRESS  ;
+
+    (* The next ULONG contains the system "E" clock frequency,		*)
+    (* expressed in Hertz.	The E clock is used as a timebase for	*)
+    (* the Amiga's 8520 I/O chips. (E is connected to "02").		*)
+    (* Typical values are 715909 for NTSC, or 709379 for PAL.		*)
+
+    ex_EClockFrequency	: LONGINT ; (* (readable) 		     *)
+    ex_CacheControl	: LONGSET ; (* Private to CacheControl calls *)
+    ex_TaskID		: LONGINT ; (* Next available task ID	     *)
+
+    ex_Reserved1	: ARRAY [0..4] OF LONGINT ;
+
+    ex_MMULock		: ADDRESS ; (* private *)
+
+    ex_Reserved2	: ARRAY [0..2] OF LONGINT ;
+
+(*----- V39 Exec additions start here -------------------------------------*)
+
+    (* The following list and data element are used	*)
+    (* for V39 exec's low memory handler...		*)
+
+    ex_MemHandlers	: MinList ; (* The handler list		*)
+    ex_MemHandler	: ADDRESS ; (* Private! handler pointer	*)
+  END ;
+
+VAR
+  SysBase[4] : ExecBasePtr ;
+
+(*----- Bit defines for AttnFlags (see above) -----------------------------*)
+
+(*  Processors and Co-processors: *)
+
+CONST
+  AFB_68010 = 0 ; (* also set for 68020 *)
+  AFB_68020 = 1 ; (* also set for 68030 *)
+  AFB_68030 = 2 ; (* also set for 68040 *)
+  AFB_68040 = 3 ;
+  AFB_68881 = 4 ; (* also set for 68882 *)
+  AFB_68882 = 5 ;
+  AFB_FPU40 = 6 ; (* Set if 68040 FPU   *)
+
+(* The AFB_FPU40 bit is set when a working 68040 FPU		*)
+(* is in the system.  If this bit is set and both the		*)
+(* AFB_68881 and AFB_68882 bits are not set, then the 68040	*)
+(* math emulation code has not been loaded and only 68040	*)
+(* FPU instructions are available.  This bit is valid *ONLY*	*)
+(* if the AFB_68040 bit is set.					*)
+
+  AFB_PRIVATE = 15  ;	(* Just what it says *)
+
+  AFF_68010   = {0} ;
+  AFF_68020   = {1} ;
+  AFF_68030   = {2} ;
+  AFF_68040   = {3} ;
+  AFF_68881   = {4} ;
+  AFF_68882   = {5} ;
+  AFF_FPU40   = {6} ;
+
+  AFF_PRIVATE = {15};
+
+(*----- Selected flag definitions for Cache manipulation calls ---------*)
+
+CONST
+  CACRF_EnableI	      = {0}  ; (* Enable instruction cache *)
+  CACRF_FreezeI	      = {1}  ; (* Freeze instruction cache *)
+  CACRF_ClearI	      = {3}  ; (* Clear instruction cache  *)
+  CACRF_IBE	      = {4}  ; (* Instruction burst enable *)
+  CACRF_EnableD	      = {8}  ; (* 68030 Enable data cache  *)
+  CACRF_FreezeD	      = {9}  ; (* 68030 Freeze data cache  *)
+  CACRF_ClearD	      = {11} ; (* 68030 Clear data cache   *)
+  CACRF_DBE	      = {12} ; (* 68030 Data burst enable  *)
+  CACRF_WriteAllocate = {13} ; (* 68030 Write-Allocate mode*)
+			       (* (must always be set!)	   *)
+  CACRF_EnableE	      = {30} ;
+  			       (* Master enable for external caches    *)
+			       (* External caches should track the     *)
+			       (* state of the internal caches 	       *)
+			       (* such that they do not cache anything *)
+			       (* that the internal cache turned off   *)
+			       (* for.				       *)
+  CACRF_CopyBack      = {31} ; (* Master enable for copyback caches    *)
+
+  DMA_Continue	  = {1} ; (* Continuation flag for CachePreDMA    *)
+  DMA_NoModify	  = {2} ; (* Set if DMA does not update memory    *)
+  DMA_ReadFromRAM = {3} ; (* Set if DMA goes *FROM* RAM to device *)
+
+
+(*----------------------------- macros ---------------------------------------*)
+
+PROCEDURE IsListEmpty( adr : ADDRESS ) : BOOLEAN ;
+PROCEDURE IsMsgPortEmpty( adr : ADDRESS ) : BOOLEAN ;
+
+(*------------------- functions in linker library ---------------------------*)
+
+PROCEDURE BeginIO    ( ioReq : ADDRESS ) ;
+PROCEDURE CreateExtIO( port  : MsgPortPtr ; ioSize : LONGINT ) : ADDRESS ;
+PROCEDURE CreatePort ( name  : STRING ; pri : LONGINT ) : MsgPortPtr ;
+PROCEDURE CreateStdIO( port  : MsgPortPtr ) : IOStdReqPtr ;
+
+PROCEDURE CreateTask( name   : STRING ;
+		      pri    : LONGINT ;
+		      initPC : ADDRESS ;
+		      stackSize : LONGINT ) : TaskPtr ;
+
+PROCEDURE DeleteExtIO( ioReq : ADDRESS ) ;
+PROCEDURE DeletePort( ioReq : MsgPortPtr ) ;
+PROCEDURE DeleteStdIO( ioReq : IOStdReqPtr ) ;
+PROCEDURE DeleteTask( task : TaskPtr ) ;
+PROCEDURE NewList( list : ListPtr ) ;
+
+(*--------------------------  functions --------------------------------------*)
+(*----------------------------- misc -----------------------------------------*)
+
+PROCEDURE Supervisor( userFunction : PROC ) : LONGINT ;
+
+(*------------- special patchable hooks to internal exec activity ------------*)
+(*------------------------ module creation -----------------------------------*)
+
+PROCEDURE InitCode( startClass : LONGSET ; version : LONGINT ) ;
+PROCEDURE InitStruct( initTable , memory : ADDRESS ; size : LONGINT ) ;
+
+PROCEDURE MakeLibrary( funcInit , structInit : ADDRESS ;
+		       libInit  : PROC ;
+		       dataSize : LONGINT ;
+		       segList  : ADDRESS ) : LibraryPtr ;
+
+PROCEDURE MakeFunctions( target , functionArray : ADDRESS ;
+			 funcDispBase : LONGINT ) ;
+
+PROCEDURE FindResident( name : STRING ) : ResidentPtr ;
+PROCEDURE InitResident( resident : ResidentPtr ; segList : ADDRESS ) : ADDRESS ;
+
+(*---------------------------- diagnostics -----------------------------------*)
+
+PROCEDURE Alert( alertNum : LONGINT ) ;
+PROCEDURE Debug( flags : LONGSET ) ;
+
+(*---------------------------- interrupts ------------------------------------*)
+
+PROCEDURE Disable( ) ;
+PROCEDURE Enable( ) ;
+PROCEDURE Forbid( ) ;
+PROCEDURE Permit( ) ;
+
+PROCEDURE SetSR( newSR, mask : BITSET ) : BITSET ;
+PROCEDURE SuperState( ) : ADDRESS ;
+PROCEDURE UserState( sysStack : ADDRESS ) ;
+
+PROCEDURE SetIntVector( intNumber : LONGINT ;
+			interrupt : InterruptPtr ) : InterruptPtr ;
+
+PROCEDURE AddIntServer( intNumber : LONGINT ; interrupt : InterruptPtr ) ;
+PROCEDURE RemIntServer( intNumber : LONGINT ; interrupt : InterruptPtr ) ;
+PROCEDURE Cause( interrupt : InterruptPtr ) ;
+
+(*-------------------------- memory allocation -------------------------------*)
+
+PROCEDURE Allocate( freeList : MemHeaderPtr ; byteSize : LONGINT ) ;
+
+PROCEDURE Deallocate( freeList    : MemHeaderPtr ;
+		      memoryBlock : ADDRESS ;
+		      byteSize    : LONGINT ) ;
+
+PROCEDURE AllocMem  ( byteSize : LONGINT ; requirements : LONGSET ) : ADDRESS ;
+PROCEDURE AllocAbs  ( byteSize : LONGINT ; location : ADDRESS ) : ADDRESS ;
+PROCEDURE FreeMem   ( memoryBlock : ADDRESS ; byteSize : LONGINT ) ;
+PROCEDURE AvailMem  ( requirements : LONGSET ) : LONGINT ;
+PROCEDURE AllocEntry( entry : MemListPtr ) : MemListPtr ;
+PROCEDURE FreeEntry ( entry : MemListPtr ) ;
+
+(*------------------------------ lists ---------------------------------------*)
+
+PROCEDURE Insert  ( list : ListPtr ; node : NodePtr ; pred : NodePtr ) ;
+PROCEDURE AddHead ( list : ListPtr ; node : NodePtr ) ;
+PROCEDURE AddTail ( list : ListPtr ; node : NodePtr ) ;
+PROCEDURE Remove  ( node : NodePtr ) ;
+PROCEDURE RemHead ( list : ListPtr ) : NodePtr ;
+PROCEDURE RemTail ( list : ListPtr ) : NodePtr ;
+PROCEDURE Enqueue ( list : ListPtr ; node : NodePtr ) ;
+PROCEDURE FindName( list : ListPtr ; name : STRING ) : NodePtr ;
+
+(*------------------------------ tasks ---------------------------------------*)
+
+PROCEDURE AddTask( task : TaskPtr ; initPC , finalPC : ADDRESS ) ;
+PROCEDURE RemTask( task : TaskPtr ) ;
+PROCEDURE FindTask( name : STRING ) : TaskPtr ;
+PROCEDURE SetTaskPri( task : TaskPtr ; priority : LONGINT ) : SHORTINT ;
+PROCEDURE SetSignal( newSignals, signalSet : LONGSET ) : LONGSET ;
+PROCEDURE SetExcept( newSignals, signalSet : LONGSET ) : LONGSET ;
+PROCEDURE Wait( signalSet : LONGSET ) : LONGSET ;
+PROCEDURE Signal( task : TaskPtr ; signalSet : LONGSET ) ;
+PROCEDURE AllocSignal( signalNum : LONGINT ) : SHORTINT ;
+PROCEDURE FreeSignal( signalNum : LONGINT );
+PROCEDURE AllocTrap( trapNum : LONGINT ) ;
+PROCEDURE FreeTrap( trapNum : LONGINT ) ;
+
+(*------------------------------ messages ------------------------------------*)
+
+PROCEDURE AddPort( port : MsgPortPtr ) ;
+PROCEDURE RemPort( port : MsgPortPtr ) ;
+PROCEDURE PutMsg ( port : MsgPortPtr ; message : ADDRESS ) ;
+PROCEDURE GetMsg ( port : MsgPortPtr ) : ADDRESS ;
+PROCEDURE ReplyMsg( message : ADDRESS ) ;
+PROCEDURE WaitPort( port : MsgPortPtr ) : ADDRESS ;
+PROCEDURE FindPort( name : STRING ) : MsgPortPtr ;
+
+(*------------------------------ libraries -----------------------------------*)
+
+PROCEDURE AddLibrary( library : LibraryPtr ) ;
+PROCEDURE RemLibrary( library : LibraryPtr ) ;
+PROCEDURE OldOpenLibrary( libName : STRING ) : LibraryPtr ;
+PROCEDURE OpenLibrary( libName : STRING ; version : LONGINT ) : LibraryPtr ;
+PROCEDURE CloseLibrary( library : LibraryPtr ) ;
+
+PROCEDURE SetFunction( library     : LibraryPtr ;
+		       funcOffset  : LONGINT ;
+		       newFunction : PROC ) ;
+
+PROCEDURE SumLibrary( library : LibraryPtr ) ;
+
+(*-----------------------------  devices -------------------------------------*)
+
+PROCEDURE AddDevice( device : DevicePtr ) ;
+PROCEDURE RemDevice( device : DevicePtr ) ;
+
+PROCEDURE OpenDevice( devName   : STRING ;
+		      unit      : LONGINT ;
+		      ioRequest : ADDRESS ;
+		      flags     : LONGSET ) : SHORTINT ;
+
+PROCEDURE CloseDevice( ioRequest : ADDRESS ) : SHORTINT ;
+PROCEDURE DoIO   ( ioRequest : ADDRESS ) : SHORTINT ;
+PROCEDURE SendIO ( ioRequest : ADDRESS ) ;
+PROCEDURE CheckIO( ioRequest : ADDRESS ) : ADDRESS ;
+PROCEDURE WaitIO ( ioRequest : ADDRESS ) : SHORTINT ;
+PROCEDURE AbortIO( ioRequest : ADDRESS ) ;
+
+(*---------------------------- resources -------------------------------------*)
+
+PROCEDURE AddResource ( resource : ADDRESS ) ;
+PROCEDURE RemResource ( resource : ADDRESS ) ;
+PROCEDURE OpenResource( resName : STRING ) : ADDRESS ;
+
+(*---------------------- private diagnostic support --------------------------*)
+(*------------------------------ misc ----------------------------------------*)
+
+PROCEDURE RawDoFmt( formatString : STRING ;
+		    dataStream   : ADDRESS ;
+		    putChProc    : PROC ;
+		    putChData    : ADDRESS ) : ADDRESS ;
+
+PROCEDURE GetCC( ) : BITSET ;
+PROCEDURE TypeOfMem( address : ADDRESS ) : LONGSET ;
+PROCEDURE Procure( sigSem , bidMsg : SignalSemaphorePtr ) : LONGINT ;
+PROCEDURE Vacate( sigSem , bidMsg : SignalSemaphorePtr ) ;
+
+(*-------------- functions in V33 or higher (Release 1.2) --------------------*)
+(*-------------- signal semaphores (note funny registers) --------------------*)
+
+PROCEDURE InitSemaphore   ( sigSem : SignalSemaphorePtr ) ;
+PROCEDURE ObtainSemaphore ( sigSem : SignalSemaphorePtr ) ;
+PROCEDURE ReleaseSemaphore( sigSem : SignalSemaphorePtr ) ;
+PROCEDURE AttemptSemaphore( sigSem : SignalSemaphorePtr ) : LONGINT ;
+PROCEDURE ObtainSemaphoreList ( sigSem : ListPtr ) ;
+PROCEDURE ReleaseSemaphoreList( sigSem : ListPtr ) ;
+PROCEDURE FindSemaphore( sigSem : STRING ) : SignalSemaphorePtr;
+PROCEDURE AddSemaphore ( sigSem : SignalSemaphorePtr ) ;
+PROCEDURE RemSemaphore ( sigSem : SignalSemaphorePtr ) ;
+
+(*---------------------------- kickmem support -------------------------------*)
+
+PROCEDURE SumKickData( ) : LONGINT ;
+
+(*--------------------------- more memory support ----------------------------*)
+
+PROCEDURE AddMemList( size : LONGINT ;
+		      attributes : LONGSET ;
+		      pri  : LONGINT ;
+		      base : ADDRESS ;
+		      name : STRING ) ;
+
+PROCEDURE CopyMem( source, dest : ADDRESS ; size : LONGINT ) ;
+PROCEDURE CopyMemQuick( source, dest : ADDRESS ; size : LONGINT ) ;
+
+(*------------------------------- cache --------------------------------------*)
+(*------------------- functions in V36 or higher (Release 2.0) ---------------*)
+
+PROCEDURE CacheClearU( ) ;
+PROCEDURE CacheClearE( adr : ADDRESS ; length : LONGINT ; caches : LONGSET ) ;
+PROCEDURE CacheControl( cacheBits , cacheMask : LONGSET ) : LONGSET ;
+
+(*-------------------------------- misc --------------------------------------*)
+
+PROCEDURE CreateIORequest( port : MsgPortPtr ; size : LONGINT ) ;
+PROCEDURE DeleteIORequest( iorequest : ADDRESS ) ;
+PROCEDURE CreateMsgPort( ) : MsgPortPtr ;
+PROCEDURE DeleteMsgPort( port : MsgPortPtr ) ;
+PROCEDURE ObtainSemaphoreShared( sigSem : SignalSemaphorePtr ) ;
+
+(*------------------------ even more memory support --------------------------*)
+
+PROCEDURE AllocVec( byteSize : LONGINT ; requirements : LONGSET ) : ADDRESS ;
+PROCEDURE FreeVec ( memoryBlock : ADDRESS ) ;
+
+(*-------------------------- V39 Pool LVOs -----------------------------------*)
+
+PROCEDURE CreatePool( requirements : LONGSET ;
+		      puddleSize   : LONGINT ;
+		      threshSize   : LONGINT ) : ADDRESS ;
+
+PROCEDURE DeletePool ( poolHeader : ADDRESS ) ;
+PROCEDURE AllocPooled( poolHeader : ADDRESS ; memSize : LONGINT ) : ADDRESS ;
+
+PROCEDURE FreePooled( poolHeader : ADDRESS ;
+		      memory  : ADDRESS ;
+		      memSize : LONGINT ) ;
+
+(*--------------------------------- misc -------------------------------------*)
+
+PROCEDURE AttemptSemaphoreShared( sigSem : SignalSemaphorePtr ) : LONGINT ;
+PROCEDURE ColdReboot( ) ;
+PROCEDURE StackSwap( newStack : StackSwapStructPtr ) ;
+
+(*------------------------------- task trees ---------------------------------*)
+
+PROCEDURE ChildFree  ( tid : ADDRESS ) ;
+PROCEDURE ChildOrphan( tid : ADDRESS ) ;
+PROCEDURE ChildStatus( tid : ADDRESS ) ;
+PROCEDURE ChildWait  ( tid : ADDRESS ) ;
+
+(*------------------------- future expansion ---------------------------------*)
+
+PROCEDURE CachePreDMA ( address : ADDRESS ;
+			length  : ADDRESS ;
+			flags   : LONGSET ) : ADDRESS ;
+
+PROCEDURE CachePostDMA( address : ADDRESS ; length : ADDRESS ; flags : LONGSET);
+
+(*------------------ functions in V39 or higher (Release 3) ------------------*)
+(*--------------------- Low memory handler functions -------------------------*)
+
+PROCEDURE AddMemHandler( memhand : InterruptPtr ) ;
+PROCEDURE RemMemHandler( memhand : InterruptPtr ) ;
+
+(*------- Function to attempt to obtain a Quick Interrupt Vector -------------*)
+
+PROCEDURE ObtainQuickVector( interruptCode : ADDRESS ) : LONGINT ;
+
+END Exec.

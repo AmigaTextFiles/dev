@@ -1,0 +1,9 @@
+
+	IFND	WILSound
+WILSound	SET	1
+
+		STRUCTURE	WildSoundModuleBASE,wm_SIZEOF
+			LABEL	wsm_SIZEOF
+
+
+	ENDC

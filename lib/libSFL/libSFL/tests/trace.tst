@@ -1,0 +1,5 @@
+2007/02/28 21:00:06: First line traced to the output file (9)
+2007/02/28 21:00:06: Trace enabled, but saved disabled (11)
+2007/02/28 21:00:06: Trace enabled again, to save enabled (13)
+2007/02/28 21:00:06: Trace enabled again, from saved state (15)
+2007/02/28 21:00:06: Multiple strings passed in: one, two, three (16)

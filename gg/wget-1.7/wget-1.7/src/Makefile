@@ -1,0 +1,171 @@
+# Generated automatically from Makefile.in by configure.
+# Makefile for `wget' utility
+# Copyright (C) 1995, 1996, 1997 Free Software Foundation, Inc.
+
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+
+#
+# Version: 1.7
+#
+
+SHELL = /bin/sh
+
+top_builddir = ..
+
+top_srcdir = ..
+srcdir     = .
+ANSI2KNR = 
+o = .o
+
+prefix       = /usr/local
+exec_prefix  = ${prefix}
+bindir       = ${exec_prefix}/bin
+sysconfdir   = ${prefix}/etc
+localedir    = $(prefix)/share/locale
+
+DESTDIR      =
+
+CC       = gcc
+CPPFLAGS = 
+# The following line is losing on some versions of make!
+DEFS     = -DHAVE_CONFIG_H -DSYSTEM_WGETRC=\"$(sysconfdir)/wgetrc\" -DLOCALEDIR=\"$(localedir)\"
+CFLAGS   = -g -O2
+LDFLAGS  = -s
+LIBS     = -lintl -Xlinker -s
+exeext   = 
+
+INCLUDES = -I. -I$(srcdir) 
+
+COMPILE = $(CC) $(INCLUDES) $(CPPFLAGS)  $(DEFS) $(CFLAGS)
+LINK    = $(SHELL) $(top_builddir)/libtool $(CC) $(CFLAGS) $(LDFLAGS) -o $@
+INSTALL = /bin/install -c
+INSTALL_PROGRAM = ${INSTALL}
+RM = rm -f
+ETAGS = etags
+
+# Conditional compiles
+ALLOCA = 
+MD5_OBJ = md5$o
+OPIE_OBJ = ftp-opie$o
+SSL_OBJ = 
+
+OBJ = $(ALLOCA) cmpt$o connect$o cookies$o fnmatch$o ftp$o        \
+      ftp-basic$o ftp-ls$o $(OPIE_OBJ) getopt$o hash$o            \
+      headers$o host$o html-parse$o html-url$o http$o init$o      \
+      log$o main$o $(MD5_OBJ) netrc$o rbuf$o recur$o retr$o       \
+      snprintf$o $(SSL_OBJ) url$o utils$o version$o safe-ctype$o
+
+.SUFFIXES:
+.SUFFIXES: .c .o ._c ._o
+
+.c.o:
+	$(COMPILE) -c $<
+
+.c._c: $(ANSI2KNR)
+	$(ANSI2KNR) $< > $*.tmp && mv $*.tmp $@
+
+._c._o:
+	@echo $(COMPILE) -c $<
+	@rm -f _$*.c
+	@ln $< _$*.c && $(COMPILE) -c _$*.c && mv _$*.o $@ && rm _$*.c
+
+.c._o: $(ANSI2KNR)
+	$(ANSI2KNR) $< > $*.tmp && mv $*.tmp $*._c
+	@echo $(COMPILE) -c $*._c
+	@rm -f _$*.c
+	@ln $*._c _$*.c && $(COMPILE) -c _$*.c && mv _$*.o $@ && rm _$*.c
+
+# Dependencies for building
+
+wget$(exeext): $(OBJ)
+	$(LINK) $(OBJ) $(LIBS)
+
+ansi2knr: ansi2knr.o
+	$(CC) -o ansi2knr ansi2knr.o $(LIBS)
+
+$(OBJ): $(ANSI2KNR)
+
+#
+# Dependencies for installing
+#
+
+install: install.bin
+
+uninstall: uninstall.bin
+
+install.bin: wget$(exeext)
+	$(top_srcdir)/mkinstalldirs $(DESTDIR)$(bindir)
+	$(INSTALL_PROGRAM) wget$(exeext) $(DESTDIR)$(bindir)/wget$(exeext)
+
+uninstall.bin:
+	$(RM) $(DESTDIR)$(bindir)/wget$(exeext)
+
+#
+# Dependencies for cleanup
+#
+
+clean:
+	$(RM) *.o wget$(exeext) *~ *.bak core $(ANSI2KNR) *._o *._c
+
+distclean: clean
+	$(RM) Makefile config.h
+
+realclean: distclean
+	$(RM) TAGS
+
+#
+# Dependencies for maintenance
+#
+
+subdir = src
+
+Makefile: Makefile.in ../config.status
+	cd .. && CONFIG_FILES=$(subdir)/$@ CONFIG_HEADERS= ./config.status
+
+TAGS: *.c *.h
+	-$(ETAGS) *.c *.h
+
+# DO NOT DELETE THIS LINE -- make depend depends on it.
+
+cmpt$o: wget.h
+connect$o: wget.h connect.h host.h
+cookies$o: wget.h cookies.h hash.h url.h utils.h
+fnmatch$o: wget.h fnmatch.h
+ftp-basic$o: wget.h utils.h rbuf.h connect.h host.h
+ftp-ls$o: wget.h utils.h ftp.h url.h
+ftp-opie$o: wget.h md5.h
+ftp$o: wget.h utils.h url.h rbuf.h retr.h ftp.h connect.h host.h fnmatch.h netrc.h
+getopt$o: wget.h getopt.h
+hash$o: wget.h utils.h hash.h
+headers$o: wget.h connect.h rbuf.h headers.h
+host$o: wget.h utils.h host.h url.h hash.h
+html-parse$o: wget.h html-parse.h
+html-url$o: wget.h html-parse.h url.h utils.h
+html$o: wget.h url.h utils.h ftp.h
+http$o: wget.h utils.h url.h host.h rbuf.h retr.h headers.h cookies.h connect.h fnmatch.h netrc.h md5.h
+init$o: wget.h utils.h init.h host.h recur.h netrc.h
+log$o: wget.h utils.h
+main$o: wget.h utils.h getopt.h init.h retr.h recur.h host.h cookies.h
+md5$o: wget.h md5.h
+mswindows$o: wget.h url.h
+netrc$o: wget.h utils.h netrc.h init.h
+rbuf$o: wget.h rbuf.h connect.h
+recur$o: wget.h url.h recur.h utils.h retr.h ftp.h fnmatch.h host.h hash.h
+retr$o: wget.h utils.h retr.h url.h recur.h ftp.h host.h connect.h hash.h
+snprintf$o:
+safe-ctype$o: safe-ctype.h
+url$o: wget.h utils.h url.h host.h
+utils$o: wget.h utils.h fnmatch.h hash.h
+version$o:

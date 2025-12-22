@@ -1,0 +1,209 @@
+; Startup module for SAS, and probably most other Amiga compilers
+;
+; Symbols:	SMALL_DATA
+;		SMALL_CODE
+
+	INCLUDE "exec/funcdef.i"
+	INCLUDE "exec/exec_lib.i"
+	INCLUDE "dos/dosextens.i"
+
+	IFD SMALL_DATA
+		XREF _LinkerDB
+	ENDC
+	XREF __BSSLEN
+	XREF __BSSBAS
+	XREF _AmigaMain
+
+	IFD CHANGE_STACK
+	XREF _StackSize
+	ENDC
+
+	SECTION text,code
+
+	IFD SMALL_DATA
+		IFD CHANGE_STACK
+			bsr __geta4
+		ELSE
+			bsr.s __geta4
+		ENDC
+		lea __BSSBAS(a4),a0
+	ELSE
+		lea __BSSBAS,a0
+	ENDC
+
+; Clear the BSS segment
+
+	move.l #__BSSLEN,d0
+	beq.s ClearBSSDone
+ClearBSSLoop:
+	clr.l (a0)+
+	subq.l #1,d0
+	bne.s ClearBSSLoop
+ClearBSSDone:
+
+; Save our stackpointer
+
+	IFD SMALL_DATA
+		move.l SP,StackPointer(a4)
+	ELSE
+		move.l SP,StackPointer
+	ENDC
+
+; Get SysBase
+
+	movea.l (4).w,a6
+	IFD SMALL_DATA
+		move.l a6,_SysBase(a4)
+	ELSE
+		move.l a6,_SysBase
+	ENDC
+
+; Get our task
+
+	sub.l a1,a1
+	jsr _LVOFindTask(a6)
+	move.l d0,a2
+
+; Handle shell/workbench startup
+
+	IFD SMALL_DATA
+		clr.l _WorkbenchMessage(a4)
+	ELSE
+		clr.l _WorkbenchMessage
+	ENDC
+	tst.l pr_CLI(a2)
+	bne.s InitStuff
+
+WorkbenchStartup:
+	lea pr_MsgPort(a2),a0
+	jsr _LVOWaitPort(a6)
+	lea pr_MsgPort(a2),a0
+	jsr _LVOGetMsg(a6)
+	IFD SMALL_DATA
+		move.l d0,_WorkbenchMessage(a4)
+	ELSE
+		move.l d0,_WorkbenchMessage
+	ENDC
+
+InitStuff:
+	IFD CHANGE_STACK
+		move.l a7,d0
+		sub.l TC_SPLOWER(a2),d0
+		IFD SMALL_DATA
+			move.l _StackSize(a4),d2
+		ELSE
+			move.l _StackSize,d2
+		ENDC
+		cmp.l d2,d0
+		bge.s StackOkay
+		move.l d2,d0
+		moveq.l #0,d1
+		jsr _LVOAllocMem(a6)
+		IFD SMALL_DATA
+			move.l d0,NewStack(a4)
+		ELSE
+			move.l d0,NewStack
+		ENDC
+		bne.s ChangeStack
+		moveq.l #RETURN_FAIL,d6
+		moveq.l #ERROR_NO_FREE_STORE,d7
+		bra.s MyExit
+ChangeStack:
+		add.l d2,d0
+		movea.l d0,a7
+StackOkay:
+	ENDC
+
+; Call C program
+
+	IFD SMALL_CODE
+		bsr _AmigaMain
+	ELSE
+		jsr _AmigaMain
+	ENDC
+
+	move.l d0,d6
+	clr.l d7
+	bra.s MyExit
+
+;----------------------------------------------------------------------
+
+	XDEF _MyExit
+
+_MyExit:
+	movem.l 4(SP),d6/d7
+
+MyExit:
+	IFD SMALL_DATA
+		move.l StackPointer(a4),SP
+		movea.l _SysBase(a4),a6
+	ELSE
+		move.l StackPointer,SP
+		movea.l _SysBase,a6
+	ENDC
+	IFD CHANGE_STACK
+		IFD SMALL_DATA
+			move.l NewStack(a4),d0
+		ELSE
+			move.l NewStack,d0
+		ENDC
+	beq.s NoStackChange
+	movea.l d0,a1
+		IFD SMALL_DATA
+			move.l _StackSize(a4),d0
+		ELSE
+			move.l _StackSize,d0
+		ENDC
+	jsr _LVOFreeMem(a6)
+NoStackChange:
+	ENDC
+	IFD SMALL_DATA
+		move.l _WorkbenchMessage(a4),d0
+	ELSE
+		move.l _WorkbenchMessage,d0
+	ENDC
+	beq.s ShellExit
+
+WorkbenchExit:
+	movea.l d0,a1
+	jsr _LVOForbid(a6)
+	jsr _LVOReplyMsg(a6)
+
+ShellExit:
+	sub.l a1,a1
+	jsr _LVOFindTask(a6)
+	move.l d0,a0
+	move.l d7,pr_Result2(a0)
+	move.l d6,d0
+	rts
+
+;----------------------------------------------------------------------
+
+	XDEF __geta4
+
+__geta4:
+	IFD SMALL_DATA
+		lea _LinkerDB,a4
+	ENDC
+	rts
+
+;----------------------------------------------------------------------
+
+	SECTION data,data
+
+	IFD CHANGE_STACK
+NewStack:		dc.l 0
+	ENDC
+
+;----------------------------------------------------------------------
+
+	SECTION bss,bss
+
+	XDEF _WorkbenchMessage
+	XDEF _SysBase
+
+StackPointer:		ds.l 1
+_WorkbenchMessage:	ds.l 1
+_SysBase:		ds.l 1
+
+	END

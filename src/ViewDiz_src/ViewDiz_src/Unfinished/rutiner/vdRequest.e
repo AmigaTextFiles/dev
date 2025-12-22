@@ -1,0 +1,14 @@
+OBJECT myargs
+  
+ENDOBJECT
+
+
+PROC main()
+  DEF tmpl
+
+  tmpl:='DRAWER/S,DEVICE/S,DEVLIST/K,DEFAULT/K'
+
+  
+
+
+ENDPROC

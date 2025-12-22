@@ -1,0 +1,249 @@
+@database IFFParseD
+@node Main "IFFParseD"
+
+Constants
+
+   @{" idCAT " link Modul 164}                       @{" idFORM " link Modul 162}                      @{" idLIST " link Modul 163}
+   @{" idNULL " link Modul 166}                      @{" idPROP " link Modul 165}                      @{" iffReturn2client " link Modul 155}
+   @{" iffcmdCleanup " link Modul 209}               @{" iffcmdEntry " link Modul 213}                 @{" iffcmdExit " link Modul 214}
+   @{" iffcmdInit " link Modul 208}                  @{" iffcmdPurgecli " link Modul 215}              @{" iffcmdRead " link Modul 210}
+   @{" iffcmdSeek " link Modul 212}                  @{" iffcmdWrite " link Modul 211}                 @{" ifferrEoc " link Modul 145}
+   @{" ifferrEof " link Modul 136}                   @{" ifferrMangled " link Modul 151}               @{" ifferrNohook " link Modul 154}
+   @{" ifferrNomem " link Modul 147}                 @{" ifferrNoscope " link Modul 146}               @{" ifferrNotiff " link Modul 153}
+   @{" ifferrRead " link Modul 148}                  @{" ifferrSeek " link Modul 150}                  @{" ifferrSyntax " link Modul 152}
+   @{" ifferrWrite " link Modul 149}                 @{" ifflciCOLLECTION " link Modul 170}            @{" ifflciENTRYHANDLER " link Modul 171}
+   @{" ifflciEXITHANDLER " link Modul 172}           @{" ifflciPROP " link Modul 169}                  @{" iffparseName " link Modul 10}
+   @{" iffparseRawstep " link Modul 181}             @{" iffparseScan " link Modul 179}                @{" iffparseStep " link Modul 180}
+   @{" iffsizeUnknown " link Modul 201}              @{" iffsliProp " link Modul 190}                  @{" iffsliRoot " link Modul 188}
+   @{" iffsliTop " link Modul 189}                
+
+Type-Declarations
+
+   @{" ClipboardHandle " link Modul 128}             @{" ClipboardHandlePtr " link Modul 133}          @{" CollectionItem " link Modul 114}
+   @{" CollectionItemPtr " link Modul 113}           @{" ContextNode " link Modul 65}                 @{" ContextNodePtr " link Modul 72}
+   @{" IFFFlagSet " link Modul 24}                  @{" IFFFlags " link Modul 13}                    @{" IFFHandle " link Modul 33}
+   @{" IFFHandlePtr " link Modul 38}                @{" IFFStreamCmd " link Modul 47}                @{" IFFStreamCmdPtr " link Modul 52}
+   @{" LocalContextItem " link Modul 84}            @{" LocalContextItemPtr " link Modul 90}         @{" StoredProperty " link Modul 99}
+   @{" StoredPropertyPtr " link Modul 103}        
+
+@endnode
+@node Modul "am2:ModuleRefs/IFFParseD.def"
+(*$ Implementation- *)
+DEFINITION MODULE IFFParseD;
+(* 24-Aug-96/Stefan Tiemann for Cyclone *)
+(* Converted from C-Includes: iffparse.h 39.1 (1.6.92), Includes Release 40.15 *)
+
+
+IMPORT ED: ExecD;
+IMPORT CL: Clipboard;
+FROM SYSTEM IMPORT ADDRESS, CAST;
+
+CONST
+ iffparseName= "iffparse.library";
+
+TYPE
+(* bit masks for "iff_Flags" (IFFHandle.flags) field *)
+ IFFFlags=(
+  // read        		 (* read mode - default    *)
+  write,		     	 (* write mode		   *)
+  // rwbits (read|write)   (* read/write bits	   *)
+  fseek,       		 (* forward seek only	   *)
+  rseek,	      		 (* random seek	   *)
+  iff3, iff4, iff5, iff6, iff7, iff8, iff9, iff10, iff11, iff12, iff13, iff14,
+  iff15, iff16, iff17, iff18, iff19, iff20, iff21, iff22, iff23, iff24,
+  iff25, iff26, iff27, iff28, iff29, iff30, iff31);
+IFFFlagSet= SET OF IFFFlags;
+
+(* Structure associated with an active IFF stream.
+ * "iff_Stream" is a value used by the client's read/write/seek functions -
+ * it will not be accessed by the library itself and can have any value
+ * (could even be a pointer or a BPTR).
+ *
+ * This structure can only be allocated by iffparse.library
+ *)
+IFFHandle= RECORD
+ stream: ADDRESS;
+ flags: IFFFlagSet;
+ depth: LONGINT;	(*  Depth of context stack *)
+END;
+IFFHandlePtr= POINTER TO IFFHandle;
+
+
+(*****************************************************************************)
+
+
+(* When the library calls your stream handler, you'll be passed a pointer
+ * to this structure as the "message packet".
+ *)
+IFFStreamCmd= RECORD
+ command: LONGINT;	(* Operation to be performed (IFFCMD_) *)
+ buf: ADDRESS;   	(* Pointer to data buffer	       *)
+ nBytes: LONGINT;	(* Number of bytes to be affected      *)
+END;
+IFFStreamCmdPtr= POINTER TO IFFStreamCmd;
+
+(*****************************************************************************)
+
+
+(* A node associated with a context on the iff_Stack. Each node
+ * represents a chunk, the stack representing the current nesting
+ * of chunks in the open IFF file. Each context node has associated
+ * local context items in the (private) LocalItems list.  The ID, type,
+ * size and scan values describe the chunk associated with this node.
+ *
+ * This structure can only be allocated by iffparse.library
+ *)
+ ContextNode= RECORD
+  node: ED.MinNode;
+  id: LONGINT;
+  type: LONGINT;
+  size: LONGINT;	(*  Size of this chunk		   *)
+  scan: LONGINT;	(*  # of bytes read/written so far *)
+ END;
+ ContextNodePtr= POINTER TO ContextNode;
+
+
+(*****************************************************************************)
+
+
+(* Local context items live in the ContextNode's.  Each class is identified
+ * by its lci_Ident code and has a (private) purge vector for when the
+ * parent context node is popped.
+ *
+ * This structure can only be allocated by iffparse.library
+ *)
+ LocalContextItem= RECORD
+  node: ED.MinNode;
+  id: LONGCARD;
+  type: LONGCARD;
+  ident: LONGCARD;
+ END;
+ LocalContextItemPtr= POINTER TO LocalContextItem;
+
+
+(*****************************************************************************)
+
+
+(* StoredProperty: a local context item containing the data stored
+ * from a previously encountered property chunk.
+ *)
+ StoredProperty= RECORD
+  size: LONGINT;
+  data: ADDRESS;
+ END;
+ StoredPropertyPtr= POINTER TO StoredProperty;
+
+
+(*****************************************************************************)
+
+
+(* Collection Item: the actual node in the collection list at which
+ * client will look. The next pointers cross context boundaries so
+ * that the complete list is accessable.
+ *)
+ CollectionItemPtr= POINTER TO CollectionItem;
+ CollectionItem= RECORD
+  next: CollectionItemPtr;;
+  size: LONGINT;
+  data: ADDRESS;
+ END;
+
+
+(*****************************************************************************)
+
+
+(* Structure returned by OpenClipboard(). You may do CMD_POSTs and such
+ * using this structure. However, once you call OpenIFF(), you may not
+ * do any more of your own I/O to the clipboard until you call CloseIFF().
+ *)
+ ClipboardHandle= RECORD
+  req: CL.IOClipReq;
+  cbPort: ED.MsgPort;
+  satisfyPort: ED.MsgPort;
+ END;
+ ClipboardHandlePtr= POINTER TO ClipboardHandle;
+
+
+CONST
+(*****************************************************************************)
+(* IFF return codes. Most functions return either zero for success or
+ * one of these codes. The exceptions are the read/write functions which
+ * return positive values for number of bytes or records read or written,
+ * or a negative error code. Some of these codes are not errors per sae,
+ * but valid conditions such as EOF or EOC (End of Chunk).
+ *)
+ ifferrEof=	  -1;	(* Reached logical end of file	*)
+ ifferrEoc=	  -2;	(* About to leave context	*)
+ ifferrNoscope=  -3;	(* No valid scope for property	*)
+ ifferrNomem=	  -4;	(* Internal memory alloc failed *)
+ ifferrRead=	  -5;	(* Stream read error		*)
+ ifferrWrite=	  -6;	(* Stream write error		*)
+ ifferrSeek=	  -7;	(* Stream seek error		*)
+ ifferrMangled=  -8;	(* Data in file is corrupt	*)
+ ifferrSyntax=	  -9;	(* IFF syntax error		*)
+ ifferrNotiff=	  -10;	(* Not an IFF file		*)
+ ifferrNohook=	  -11;	(* No call-back hook provided	*)
+ iffReturn2client= -12;	(* Client handler normal return *)
+
+
+(*****************************************************************************)
+
+
+(* Universal IFF identifiers *)
+ idFORM	= CAST(LONGINT,'FORM');
+ idLIST	= CAST(LONGINT,'LIST');
+ idCAT	= CAST(LONGINT,'CAT ');
+ idPROP	= CAST(LONGINT,'PROP');
+ idNULL	= CAST(LONGINT,'    ');
+
+(* Identifier codes for universally recognized local context items *)
+ ifflciPROP		= CAST(LONGINT,'prop');
+ ifflciCOLLECTION	= CAST(LONGINT,'coll');
+ ifflciENTRYHANDLER	= CAST(LONGINT,'enhd');
+ ifflciEXITHANDLER	= CAST(LONGINT,'exhd');
+
+
+(*****************************************************************************)
+
+
+(* Control modes for ParseIFF() function *)
+ iffparseScan= 0;
+ iffparseStep= 1;
+ iffparseRawstep= 2;
+
+
+(*****************************************************************************)
+
+
+(* Control modes for StoreLocalItem() function *)
+ iffsliRoot=  1;  (* Store in default context	  *)
+ iffsliTop=   2;  (* Store in current context	  *)
+ iffsliProp=  3;  (* Store in topmost FORM or LIST *)
+
+
+(*****************************************************************************)
+
+
+(* Magic value for writing functions. If you pass this value in as a size
+ * to PushChunk() when writing a file, the parser will figure out the
+ * size of the chunk for you. If you know the size, is it better to
+ * provide as it makes things faster.
+ *)
+ iffsizeUnknown= -1;
+
+
+(*****************************************************************************)
+
+
+(* Possible call-back command values *)
+ iffcmdInit= 0;	(* Prepare the stream for a session *)
+ iffcmdCleanup= 1;(* Terminate stream session	    *)
+ iffcmdRead=	2;	(* Read bytes from stream	    *)
+ iffcmdWrite= 3;	(* Write bytes to stream	    *)
+ iffcmdSeek=	4;	(* Seek on stream		    *)
+ iffcmdEntry= 5;	(* You just entered a new context   *)
+ iffcmdExit=	6;	(* You're about to leave a context  *)
+ iffcmdPurgecli= 7;(* Purge a LocalContextItem	    *)
+
+END IFFParseD.
+@endnode

@@ -1,0 +1,45 @@
+	.SECTION	"temps",$80
+__TEMP_var0:	.DS	16
+	.SECTION	"args",$a0
+__ARGS:	.DS	16
+	.SECTION	"code",$2000
+_A:	.DS 1
+_B:	.DS 1
+_C:	.DS 1
+_ASTR:	.DB 16,84,104,105,115,32,105,115,32,97,32,83,84,82,73,78,103
+APROC_ARG__D:	.DS 1
+APROC:
+	STA	APROC_ARG__D
+	JMP	APROC_Lab0
+APROC_E:	.DS 1
+APROC_Lab0:
+	LDA	APROC_ARG__D+0
+	CLC
+	ADC	_A+0
+	SEC
+	SBC	_C+0
+	STA	APROC_E+0
+		;If Statement
+	LDA	_B+0
+	CMP	APROC_E+0
+	BCS	APROC_true__Lab3
+	JMP	APROC_false__Lab2
+APROC_true__Lab3:
+	LDA	APROC_E+0
+	SEC
+	SBC	_B+0
+	STA	APROC_E+0
+	LDA	_B+0
+	SEC
+	SBC	APROC_ARG__D+0
+	LDX	_A+0
+APROC_Lab4:
+	CMP	#128
+	ROR	A
+	DEX
+	BNE	APROC_Lab4
+	STA	_C+0
+	JMP	APROC_exit__Lab1
+APROC_false__Lab2:
+APROC_exit__Lab1:
+	RTS

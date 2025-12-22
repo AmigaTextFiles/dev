@@ -1,0 +1,255 @@
+#define callargs(op)        (op->numres+op->numargs+op->is_param)
+#define closure_size(op)    2+callargs(op)+(op->numres!=1)
+
+#define node_args(cl)	cl->ARGS[0]
+#define node_cont(cl)	cl->ARGS[1]
+
+TERM
+DEFUN_(_RUNTIMEclosure_0,(numargs,op,ir,VAR_args),
+      unsigned numargs AND
+      OPNREC   op      AND
+      INSTREC  ir      AND
+      VAR_decl)
+ { REGISTER unsigned i = 0; 
+   REGISTER unsigned cl_size = closure_size(op);
+   REGISTER TERM cl;
+   VAR_decl1
+  
+#ifdef STATISTICS
+  UCL++;
+#endif
+
+   cl=NEW_CELL(cl_size);
+   cl->NAME=0; /* Closure-Node with ref-count 1 */
+   node_args(cl)=(TERM)numargs;
+   VAR_init(ir);
+    while(i<numargs) cl->ARGS[(i++)+3] = VAR_val;
+   VAR_end;
+   if (op->is_param) {
+     node_cont(cl)=(TERM) INST_OPR(op,ir);
+     cl->ARGS[cl_size-1]=(TERM) ir;
+   }
+   else
+     node_cont(cl)=(TERM) op;
+   return cl;
+}
+
+TERM
+DEFUN_(_RUNTIMEcall_0,(DB,n,cl,VAR_args),
+      unsigned DB AND
+      unsigned n  AND
+      CLOSURE  cl AND
+      VAR_decl)
+ { REGISTER unsigned i;
+   REGISTER unsigned j;
+   REGISTER unsigned numargs=(unsigned)(node_args(cl));
+   REGISTER TERM     clp=cl;
+   REGISTER TERM     *a;
+   REGISTER TERM     RES; 
+   REGISTER OPNREC   op; 
+   REGISTER SORTREC  *sr;
+   REGISTER unsigned unshared = 0;
+   extern void EXFUN(exit,(unsigned));
+   VAR_decl1
+    
+   while (OPN(clp)) {
+     clp=node_cont(clp);
+     numargs+=(unsigned)(node_args(clp));
+   }
+   op=(OPNREC)(node_cont(clp));
+
+   if (n+numargs < op->numargs) { /* Apply */
+#ifdef STATISTICS
+     APPLY++;
+#endif
+     clp=NEW_CELL(n+2);
+     clp->NAME=1; /* Apply-Node with ref-count 1 */
+     node_args(clp)=(TERM)n;
+     node_cont(clp)=(TERM)cl;
+     i=2;
+     n+=i;
+     VAR_init(cl);
+      while(i<n) clp->ARGS[i++] = VAR_val;
+     VAR_end;
+     return clp;  
+   }
+    
+   a= &(clp->ARGS[2]);
+
+   i=numargs+1;
+   n+=i;
+   VAR_init(cl);
+    while(i<n) a[i++]= VAR_val;
+   VAR_end;
+    
+   if (!OPN(cl)) { /* Closure-Node */
+     if (ONE_REF(cl)) /* unshared Closure-Node */
+       /* ... so nothing has to be copied (and freed afterwards) */
+       unshared = 1;
+     else {  /* shared Closure-Node */
+       /* ... so copy only the arguments which are "old" */
+       j=(unsigned)node_args(clp); sr= &(op->args_arr[j-1]);
+       while(j) COPY(*sr--,a[j--]);
+     }
+   } else { /* Apply-Node */
+     /* ... copy the "old" arguments of the Closure-Node */
+     sr= &(op->args_arr[(j=(unsigned)node_args(clp))-1]);
+     while(j) COPY(*sr--,a[j--]);
+     /* ... move and copy the arguments of the Apply-Nodes */
+     clp=cl; 
+     sr= &(op->args_arr[(j=numargs)-1]);
+     while (OPN(clp)) {
+       i=(unsigned)(node_args(clp))+1;
+       while(i>1) a[j--]=COPY(*sr--,clp->ARGS[i--]); 
+       clp=node_cont(clp);
+     }
+   }
+    
+#if DEBUG
+   if (*(op->name) != '_') {
+      (*(op->calls))++;
+      if (DB && (DOING_IO==0)) D_CALL(op,a);
+   } else NODBX=FALSE;
+      
+#endif
+
+   callswitch(callargs(op))
+       
+#ifdef DEBUG
+   if (*(op->name) != '_') {
+     if (DB && (DOING_IO==0)) D_EXIT(a);
+   }
+#endif
+
+   RES=a[0];
+    
+   /* ... free the closure */
+   if (unshared) {
+     REGISTER unsigned i0=closure_size(op);
+     if (op->is_param) FREE_OPN(op);
+     MDEALLOC(i0,cl);
+   } else
+     free_CLOSURE(cl);
+   return RES;
+ }
+
+static SORTREC *
+DEFUN(free_CLOSURE2,(cl), 
+      CLOSURE cl)
+ { REGISTER unsigned numargs=(unsigned)(node_args(cl));
+   if (DZ_REF(cl)) {
+     REGISTER unsigned i=2;
+     REGISTER SORTREC *sorts;
+     numargs+=i;
+#define FREE_CLOS						\
+     if(OPN(cl)) {						\
+       sorts=free_CLOSURE2(node_cont(cl));			\
+       while (i<numargs) FREE(*sorts++,cl->ARGS[i++]);		\
+       MDEALLOC(numargs,cl);					\
+     } else {							\
+       REGISTER OPNREC op = ((OPNREC)(node_cont(cl)));		\
+       REGISTER unsigned i0=closure_size(op);			\
+       sorts=op->args_arr;					\
+       while (i<numargs) FREE(*sorts++,cl->ARGS[++i]);		\
+       if (op->is_param) FREE_OPN(op);				\
+       MDEALLOC(i0,cl);						\
+     }
+     FREE_CLOS
+     return sorts;
+   }
+   else {
+     while(OPN(cl)) {
+       cl=node_cont(cl);
+       numargs+=(unsigned)(node_args(cl));
+     }
+     return ((OPNREC)(node_cont(cl)))->args_arr+numargs;
+   }
+ }
+
+void
+DEFUN(free_CLOSURE,(cl),
+      CLOSURE cl)
+ {
+   if (DZ_REF(cl)) {
+     REGISTER unsigned i=2;
+     REGISTER unsigned numargs=i+(unsigned)(node_args(cl));
+     REGISTER SORTREC *sorts;
+     FREE_CLOS
+#undef FREE_CLOS
+   } 
+#ifdef STATISTICS
+   else CCL++;
+#endif
+ }
+
+void
+DEFUN(read_CLOSURE,(A,SYSI,OK,RES,SYSO),
+      TERM A      AND
+      TERM SYSI   AND
+      TERM *OK    AND
+      TERM *RES   AND
+      TERM *SYSO)
+ { *OK= false;
+   *SYSO= SYSI;
+   *RES= A;
+ }
+
+SORTREC *
+DEFUN(write_CLOSUR2,(cl),
+      CLOSURE cl)
+ { REGISTER unsigned u=1;
+   REGISTER unsigned i;
+   REGISTER unsigned j=3;
+   REGISTER unsigned numargs=(unsigned)(node_args(cl));
+   REGISTER SORTREC *sorts;
+   REGISTER OPNREC op;
+   extern int EXFUN(strcmp,(CONST char *,CONST char *));
+   if (OPN(cl)) {
+     sorts=write_CLOSUR2(node_cont(cl));
+     j=2;
+   } else { 
+     op=(OPNREC)(node_cont(cl));
+     u= strcmp(op->name,"_");
+     if (u) {
+        if (*(op->name) != '_')
+          S_OUT(op->name);
+        else
+          S_OUT(op->name + 1);
+     }
+     sorts=op->args_arr;
+   }
+   if (numargs){
+    if (u || (numargs>1)) C_OUT('(');
+    for (i=0;i<numargs;i++) {
+      if (i) C_OUT(',');
+      NCWRITE(*sorts++,cl->ARGS[i+j]);
+    }
+    if (u || (numargs>1)) C_OUT(')');
+   }
+   return sorts;
+ }
+
+  
+void
+DEFUN(write_CLOSURE,(A,SYSI,OK,SYSO),
+      CLOSURE A   AND
+      TERM    SYSI AND
+      TERM    *OK  AND
+      TERM    *SYSO) 
+ { *OK= true;
+   *SYSO= SYSI;
+   write_CLOSUR2(A);
+   free_CLOSURE(A);
+ }
+
+TERM
+DEFUN(_X61_X61_CLOSURE,(A1,A2),
+      CLOSURE A1 AND
+      CLOSURE A2)
+ { return (TERM)(A1==A2); }
+
+static int
+DEFUN(EQ_Closure,(A1,A2),
+      CLOSURE A1 AND
+      CLOSURE A2)
+ { return FALSE; }

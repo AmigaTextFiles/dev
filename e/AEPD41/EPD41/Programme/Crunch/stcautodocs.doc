@@ -1,0 +1,792 @@
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+                stc.library v3.303+
+
+
+TABLE OF CONTENTS
+
+stc.library/CrunchData      * Not documented here.. Use CrunchDataTags()
+stc.library/DeCrunchData
+stc.library/AllocBuffer
+stc.library/FreeBuffer
+stc.library/QuickSort
+stc.library/AllocFileBuffer * Not documented here.. Use NewAllocFileBuffer()
+stc.library/FreeFileBuffer
+stc.library/LoadFileBuffer
+stc.library/ProcessHunks
+stc.library/SaveExec        * Not documented here.. Use SaveExecTags()
+stc.library/LibDeCrunchPExec
+stc.library/CrunchDataTags
+stc.library/SaveExecTags
+stc.library/NewAllocFileBuffer
+stc.library/AllocMemBuffer
+stc.library/FileIs
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/DeCrunchData
+
+    NAME
+        DeCrunchData -- Decrunches data that was crunched with stc.library
+                        v2.0 -> 3.304 (S403 and S404)
+
+    SYNOPSIS
+        success = DeCrunchData( destination, source )
+        D0        -36           A0           A1
+
+        BOOL DeCrunchData( APTR destination, APTR source );
+
+    FUNCTION
+        Decrunches stc.library crunched data (S403 and S404) from standard
+        sourcefile to destination buffer.
+
+        If both destination and source has separate memory regions there
+        is no problem to decrunch data.
+
+        If you need to save memory it's possible to decrunch over the source
+        file. Take care you do the following:
+            Decrunch memory buffer must be atleast file's original length +
+            security length. You get both values from the beginning of the
+            source file (the decrunch info header).
+
+            Load source file to the beginning of the decrunch buffer and
+            define destination address "security length" bytes ahead from
+            the beginning of the decrunch buffer.
+
+        Decrunch info header & decrunching:
+
+        Every file crunched with stc.library v2.0+ has following header
+        (16 bytes) at the beginning of the crunched data:
+
+            "S404" or "S403".L  ; cruncher version - string (four bytes)
+            Security length.L   ; overlap size - longword
+            Original length.L   ; decrunched length - longword
+            Crunched length.L   ; crunched length - longword
+               .                ; crunched data starts
+               .
+               .
+
+        Security length is always 16 + something.
+
+        There are also two control words at the end of crunched data. For
+        historical reasons it's quite wierd. I'll explain it with a 
+        following picture:
+
+        <<- Lower memory                           Higher memory ->>
+
+                  +------------ Crunched length ------------+
+                  |                                         |
+        InfoHeader|......................LastWord|BitCounter|MaxBits
+                            ^                 ^       ^         ^
+                            |                 |       |         |
+            Crunched data --+                 |       |         |
+                                              |       |         |
+                         Last crunched word --+       |         |
+                                                      |         |
+           How many used bits there are in LastWord --+         |
+                                                                |
+                                     Efficiency (not in S403) --+
+
+        If both crunched data and destination memory overlap there must
+        be atleast 'Security length' distance between the start of the
+        crunched data and the start of the destination memory:
+
+        <<- Lower memory                               Higher memory ->>
+
+                  <<<-------------- Decrunching direction --------------
+
+        InfoHeader|......................LastWord|BitCounter|MaxBits
+        ^
+        |             |<------------ Destination memory starts here ....
+        |             |
+        +-- SecLen ---+
+        |
+        +---------------> Crunched data starts here..
+
+    INPUTS
+        destination = pointer to the beginning of the memory you want to
+                      decrunch
+        source      = pointer to crunched data (must include the decrunch
+                      info header)
+
+    RESULT
+        success     = TRUE if source was actually S403 or S404 crunched file
+                      FALSE if coulnd't find correct ID string
+
+    SEE ALSO
+        CrunchDataTags()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/AllocBuffer
+
+    NAME
+        AllocBuffer -- Alloc buffer for cruncher
+
+    SYNOPSIS
+        buffer AllocBuffer( version )
+        D0     -42          D0
+
+        BOOL AllocBuffer( ULONG version );
+
+    FUNCTION
+        Allocates correct size of memory for cruncher's use. This buffer
+        includes hash table and lookahead buffer.
+
+    INPUTS
+        version = current cruncher version. Use S404 at the moment.
+
+    RESULT
+        buffer  = pointer to the buffer or NULL if allocation failed.
+
+    SEE ALSO
+        FreeBuffer(), CrunchDataTags()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/FreeBuffer
+
+    NAME
+        FreeBuffer -- Frees buffer allocated with AllocBuffer()
+
+    SYNOPSIS
+        FreeBuffer( buffer )
+        -48         A1
+
+        void FreeBuffer( APTR buffer );
+
+    FUNCTION
+        Frees memory allocated with AllocBuffer().
+
+    INPUTS
+        buffer = pointer to buffer
+
+    SEE ALSO
+        AllocBuffer()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/QuickSort
+
+    NAME
+        QuickSort -- Sort an array of numbers
+
+    SYNOPSIS
+        QuickSort( amount, array )
+        -54        D0      A0
+
+        void QuickSort( ULONG amount, ULONG *array );
+
+    FUNCTION
+        Sorts an array of unsigned lonwords into ascending order. Uses
+        fast quicksort algorithm.
+
+    INPUTS
+        amount = number of items in array
+        array  = pointer to the array of ULONGs
+
+    NOTES
+        This function uses recursion and may need a lot of stack space.
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/FreeFileBuffer
+
+    NAME
+        FreeFileBuffer -- Frees memory allocated with AllocFileBuffer(),
+                       NewAllocFileBuffer() or AllocMemBuffer()
+
+    SYNOPSIS
+        FreeFileBuffer( filebuffer )
+        -66             A1
+
+        void FreeFileBuffer( APTR filebuffer );
+
+    FUNCTION
+        Frees memory allocated with AllocFileBuffer(), NewAllocFileBuffer()
+        or AllocMemBuffer().
+
+    INPUTS
+        filebuffer = pointer buffer
+
+    SEE ALSO
+        AllocFileBuffer(), NewAllocFileBuffer(), AllocMemBuffer()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/LoadFileBuffer
+
+    NAME
+        LoadFileBuffer -- Load file into filebuffer
+
+    SYNOPSIS
+        length = LoadFileBuffer( filebuffer )
+        D0       -72             A0
+
+        ULONG LoadFileBuffer( APTR filebuffer );
+
+    FUNCTION
+        Loads a file into buffer. Buffer must have been allocated with
+        AllocFileBuffer() or NewAllocFileBuffer().
+        This function takes automatically care of placing data into
+        correct place inside buffer (security length).
+
+    INPUTS
+        filebuffer = pointer to buffer allocated with AllocFilebuffer() or
+                     NewAllocFileBuffer()
+
+    RESULT
+        length     = total bytes loaded or NULL if there was an error. In
+                     case of error read DOS errorcode from ErrorMsg.
+
+    NOTES
+        There are few hypotical cases when this function may return error
+        without a reason. Firstly filebuffer includes information of the
+        file to be loaded: file size, security length and name (path).
+
+        If file size changes between NewAllocFileBuffer() and
+        LoadFileBuffer() (some other task modifies the file) an error
+        will be returned. This is because file won't stay locked after
+        NewAllocFileBuffer().
+
+        If you use file names (paths) longer than 108 characters the name
+        will be automatically truncated. So it's recommendent to change
+        work directory instead just adding it to filename.
+
+    BUGS
+        Read also the note considering StcBase->ErrorMsg in
+        include/libraries/stc.h.
+
+    SEE ALSO
+        AllocFileBuffer(), NewAllocFileBuffer()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/ProcessHunks
+
+    NAME
+        ProcessHunks -- Preprocess hunks of command file
+
+    SYNOPSIS
+        processedlength = ProcessHunks( length, filebuffer )
+        D0                -78           D0      A0
+
+        ULONG ProcessHunks( ULONG length, APTR filebuffer );
+
+    FUNCTION
+        Converts hunks of command file to StoneCracker's own and much
+        shorter form. Hunk_symbol, hunk_debug and hunk_ext will be
+        removed and there's no way to get them back.
+
+        Hunk preprocessor does the following for hunks:
+
+          � All debug hunks generated by compiler are deleted (no way to
+            get them back!).
+          � There are no Hunk_ends
+          � Hunk header info at the beginning of the file is modified to
+            a shorter form:
+                  1 longword = (total number of hunks)-1 (=n)
+                n+1 longwords = hunksizes & memory type (as normally)
+          � Hunk_code is converted to %01xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.L
+                                         +-------- datasize>>2 -------+
+          � Hunk_data is converted to %11xxxxxxxxxxxxxxxxxxxxxxxxxxxxxx.L
+                                         +-------- datasize>>2 -------+
+          � Hunk_bss is converted to %100000000000000000.W
+          � Hunk_reloc start with %000000000000000000.W and then
+            Repeat until (number of relocentries) = 0
+              1 word = number of relocentries (null if no relocs anymore)
+              1 word = relocate hunk number..
+              1 longword = %bbbbbbbbxxxxxxxxxxxxxxxxxxxxxxxx.L
+                            ^       +----- First reloc ----+
+                            |
+                            +--> Number of bytes to add to 'First reloc'
+                                   2       = 3 bytes per relocentry
+                                   4 or 6  = 2 bytes per relocentry
+                                   8 or 10 = 1 byte per relocentry
+                                   ?       = only one relocentry
+              followed by (number of relocentries) %bbbbbbbb reloc-
+              entries..
+          � End of processed hunks is %1111111111111111.W
+
+    INPUTS
+        length     = size of file in filebuffer.
+        filebuffer = buffer allocated with AllocFileBuffer() or
+                     NewAllocFileBuffer().
+
+    RESULT
+        processedlength = size of the file after preprocessing or NULL
+                          if it's not possible to convert all hunks
+                          correctly. Read ErrorMsg for errorcode.
+
+                Errorcodes are:
+
+                phNOHEADER = file wasn't a command file.
+                phNOMATCH  = file is probably overlayed. Maximum number of
+                             hunks doesn't match to highest hunk.
+                phUNIT     = there was a hunk_unit.
+                phNAME     = there was a hunk_name (handled since v3.303)
+                phREHEADER = there was hunk_header again.
+                phOVERLAY  = file is overlayed.
+                phBREAK    = file is overlayed.
+                phHUNKID   = unknown hunk ID.
+
+    NOTE
+        All command files _must_ be preprocessed if you want to decrunch
+        them with stc.library's executable decrunchers.
+
+    BUGS
+        These are really not bugs but stc.library can't handle hunk_unit
+        and new hunk types that came with Kickstart 2.0 and higher. Also
+        it's not possible to preprocess overlayed files.
+
+        Read also the note considering StcBase->ErrorMsg in
+        include/libraries/stc.h.
+
+    SEE ALSO
+        AllocFileBuffer(), NewAllocFileBuffer(), LoadFileBuffer()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/LibDeCrunchPExec
+
+    NAME
+        LibDeCrunchPExec -- decrunches crunched command file
+
+    SYNOPSIS
+        LibDeCrunchPExec( hunk1, seglist )
+        -90               A3     A4
+
+        void LibDeCrunchPExec( APTR hunk1, APTR seglist );
+
+    FUNCTION
+        Decrunches and relocates crunched command file. Function also
+        takes care of hunk mess, memory managing and closing library.
+        If decrunching succees decrunched program will be runned.
+        Following assembly example (it's current library decruncher)
+        shows how to use LibDeCrunchPExec():
+
+
+    *
+    * First normal hunk stuff in front of command file..
+    *
+
+        cnop    0,4
+        dc.l	HUNK_HEADER             ; It's command file
+        dc.l	0
+        dc.l	2                       ; Total number of hunks.
+        dc.l	0                       ; Lowest hunk
+        dc.l	1                       ; Highest hunk
+        dc.l	(ldH0End-ldH0Start)>>2	; Size of the first code hunk
+ldH1MemSize:
+        dc.l	0                       ; Size of the second code hunk
+                                        ; Code size + original file size +
+                                        ; security length
+        dc.l    HUNK_CODE
+        dc.l    (ldH0End-ldH0Start)>>2  ; Size of the first code hunk
+
+    *
+    * Code of the first code hunk starts..
+    *
+
+ldH0Start:
+        pea     ldExit(pc)
+        movem.l d0-a6,-(sp)
+        lea     ldH0Start-4(pc),a4      ; Address of this code hunk (seglist)
+        move.l  (a4),a3
+        add.l   a3,a3
+        add.l   a3,a3                   ; Address of next code hunk
+        jsr     18(a3)                  ; Call it.. 18 = 4 bytes of link
+                                        ; to next hunk + 12 bytes of
+                                        ; library name + 2 bytes to make
+                                        ; code longword aligned..
+        movem.l (sp)+,d0-a6
+ldExit:
+        rts
+        cnop    0,4
+ldH0End:
+
+    *
+    * Hunk stuff in front of next hunk (segment)
+    *
+
+		dc.l    HUNK_CODE
+ldH1DataSize:
+        dc.l    0                       ; Size of code & crunched data
+
+    *
+    * Code of the second code hunk & crunched data..
+    *
+
+ldH1Start:
+        dc.b    "stc.library",0,0,0
+        lea     4(a3),a1                ; Here we actually start..
+        moveq   #STCVERSION,d0          ; = 3
+        move.l  $04.w,a6
+        jsr     _LVOOpenLibrary(a6)
+        tst.l   d0
+        bne.s   ldCont
+        rts
+ldCont: move.l  d0,a6
+        jsr     _LVOstcLibDeCrunchPExec(a6)
+ldH1End:
+        ; Crunched data starts here. Jsr passes address of the data
+        ; into the stack..
+        ;
+        ; Library function takes care of closing library..
+
+
+    INPUTS
+        hunk1   = pointer to next hunk in seglist
+        seglist = pointer to program's segment list
+
+    NOTE
+        You really _must_ know what you are going to do because this
+        function causes easily those red boxes. There can't more than
+        two hunks in command file that includes this function and the
+        example above is the only way how to use function correctly.
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/CrunchDataTags
+
+    NAME
+        CrunchDataTags -- crunch data in buffer
+
+    SYNOPSIS
+        crunchedlength = CrunchDataTags( taglist )
+        D0               -96             A0
+
+        ULONG CrunchDataTags( struct TagItem * );
+
+    FUNCTION
+        Crunches data in buffer with the latest algorithm or actually
+        with the algorithm you defined with AllocBuffer() (both S403 and
+        S404 algorithms default to S404).
+
+        There are following tags for CrunchDataTags():
+
+        cdDESTINATION - you must give filebuffer as a destination. See
+            AllocFileBuffer(), NewAllocFileBuffer(), AllocMemBuffer() and
+            LoadFileBuffer().
+
+        cdLENGTH - size of file to be crunched.
+
+        cdABORTFLAGS - there are three possibilities and only one of them
+            can be used at once. If cdABORTFLAGS == cdAbortNIL there's no
+            way to abort crunching process.
+            If cdABORTFLAGS == cdAbortGADGET function expects to find valid
+            pointer to a message structure in cdMSGPORT tag. This message
+            port is checked every now and then if a gadget event has
+            arrived. Note! The "abort gadget's" user data field must be
+            NULL. If your message port gets gadget events from several
+            gadgets take care that only "abort gadget's" user data field
+            is NULL.
+            If cdABORTFLAGS == cdAbortCTRLC ctrl-c signal is checked. This
+            works only when your program is running under CLI without own
+            window.
+
+        cdOUTPUTFLAGS - there are three possibilities and only one of them
+            can be used at once. If cdOUTPUTFLAGS == cdOutPutNIL then no
+            output is done.
+            If cdABORTFLAGS == cdOutPutWIN function expects to find valid
+            pointer to your window's rastport in cdRASTPORT tag. Number of
+            bytes still remaining is written into your window. Position
+            must be defines with cdXPOS & cdYPOS tags.
+            If cdOutPutFLAGS == cdOutPutCLI function expects to find file
+            handle (use DOS Output() ) in cdRASTPORT tag. The counter is
+            written into CLI.
+
+    cdXPOS - define relative x position for crunch counter in your window.
+            You need this tag only when cdOUTPUTFLAGS == cdOutPutWIN.
+
+    cdYPOS - define relative y position for crunch counter in your window.
+            You need this tag only when cdOUTPUTFLAGS == cdOutPutWIN.
+
+    cdRASTPORT - pointer to your window's raster port. You need this tag
+            only when cdOUTPUTFLAGS == cdOutPutWIN.
+            If cdOUTPUTFLAGS == cdOutPutCLI this tag must be CLI's file
+            handle (use DOS Output() ).
+
+    cdMSGPORT - pointer to your window's message port. This tag is used
+            and needed only when cdABORTFLAGS == cdAbortGADGET.
+
+    cdDISTBITS - define cruncher's efficiency. There are five possibilities:
+            cdDist1K  = the worst efficiency but the fastest
+            cdDist2K  =            .
+            cdDist4K  =            .
+            cdDist8K  =            .
+            cdDist16K = the best efficiency but the slowest
+
+    cdBUFFER - pointer to buffer you have allocated with AllocBuffer().
+
+    INPUTS
+        taglist = pointer to your taglist (an array of longwords). The
+                  taglist must end with TAG_DONE.
+
+    RESULT
+        crunchedlength = new crunched length (includes 16 bytes of decrunch
+                         info header), NULL if crunching failed or -1L if
+                         user aborted crunching. (this value is always
+                         longword aligned)
+
+    SEE ALSO
+        DeCrunchData(), LoadFileBuffer(), AllocFileBuffer(),
+        NewAllocFileBuffer(), AllocMemBuffer()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/SaveExecTags
+
+    NAME
+        SaveExecTags -- saves crunched file with decruncher
+
+    SYNOPSIS
+        savedlength = SaveExecTags( taglist )
+        D0            -102          A0
+
+        ULONG SaveExecTags( struct TagItem *taglist );
+
+    FUNCTION
+        Saves crunched file with wanted decruncher or without decruncher.
+
+        There are following tags for SaveExecTags():
+
+        sxSAVETYPE - define what kind of decruncher you want to attach to
+                the crunched file. Stc.library v3.303 & v3.304 have six
+                types:
+                sxData          = no decruncher, just crunched data
+                sxPExec         = normal decruncher for command files. All
+                                  needed hunks, memory handling and
+                                  relocation is included. Average speed.
+                sxPExecLib      = same as above but needs stc.library for
+                                  decrunching. Fast & short decruncher!
+                sxAbsNormal     = normal decruncher for absolute files. One
+                                  hunk and cache code. Average speed.
+                sxAbsPlain      = decruncher included but without hunks so
+                                  it's not runable from CLI or workbench.
+                                  No cache code. Average speed.
+                sxAbsKillSystem = special decruncher for absolute files. One
+                                  hunk, cache code, stack relocation, forces
+                                  VBR (=vector base register) to zero and SR
+                                  (=status register) is modified. Use only
+                                  if you need to overdrive OS. Average
+                                  speed.
+                    NOTE! Kill system decruncher returns processor type
+                          in A4 register. If A4 = $00000000 mc68000/010 is
+                          presented and if A4 = $ffffffff mc68020/030/040
+                          is presented!
+
+        sxFILENAME - pointer NULL terminated filename.
+
+        sxDATABUFFER - pointer to filebuffer that was allocated with
+                AllocFileBuffer() or NewAllocFileBuffer().
+
+        sxLENGTH - size of crunched file. CrunchDataTags() returns this
+                value.
+
+        sxLOAD - start address of absolute file. You need this with all
+                absolute files.
+
+        sxJUMP - run address of absolute file. You need this with all
+                absolute files.
+
+        sxDECR - memory location for decruncher code. You need this when
+                sxSAVETYPE == sxAbsKillSystem.
+
+        sxUSP - new memory location for user stackpointer. You need this
+                when sxSAVETYPE == sxAbsKillSystem.
+
+        sxSSP - new memory location for system stackpointer (=interrupt
+                stackppointer). You need this when sxSAVETYPE ==
+                sxAbsKillSystem.
+
+        sxSR - define status register. The value is loaded into SR just
+                before running your code so flags won't change during
+                decrunching. You need this when sxSAVETYPE ==
+                sxAbsKillSystem.
+
+    INPUTS
+        taglist = pointer to your taglist (an array of longwords). The
+                  taglist must end with TAG_DONE.
+
+    RESULT
+        savedlength = total bytes saved to the disk or NULL if an error
+                      occured. Read ErrorMsg for DOS errorcode.
+
+    BUGS
+        Read also the note considering StcBase->ErrorMsg in
+        include/libraries/stc.h.
+
+    SEE ALSO
+        CrunchDataTags()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/NewAllocFileBuffer
+
+    NAME
+        NewAllocFileBuffer -- allocate memory for file
+
+    SYNOPSIS
+
+        filebuffer = NewAllocFileBUffer( securitylength, filename )
+        D0           -108                D0              A0
+
+        APTR NewAllocFileBuffer( ULONG securitylength, char *filename );
+
+    FUNCTION
+        Allocates memory for file to be crunched. This is the only way
+        to do it in future compatible way. Security length must be even
+        value (prefer longword alignment).
+
+    INPUTS
+        securitylength = how many bytes source data and crunched data can
+                         overlap each other without confusing crunching or
+                         decrunching.
+
+        filename       = pointer to NULL terminated filename. In maximum
+                         108 characters (including path if added).
+
+    RESULT
+        filebuffer = pointer to filebuffer that is used with many other
+                     functions or NULL if an error occured. In case of
+                     error if:
+                        ErrorMsg = NULL then there wasn't enough memory,
+                        ErrorMsg <> NULL it's the DOS errorcode.
+
+    BUGS
+        Read also the note considering StcBase->ErrorMsg in
+        include/libraries/stc.h.
+
+    SEE ALSO
+        DeCrunchData(), LoadFileBuffer(), CrunchDataTags(), SaveExecTags()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/AllocMemBuffer
+
+    NAME
+        AllocMemBuffer -- allocate memory for misc data
+
+    SYNOPSIS
+        filebuffer = AllocMemBuffer( securitylength, memsize )
+        D0           -114            D0              D1
+
+        APTR AllocMemBuffer( ULONG securitylength, ULONG memsize );
+
+    FUNCTION
+        Allocates memory for "filebuffer" in future compatible way but you
+        can't use LoadFileBuffer() with this filebuffer pointer. This
+        function makes it possible to crunch anykind of data, not just
+        files.
+        You must take care of placing data into correct place in
+        filebuffer yourself. The data (..you want to crunch) must start
+        "security length" distance ahead from the start of the filebuffer!
+
+        Like in this assembly example:
+
+
+myseclen    equ     4           ; security length we use in this example
+
+            move.l  stcbase,a6
+            moveq   #myseclen,d0
+            move.l  #10240,d1       ; we want 10Kb buffer
+            move.l  d1,d2
+            jsr     _LVOAllocMemBuffer(a6)
+            move.l  d0,filebuffer   ; did we get memory
+            beq     nomemory
+
+            lea     mydata,a0       ; start of data we want to crunch
+            move.l  d0,a1           * a1 = filebuffer     *
+            addq    #myseclen,a1    * add security length *
+
+            lsr     #2,d2
+            subq    #1,d2           ; how many longwords to move
+loop:       move.l  (a0)+,(a1)+     ; zwing!
+            dbra    d2,loop
+            .
+            .
+*
+* And now we can go on crunching the contents of the filebuffer with
+* CrunchDataTags() and then save it with SaveExecTags(). And when we
+* don't need the buffer anymore it can be freed with FreeFileBuffer().
+*
+
+    INPUTS
+        securitylength = how many bytes source data and crunched data can
+                         overlap each other without confusing crunching or
+                         decrunching.
+
+        memsize        = size of the filebuffer.
+
+    RESULT
+        filebuffer = pointer to filebuffer or NULL if no memory.
+
+    SEE ALSO
+        FreeFileBuffer(), CrunchDataTags(), SaveExecTags()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+stc.library/FileIs
+
+    NAME
+        FileIs -- examine file if it's already crunched
+
+    SYNOPSIS
+        fileinfo = FileIs( filename )
+        D0         -120    A0
+
+        ULONG FileIs( char *filename );
+
+    FUNCTION
+        Examines file if it's already crunched with any of stc.library
+        v2.0+ cruncher. This function finds and separates all decrunchers
+        and cruncher types used in stc.library v2.0+.
+        Returned fileinfo has a bit complicated layout. The fileinfo is
+        divided into two parts. Bits 31-24 include info about the file and
+        bits 23-0 include additional info (bytes to skip or DOS errorcode).
+
+        IAAA.L = fileinfo
+        ^^-^
+        | \|
+        |  |
+        |  +-----> AAA, bits 23-0, additional info
+        |
+        |
+        +--> I = %aabbcccc, bits 31-24
+
+        bits 31-30 %aa   = filetype:
+            isEXEC          %10 = exec (command file)
+            isDATA          %01 = data (can't be runned)
+                            %11 = reserved
+                            %00 = DOS error occured during examing!
+        bits 29-28 %bb   = cruncher type:
+                            %00 = not crunched
+            isS403          %10 = S403
+            isS404          %01 = S404
+                            %11 = reserved
+        bits 27-24 %cccc = decruncher type:
+                            %0000 = not crunched? (sxData?)
+            isNPEXEC        %0001 = exec, normal decruncher (sxPExec)
+            isLPEXEC        %0010 = exec, library decruncher (sxPExecLib)
+            isNABS          %0011 = absolute normal (sxAbsNormal)
+            isPABS          %0100 = absolute plain (sxPlain)
+            isKABS          %0101 = absolute kill system (sxKillSystem)
+                            rest are reserved..
+
+        If %aa = %00 (DOS error occured during examing) AAA, bits 23-0,
+        include DOS errorcode.
+        Otherwise AAA, bits 23-0, include the number of bytes from the
+        beginning of the file to the "decrunch info header" (=size of
+        decruncher).
+
+        Here are some examples of bitcombinations for different files
+        (bits 31-24):
+                                             aabbcccc
+            crunched absolute plain (S404): %01010100
+
+                                             aabbcccc
+            normal command file:            %10000000
+
+                                             aabbcccc
+            crunched libexecutable (S404):  %10010010
+
+    INPUTS
+        filename = pointer to NULL terminated filename.
+
+    RESULT
+        fileinfo = info about the file or DOS errorcode.
+
+    SEE ALSO
+        SaveExecTags(), DeCrunchData()
+
+=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+MOVEQ   #0,D0
+RTS                     ; succesful exit..

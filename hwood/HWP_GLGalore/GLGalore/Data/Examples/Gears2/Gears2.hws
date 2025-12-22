@@ -1,0 +1,504 @@
+/*
+** Gears2.hws
+**
+** Hollywood port by Andreas Falkenhahn based on C code found in the MiniGL SDK
+*/
+
+@VERSION 6,0
+
+@REQUIRE "glgalore"
+
+@DISPLAY {Width = 640, Height = 480, Sizeable = True, Title = "Gears"}
+
+/*
+ * nt - number of teeth
+ * wd - width of gear at teeth
+ * ir - inside radius absolute scale
+ * or - radius at outside of wheel (tip of tooth) ratio of ir
+ * tp - ratio of tooth in slice of circle (0..1] (1 = teeth are touching at base)
+ * tip - ratio of tip of tooth (0..tp] (cant be wider that base of tooth)
+ * ns - number of elements in wheel width profile
+ * *ip - list of float pairs {start radius, width, ...} (width is ratio to wd)
+ *
+ */
+
+/* gear lying on xy plane, z for width. all normals calulated
+   (normalized) */
+
+Function p_Gear(nt, wd, ir, orr, tp, tip, ns, ip)
+
+	Local prev
+	Local t
+
+	; estimat # times to divide circle
+	If nt <= 0
+		circle_subdiv = 64
+	Else
+		; lowest multiple of number of teeth
+		circle_subdiv = nt;
+		While circle_subdiv < 64 Do circle_subdiv = circle_subdiv + nt
+	EndIf
+
+	; --- draw wheel face ---
+	; draw horzontal, vertical faces for each section. if first
+	; section radius not zero, use wd for 0.. first if ns == 0
+	; use wd for whole face. last width used to edge.
+
+	If ns <= 0
+		p_FlatFace(0.0, ir, wd)
+	Else
+		; draw first flat_face, then continue in loop
+		If ip[0].Rad > 0.0
+			p_FlatFace(0.0, ip[0].Rad * ir, wd)
+			prev = wd
+			t = 0
+		Else
+			p_FlatFace(0.0, ip[1].Rad * ir, ip[0].wid * wd)
+			prev = ip[0].wid
+			t = 1
+		EndIf
+
+		For Local k = t To ns - 1
+
+			If prev < ip[k].wid
+				p_DrawInside(prev * wd, ip[k].wid * wd, ip[k].Rad * ir)
+			Else
+				p_DrawOutside(prev * wd, ip[k].wid * wd, ip[k].Rad * ir)
+			EndIf
+			prev = ip[k].wid
+
+			; - draw to edge of wheel, add final face if needed
+			If k = ns - 1
+
+				p_FlatFace(ip[k].Rad * ir, ir, ip[k].wid * wd)
+
+				; now draw side to match tooth rim
+				If ip[k].wid < 1.0
+					p_DrawInside(ip[k].wid * wd, wd, ir)
+				Else
+					p_DrawOutside(ip[k].wid * wd, wd, ir)
+				EndIf
+
+			Else
+				p_FlatFace(ip[k].Rad * ir, ip[k + 1].Rad * ir, ip[k].wid * wd)
+			EndIf
+		Next
+	EndIf
+
+	; --- tooth side faces ---
+	p_ToothSide(nt, ir, orr, tp, tip, wd)
+
+EndFunction
+
+Function p_ToothSide(nt, ir, orr, tp, tip, wd)
+
+	Local endx = 2.0 * #PI / nt;
+	Local x = {}
+	Local y = {}
+	Local s = {}
+	Local c = {}
+
+	orr = orr * ir         ; or is really a ratio of ir
+  
+	Local i = 0
+
+	While i < 2.0 * #PI - endx / 4.0
+
+		c[0] = Cos(i)
+		s[0] = Sin(i)
+		c[1] = Cos(i + endx * (0.5 - tip / 2))
+		s[1] = Sin(i + endx * (0.5 - tip / 2))
+		c[2] = Cos(i + endx * (0.5 + tp / 2))
+		s[2] = Sin(i + endx * (0.5 + tp / 2))
+
+		x[0] = ir * c[0]
+		y[0] = ir * s[0]
+		x[5] = ir * Cos(i + endx)
+		y[5] = ir * Sin(i + endx)
+	    
+		; ---treat veritices 1,4 special to match strait edge of face
+		x[1] = x[0] + (x[5] - x[0]) * (0.5 - tp / 2)
+		y[1] = y[0] + (y[5] - y[0]) * (0.5 - tp / 2)
+		x[4] = x[0] + (x[5] - x[0]) * (0.5 + tp / 2)
+		y[4] = y[0] + (y[5] - y[0]) * (0.5 + tp / 2)
+		x[2] = orr * Cos(i + endx * (0.5 - tip / 2))
+		y[2] = orr * Sin(i + endx * (0.5 - tip / 2))
+		x[3] = orr * Cos(i + endx * (0.5 + tip / 2))
+		y[3] = orr * Sin(i + endx * (0.5 + tip / 2))
+
+		; draw face trapezoids as 2 tmesh
+		gl.Normal(0.0, 0.0, 1.0)
+		gl.Begin(#GL_TRIANGLE_STRIP)
+		gl.Vertex(x[2], y[2], wd / 2)
+		gl.Vertex(x[1], y[1], wd / 2)
+		gl.Vertex(x[3], y[3], wd / 2)
+		gl.Vertex(x[4], y[4], wd / 2)
+		gl.End()
+
+		gl.Normal(0.0, 0.0, -1.0)
+		gl.Begin(#GL_TRIANGLE_STRIP)
+		gl.Vertex(x[2], y[2], -wd / 2)
+		gl.Vertex(x[1], y[1], -wd / 2)
+		gl.Vertex(x[3], y[3], -wd / 2)
+		gl.Vertex(x[4], y[4], -wd / 2)
+		gl.End()
+
+		; draw inside rim pieces
+		gl.Normal(c[0], s[0], 0.0)
+		gl.Begin(#GL_TRIANGLE_STRIP)
+		gl.Vertex(x[0], y[0], -wd / 2)
+		gl.Vertex(x[1], y[1], -wd / 2)
+		gl.Vertex(x[0], y[0], wd / 2)
+		gl.Vertex(x[1], y[1], wd / 2)
+		gl.End()
+
+		; draw up hill side
+		Block
+			; calculate normal of face
+			Local a = x[2] - x[1]
+			Local b = y[2] - y[1]
+			Local n = 1.0 / Sqrt(a * a + b * b)
+			a = a * n
+			b = b * n
+			gl.Normal(b, -a, 0.0)
+		EndBlock
+
+		gl.Begin(#GL_TRIANGLE_STRIP)
+		gl.Vertex(x[1], y[1], -wd / 2)
+		gl.Vertex(x[2], y[2], -wd / 2)
+		gl.Vertex(x[1], y[1], wd / 2)
+		gl.Vertex(x[2], y[2], wd / 2)
+		gl.End()
+	    
+		; draw top of hill
+		gl.Normal(c[1], s[1], 0.0)
+		gl.Begin(#GL_TRIANGLE_STRIP)
+		gl.Vertex(x[2], y[2], -wd / 2)
+		gl.Vertex(x[3], y[3], -wd / 2)
+		gl.Vertex(x[2], y[2], wd / 2)
+		gl.Vertex(x[3], y[3], wd / 2)
+		gl.End()
+
+		; draw down hill side
+		Block
+			; calculate normal of face
+			Local a = x[4] - x[3]
+			Local b = y[4] - y[3]
+			Local c = 1.0 / Sqrt(a * a + b * b)
+			a = a * c
+			b = b * c
+			gl.Normal(b, -a, 0.0)
+		EndBlock
+
+		gl.Begin(#GL_TRIANGLE_STRIP)
+		gl.Vertex(x[3], y[3], -wd / 2)
+		gl.Vertex(x[4], y[4], -wd / 2)
+		gl.Vertex(x[3], y[3], wd / 2)
+		gl.Vertex(x[4], y[4], wd / 2)
+		gl.End()
+	    
+		; inside rim part
+		gl.Normal(c[2], s[2], 0.0)
+		gl.Begin(#GL_TRIANGLE_STRIP)
+		gl.Vertex(x[4], y[4], -wd / 2)
+		gl.Vertex(x[5], y[5], -wd / 2)
+		gl.Vertex(x[4], y[4], wd / 2)
+		gl.Vertex(x[5], y[5], wd / 2)
+		gl.End()
+
+		i = i + endx
+
+	Wend
+
+EndFunction
+
+Function p_FlatFace(ir, orr, wd)
+
+	Local w
+
+	; draw each face (top & bottom )
+	If wd = 0 Then Return
+
+	w = wd / 2
+
+	While w > -wd
+
+		If w > 0.0
+			gl.Normal(0.0, 0.0, 1.0)
+		Else
+			gl.Normal(0.0, 0.0, -1.0)
+		EndIf
+
+		If ir = 0.0
+
+			; draw as t-fan
+			gl.Begin(#GL_TRIANGLE_FAN)
+			gl.Vertex(0.0, 0.0, w)  ; center
+			gl.Vertex(orr, 0.0, w)
+
+			For Local i = 1 To circle_subdiv - 1
+				gl.Vertex(Cos(2.0 * #PI * i / circle_subdiv) * Orr, Sin(2.0 * #PI * i / circle_subdiv) * orr, w)
+			Next
+
+			gl.Vertex(orr, 0.0, w)
+			gl.End()
+
+		Else
+
+			; draw as tmesh
+			gl.Begin(#GL_TRIANGLE_STRIP)
+			gl.Vertex(orr, 0.0, w)
+			gl.Vertex(ir, 0.0, w)
+      
+			For Local i = 1 To circle_subdiv - 1
+				gl.Vertex(Cos(2.0 * #PI * i / circle_subdiv) * orr, Sin(2.0 * #PI * i / circle_subdiv) * orr, w)
+				gl.Vertex(Cos(2.0 * #PI * i / circle_subdiv) * ir, Sin(2.0 * #PI * i / circle_subdiv) * ir, w)
+			Next
+
+			gl.Vertex(orr, 0.0, w)
+			gl.Vertex(ir, 0.0, w)
+			gl.End()
+		EndIf
+
+		w = w - wd
+	Wend
+
+EndFunction
+
+Function p_DrawInside(w1, w2, Rad)
+
+	If w1 = w2 Then Return
+
+	w1 = w1 / 2
+	w2 = w2 / 2
+
+	For j = 0 To 1
+
+		If j = 1
+			w1 = -w1
+			w2 = -w2
+		EndIf
+
+		gl.Begin(#GL_TRIANGLE_STRIP)
+		gl.Normal(-1.0, 0.0, 0.0)
+		gl.Vertex(Rad, 0.0, w1)
+		gl.Vertex(Rad, 0.0, w2)
+    
+		For Local i = 1 To circle_subdiv - 1
+      
+			Local c = Cos(2.0 * #PI * i / circle_subdiv)
+			Local s = Sin(2.0 * #PI * i / circle_subdiv)
+
+			gl.Normal(-c, -s, 0.0)
+			gl.Vertex(c * Rad, s * Rad, w1)
+			gl.Vertex(c * Rad, s * Rad, w2)
+		Next
+
+		gl.Normal(-1.0, 0.0, 0.0)
+		gl.Vertex(Rad, 0.0, w1)
+		gl.Vertex(Rad, 0.0, w2)
+		gl.End()
+	Next
+
+EndFunction
+
+Function p_DrawOutside(w1, w2, Rad)
+
+	If w1 = w2 Then Return
+
+	w1 = w1 / 2
+	w2 = w2 / 2
+
+	For Local j = 0 To 1
+
+		If j = 1
+			w1 = -w1
+			w2 = -w2
+		EndIf
+
+		gl.Begin(#GL_TRIANGLE_STRIP)
+		gl.Normal(1.0, 0.0, 0.0)
+		gl.Vertex(Rad, 0.0, w1)
+		gl.Vertex(Rad, 0.0, w2)
+    
+		For Local i = 1 To circle_subdiv - 1
+
+			Local c = Cos(2.0 * #PI * i / circle_subdiv)
+			Local s = Sin(2.0 * #PI * i / circle_subdiv)
+
+			gl.Normal(c, s, 0.0)
+			gl.Vertex(c * Rad, s * Rad, w1)
+			gl.Vertex(c * Rad, s * Rad, w2)
+		Next
+
+		gl.Normal(1.0, 0.0, 0.0)
+		gl.Vertex(Rad, 0.0, w1)
+		gl.Vertex(Rad, 0.0, w2)
+		gl.End()
+	Next
+
+EndFunction
+
+Function p_OneFrame()
+
+	gl.Clear(#GL_COLOR_BUFFER_BIT|#GL_DEPTH_BUFFER_BIT)
+
+	gl.PushMatrix()
+	gl.Translate(0.0, 0.0, -4.0)
+	gl.Rotate(a3, 1.0, 1.0, 1.0)
+	gl.Rotate(a4, 0.0, 0.0, -1.0)
+	gl.Translate(0.14, 0.2, 0.0)
+	p_Gear(76, 0.4, 2.0, 1.1, 0.4, 0.04, 6, gear_profile)
+	gl.PopMatrix()
+
+	If spinning
+
+		a1 = a1 + i1
+		If a1 > 360.0 Then a1 = a1 - 360.0
+		If a1 < 0.0 Then a1 = a1 - 360.0
+
+		a2 = a2 + i2
+		If a2 > 360.0 Then a2 = a2 - 360.0
+		If a2 < 0.0 Then a2 = a2 - 360.0
+
+		a3 = a3 + i3
+		If a3 > 360.0 Then a3 = a3 - 360.0
+		If a3 < 0.0 Then a3 = a3 - 360.0
+
+		a4 = a4 + i4
+		If a4 > 360.0 Then a4 = a4 - 360.0
+		If a4 < 0.0 Then a4 = a4 - 360.0
+	EndIf
+
+EndFunction
+
+Function p_Reshape(msg)
+
+	gl.Viewport(0, 0, msg.width, msg.height)
+	gl.MatrixMode(#GL_PROJECTION)
+	gl.LoadIdentity()
+	gl.Frustum(-1.0, 1.0, -1.0, 1.0, d_near, d_far)
+
+	gl.MatrixMode(#GL_MODELVIEW)
+	gl.LoadIdentity()
+	gl.Clear(#GL_COLOR_BUFFER_BIT|#GL_DEPTH_BUFFER_BIT)
+
+	width = w
+	height = h
+
+EndFunction
+
+Function p_Init()
+
+	Local f = {}
+
+	d_near = 1.0
+	d_far = 2000
+	spinning = True
+	circle_subdiv = 0
+
+	gear_profile = {
+		{Rad = 0.000, wid = 0.0},
+		{Rad = 0.300, wid = 7.0},
+		{Rad = 0.340, wid = 0.4},
+		{Rad = 0.550, wid = 0.64},
+		{Rad = 0.600, wid = 0.4},
+		{Rad = 0.950, wid = 1.0}
+	}
+
+	a1 = 27.0
+	a2 = 67.0
+	a3 = 47.0
+	a4 = 87.0
+	i1 = 1.2
+	i2 = 3.1
+	i3 = 2.3
+	i4 = 1.1
+
+      	gl.ClearColor(0.5, 0.5, 0.5, 1.0)
+      	gl.Color(0.3, 0.3, 0.3)
+
+      	p_Reshape({width = 640, height = 480})
+	
+	gl.Enable(#GL_DEPTH_TEST)
+	gl.Clear(#GL_COLOR_BUFFER_BIT|#GL_DEPTH_BUFFER_BIT)
+
+      	gl.Enable(#GL_LIGHTING)
+
+      	gl.Light(#GL_LIGHT0, #GL_SHININESS, 1.0)
+	f[0] = 1.3
+	f[1] = 1.3
+	f[2] = -3.3
+	f[3] = 1.0
+      	gl.Light(#GL_LIGHT0, #GL_POSITION, f)
+	f[0] = 0.8
+	f[1] = 1.0
+	f[2] = 0.83
+	f[3] = 1.0
+      	gl.Light(#GL_LIGHT0, #GL_SPECULAR, f)
+      	gl.Light(#GL_LIGHT0, #GL_DIFFUSE, f)
+      	gl.Enable(#GL_LIGHT0)
+
+      	gl.Light(#GL_LIGHT1, #GL_SHININESS, 1.0)
+	f[0] = -2.3
+	f[1] = 0.3
+	f[2] = -7.3
+	f[3] = 1.0
+      	gl.Light(#GL_LIGHT1, #GL_POSITION, f)
+	f[0] = 1.0
+	f[1] = 0.8
+	f[2] = 0.93
+	f[3] = 1.0
+      	gl.Light(#GL_LIGHT1, #GL_SPECULAR, f)
+      	gl.Light(#GL_LIGHT1, #GL_DIFFUSE, f)
+      	gl.Enable(#GL_LIGHT1)
+
+      	; gear material
+	f[0] = 0.1
+	f[1] = 0.15
+	f[2] = 0.2
+	f[3] = 1.0
+      	gl.Material(#GL_FRONT_AND_BACK, #GL_SPECULAR, f)
+
+	f[0] = 0.9
+	f[1] = 0.3
+	f[2] = 0.3
+	f[3] = 1.0
+      	gl.Material(#GL_FRONT_AND_BACK, #GL_DIFFUSE, f)
+
+	f[0] = 0.4
+	f[1] = 0.9
+	f[2] = 0.6
+	f[3] = 1.0
+      	gl.Material(#GL_FRONT_AND_BACK, #GL_AMBIENT, f)
+
+      	gl.Material(#GL_FRONT_AND_BACK, #GL_SHININESS, 4)
+
+	gl.Clear(#GL_COLOR_BUFFER_BIT|#GL_DEPTH_BUFFER_BIT)
+
+EndFunction
+
+p_Init()
+
+InstallEventHandler({
+	SizeWindow = Function(msg) p_Reshape(msg) EndFunction,
+	ModeSwitch = Function(msg) p_Init() p_Reshape(msg) EndFunction})
+
+; Setup a hardware doublebuffer managed by GL Galore	
+BeginDoubleBuffer(True)
+
+EscapeQuit(True)
+
+Repeat
+	DisableLineHook()
+
+	p_OneFrame()
+
+	EnableLineHook()
+
+	; Swap buffers
+	Flip
+
+	CheckEvent
+Forever
+

@@ -1,0 +1,29 @@
+MODULE	'exec/nodes'
+
+CONST	LIB_VECTSIZE=6,
+		LIB_RESERVED=4,
+		LIB_BASE=-6,
+		LIB_USERDEF=-30,
+		LIB_NONSTD=-30,
+		LIB_OPEN=-6,
+		LIB_CLOSE=-12,
+		LIB_EXPUNGE=-18,
+		LIB_EXTFUNC=-24
+
+OBJECT Library|Lib
+	Node|LN:LN,
+	Flags:UBYTE,
+	pad:UBYTE,
+	NegSize:UWORD,
+	PosSize:UWORD,
+	Version:UWORD,
+	Revision:UWORD,
+	IdString:APTR,
+	Sum:ULONG,
+	OpenCnt:UWORD
+
+FLAG	LIB_SUMMING,
+		LIB_CHANGED,
+		LIB_SUMUSED,
+		LIB_DELEXP,
+		LIB_EXP0CNT

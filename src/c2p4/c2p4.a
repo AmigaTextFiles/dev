@@ -1,0 +1,526 @@
+		xdef	_c2p4
+
+; ---------------------------------------------------------------------
+
+; void __asm c2p4 (register __a2 UBYTE *fBUFFER,
+;                  register __a3 UBYTE *fBUFFER_CMP,
+;                  register __a4 PLANEPTR *planes,
+;                  register __a5 struct Task *task,
+;                  register __d0 ULONG signals,
+;                  register __a6 struct GfxBase *GfxBase);
+;
+; 4-plane unpacked chunky to planar converter.
+; Optimised for 68020/30 with fastmem.
+;
+; Author: Peter McGavin (e-mail peterm@maths.grace.cri.nz), 6 April 1994
+; Based on James McCoull's 4-pass blitter algorithm.
+;
+; This code is public domain.
+;
+; Use chunky comparison buffer.  Return immediately if no diffs found.
+; Perform first 2 passes (Fast->Chip) with the CPU (in 1 pass).
+; Update chunky comparison buffer.
+; Perform passes 3 & 4 with QBlit().
+; Return immediately after launching blits.
+; Signal task from CleanUp() on completion.
+; Task should wait for signal before next call to c2p4().
+;
+; (Unimplemented speedup idea: Might be possible to signal task after pass 3,
+; but will probably need another Wait() somewhere.)
+;
+; Approx timing (A4000/030, 320x200x4):
+;	CPU pass max 18ms (then return)
+;	Asynchronous blitter passes add 31ms
+;
+; Example usage:
+;
+;	/* clear fBUFFER, fBUFFER_CMP, and planes here */
+;	if ((sigbit = AllocSignal(-1)) == -1)
+;		die ("Can't allocate signal!\n");
+;	safe = TRUE;
+;	for (;;) {
+;		... /* render to fBUFFER here */
+;		if (!safe) {
+;			Wait (1<<sigbit);  // wait for previous c2p4 to finish
+;			safe = TRUE;
+;		}
+;	        c2p4 (fBUFFER, fBUFFER_CMP, &RASTPORT->BitMap->Planes[0],
+;			FindTask(NULL), 1<<sigbit, GfxBase);
+;		safe = FALSE;
+;	}
+;	if (!safe)
+;		Wait (1<<sigbit);  // wait for last c2p4 to finish
+;	FreeSignal(sigbit);
+
+width		equ	256	; must be a multiple of 32
+height		equ	128
+toplinestoskip	equ	10
+
+plsiz	 	equ	width/8*height
+pixels		equ	width*height
+offset		equ	width/8*toplinestoskip
+
+cleanup		equ	$40
+
+;		section chunks,code
+
+_c2p4:		movem.l	d2-d7/a2-a6,-(sp)
+
+; save arguments
+
+		move.l	#mybltnode,a0
+		move.l	a2,(chunky-mybltnode,a0)
+		move.l	a4,(planes-mybltnode,a0)
+		move.l	a5,(task-mybltnode,a0)
+		move.l	d0,(signals-mybltnode,a0)
+		move.l	a6,(gfxbase-mybltnode,a0)
+
+;-------------------------------------------------
+;original chunky data
+;0		........a3a2a1a0 ........b3b2b1b0
+;2		........c3c2c1c0 ........d3d2d1d0
+;4		........e3e2e1e0 ........f3f2f1f0
+;6		........g3g2g1g0 ........h3h2h1h0
+;8		........i3i2i1i0 ........j3j2j1j0
+;10		........k3k2k1k0 ........l3l2l1l0
+;12		........m3m2m1m0 ........n3n2n1n0
+;14		........o3o2o1o0 ........p3p2p1p0
+;16		........q3q2q1q0 ........r3r2r1r0
+;18		........s3s2s1s0 ........t3t2t1t0
+;20		........u3u2u1u0 ........v3v2v1v0
+;22		........w3w2w1w0 ........x3x2x1x0
+;24		........y3y2y1y0 ........z3z2z1z0
+;26		........A3A2A1A0 ........B3B2B1B0
+;28		........C3C2C1C0 ........D3D2D1D0
+;30		........E3E2E1E0 ........F3F2F1F0
+;-------------------------------------------------
+
+		move.l	#buff2,a4	; a4 -> buff2 (in Chip)
+		move.l	#$00ff00ff,d7	; constant
+		move.w	#pixels/32,d6	; loop counter
+
+		bra.b	end_pass1loop
+
+		cnop	0,4
+
+; main loop (starts here) processes 32 chunky pixels at a time
+; compare next 32 pixels with compare page, looking for differences
+
+initpass1loop:	cmpm.l	(a2)+,(a3)+
+		bne.w	fix1
+		cmpm.l	(a2)+,(a3)+
+		bne.w	fix2
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix3
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix4
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix5
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix6
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix7
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix8
+
+		addq.l	#8,a4		; skip 8 bytes in output
+
+end_pass1loop:	dbra	d6,initpass1loop
+
+; If we get to here then no difference was found.
+; Signal the task and return.
+
+		move.l	(task-mybltnode,a0),a1
+		move.l	(signals-mybltnode,a0),d0
+		move.l	(4).w,a6
+		jsr	(_LVOSignal,a6)
+
+		movem.l	(sp)+,d2-d7/a2-a6
+		rts
+
+; This becomes the main loop after the first difference is found
+
+pass1loop:	cmpm.l	(a2)+,(a3)+
+		bne.b	fix1
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix2
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix3
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix4
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix5
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix6
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix7
+		cmpm.l	(a2)+,(a3)+
+		bne.b	fix8
+
+		addq.l	#8,a4		; skip 8 bytes in output
+
+		dbra	d6,pass1loop
+
+		bra.w	done
+
+; difference found, restore a2 and a3
+
+fix8:		subq.l	#4,a2
+		subq.l	#4,a3
+fix7:		sub.w	#28,a2
+		sub.w	#28,a3
+		bra.b	go_c2p
+
+fix6:		subq.l	#4,a2
+		subq.l	#4,a3
+fix5:		sub.w	#20,a2
+		sub.w	#20,a3
+		bra.b	go_c2p
+
+fix4:		subq.l	#4,a2
+		subq.l	#4,a3
+fix3:		sub.w	#12,a2
+		sub.w	#12,a3
+		bra.b	go_c2p
+
+fix2:		subq.l	#4,a2
+		subq.l	#4,a3
+fix1:		subq.l	#4,a2
+		subq.l	#4,a3
+
+; convert 32 pixels (passes 1 and 2 combined)
+
+go_c2p:		movem.l	(a2)+,d0-d3/a0/a1/a5/a6	; ABCD EFGH IJKL MNOP QRST UVWX YZ01 2345
+
+		movem.l	d0-d3/a0/a1/a5/a6,(a3)	; update compare buffer
+		adda.w	#32,a3
+
+		lsl.l	#4,d0		; A.B.C.D.
+		move.l	d0,d4		; A.B.C.D.
+		and.l	d7,d4		; ..B...D.
+		eor.l	d4,d0		; A...C...
+
+		move.l	d1,d5		; .E.F.G.H
+		and.l	d7,d5		; ...F...H
+		eor.l	d5,d1		; .E...G..
+
+		or.l	d1,d0		; AE..CG..
+		or.l	d5,d4		; ..BF..DH
+
+		move.l	d2,d1		; .I.J.K.L
+		and.l	d7,d1		; ...J...L
+
+		move.l	d3,d5		; .M.N.O.P
+		and.l	d7,d5		; ...N...P
+
+		lsl.l	#4,d4		; .BF..DH.
+		or.l	d1,d4		; .BFJ.DHL
+		lsl.l	#4,d4		; BFJ.DHL.
+		or.l	d5,d4		; BFJNDHLP
+
+		move.l	d4,(pixels/4,a4)
+
+		eor.l	d5,d3		; .M...O..
+		lsr.l	#4,d3		; ..M...O.
+		eor.l	d1,d2		; .I...K..
+		or.l	d3,d2		; .IM..KO.
+		lsr.l	#4,d2		; ..IM..KO
+		or.l	d2,d0		; AEIMCGKO
+
+		move.l	a6,d3
+		move.l	a5,d2
+		move.l	a1,d1
+
+		move.l	d0,(a4)+
+
+		move.l	a0,d0
+
+		lsl.l	#4,d0		; Q.R.S.T.
+		move.l	d0,d4		; Q.R.S.T.
+		and.l	d7,d4		; ..R...T.
+		eor.l	d4,d0		; Q...S...
+
+		move.l	d1,d5		; .U.V.W.X
+		and.l	d7,d5		; ...V...X
+		eor.l	d5,d1		; .U...W..
+
+		or.l	d1,d0		; QU..SW..
+		or.l	d5,d4		; ..RV..TX
+
+		move.l	d2,d1		; .Y.Z.0.1
+		and.l	d7,d1		; ...Z...1
+
+		move.l	d3,d5		; .2.3.4.5
+		and.l	d7,d5		; ...3...5
+
+		lsl.l	#4,d4		; .RV..TX.
+		or.l	d1,d4		; .RVZ.TX1
+		lsl.l	#4,d4		; RVZ.TX1.
+		or.l	d5,d4		; RVZ3TX15
+
+		move.l	d4,(pixels/4,a4)
+
+		eor.l	d5,d3		; .2...4..
+		lsr.l	#4,d3		; ..2...4.
+		eor.l	d1,d2		; .Y...0..
+		or.l	d3,d2		; .Y2..04.
+		lsr.l	#4,d2		; ..Y2..04
+		or.l	d2,d0		; QUY2SW04
+
+		move.l	d0,(a4)+
+
+		dbra	d6,pass1loop
+
+; start the blitter in the background for passes 3 & 4
+
+done:		move.l	#mybltnode,a1
+		move.l	(gfxbase-mybltnode,a1),a6
+		jsr	(_LVOQBlit,a6)
+
+		movem.l	(sp)+,d2-d7/a2-a6
+		rts
+
+;-----------------------------------------------------------------------------
+; QBlit functions (called asynchronously)
+
+;-------------------------------------------------
+;after pass 2
+;0		a3a2a1a0e3e2e1e0 i3i2i1i0m3m2m1m0
+;2		c3c2c1c0g3g2g1g0 k3k2k1k0o3o2o1o0
+;4		q3q2q1q0u3u2u1u0 y3y2y1y0C3C2C1C0
+;6		s3s2s1s0w3w2w1w0 A3A2A1A0E3E2E1E0
+;
+;pixels/4+0	b3b2b1b0f3f2f1f0 j3j2j1j0n3n2n1n0	
+;pixels/4+2	d3d2d1d0h3h2h1h0 l3l2l1l0p3p2p1p0
+;pixels/4+4	r3r2r1r0v3v2v1v0 z3z2z1z0D3D2D1D0
+;pixels/4+6	t3t2t1t0x3x2x1x0 B3B2B1B0F3F2F1F0
+;-------------------------------------------------
+
+;Pass 3, subpass 1
+;	apt		buff2
+;	bpt		buff2+2
+;	dpt		buff3
+;	amod		2
+;	bmod		2
+;	dmod		0
+;	cdat		$cccc
+;	sizv		pixels/8
+;	sizh		1 word
+;	con		D=AC+(B>>2)~C, ascending
+
+blit31:		moveq	#-1,d0
+		move.l	d0,(bltafwm,a0)
+		move.w	#0,(bltdmod,a0)
+		move.l	#buff2,(bltapt,a0)
+		move.l	#buff2+2,(bltbpt,a0)
+		move.l	#buff3,(bltdpt,a0)
+		move.w	#2,(bltamod,a0)
+		move.w	#2,(bltbmod,a0)
+		move.w	#pixels/8,(bltsizv,a0)
+		move.w	#$cccc,(bltcdat,a0)
+		move.l	#$0DE42000,(bltcon0,a0)	; D=AC+(B>>2)~C
+		move.w	#1,(bltsizh,a0)		;do blit
+		lea	(blit32,pc),a0
+		move.l	a0,(qblitfunc-mybltnode,a1)
+		rts
+
+;Pass 3, subpass 2
+;	apt		buff2+pixels/2-2-2
+;	bpt		buff2+pixels/2-2
+;	dpt		buff3+pixels/2-2
+;	amod		2
+;	bmod		2
+;	dmod		0
+;	cdat		$cccc
+;	sizv		pixels/8
+;	sizh		1 word
+;	con		D=(A<<2)C+B~C, descending
+
+blit32:		move.l	#buff2+pixels/2-2-2,(bltapt,a0)
+		move.l	#buff2+pixels/2-2,(bltbpt,a0)
+		move.l	#buff3+pixels/2-2,(bltdpt,a0)
+		move.l	#$2DE40002,(bltcon0,a0)	; D=(A<<2)C+B~C, desc.
+		move.w	#1,(bltsizh,a0)		;do blit
+		lea	(blit43,pc),a0
+		move.l	a0,(qblitfunc-mybltnode,a1)
+		rts
+
+;-------------------------------------------------
+;after pass 3
+;0		a3a2c3c2e3e2g3g2 i3i2k3k2m3m2o3o2
+;2		q3q2s3s2u3u2w3w2 y3y2A3A2C3C2E3E2
+;
+;pixels/8+0	b3b2d3d2f3f2h3h2 j3j2l3l2n3n2p3p2
+;pixels/8+2	r3r2t3t2v3v2x3x2 z3z2B3B2D3D2F3F2
+;
+;pixels/4+0	a1a0c1c0e1e0g1g0 i1i0k1k0m1m0o1o0
+;pixels/4+2	q1q0s1s0u1u0w1w0 y1y0A1A0C1C0E1E0
+;
+;3*pixels/8+0	b1b0d1d0f1f0h1h0 j1j0l1l0n1n0p1p0
+;3*pixels/8+2	r1r0t1t0v1v0x1x0 z1z0B1B0D1D0F1F0
+;-------------------------------------------------
+
+;Pass 4, plane 3
+;	apt		buff3+0*pixels/8
+;	bpt		buff3+1*pixels/8
+;	dpt		Planes+3*plsiz+offset
+;	amod		0
+;	bmod		0
+;	dmod		0
+;	cdat		$aaaa
+;	sizv		pixels/16
+;	sizh		1 word
+;	con		D=AC+(B>>1)~C, ascending
+
+blit43:		movem.l	a2,-(sp)
+		move.l	#buff3+0*pixels/8,(bltapt,a0)
+		move.l	#buff3+1*pixels/8,(bltbpt,a0)
+		move.l	(planes-mybltnode,a1),a2
+		move.l	(3*4,a2),a2
+		add.w	#offset,a2
+		move.l	a2,(bltdpt,a0)		; Plane3
+		move.w	#0,(bltamod,a0)
+		move.w	#0,(bltbmod,a0)
+		move.w	#pixels/16,(bltsizv,a0)	;/8???
+		move.w	#$aaaa,(bltcdat,a0)
+		move.l	#$0DE41000,(bltcon0,a0)	; D=AC+(B>>1)~C
+		move.w	#1,(bltsizh,a0)		;plane 3
+		lea	(blit41,pc),a0
+		move.l	a0,(qblitfunc-mybltnode,a1)
+		movem.l	(sp)+,a2
+		rts
+
+;-------------------------------------------------
+;Plane3		a3b3c3d3e3f3g3h3 i3j3k3l3m3n3o3p3
+;Plane3+2	q3r3s3t3u3v3w3x3 y3z3A3B3C3D3E3F3
+;-------------------------------------------------
+
+;Pass 4, plane 1
+;	apt		buff3+2*pixels/8
+;	bpt		buff3+3*pixels/8
+;	dpt		Planes+1*plsiz+offset
+;	amod		0
+;	bmod		0
+;	dmod		0
+;	cdat		$aaaa
+;	sizv		pixels/16
+;	sizh		1 word
+;	con		D=AC+(B>>1)~C, ascending
+
+blit41:		movem.l	a2,-(sp)
+		move.l	#buff3+2*pixels/8,(bltapt,a0)
+		move.l	#buff3+3*pixels/8,(bltbpt,a0)
+		move.l	(planes-mybltnode,a1),a2
+		move.l	(1*4,a2),a2
+		add.w	#offset,a2
+		move.l	a2,(bltdpt,a0)		; Plane1
+		move.w	#1,(bltsizh,a0)		;plane 1
+		lea	(blit42,pc),a0
+		move.l	a0,(qblitfunc-mybltnode,a1)
+		movem.l	(sp)+,a2
+		rts
+
+;-------------------------------------------------
+;Plane1		a1b1c1d1e1f1g1h1 i1j1k1l1m1n1o1p1
+;Plane1+2	q1r1s1t1u1v1w1x1 y1z1A1B1C1D1E1F1
+;-------------------------------------------------
+
+;Pass 4, plane 2
+;	apt		buff3+1*pixels/8-2
+;	bpt		buff3+2*pixels/8-2
+;	dpt		Planes+3*plsiz-2+offset
+;	amod		0
+;	bmod		0
+;	dmod		0
+;	cdat		$aaaa
+;	sizv		pixels/16
+;	sizh		1 word
+;	con		D=(A<<1)C+B~C, descending
+
+blit42:		movem.l	a2,-(sp)
+		move.l	#buff3+1*pixels/8-2,(bltapt,a0)
+		move.l	#buff3+2*pixels/8-2,(bltbpt,a0)
+		move.l	(planes-mybltnode,a1),a2
+		move.l	(2*4,a2),d0
+		add.l	#plsiz-2+offset,d0
+		move.l	d0,(bltdpt,a0)		; Plane2+plsiz-2
+		move.l	#$1DE40002,(bltcon0,a0)	; D=(A<<1)C+B~C, desc.
+		move.w	#1,(bltsizh,a0)		;plane 2
+		lea	(blit40,pc),a0
+		move.l	a0,(qblitfunc-mybltnode,a1)
+		movem.l	(sp)+,a2
+		rts
+
+;-------------------------------------------------
+;Plane2		a2b2c2d2e2f2g2h2 i2j2k2l2m2n2o2p2
+;Plane2+2	q2r2s2t2u2v2w2x2 y2z2A2B2C2D2E2F2
+;-------------------------------------------------
+
+;Pass 4, plane 0
+;	apt		buff3+3*pixels/8-2
+;	bpt		buff3+4*pixels/8-2
+;	dpt		Planes+1*plsiz-2+offset
+;	amod		0
+;	bmod		0
+;	dmod		0
+;	cdat		$aaaa
+;	sizv		pixels/16
+;	sizh		1 word
+;	con		D=(A<<1)C+B~C, descending
+
+blit40:		movem.l	a2,-(sp)
+		move.l	#buff3+3*pixels/8-2,(bltapt,a0)
+		move.l	#buff3+4*pixels/8-2,(bltbpt,a0)
+		move.l	(planes-mybltnode,a1),a2
+		move.l	(a2),d0
+		add.l	#plsiz-2+offset,d0
+		move.l	d0,(bltdpt,a0)		; Plane0+plsiz-2
+		move.w	#1,(bltsizh,a0)		;plane 0
+		lea	(blit31,pc),a0
+		move.l	a0,(qblitfunc-mybltnode,a1)
+		moveq	#0,d0			; set Z flag
+		movem.l	(sp)+,a2
+		rts
+
+;-------------------------------------------------
+;Plane0		a0b0c0d0e0f0g0h0 i0j0k0l0m0n0o0p0
+;Plane0+2	q0r0s0t0u0v0w0x0 y0z0A0B0C0D0E0F0
+;-------------------------------------------------
+
+qblitcleanup:	movem.l	a2/a6,-(sp)
+		move.l	#mybltnode,a2
+		move.l	(task-mybltnode,a2),a1	; signal the task
+		move.l	(signals-mybltnode,a2),d0
+		move.l	(4).w,a6
+		jsr	(_LVOSignal,a6)		; may be called from interrupts
+		movem.l	(sp)+,a2/a6
+		rts
+
+;-----------------------------------------------------------------------------
+		section	data,data
+
+		quad
+mybltnode:	dc.l	0		; next bltnode
+qblitfunc:	dc.l	blit31		; ptr to qblitfunc()
+		dc.b	cleanup		; stat
+		dc.b	0		; filler
+		dc.w	0		; blitsize
+		dc.w	0		; beamsync
+		dc.l	qblitcleanup	; ptr to qblitcleanup()
+
+		quad
+chunky:		dc.l	0		; ptr to original chunky data
+planes:		dc.l	0		; ptr to list of output plane ptrs
+task:		dc.l	0		; ptr to this task
+signals:	dc.l	0		; signals to Signal() at cleanup
+gfxbase:	dc.l	0		; GfxBase
+
+;-----------------------------------------------------------------------------
+		section	segment1,bss,chip		; MUST BE IN CHIP !!!!!
+
+buff2		ds.b pixels/2	;Intermediate buffer 2
+buff3		ds.b pixels/2	;Intermediate buffer 3
+
+;-----------------------------------------------------------------------------
+
+		end

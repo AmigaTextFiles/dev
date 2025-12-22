@@ -1,0 +1,267 @@
+; Use a 020-capable assembler for this!!
+		MC68020
+
+		BSS
+;first longword: data read pointer
+;second longword: data end pointer (the last sample WORD to play)
+;third longword: stereo offset pointer (# of bytes to add to get the right channel, 0 = mono)
+;fourth longword: value to add (fixed rate only)
+;fifth longword: remaining add offset (only lower word used)
+Auradata	ds.l	5
+owntimer	ds.w	1
+Aurachmode	ds.w	1
+Auraratemode	ds.w	1
+vbr_addr	ds.l	1
+		DATA
+Auraperlimit	dc.w	248
+Aurahandler	dc.l	AuraIntHandler
+playing_Aura	dc.w	0
+
+		SECTION	"text",CODE
+		XDEF	_InitAura,_RemAura,_PlayAura,_StopAura,_SetAuraParams
+
+; For Barfly...
+		BOPT	ws-,w4-
+
+; _InitAura (void) -- initialize sample playback system
+; returns: 0 = ok, nonzero = error
+_InitAura
+		tst.w	owntimer
+		bne.s	rm_rts
+		movem.l	a5/a6,-(sp)
+		move.w	#$400,$dff09a	;audio ch #3 interrupt off
+		movea.l	4.w,a6
+		btst	#0,$129(a6)	;test 68010+ of AttnFlags
+		beq.s	1$
+		lea	initaura_superv(pc),a5
+		jsr	-$1E(a6)	;Supervisor()
+		move.l	a0,vbr_addr
+1$		move.l	vbr_addr,a0
+		move.l	$70(a0),oldaudiointr	;MODIFIED CODE... therefore...
+		jsr	-$27C(a6)		;CacheClearU()
+		move.w	#1,owntimer
+		moveq	#0,d0
+		movem.l	(sp)+,a5/a6
+		rts
+
+initaura_superv	movec	VBR,a0
+		rte
+
+;_RemAura (void) -- deallocate sample playback system resources
+_RemAura	tst.w	owntimer
+		beq.s	rm_rts
+		clr.w	owntimer
+		move.w	#$400,$dff09a	;audio ch #3 interrupt off
+		move.l	vbr_addr,a0
+		move.l	oldaudiointr,$70(a0)
+rm_rts		rts
+
+AuraSIntHandler	;single channel playback
+		move.l	d0,-(sp)
+		move.w	$dff01e,d0
+		btst	#$A,d0		;intr 3?
+		beq.w	jmpoldintr
+		move.l	a0,-(sp)
+		move.w	#$400,$dff09c
+		movea.l	Auradata,a0	;addr...
+		move.w	(a0)+,$A20000	;final...
+		move.w	#0,$dff0da
+		cmpa.l	Auradata+4,a0
+		bhi.s	Auraaudintr_end
+		move.l	a0,Auradata
+		move.l	(sp)+,a0
+		move.l	(sp)+,d0
+		rte
+
+AuraIntHandler	; plays through both channels
+		move.l	d0,-(sp)
+		move.w	$dff01e,d0
+		btst	#$A,d0		;intr 3?
+		beq.s	jmpoldintr
+		move.l	a0,-(sp)
+		move.w	#$400,$dff09c
+		movea.l	Auradata,a0	;addr...
+		move.w	(a0)+,$A20000	;final...
+		move.l	Auradata+8,d0
+		move.w	-2(a0,d0.l),$A20002	;stereo offset
+		move.w	#0,$dff0da
+		cmpa.l	Auradata+4,a0
+		bhi.s	Auraaudintr_end
+		move.l	a0,Auradata
+		move.l	(sp)+,a0
+		move.l	(sp)+,d0
+		rte
+
+jmpoldintr	move.l	(sp)+,d0
+		dc.w	$4ef9
+oldaudiointr	dc.l	0
+
+Auraaudintr_end_f
+		move.l	(sp)+,a1
+Auraaudintr_end	move.w	#$400,$dff09a
+		move.l	(sp)+,a0
+		move.l	(sp)+,d0
+		clr.b	playing_Aura
+		rte
+
+AuraFIntHandler	; plays through both channels, fixed output rate
+		move.l	d0,-(sp)
+		move.w	$dff01e,d0
+		btst	#$A,d0		;intr 3?
+		beq.s	jmpoldintr
+		move.l	a0,-(sp)
+		move.l	a1,-(sp)
+		lea	Auradata,a1
+		move.w	#$400,$dff09c
+		movea.l	(a1),a0	;addr...
+		move.w	(a0),$A20000	;final...
+		move.l	8(a1),d0
+		move.w	0(a0,d0.l),$A20002 ;stereo offset (only mono (= 0) in V5.04 though)
+		moveq	#0,d0
+		move.w	d0,$dff0da
+		move.w	18(a1),d0	;get remaining offset fraction (always < 1 [0x10000])
+		add.l	12(a1),d0	;add rate value
+		swap	d0
+		adda.w	d0,a0		;add to sample pointer
+		adda.w	d0,a0		;twice, because we handle words!
+		swap	d0
+		move.w	d0,18(a1)	;store current fraction...
+		cmpa.l	4(a1),a0
+		bhi.s	Auraaudintr_end_f
+		move.l	a0,(a1)
+		move.l	(sp)+,a1
+		move.l	(sp)+,a0
+		move.l	(sp)+,d0
+		rte
+
+AuraSFIntHandler ; plays through single channel, fixed output rate
+		move.l	d0,-(sp)
+		move.w	$dff01e,d0
+		btst	#$A,d0		;intr 3?
+		beq.w	jmpoldintr
+		move.l	a0,-(sp)
+		move.l	a1,-(sp)
+		lea	Auradata,a1
+		move.w	#$400,$dff09c
+		movea.l	(a1),a0	;addr...
+		move.w	(a0),$A20000	;final...
+		moveq	#0,d0
+		move.w	d0,$dff0da
+		move.w	18(a1),d0	;get remaining offset fraction (always < 1 [0x10000])
+		add.l	12(a1),d0	;add rate value
+		swap	d0
+		adda.w	d0,a0		;add to sample pointer
+		adda.w	d0,a0		;twice, because we handle words!
+		swap	d0
+		move.w	d0,18(a1)	;store current fraction...
+		cmpa.l	4(a1),a0
+		bhi.w	Auraaudintr_end_f
+		move.l	a0,(a1)
+		move.l	(sp)+,a1
+		move.l	(sp)+,a0
+		move.l	(sp)+,d0
+		rte
+
+;_PlayAura -- Play Aura sample, input registers:
+;	A0 = sample (struct Soitin *)
+;	D0 = sample start offset (in WORDs)
+;	D1 = sample period (UWORD)
+;	D2 = sample end offset (i.e. offs to first word NOT to play) (0 = play until end)
+
+_PlayAura	tst.w	owntimer
+		beq.w	playAura_exit
+		addq.l	#6,a0		;skip header
+		add.l	d0,d0		;words to bytes
+		add.l	a0,d0		;d0 = sample start
+		move.l	d0,Auradata
+		btst	#5,-1(a0)	;STEREO?
+		bne.s	pmd_stereo
+		moveq	#0,d0
+		bra.s	pmd_setstereo
+pmd_stereo	move.l	a0,d0
+		add.l	-6(a0),d0	;add sample length...
+pmd_setstereo	move.l	d0,Auradata+8	;store stereo offset
+		tst.l	d2
+		bne.s	pmd_givenend
+		move.l	-6(a0),d0	;get length
+		bra.s	pmd_setend
+pmd_givenend	move.l	d2,d0
+		add.l	d0,d0
+pmd_setend	lea	-2(a0,d0.l),a0	;ptr to last WORD
+		move.l	a0,Auradata+4
+		moveq	#0,d0
+		move.w	Auraperlimit,d0
+		tst.w	Auraratemode
+		bne.s	pmd_fixedrate
+		cmp.w	d0,d1
+		bhi.s	playAura_noovf
+		move.w	d0,d1
+playAura_noovf
+		lsr.w	#1,d1
+		movea.l	vbr_addr,a1
+		move.l	Aurahandler,$70(a1)
+		lea	$dff000,a0
+		move.w	#$8400,$9a(a0)	;INTENA
+		move.w	#$0380,$9a(a0)
+		move.w	d1,$d6(a0)
+		move.w	#0,$d8(a0)
+		move.w	#$8400,$9c(a0)	;INTREQ
+		st	playing_Aura
+playAura_exit	rts
+
+;	calculations for fixed playback rate...
+pmd_fixedrate
+; multiply playback period by 16384...
+		swap	d0
+		lsr.l	#2,d0
+; divide by note period...
+		divu	d1,d0
+; clear upper word and multiply by 4
+		swap	d0
+		clr.w	d0
+		swap	d0
+		add.l	d0,d0
+		add.l	d0,d0
+; now we have a rate multiplier...
+		move.l	d0,Auradata+12
+		clr.l	Auradata+16
+		move.w	Auraperlimit,d1
+		bra.s	playAura_noovf	;set timer to run at maximum rate
+
+; _StopAura - may only trash A1!
+_StopAura	tst.w	owntimer
+		beq.s	stopAura_exit
+		clr.b	playing_Aura
+		move.w	#$400,$dff09a	;audio 3 INTENA = 0
+stopAura_exit	rts
+
+SetHandlerAddr	tst.w	Aurachmode
+		beq.s	sha_dual
+		tst.w	Auraratemode
+		beq.s	sha_s_var
+		lea	AuraSFIntHandler(pc),a0
+		bra.s	sha_set
+sha_s_var	lea	AuraSIntHandler(pc),a0
+		bra.s	sha_set
+sha_dual	tst.w	Auraratemode
+		beq.s	sha_d_var
+		lea	AuraFIntHandler(pc),a0
+		bra.s	sha_set
+sha_d_var	lea	AuraIntHandler(pc),a0
+sha_set		move.l	a0,Aurahandler
+		rts
+
+; SetAuraParams:
+; D0 = flags:
+;	bit 0:	0 = normal stereo/mono mode
+;		1 = use only one channel (no stereo, slightly faster)
+;	bit 1:	0 = use variable output rate
+;		1 = locked output rate at max. period
+; D1 = max. period
+_SetAuraParams:
+		move.w	d1,Auraratemode
+		btst	#0,d0
+		sne	Aurachmode+1
+		btst	#1,d0
+		sne	Auraratemode+1
+		rts

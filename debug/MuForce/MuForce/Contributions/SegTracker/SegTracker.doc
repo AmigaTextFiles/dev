@@ -1,0 +1,406 @@
+SegTracker                                                        SegTracker
+
+   NAME
+        SegTracker - A global SegList tracking utility
+
+   SYNOPSIS
+        A global tracking utility for disk loaded files including
+        libraries and devices.  If placed in the startup-sequence
+        right after SetPatch, it will track all disk loaded segments
+        (other than those loaded by SetPatch).
+
+   FUNCTION
+        SegTracker will patch dos.library's LoadSeg(), NewLoadSeg() and
+        UnLoadSeg() functions in order to track the SegLists that are
+        loaded. SegTracker keeps those SegLists stored in a "safe" manner
+        and even handles programs which split their SegList. 
+
+        The first time the program is run, it installs the patches
+        and semaphore.  After that point, it just finds the semaphore
+        and uses it.
+
+        When SegTracker is installed, it will scan the Kickstart ROM for
+        ROM modules and the KickMemList for ROM updates (OS 3.5/3.9) and
+        add their location/size to the tracking list such that addresses
+        within those modules can be identified.  Note that the offsets
+        of ROM modules are based on the location of the module's RomTag
+        whereas ROM updates get tracked with their KickMemList entries.
+        The NOROM option will prevent this feature from being installed.
+
+        Additionally, KickMemList will be scanned for 3rd-party KickTags.
+        You can prevent this behaviour with the NOKICKTAG option.
+
+	If the LOADSYMBOLS option is provided, SegTracker can also
+	store away debug information such as symbol names, line
+	numbers and source code file names, and then later provide such
+	information to debugging tools.
+
+        By using SegTracker, it will be possible to better identify
+        where Enforcer hits come from when dealing with libraries
+        and devices.  Basically, it is a system-global Hunk-o-matic.
+
+        External programs can then pass in an address to SegTracker
+        either via the command line or via the given function pointer
+        in the SegTracker semaphore and get back results as to what
+        hunk and offset the address is at.
+
+        To work with the function directly, you need to find the
+        semaphore of "SegTracker" using FindSemaphore().
+        The structure found will be the following:
+
+        struct  SegSem
+        {
+        struct  SignalSemaphore seg_Semaphore;
+                SegTrack        *seg_Find;
+                struct  MinList  seg_List; /* internal */
+                UWORD            seg_Version;
+                APTR             seg_Self;
+		BPTR             seg_Segment;    /* internal */
+		ULONG            seg_UseCount;   /* internal */
+		void            (*seg_Remove)(void); /* internal */
+		/* The following members exist if seg_Version >= 47 */
+		SegTrack       *seg_FindSymbol; 
+		ULONG           seg_LoadSymbols; /* if set, symbols loaded */
+		struct  MinList seg_Symbols;     /* internal */
+		struct	MinList seg_Lines;	 /* internal */
+        };
+
+        The function pointer seg_Find points to a routine that takes
+        an address and two pointers to longwords for returning the
+        Segment number and Offset within the segment.  The function
+        returns the name of the file loaded.  Note that you must call
+        this function while in Forbid() and then copy the name as the
+        seglist may be UnLoadSeg'ed at any moment and the name string
+        will then no longer be in memory.
+
+        typedef char (* __asm SegTrack(register __a0 ULONG Address,
+                                       register __a1 ULONG *SegNum,
+                                       register __a2 ULONG *Offset));
+
+        The above is for use in C code function pointer prototype
+        in SAS/C 5 and 6.
+
+	If seg_Self points back to the semaphore and seg_Version is
+	greater or equal to 47, an additional function seg_FindSymbol
+	is present. This function locates the nearest symbol or line
+	number in a source file given an address into a binary,
+	provided the binary included such debug information and
+	SegTracker was instructed with the LOADSYMBOLS command line
+	argument to retrieve them when loading the code.
+
+	The function signature is identical to the above, where
+	"Address" is to be found in the symbol database of SegTracker.
+	If the Offset pointer is NULL, then SegTracker will locate
+	the symbol nearest the provided address in the return value
+	of this function, and the offset of the supplied address from
+	the symbol in *SegNum.
+	If the Offset pointer is non-NULL, SegTracker will locate the
+	nearest source line number to the address supplied, and will
+	return the name of the source file. *SegNum will be filled
+	with the offset from the start of the line to the Address,
+	and *Offset will be filled by the line number.
+
+   INPUTS
+        FIND/M      - Find the hex (in $XXXXXX or 0xXXXXXX format) address
+                      in the tracked segments.
+                      Multiple addresses can be given.
+
+        SHOW/S      - Shows all of the segments being tracked.
+
+        DUMP/S      - Displays all of the segment elements being tracked.
+
+        NOROM/S     - Tells SegTracker not to scan ROM/KickMemList when
+                      it is installed, thus not adding ROM addresses to
+                      the tracking list.
+
+        NOKICKTAG/S - Tells SegTracker not to scan KickMemList for other
+                      KickTags when it is installed, thus not adding
+                      any KickTag addresses to the tracking list.
+
+        NOLOADMODULE/S - Tells SegTracker not to scan modules loaded by
+                      LoadModule.
+
+        FULLPATH/S  - Usually, the [New]LoadSeg() patch tracks filenames
+                      as they are given to the respective function. With
+                      this option, it will track the full path.
+
+        NOPATH/S    - Usually, the [New]LoadSeg() patch tracks filenames
+                      as they are given to the respective function. With
+                      this option, it will strip path information.
+                      Additionally, NOPATH determines the output format
+                      of the SHOW, DUMP and FIND functions.
+
+        REMOVE/S    - Remove a running instance of SegTracker.
+
+	LOADSYMBOLS/S Instructs SegTracker to scan the loaded binary
+		      for debug symbols and line number information,
+		      and load them into its database. SegTracker is
+		      then able to find for a given address the
+		      nearest label.
+
+        All options except FIND are also available from the Workbench as
+        ToolTypes. In addition, the ToolTypes may contain a ToolType
+        WINDOW=<path>, which provides a file specification where SegTracker
+        output should go to. This is typically a CON: type window.
+
+
+   EXAMPLE USAGE
+        /*
+         * A simple program that will "find" given addresses in the SegLists
+         * This program has been compiled with SAS/C 6.2 without errors or
+         * warnings.
+         *
+         * Compiler options:
+         * DATA=FARONLY PARAMETERS=REGISTER NOSTACKCHECK
+         * NOMULTIPLEINCLUDES STRINGMERGE STRUCTUREEQUIVALENCE
+         * MULTIPLECHARACTERCONSTANTS DEBUG=LINE NOVERSION
+         * OPTIMIZE OPTIMIZERINLOCAL NOICONS
+         *
+         * Linker options:
+         * FindSeg.o TO FindSeg SMALLCODE SMALLDATA NODEBUG LIB LIB:sc.lib
+         */
+        #include <exec/types.h>
+        #include <exec/execbase.h>
+        #include <exec/libraries.h>
+        #include <exec/semaphores.h>
+        #include <dos/dos.h>
+        #include <dos/dosextens.h>
+        #include <dos/rdargs.h>
+
+        #include <clib/exec_protos.h>
+        #include <pragmas/exec_sysbase_pragmas.h>
+
+        #include <clib/dos_protos.h>
+        #include <pragmas/dos_pragmas.h>
+
+        #include <string.h>
+
+        #include "FindSeg_rev.h"
+
+        #define EXECBASE (*(struct ExecBase **)4)
+
+        typedef char (* __asm SegTrack(register __a0 ULONG,
+                                       register __a1 ULONG *,
+                                       register __a2 ULONG *));
+
+        struct SegSem
+        {
+        struct SignalSemaphore seg_Semaphore;
+               SegTrack        *seg_Find;
+        };
+
+        #define SEG_SEM "SegTracker"
+
+        #define TEMPLATE "FIND/M" VERSTAG
+
+        #define OPT_FIND  0
+        #define OPT_COUNT 1
+
+        ULONG cmd(void)
+        {
+        struct ExecBase *SysBase;
+        struct Library  *DOSBase;
+        struct RDArgs   *rdargs;
+               ULONG    rc=RETURN_FAIL;
+        struct SegSem   *segSem;
+               char     **hex;
+               LONG     opts[OPT_COUNT];
+
+          SysBase = EXECBASE;
+          if (DOSBase = OpenLibrary("dos.library",37))
+          {
+            memset((char *)opts, 0, sizeof(opts));
+
+            if (!(rdargs = ReadArgs(TEMPLATE, opts, NULL)))
+            {
+              PrintFault(IoErr(),NULL);
+            }
+            else if (CheckSignal(SIGBREAKF_CTRL_C))
+            {
+              PrintFault(ERROR_BREAK,NULL);
+            }
+            else if (segSem=(struct SegSem *)FindSemaphore(SEG_SEM))
+            {
+              rc=RETURN_OK;
+              if (opts[OPT_FIND])
+              {
+                for (hex=(char **)opts[OPT_FIND];(*hex);hex++)
+                {
+                char  *p;
+                ULONG val;
+                ULONG tmp[4];
+                ULONG c;
+
+                  val=0;
+                  p=*hex;
+                  if (*p=='$') p++; /* Support $hex */
+                  while (*p)
+                  {
+                    c=(ULONG)*p;
+                    if ((c>='a') && (c<='f')) c-=32;
+                    c-='0';
+                    if (c>9)
+                    {
+                      c-=7;
+                      if (c<10) c=16;
+                    }
+
+                    if (c<16)
+                    {
+                      val=(val << 4) + c;
+                      p++;
+                    }
+                    else
+                    {
+                      val=0;
+                      p=&p[strlen(p)];
+                    }
+                  }
+
+                  /*
+                   * Ok, we need to do this within Forbid()
+                   * as segments can unload at ANY time, including
+                   * during AllocMem(). Realisticly, VPrintf() should
+		   * not be used, but instead code should print into
+		   * a RAM buffer that is printed after the Permit().
+                   */
+                  Forbid();
+                  if (p=(*segSem->seg_Find)(tmp[0]=val,&tmp[2],&tmp[3]))
+                  {
+                  ULONG *ord; /* Ordinate list for overlays */
+
+                    tmp[1]=(ULONG)p;
+                    VPrintf("$%08lx - %s : Hunk %ld, Offset $%08lx",tmp);
+
+                    /*
+                     * Now get the SegList address by passing the
+                     * same pointer for both hunk & offset.  Note
+                     * that this is only in the newer SegTrackers
+                     * and will not work with ROM/KickTag entries.
+                     * To test if this worked, check if the result
+                     * of this call is either a hunk or an offset.
+                     */
+                    (*segSem->seg_Find)(val,&tmp[0],&tmp[0]);
+                    /*
+                     * This "kludge" is for compatibility reasons
+                     * Check if result is the same as either the hunk
+                     * or the offset.  If so, do not print it...
+                     */
+                    if ((tmp[0]!=tmp[2]) && (tmp[0]!=tmp[3]))
+                    {
+                      VPrintf(", SegList $%08lx",tmp);
+                    }
+
+                    /*
+                     * Find out the type of the segment, potentially
+                     * print the ordinate information of the segment.
+                     */
+                    switch (p[-1])
+                    {
+                     case 0x01: /* This is an overlay segment */
+                      ord    = (ULONG *)(p - 1 - sizeof(ULONG));
+                      ord   -= ord[0];
+                      Printf(" Ordinate $%08lx\n",ord[tmp[2]]);
+                      break;
+                     case 0xff: /* This is a ROM module */
+                      PutStr(" (ROM)\n");
+                      break;
+                     default:   /* Regular segment */
+                      PutStr("\n");
+                      break;
+                    }
+                  }
+                  else VPrintf("$%08lx - Not found\n",tmp);
+		  /*
+		   * Now check whether symbol and line number
+		   * information is available. Only for V47 and
+		   * above.
+		   */
+		  if (segSem->seg_Self == segSem &&
+		      segSem->seg_Version >= 47  && segSem->seg_LoadSymbols) {
+		    /* First, scan for symbols, and symbol offsets */
+		    if (p=(*segSem->seg_FindSymbol)(tmp[0]=val,&tmp[2],NULL)) {
+		      tmp[1] = (LONG)p;
+		      VPrintf("%.32s + 0x%08lx\n",(LONG *)(tmp + 1));
+		    }				  }
+		    /* Now scan for line number information */
+		    if (p=(*segSem->seg_FindSymbol)(tmp[0]=val,&tmp[3],&tmp[2])) {
+		      tmp[1] = (LONG)p;
+		      VPrintf("%.32s:%ld + 0x%08lx\n",(LONG *)(tmp + 1));
+		    }
+		  }
+                  Permit();
+                }
+              }
+            }
+            else PutStr("Could not find SegTracker semaphore.\n");
+
+            if (rdargs) FreeArgs(rdargs);
+            CloseLibrary(DOSBase);
+          }
+          else if (DOSBase=OpenLibrary("dos.library",0))
+          {
+            Write(Output(),"Requires Kickstart 2.04 (37.175) or later.\n",43);
+            CloseLibrary(DOSBase);
+          }
+
+          return(rc);
+        }
+
+   NOTES
+        The earlier this command is run, the better off it will be in
+        tracking disk loaded segments.  Under debug usage, you may
+        wish to run the command right *AFTER* SetPatch.
+
+        Some things may not call UnLoadSeg() to free their seglists.
+        There is no way SegTracker can follow a seglist that is not
+        unloaded via the dos.library call to UnLoadSeg().  For this
+        reason, SegTracker adds new LoadSeg() segments to the top
+        of its list.  This way, if any old segments are still on
+        the list but have been unloaded via some other method they
+        will not clash with newer segments during the find operation.
+
+        Note that the resident list is one such place where UnLoadSeg()
+        is not called to free the seglist.  Thus, if something is made
+        resident and then later unloaded it will still be listed as
+        tracked by SegTracker.
+
+        In order to support a new feature in CPR, the SegTracker function
+        got a "kludge" added to it.  If a segment is found, you can then
+        call the function again with the same address but with having
+        both pointers point to the same longword of storage.  By doing
+        this, the function will now return (in that longword) the
+        SegList pointer (CPTR not BPTR) of the file that contains
+        the address.  The reason this method was used was so it
+        would be compatible with older SegTracker versions.  In older
+        versions you would not get the result you wanted but you would
+        also not crash.  See the example above for more details on how
+        to use this feature.  The SegTracker FIND option has been
+        expanded to include this information.
+
+	In addition to tracking segments and segment addresses, Seg-
+	Tracker can also parse the loaded segments for debug information,
+	such as symbol names and line number information, and provide
+	this information later on to debugging tools. To enable this
+	feature, add the LOADSYMBOLS command line argument. Note that
+	SegTracker can only provide symbol and line number information
+	if the binaries include it as debug information. This is
+	typically NOT the case, unless the binaries are prepared, e.g.
+	by compiling them in debug mode. The SLink and BLink linkers
+	can be instructed to preserve symbol names by not including
+	the "ND" command line argument. The SAS/C compiler can be
+	instructed to include line number information by adding the
+	DEBUG=LINE command line switch. Please consult the manual of
+	your development tool how such information could be integrated
+	into executables.
+
+	As the LoadSeg() function of the operating system skips over
+	such debug information, SegTracker has to scan binaries a
+	second time to collect such data, which results in slower
+	loading. LOADSYMBOLS should therefore not be enabled in
+	general, but only when needed. Loading can be particularly
+	slow on Os 3.1.4 or below because the buffered I/O functions
+	of the dos.library are not well-optimized. Performance should
+	be better from Os 3.2 onwards.
+	
+	

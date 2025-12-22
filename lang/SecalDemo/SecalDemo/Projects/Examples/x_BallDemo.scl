@@ -1,0 +1,356 @@
+/******************************************************************************\
+**  Ball demo (uses Extension) for Secal                                      **
+**  Requires Kickstart 2                                                      **
+**  Try to change "BALLNUM" (0=auto ctrl)                                     **
+\******************************************************************************/
+
+
+go main;
+
+
+#-------------------------------------------------------------------------------
+
+
+def BALLNUM=0;							# (INITIAL) NUMBER OF BALLS
+def CHANGETIME=300;					# TIME FOR EACH PATTERN
+
+
+#-------------------------------------------------------------------------------
+
+
+include "inc/libcalls/exec.inc";
+include "inc/libcalls/graphics.inc";
+include "inc/lvos/graphics.inc";
+
+include "inc/hardware/custom.inc";
+include "inc/intuition/screens.inc";
+
+include "ext/ext.inc";				# INTERFACE FOR EXTENSION
+inclib "ext/ext.lib";					# USE EXTENSION LIB
+
+
+def SysBase=[4.w].ul;
+
+
+/******************************************************************************\
+************                      M A I N                           ************
+\******************************************************************************/
+
+
+obj GfxBase:ulong;
+
+obj myscr,mymus,sincostable:ulong;
+obj scrwidth,xcenter,ycenter:word;
+
+
+#-------------------------------------------------------------------------------
+
+
+main:
+push d2;
+
+d2:=0;
+
+OpenLibrary("graphics.library",37); GfxBase:=d0;
+if GfxBase then
+	x_Init;											# INITIALIZE EXTENSION
+	if d0 then
+		x_GraphicsStart;					# START GRAPHICS SUBSYSTEM
+		if d0 then
+			x_AudioStart(%1111);			# START AUDIO SUBSYSTEM
+			if d0 then
+
+				x_LoadFile("data/sincos.dat",0); sincostable:=a0;
+				if sincostable then
+					x_Scr_Open(0,0,0,3,"Secal Ball demo",@scrcolors,0); myscr:=a0;
+					if myscr then
+						x_Scr_AddBmp(myscr);		# ADD ANOTHER BUFFER
+						if d0 then
+							x_Mus_Load("data/mod.demomusic",%1111); mymus:=a0;
+							if mymus then
+								x_Mus_Play(mymus,0);
+
+								x_SetTaskPri(0,31);	# CHANGE TASKPRI FOR SMOOTH ACTION
+								call action; d2:=d0;
+								x_RevertTaskPri;	# REVERT TO PREVIOUS PRI
+
+								x_Mus_Stop(mymus);
+							;
+						;
+					;
+				;
+			;
+		;
+		x_Done;							# SHUT DOWN EXTENSION, LET IT CLEAN UP INSTEAD OF US, TOO
+												# (SCREEN, MUSIC, ETC)
+	;
+	CloseLibrary(GfxBase);
+;
+
+d0.l:=d2.w;
+
+pop d2;
+rts;															# MAIN
+
+
+
+scrcolors:
+dc.l $000000,$ffeeff,$9900ff,$6611aa,$441188,$0033ff,$0022bb,$111166;
+												# SCREEN COLORS IN THE RGB8 FORMAT OF THE EXTENSION
+
+
+#*******************************************************************************
+
+
+obj ballnumfinal,ballnumtemp:word;
+
+
+
+#																	D0=FINAL BALLNUM
+
+action:
+push d2\a5;
+
+a0:=myscr; a0:=x_scr(a0).screen;
+xcenter:=Screen(a0).Width/2;
+d0:=Screen(a0).Height-(Screen(a0).BarHeight+1);
+ycenter:=d0/2+(Screen(a0).BarHeight+1);			# 0,0 OFFSET
+a0:=myscr; scrwidth:=x_scr(a0).rowdiff;			# SCREEN WIDTH
+
+
+a5:=$dff000;										# GLOBAL CUSTOM PTR
+
+call ballsinit;
+
+ballnumfinal:=BALLNUM; ballnumtemp:=31;
+if ballnumfinal>5000 then ballnumfinal:=5000;;
+
+WaitTOF;
+repeat
+	d2.l:=x_VBlankCnt;
+
+	if ballnumfinal=0 then d0:=ballnumtemp; else d0:=ballnumfinal;;
+	call ballsframe;
+
+	if ballnumfinal=0 then
+		if x_VBlankCnt<>d2+1 then
+			ballnumfinal:=ballnumtemp-14;
+			if ballnumfinal<20 then ballnumfinal:=20;;
+		else
+			if x_VBlankCnt and 1=0 then
+				ballnumtemp:=ballnumtemp+1;
+			;
+		;
+	;											# IF BALLNUM IS NOT FIXED,
+												# SEE IF THE MACHINE CAN STILL KEEP UP
+until [$dff016] and $400=0;		# DIRTY CHECK FOR RIGHT MOUSE BUTTON
+
+d0:=ballnumfinal;						# RETURN THE ACTUAL NUMBER OF BALLS
+
+pop d2\a5;
+rts;															# ACTION
+
+
+/******************************************************************************\
+************                     B A L L S                          ************
+\******************************************************************************/
+
+
+obj bufcount:word;
+obj workbufptr:ulong;
+obj screenbitplanes:ulong;
+
+obj patchng:word;
+obj patptr:ulong;
+
+obj x0,x1,y0,y1:word;
+
+obj vx0,vx1,vy0,vy1:word;
+obj dx0,dx1,dy0,dy1:word;
+
+
+#*******************************************************************************
+
+
+ballsinit:
+[@workbuf0].l:=0; [@workbuf1].l:=0;
+workbufptr:=@workbuf0;			# BUFFER INIT
+
+patchng:=0; patptr:=@patsource;		# PATTERN INIT
+rts;															# BALLSINIT
+
+
+#-------------------------------------------------------------------------------
+
+
+# D0=BALLNUM
+
+ballsframe:
+push d2;
+d2:=d0;
+
+call changescreen;						# SWAP SCREEN BUFFERS
+
+if patchng=0 then
+	a0:=patptr;
+	vx0:=[a0+]; vx1:=[a0+]; vy0:=[a0+]; vy1:=[a0+];
+	dx0:=[a0+]; dx1:=[a0+]; dy0:=[a0+]; dy1:=[a0+];
+	if a0=@end_patsource then a0:=@patsource;;
+	patptr:=a0;
+
+	x0:=0; x1:=0; y0:=0; y1:=0;
+	patchng:=CHANGETIME;				# GET NEXT PATTERN
+else
+	patchng:=patchng-1;
+;															# DECREMENT COUNTER
+
+OwnBlitter;
+call clearballs;
+d0:=d2; call drawcalcballs;
+WaitBlit;
+DisownBlitter;								# DO BALLS
+
+x0:=x0+vx0; x1:=x1+vx1;
+y0:=y0+vy0; y1:=y1+vy1;
+
+pop d2;
+rts;															# BALLSFRAME
+
+
+
+patsource:
+dc 11,8,36,20,80,32,200,128;
+dc $fff0,$10,$fff8,$ffec,$fe10,$208,$410,$414;
+dc $8,$10,$8,0,$3e0,$3e8,$3e8,$3e0;
+dc $10,$8,$8,$10,$208,$fc10,$fc10,$208;
+dc $8,$10,$8,$10,$d0,$d0,$c8,$c8;
+dc $4,$10,$c,$18,$1fc,$214,$fffc,$414;
+dc $8,$10,$8,$10,$ff34,$8,0,$d4;
+dc $8,$8,$8,$8,$238,$fc38,$38,$fe38;
+dc $fff1,$10,$f,$fff4,$fe08,$20a,$3ff,$408;
+dc $8,$8,$8,$8,$3e0,$fc00,$3e0,0;
+dc $8,$10,$8,$10,$d0,$c8,$c8,$d0;
+dc $8,$8,$fff8,$8,$3f0,$10,$3f0,$fff0;
+end_patsource:								# LISSAJOUS PATTERNS
+
+
+#-------------------------------------------------------------------------------
+
+
+changescreen:
+WaitBlit;
+
+x_Scr_ActivateBmp(myscr,bufcount,-1,-1);	# CHANGE SCR BUFS
+bufcount:=bufcount xor 1;			# FLIP PAGE ID
+
+if bufcount=0 then
+	workbufptr:=@workbuf0;
+	x_Scr_GetBmp(myscr,0);
+	screenbitplanes:=x_bmp(a0).planes;
+else
+	workbufptr:=@workbuf1;
+	x_Scr_GetBmp(myscr,1);
+	screenbitplanes:=x_bmp(a0).planes;
+;															# GET WORK BUF
+rts;															# CHANGESCREEN
+
+
+#-------------------------------------------------------------------------------
+
+
+clearballs:
+push a2\a6;
+
+a2:=workbufptr; a6:=GfxBase;			# PRELOAD REGS
+
+if [a2].l then
+	WaitBlit;
+	Custom(a5).bltcon0:=$100; Custom(a5).bltcon1:=0;
+	Custom(a5).bltdmod:=scrwidth/3-4;		# PRELOAD BLT REGS
+
+	repeat
+		call a6+LVOWaitBlit;		# DIRECT CALL WITH LVO!
+		Custom(a5).bltdpt:=[a2+];			# POINTER FROM BUF
+		Custom(a5).bltsize:=(11*3) lsl 6 or 2;
+	until [a2].l=0;						# ZERO INDICATES END OF BUF
+;
+
+pop a2\a6;
+rts;															# CLEARBALLS
+
+
+
+
+
+obj dcb_counter:word;
+
+
+
+# D0=BALLNUM
+
+drawcalcballs:
+push d2\d3\d4\d5\a2\a3\a4\a6;
+dcb_counter:=d0;
+
+a2:=workbufptr;
+d2:=x0; d3:=x1; d4:=y0; d5:=y1;
+a3:=sincostable; a4:=a3+$800; a6:=GfxBase;	# PRELOAD REGS
+
+WaitBlit;
+Custom(a5).bltafwm:=-1; Custom(a5).bltalwm:=0;
+Custom(a5).bltamod:=-2; Custom(a5).bltbmod:=-2;
+Custom(a5).bltcmod:=scrwidth/3-4;
+Custom(a5).bltdmod:=scrwidth/3-4;		# PRELOAD BLT REGS
+
+for dcb_counter:=dcb_counter-1 downto 0 do
+	d0:=(d4 and $fff) << 1; d1:=[a4+d0.w];
+	d0:=(d5 and $fff) << 1; d1:=d1+[a4+d0.w];
+	d1:=d1 asr 3+ycenter;
+	a0:=d1.w*scrwidth;					# LISSAJOUS CALCS
+
+	d0:=(d2 and $fff) << 1; d1:=[a3+d0.w];
+	d0:=(d3 and $fff) << 1; d1:=d1+[a3+d0.w];
+	d1:=d1 asr 2+xcenter;
+	a0:=a0+(d1.w lsr 3) and -2;			# LISSAJOUS CALCS
+
+	d1:=d1 lsl 12;
+	a0:=screenbitplanes+a0; [a2+].l:=a0;		# STORE PLANEPTR FOR CLEAR
+
+	call a6+LVOWaitBlit;			# DOCUMENTED TO PRESERVE ALL REGS!
+
+	Custom(a5).bltcon1:=d1;
+	d1:=d1 or $fca; Custom(a5).bltcon0:=d1;
+	Custom(a5).bltcpt:=a0; Custom(a5).bltdpt:=a0;
+	Custom(a5).bltapt:=@ballmaskdata;
+
+	if dcb_counter and 1 then Custom(a5).bltbpt:=@balldata0;
+	else Custom(a5).bltbpt:=@balldata1;;
+	Custom(a5).bltsize:=(11*3) lsl 6 or 2;	# START BLIT
+
+	d2:=d2+dx0; d3:=d3+dx1;
+	d4:=d4+dy0; d5:=d5+dy1;
+;															# PROCESS EVERY BALL
+[a2].l:=0;									# TERMINATING 0!
+
+pop d2\d3\d4\d5\a2\a3\a4\a6;
+rts;															# DRAWCALCBALLS
+
+
+#*******************************************************************************
+
+
+data_c;
+
+ballmaskdata:						incbin "data/ball_b_mask";
+balldata0:							incbin "data/ball_b_0";
+balldata1:							incbin "data/ball_b_1";
+
+
+bss;
+
+workbuf0: 							ds.l 5000;
+workbuf1:								ds.l 5000;		# BUFFER FOR POINTERS
+
+
+#*******************************************************************************
+

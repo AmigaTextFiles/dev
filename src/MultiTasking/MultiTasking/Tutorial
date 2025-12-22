@@ -1,0 +1,606 @@
+                        Multitasking on The Amiga
+
+
+        This tutorial was written by Leo L. Schwab, and was originally
+posted on the Programmer's Network and Amiga Conference on the WELL.
+Permission is hereby granted to freely distribute this tutorial provided
+credit is given to the original author (I want to be famous, you see :-).
+
+
+Foreword
+--------
+
+        John Draper suggested that one way to become well-known is to write
+knowledgeable tutorials to help fellow programmers understand the system.
+This, then, is my attempt to tell people how to deal with basic multitasking
+on the Amiga.
+
+        This tutorial will describe multitasking on the Exec level, not the
+DOS level.  As a personal preference, I prefer to avoid the DOS whenever I
+can and go straight to the Exec.  This does not cause undue difficulty, and
+in fact reduces overhead and headaches.
+
+        This tutorial will deal mostly on the practical level, and will
+assume you know the basic concepts behind a multitasking environment.  Thus,
+this tutorial will use a cookbook approach to help you through getting your
+multiple tasks running and talking to each other.
+
+        So get out your favorite C compiler and follow me.....
+
+
+Introduction
+------------
+
+        The first thing you should do when approacing the Amiga exec is to
+forget everything you know about any other kind of multitasking operating
+system you're familiar with.  Put it out of your mind.  Ignore it.
+Particularly UNIX.
+
+        I say this because trying to use your knowledge of your favorite
+multitasking operating system is not going to help you much when you start
+dealing with the Amiga exec.  The exec is far and away vastly different from
+just about every other multitasking environment, with the possible exception
+of XINU (I mention XINU because there's a good book out on it, and many of
+the concepts in that book can be applied to the Amiga exec).
+
+        The exec is, in my view, a bare-bones multitasking environment.
+There is just enough in the exec to do everything you need, although it may
+not do everything you want.  It won't automagically deallocate resources
+you've opened, and it's handling of runaway programs is not what many
+programmers would like.
+
+        By contrast, however, the exec is small and compact.  It's written
+in extremely tight machine code.  Because it's small and quick, and doesn't
+try to "do things behind your back," it is a real-time operating system, and
+can respond to interrupts and signals rather efficiently.
+
+        So, in exchange for having to do everything yourself, you get a very
+efficient multitasking executive.
+
+
+Getting Started
+---------------
+
+        A task, in the exec's eyes, consists of two parts:  A program
+segment residing somewhere in memory, and a task control block which is
+part of a linked list of tasks managed by the exec.
+
+        The program segment can be anything and anywhere.  One particular
+way of getting a program segment might be to declare a function in C:
+
+-----
+subtask ()
+{
+        ...
+}
+-----
+
+        The task control block is an object that describes your task to the
+exec.  In particular, where your stack is in memory, where the stack pointer
+is, where the program counter should be, what signals your task has
+received, which signals it's waiting on, etc.  Every task must have a task
+control block.
+
+        In addition, all tasks require a stack.  Even if you're not doing
+any subroutine calls or have any local variables, you are still required to
+have a stack so the exec can save your registers and return address if it
+should perform a context switch.  The absolute minimum size your stack can
+be is 70 bytes (q.v. RKM vol 1, p. 1-17,1-18).  A nice round number for a
+stack size is 1K.  Personally, I prefer to specify a stack of 2K just to be
+sure I have enough space for my variables and any subroutines I may call.
+The stack can be allocated out of the free memory pool using AllocMem().
+It is recommended (but not neccesary) that you not declare the memory public
+i.e. don't specify the MEMF_PUBLIC flag when calling AllocMem().
+
+
+Calling A Task Into Existence
+-----------------------------
+
+        The exec support library provides a rather nice function for the
+purpose of creating tasks, called (oddly enough) CreateTask().
+
+        CreateTask() performs only the most basic of task initialization
+steps.  It first allocates a chunk of memory for both the stack and task
+control block.  It then initializes the tc_SP{Upper,Lower,Reg} fields in the
+structure, and the tc_Node.ln_{Pri,Type,Name} entries in the node structure.
+Finally, it calls AddTask() to add your task to the system, and returns you
+a pointer to the task control block.  If anything goes wrong during this
+Process, it returns a null, and doesn't allocate anything.
+
+        The calling format for CreateTask() is as follows:
+
+struct Task *CreateTask (name, pri, initPC, stacksize)
+char *name;
+UBYTE pri;
+APTR initPC;
+ULONG stacksize;
+
+        "name" is a pointer to a string that is the name of your task.  This
+is used if another task wants to find your task.
+
+        "pri" is your task's priority.  This is a signed byte from -128 to
++127.  0 is the canonical priority for new tasks.
+
+        "initPC" is the starting value for your program counter.  Generally,
+this would be a pointer to a function, or some such thing.
+
+        "stacksize" is how big a chunk of memory you want allocated for your
+stack and task control block combined.  CreateTask() allocates (stacksize)
+bytes of memory, then uses the first (sizeof (struct Task)) bytes for the
+task control block, and the rest is used for the actual stack.  This is
+important to remember if you want a specific stack size.
+
+        The source code to CreateTask() can be found in the RKM vol. 2 a few
+pages past page E-78, in Appendix F.
+
+        A typical call to CreateTask might look like this:
+
+-----
+struct Task *tsk;
+extern void function();
+if (!(tsk = CreateTask ("Foo", 0, function, 2048)))
+        printf ("Couldn't create task\n");
+-----
+
+        Note that CreateTask does only the basic initialization of the task
+control block.  If you are doing anything special, like exception
+processing, or interrupts, you can't use CreateTask; you'll have to cook up
+your own.  The source code in the RKM provides a good template for writing
+your own custom task creator should you need one.
+
+
+Getting Rid Of Tasks
+--------------------
+
+        If you spawn a subtask, you'll probably want to kill it off
+eventually.  This is a bit tricky, but not too terrible.
+
+        Firstly, if your subtask allocated any resources, it must be certain
+to close them before you try to remove it.  Remember, the exec does not
+perform resource management (at least not to the same level as in other
+operating systems); you have to free up everything yourself.  This could
+probably be accomplished by sending your subtask a message asking it to kill
+itself.  Once it gets this, it goes about closing all the stuff it may have
+opened before "exiting."
+
+        If you use CreateTask(), you can use the complementary function
+DeleteTask() to get rid of a task you've spawned.  DeleteTask() performs a
+RemTask() on the task in question, then frees up the memory it allocated
+earlier for the stack and task control block.  A typical call to
+DeleteTask() might look like this:
+
+-----
+struct Task *tsk;
+DeleteTask (tsk);
+-----
+
+        "tsk" is the pointer to the task control block you got when you
+called CreateTask().
+
+        Now pay attention, because this next bit is important.  If you
+intend to use DeleteTask() on a task to get rid of it, *you must never let
+that task exit on its own*.
+
+        For example, if you have declared a function to be treated as a
+task, you must *never* let the function return.
+
+        The reason for this is because of the action taken by the exec when
+a task exhausts its stack (that is, has exited on its own).  Unless you've
+specified a special clean-up function when you called AddTask() (which you
+can't do with CreateTask()), the default action taken by the exec is to
+remove the task from the system task list, by calling RemTask().
+
+        DeleteTask() also calls RemTask().  Calling RemTask() on an already
+removed task is deadly.  If you try and do this, the system may or may not
+crash.  If it does crash, you may or may not get Guru Meditation.  If you do
+get Guru Meditation, it will probably be for something completely unrelated,
+most likely a memory problem.  If, on the other hand, the system doesn't
+crash, it may crash later when you try to start a different program.
+RemTask()ing removed tasks is a sure way to make your life miserable.
+
+        There is, however, nothing wrong with calling RemTask() on a task
+that is currently active.  If you get the CPU, you can call RemTask() on any
+task in the system, and it will stop running and never be called again.
+Once you've RemTask()ed it, it's up to you to deallocate its stack and
+resources.
+
+        Since it's a good idea to let tasks deallocate their own resources
+(except their stack, that's up to the task doing the RemTask()ing), a
+typical pseudo-code sequence might look like this:
+
+-----
+if (RECEIVED_KILL_MESSAGE) {
+        deallocate_resources ();
+        return;
+}
+-----
+
+        But we've already said that we can't let the task exit on it's own.
+So the "obvious" approach would be to do this:
+
+-----
+if (RECEIVED_KILL_MESSAGE) {
+        deallocate_resources ();
+        while (1)
+                ;
+}
+-----
+
+        This is also deadly.  This creates a condition known as
+busy-waiting, and it's something to be avoided on the Amiga.  Suppose a low
+priority task wanted to kill off a high-priority task by sending it a
+message.  If the high-priority task entered the busy-waiting loop outlined
+above, the low-priority task would never get the CPU back (Remember, exec
+context switching is not the same as UNIX.  Whoever has the highest priority
+is the task currently running, regardless of how big a CPU hog it is).
+Somehow, we've got to get the task to enter a wait state of some kind.  This
+is the way I like to do it:
+
+-----
+if (RECEIVED_KILL_MESSAGE) {
+        deallocate_resources ();
+        Wait (0);       /*  Wait for Godot  :-)  */
+}
+-----
+
+        When you call Wait(), you specify a mask which is the logical OR of
+the signal bits you want to wake up on.  By specifying a mask of zero, no
+signal condition will satisfy the mask.  So the task goes to sleep and never
+wakes up again.  But the task is still in the system task list.  So at this
+point it is safe to call DeleteTask().
+
+
+Message Passing
+---------------
+
+        You might think message passing is a concept seperate from
+multitasking.  But multitasking and message passing are so closely
+intertwined in the Amiga exec that it would be incomplete to discuss one and
+not the other.  As was discussed above, message passing is an effective way
+to tell a task to go away.  So it seems appropriate to discuss it.
+
+        To do message passing, you need two things:  A message port, and a
+message.
+
+        A message is simply a chunk of memory with data in it.  The first
+part of the chunk is a node structure.  This is used to link messages in a
+FIFO queue.  The rest of the memory generally contains a pointer to the
+reply port, and the size of the message.
+
+        A message port is a list header that the exec links messages on to.
+The message port also contains other information, such as which task it
+belongs to, which signal bit to assert when a new message arrives, and some
+flags.
+
+        The structure definition for messages and message ports can be found
+in the RKM vol. 2 p. D-27.
+
+
+Making Message Ports
+--------------------
+
+        The exec support library once again provides us with a convenient
+port creation function, called CreatePort().
+
+        CreatePort() first allocates a signal bit (using AllocSignal()),
+then allocates memory for the port itself.  It then initializes the node
+structure, and the mp_{Flags,SigBit,SigTask} fields.  Finally, depending on
+whether or not you gave a name to the port, it either calls AddPort() (if
+you gave it a name), or simply calls NewList() for the message list
+structure (if you didn't give it a name).  The reason for this dual action
+is in case you want to create a truly private message port.  If you don't
+call AddPort(), other tasks will not be able to find your port by calling
+FindPort().  This is useful if you're sure other parts of the system will
+confuse your port with someone else's, or you simply don't want to receive
+messages from other tasks that may try to interrogate you (junk mail?).
+
+        The calling convention for CreatePort() is as follows:
+
+struct MsgPort *CreatePort (name, pri);
+char *name;
+BYTE pri;
+
+        "name" is a pointer to a null-terminated string that is the name of
+your port.  This is so that other tasks can use FindPort() to get a pointer
+to your port.
+
+        "pri" is a priority.  I asked one of the Amiga people what use
+priority on a message port was.  He explained that, since exec keeps
+everything in lists sorted according to priority, "Why not ports, too?"
+This does have a marginally practical value.  Since ports are sorted
+according to priority, when you call FindPort() on a port that has a high
+priority, it will still find the port, but it will find it quicker (since
+it's closer to the head of the list).  As a rule, I suggest assigning ports
+the same priority as the task owning it.
+
+
+Making Messages
+---------------
+
+        All you need to make a message is a chunk of memory, so go get one
+(I'll wait....).
+
+        Got it?  Now put a message structure at the front of the block you
+allocated.  After that, put anything you need.  A typical way of creating a
+message might be like this:
+
+-----
+struct InformationPacket {
+        struct Message message;
+        << insert relevant data declarations here >>
+} pack;
+-----
+
+        Remember, a message can contain any kind of data you like.  The one
+thing exec expects to see is a message structure at the front.  It must be
+an instance of a message, not a pointer to one.  Beyond that requirement,
+exec doesn't care.
+
+        One field of particular importance in the message structure is the
+mn_ReplyPort, which will be discussed later.
+
+        As an illustration, take a look at the IORequest structures (RKM
+vol. 2 p. D-23).  See what the first thing is in each of them?  A message
+structure.
+
+
+Sending Messages
+----------------
+
+        In order to send a message, you must have a valid pointer to a
+message port, and a pointer to a message.  When you have these, you pass
+them to the exec function PutMsg().  The calling convention is as follows:
+
+PutMsg (port, msg);
+struct MsgPort *port;
+struct Message *msg;
+
+        "port" is a pointer to a message port that was obtained either by
+calling CreatePort(), or (more likely) by calling FindPort().
+
+        "msg" is a pointer to a message you've constructed, as outlined
+above.
+
+        Now pay attention, because this is another important bit.  PutMsg()
+does not copy the message you're passing, but simply assigns the right to
+use the memory to the task owning the port you're sending the message to.
+
+        Let me rephrase that.  PutMsg() does not make a copy of your message
+and pass the copy to the port you're sending to.  It gives the original
+message to the port.
+
+        Let's say you've allocated a block of RAM and are using it as a
+message.  Then you call PutMsg(), passing a pointer to your block of RAM.
+You now no longer own that block of RAM; you have passed ownership (and
+therefore the right to use and modify the RAM) to the port you sent it to.
+
+        This means that, once you've passed ownership to the receiving task,
+you are *not* allowed to modify the message.  If you *really* know what
+you're doing, you can still access the contents of the message, but this can
+get you into trouble, as will be illustrated later.
+
+
+Receiving Messages
+------------------
+
+        To receive a message, you must have a properly initialized message
+port (generally made with CreatePort()).  If you have properly initialized
+the mp_{SigTask,SigBit} fields of the message port structure (CreatePort()
+does this for you), you will receive a signal when a message arrives at
+your port.
+
+        There are several ways to see if a message has arrived at your port.
+The most basic of these is the exec function GetMsg().  It works like this:
+
+msg = GetMsg (port);
+struct Message *msg;
+struct MsgPort *port;
+
+        "msg" is a pointer to a block of RAM being used as a message.  The
+task receiving the message should "know" how the RAM is structured so it can
+read the data properly.  If a message is waiting, GetMsg() returns a pointer
+to it and removes the message from the port.  If there are no messages on
+your port, GetMsg() returns a null.
+
+        "port" is a pointer to your message port that you are expecting
+messages to arrive on.
+
+        If you want your task to wait for a message to arrive before you do
+anything else, you might try to do it like this:
+
+-----
+while (!(msg = GetMsg (port)))
+        ;
+-----
+
+        This is the very deadly busy-waiting loop again, and you should
+avoid it like the plague.  The proper way to wait for a message is like
+this:
+
+-----
+msg = WaitPort (port);
+GetMsg (port);
+-----
+
+        WaitPort() first checks to see if you have any messages, and if you
+don't, goes to sleep until one arrives.  Note that, although WaitPort() does
+return a pointer to a message, it does not remove it from the port.  You
+should always follow WaitPort() with a call to GetMsg() to dequeue the
+message.
+
+        Another way to wait for messages is to use exec's general-purpose
+Wait() function.  It's used like this (when waiting for messages):
+
+-----
+Wait (1 << port -> mp_SigBit);
+msg = GetMsg (port);
+-----
+
+        Note that Wait() does not "buffer" i.e. if two messages arrive at
+your port, Wait() will not report both of them.  If you're using Wait() to
+wait for messages, the proper way to make sure you get all of them is like
+this:
+
+-----
+Wait (1 << port -> mp_SigBit);
+while (msg = GetMsg (port)) {
+        << relevant message handling here >>
+}
+-----
+
+        It may look like busy-waiting, but it isn't.  The while-loop
+continues to execute until all the messages on your port have been received
+and dequeued.  Once you've gotten them all, the loop exits and you're free
+to check on other things.
+
+        When you have gotten the message, you are free to access and modify
+the message as much as you like.  After all, it's now your RAM.
+
+        After you are through using a message, it is a good idea to reply to
+it.  Tasks that send you messages often wait for you to reply to them so
+they can get on with their work.  This is done with the exec function
+ReplyMsg(), which works like this:
+
+ReplyMsg (msg);
+struct Message *msg;
+
+        "msg" is a pointer to a message that arrived at your port.
+
+        Note that the message's mn_ReplyPort field must be valid for
+ReplyMsg() to work properly.  Once you have replied to a message, you are no
+longer allowed to use the data in the message, since you have returned
+ownership to the task that sent you the message.
+
+        Note also that, when you reply to a message, it is exactly as if you
+said:
+
+-----
+PutMsg (msg -> mn_ReplyPort, msg);
+-----
+
+        This means that the task receiving the reply will receive it as
+though it were an ordinary message.  The receiving task should know what to
+do with replies to messages.  It is not a good idea to reply to a reply.
+This is a typical way of sending a message and waiting for a reply:
+
+-----
+PutMsg (sendport, msg);
+WaitPort (replyport);
+GetMsg (replyport);     /*  We don't reply to replies, we just get them  */
+-----
+
+
+Traps To Avoid
+--------------
+
+        One trap that is easy to fall into is failing to remember that, once
+you reply a message, you can no longer rely on the information in the
+message.  Here's one incantation of this trap I fell into.
+
+-----Low priority task segment-----
+        struct IORequest *msg;
+        struct MsgPort *port;
+
+        /*  msg initialized elsewhere (possibly with CreateExtIO())  */
+        port = CreatePort ("foo port", 0);
+        if (msg = GetMsg (port)) {
+                ReplyMsg (msg);
+                if (msg -> io_Command == SPECIALVAL)
+                        exit (-1);
+        }
+-----High priority task segment-----
+        struct IORequest *msg;
+        struct MsgPort *sendport, *replyport;
+
+        replyport = CreatePort ("replies", 1);
+        sendport = FindPort ("foo port");
+        if (SPECIAL_CASE) {
+                msg -> io_Command = SPECIALVAL;
+                PutMsg (sendport, msg);
+                WaitPort (replyport);
+                GetMsg (replyport);
+        }
+        msg -> io_Command = NORMAL_VAL;
+-----
+
+        Here's what happens.  The high priority task detects a special case,
+and sends a message to the low priority task with a special value in the
+command field.  Then it goes to sleep, waiting for a reply.
+
+        The low priority task wakes up with a message in its port.  It gets
+the message, then replies to it right away so the high priority task won't
+have to wait too long.
+
+        The moment the low priority task replies, the high priority task
+wakes up again (since the WaitPort() just got satisfied), gets the message,
+and changes the command field back to its normal value.
+
+        Eventually down the line, the high priority task goes to sleep on
+something, and the low priority task starts where it left off.  Remember
+that the low priority task had just replied the message and was about the
+check the command field for SPECIALVAL.  But it lost control of the CPU when
+it replied the message, and the command field got changed back to
+NORMAL_VAL.  So the test for SPECIALVAL will fail, and the exit() function
+will never get called.
+
+        The way to avoid this trap is to copy *all* the data you intend to
+examine into your own private storage before you reply the message.  The fix
+to the above code would be this:
+
+-----Low priority task segment-----
+        int cmd;
+
+        if (msg = GetMsg (port)) {
+                cmd = msg -> io_Command;
+                ReplyMsg (msg);
+                if (cmd == SPECIALVAL)
+                        exit (-1);
+        }
+-----
+
+        If you intend to modify the message before you reply to it, you
+should do all modification before replying the message.
+
+        Remember: when you reply a message, you give up all rights to use
+the data in the message.
+
+
+An Example
+----------
+
+        Attached (somewhere) is a piece of source code (in C) that
+illustrates the creation of a task, creation of message ports, message
+passing, passing and modifying data in the message, and cleaning up.  It
+compiles sucessfully under Lattice 3.03 (sorry, I couldn't make it work with
+Manx).  Ignore the compiler warnings about improperly typed pointers.
+
+        Note: this program, once compiled and linked (remember the "faster"
+argument!), __s_e_e_m_s_ to work OK, provided the program is on
+disk.  If you try to run it out of RAMdisk, it will run, but the next
+program you try to run crashes the machine.  I'm not sure why this is
+happening (I suspect I'm forgetting to do something terribly important), and
+would appreciate help in this area.  Other than that, it works.
+
+
+Bibliography
+------------
+
+        ROM Kernel Manual (v1.1), Volume 1
+        pp. 1-11 - 1-21, 1-29 - 1-37
+
+        ROM Kernel Manual (v1.1), Volume 2
+        pp. A-64, A-65, A-68, A-74, A-75, A-78, A-82, A-85 - A-87, A-93,
+            A-94, D-23, D-27, D-29, D-30, Appendix F (past page E-78)
+
+----------------
+
+        I hope you've found this helpful.  If you have any suggestions or
+corrections, or just want to flame me, feel free to leave me some mail.
+
+                                        Have fun,
+                                        Leo L. Schwab
+--------
+...!{hplabs,dual,well}!unicom!schwab    (or)    ...!well!ewhac
+        "We interrupt this program to annoy you, and to make things
+generally irritating for you."
+

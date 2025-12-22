@@ -1,0 +1,6 @@
+
+OBJECT newFile
+  fh
+ENDOBJECT
+
+

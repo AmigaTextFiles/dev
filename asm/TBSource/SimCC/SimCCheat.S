@@ -1,0 +1,1284 @@
+***********************************************
+*                                             *
+*              (C)opyright 1991-92            *
+*                                             *
+*             by  Tomi Blinnikka              *
+*                                             *
+*             SimCity 1.1  Cheat              *
+*                                             *
+* Version 0.00a - 0.99a  18/4/1991            *
+*                                             *
+* BUGS: Didn't work through DOS               *
+*                                             *
+* Version 1.00  19/4/1991                     *
+*                                             *
+* BUGS: No WB Stuff + some font stuff         *
+*                                             *
+* Version 1.01  26-27/4/1991                  *
+*                                             *
+* BUGS: No font stuff + WB Stuff didn't work  *
+*       from directories                      *
+*                                             *
+* Version 1.02  27-29/4/1991                  *
+*                                             *
+* BUGS: Doesn't work with CShell	      *
+*                                             *
+* Version 1.03  30/4/1991		      *
+*                                             *
+* BUGS: Still little problems with CShell     *
+*                                             *
+* Version 1.04  01/5/1991		      *
+*                                             *
+* BUGS: Unknown				      *
+*                                             *
+* Version 1.05  02/5/1991		      *
+*                                             *
+* BUGS: Unknown				      *
+*                                             *
+* Version 1.06  18/5/1991		      *
+*                                             *
+* BUGS: No PoC DOS support		      *
+*       No PoC 2,3,4 player support           *
+*                                             *
+* Version 1.07  27/5/1991		      *
+*                                             *
+* BUGS: No PoC/OilImp/Oil Imperium DOS sup-   *
+*	port				      *
+*       No PoC 2, 3, 4 player support         *
+*                                             *
+***********************************************
+
+	INCLUDE	"JMPLibs.i"
+	INCLUDE	"exec/types.i"
+	INCLUDE	"libraries/dos.i"
+	INCLUDE	"libraries/reqbase.i"
+	INCLUDE "workbench/startup.i"
+	INCLUDE	"intuition/intuition.i"
+
+	INCLUDE	"XREF:dos.xref"
+	INCLUDE	"XREF:intuition.xref"
+	INCLUDE	"XREF:exec.xref"
+	INCLUDE	"XREF:gfx.xref"
+
+	INCLUDE	"LWF:SimCC/SimCC2.0.i"
+
+DReq:	set	1
+
+	XREF	Help
+	XREF	HWin1
+
+	XDEF	_IntuitionBase
+	XDEF	_GfxBase
+	XDEF	MenusOff
+	XDEF	MenusOn
+	XDEF	Kick
+	XDEF	YOffset
+	XDEF	Topaz
+	XDEF	NoWin
+	XDEF	CheckIDCMP
+	XDEF	ClearMSGs
+	XDEF	Window1IDCMP
+	XDEF	wd_RPort
+
+		section	SimCityCheat,CODE
+
+Start:		move.l	a0,SCCAddress		;Get SimCity filename
+		move.l	d0,SCCLength		;Get length
+
+		move.l	#0,a1
+		lib	Exec,FindTask
+		move.l	d0,SCCTask
+		move.l	d0,a4
+
+		move.l	pr_CLI(a4),d0
+		bne	Start1
+		bsr	WBStart
+
+Start1:		openlib	Dos,ShutDown
+
+		lib	Dos,Output
+		move.l	d0,_stdout
+
+		move.l	pr_CLI(a4),d0
+		beq	WBInput
+
+;CLI Inputs
+
+		move.l	SCCAddress(pc),a0
+		move.l	SCCLength(pc),d0
+		clr.b	-1(a0,d0.l)		;add null to end of filename
+
+		cmp.b	#160,(a0)
+		beq	StartMain
+		cmp.b	#$0a,(a0)
+		beq	StartMain
+		cmp.b	#$0d,(a0)
+		beq	StartMain
+		tst.b	(a0)
+		bne	GotFileName
+		jmp	StartMain
+
+WBStart:	lea.l	pr_MsgPort(a4),a0
+		lib	Exec,WaitPort
+		lea.l	pr_MsgPort(a4),a0
+		flib	Exec,GetMsg
+		move.l	d0,WBMsg
+WBStart1:	rts
+
+GotFileName:	move.w	#1,Mode
+		cmp.b	#"?",(a0)
+		beq	CommandLineHelp
+		lea.l	FRFile(pc),a1
+		bsr	CopyText
+		tst.l	d0
+		bne	ShutDown
+		lea.l	FRFile(pc),a0
+		move.l	a0,d1
+		move.l	#MODE_OLDFILE,d2
+		lib	Dos,Open
+		move.l	d0,SCCFile
+		bne	DOSCheat
+		bsr	SCCNotOpen
+		bra	ShutDown
+
+;Copies filename from one place to another
+;Handles CShell and quotes
+;
+;INPUTS
+;------
+;a0 = Source
+;a1 = Destination
+;
+;RETURNS
+;-------
+;d0 = #$00 if everything OK
+;d0 = #$ff if need to goto ShutDown
+;
+;DEFAULTS
+;--------
+;a0 = SCCAddress from DOS
+;a1 = FRFile	 from DOS
+;
+
+CopyText:	cmp.b	#'"',(a0)
+		beq	Quotes
+CopyTText:	move.b	(a0)+,(a1)+
+		cmp.b	#'"',(a0)
+		beq	Quotes
+		cmp.b	#$20,(a0)
+		beq	CopyTText1
+		cmp.b	#160,(a0)
+		beq	CopyTText1
+		cmp.b	#$0a,(a0)
+		beq	CopyTText1
+		cmp.b	#$0d,(a0)
+		beq	CopyTText1
+		cmp.b	#$00,(a0)
+		bne	CopyTText
+CopyTText1:	clr.b	(a1)
+		clr.l	d0
+		rts
+Quotes:		add.l	#1,a0
+Quotes1:	move.b	(a0)+,(a1)+
+		cmp.b	#$00,(a0)
+		beq	MismatchQuotes
+		cmp.b	#160,(a0)
+		beq	MismatchQuotes
+		cmp.b	#$0a,(a0)
+		beq	MismatchQuotes
+		cmp.b	#$0d,(a0)
+		beq	MismatchQuotes
+		cmp.b	#'"',(a0)
+		bne	Quotes1
+Quotes2:	clr.b	(a1)
+		clr.l	d0
+		rts
+MismatchQuotes:	print	<"***Break",13,10,"Mismatched quotes",13,10>
+		move.l	#$ff,d0
+		rts
+
+;WB Inputs, start with opening NIL:
+
+WBInput:	lea.l	NILName(pc),a0
+		move.l	a0,d1
+		move.l	#MODE_NEWFILE,d2
+		lib	Dos,Open
+		move.l	d0,NILFile
+		beq	ShutDown
+		move.l	NILFile(pc),_stdout
+
+		move.l	#$00,d1
+		flib	Dos,CurrentDir
+		move.l	d0,OldLock
+		move.l	WBMsg(pc),a2
+		move.l	sm_NumArgs(a2),ArgsLeft
+		move.l	sm_ArgList(a2),ArgList
+
+WBInputIn:	sub.l	#1,ArgsLeft
+		add.l	#8,ArgList
+		cmp.l	#$00,ArgsLeft
+		beq	WBInputOut
+
+WBInput1:	move.l	ArgList(pc),a0
+		move.l	wa_Name(a0),d1
+		move.l	d1,a1
+		tst.b	(a1)
+		bne	WBInput2
+WBInput1.1:	move.l	ArgList(pc),a0
+		move.l	wa_Lock(a0),d1
+		beq	WBInputIn
+		lib	Dos,CurrentDir
+		move.l	#$00,FRDir
+		bra	WBInputIn
+
+WBInput2:	move.l	d1,a0
+		lea.l	FRFile(pc),a1
+WBInput2.1:	move.b	(a0)+,(a1)+
+		cmp.b	#$00,(a0)
+		bne	WBInput2.1
+		clr.b	(a1)
+		bra	WBInput1.1
+
+WBInputOut:	move.l	FRDir(pc),a0
+		lea.l	FRPathName(pc),a1
+		cmp.b	#$00,(a0)
+		beq	WBInputOut1.1
+WBInputOut1:	move.b	(a0)+,(a1)+
+		cmp.b	#$00,(a0)
+		bne	WBInputOut1
+WBInputOut1.1:	lea.l	FRFile(pc),a0
+WBInputOut2:	move.b	(a0)+,(a1)+
+		cmp.b	#$00,(a0)
+		bne	WBInputOut2
+		clr.b	(a1)
+
+StartMain:	move.w	#0,Mode
+		moveq.l	#2,d0
+
+		move.l	#2,d0
+		move.l	$4,a6
+		lea.l	_ReqLib,a1
+		jsr	_LVOOpenLibrary(a6)
+		move.l	d0,_ReqBase
+		beq	NoReq
+		openlib	Intuition,NoInt
+		openlib	Gfx,NoGfx
+
+;test for 2.0
+
+		move.l	_IntuitionBase(pc),a6
+		move.w	$14(a6),d0
+		cmp.w	#36,d0
+		bcs	StartWin1
+
+;under 2.0
+		move.w	#$01,Kick
+		move.l	#$00,a0
+		flib	Intuition,LockPubScreen
+		move.l	d0,PubScreen
+		beq	NoPub
+
+;Get DragBar size
+
+		move.w	#40,Win1YSize
+		move.l	d0,a0
+		move.b	$1e(a0),d0
+		add.b	#1,d0
+		move.w	#$00,Win1ZoomY
+		move.b	d0,Win1ZoomY+1
+		add.b	d0,Gad1YPos+1
+		move.b	d0,YOffset
+
+;use new OpenWindow (OpenWindowTagList)
+
+		lea.l	NewWindow1(pc),a0
+		lea.l	Win1TagList(pc),a1
+		flib	Intuition,OpenWindowTagList
+		move.l	d0,Window1
+		beq	NoWin
+		move.l	#$00,a0
+		move.l	PubScreen(pc),a1
+		flib	Intuition,UnlockPubScreen
+		move.l	#$00,PubScreen
+		bra	AddMenu1
+
+;under 1.3
+
+StartWin1:	move.w	#$00,Kick
+		add.w	#10,Gad1YPos
+		lea.l	NewWindow1(pc),a0
+		lib	Intuition,OpenWindow
+		move.l	d0,Window1
+		beq	NoWin
+
+;Add Menus to Window1
+
+AddMenu1:	move.l	Window1(pc),a0
+		move.l	wd_RPort(a0),Win1RP
+		lea.l	Menu1(pc),a1
+		flib	Intuition,SetMenuStrip
+
+;Add gadget
+
+		lea.l	AmountGad1(pc),a1
+		move.l	Window1(pc),a0
+		move.l	#$00,d0
+		flib	Intuition,AddGadget
+
+;Refresh gad list
+
+		lea.l	AmountGad1(pc),a0
+		move.l	Window1(pc),a1
+		move.l	#$00,a2
+		flib	Intuition,RefreshGadgets
+
+;Activate string gad
+
+		lea.l	AmountGad1(pc),a0
+		move.l	Window1(pc),a1
+		move.l	#$00,a2
+		flib	Intuition,ActivateGadget
+
+Window1IDCMP:	move.l	Window1(pc),a0
+		bsr	CheckIDCMP
+		cmp.l	#CLOSEWINDOW,d2
+		beq	ShutDown
+		cmp.l	#VANILLAKEY,d2
+		beq	VanillaKeys
+		cmp.l	#RAWKEY,d2
+		beq	RawKeys
+		cmp.l	#MENUPICK,d2
+		beq	Win1Menus
+		cmp.l	#MOUSEBUTTONS,d2
+		beq	ActivateGad
+		bra	Window1IDCMP
+
+VanillaKeys:	cmp.w	#$1b,d3
+		beq	ShutDown
+		cmp.w	#"q",d3
+		beq	ShutDown
+		cmp.w	#"Q",d3
+		beq	ShutDown
+		bra	Window1IDCMP
+RawKeys:	cmp.w	#$5f,d3
+		beq	Help
+		bra	Window1IDCMP
+
+ActivateGad:	cmp.l	#IECODE_LBUTTON,d3
+		bne	ActivateGadOut
+ActivateGad1:	lea.l	AmountGad1(pc),a0
+		move.l	Window1(pc),a1
+		move.l	#$00,a2
+		lib	Intuition,ActivateGadget
+ActivateGadOut:	bra	Window1IDCMP
+
+Win1Menus:	bsr	MenuNull
+		cmp.l	#$00,d6
+		beq	DoMenu1
+		cmp.l	#$01,d6
+		beq	DoMenu2
+		bra	Window1IDCMP
+DoMenu1:	cmp.l	#$00,d5
+		beq	GetN
+		cmp.l	#$01,d5
+		beq	Help
+		cmp.l	#$02,d5
+		beq	About
+		cmp.l	#$03,d5
+		beq	ShutDown
+		bra	Window1IDCMP
+DoMenu2:	cmp.l	#$00,d5
+		beq	DM2.1
+		bra	Window1IDCMP
+DM2.1:		cmp.l	#$00,d4
+		beq	DM2.1.1
+		cmp.l	#$01,d4
+		beq	DM2.1.2
+		cmp.l	#$02,d4
+		beq	DM2.1.3
+		cmp.l	#$03,d4
+		beq	DM2.1.4
+		cmp.l	#$04,d4
+		beq	DM2.1.5
+		cmp.l	#$05,d4
+		beq	DM2.1.6
+		cmp.l	#$06,d4
+		beq	DM2.1.7
+		cmp.l	#$07,d4
+		beq	DM2.1.8
+		cmp.l	#$08,d4
+		beq	DM2.1.9
+		cmp.l	#$09,d4
+		beq	DM2.1.10
+		bra	Window1IDCMP
+DM2.1.1:	move.w	#$00,Game
+		bra	SimAmount1
+DM2.1.2:	move.w	#$01,Game
+		bra	PoCAmount1
+DM2.1.3:	move.w	#$02,Game
+		bra	PoCAmount1
+DM2.1.4:	move.w	#$03,Game
+		bra	PoCAmount1
+DM2.1.5:	move.w	#$04,Game
+		bra	PoCAmount1
+DM2.1.6:	move.w	#$05,Game
+		bra	OilAmount1
+DM2.1.7:	move.w	#$06,Game
+		bra	OilAmount1
+DM2.1.8:	move.w	#$07,Game
+		bra	OilAmount1
+DM2.1.9:	move.w	#$08,Game
+		bra	OilAmount1
+DM2.1.10:	move.w	#$09,Game
+		bra	RRTAmount1
+
+GetN:		cmp.w	#$00,Game
+		beq	SimCheckAmount		;SimCity
+		cmp.w	#$01,Game
+		beq	PoCCheckAmount		;Ports of Call
+		cmp.w	#$02,Game
+		beq	PoCCheckAmount
+		cmp.w	#$03,Game
+		beq	PoCCheckAmount
+		cmp.w	#$04,Game
+		beq	PoCCheckAmount
+		cmp.w	#$05,Game
+		beq	OilCheckAmount		;Oil Imperium
+		cmp.w	#$06,Game
+		beq	OilCheckAmount
+		cmp.w	#$07,Game
+		beq	OilCheckAmount
+		cmp.w	#$08,Game
+		beq	OilCheckAmount
+		cmp.w	#$09,Game
+		beq	RRTCheckAmount		;RailRoad Tycoon
+		bra	Window1IDCMP
+
+SimCheckAmount:	lea.l	GetSimName(pc),a5
+		cmp.l	#16777216,AmountInt
+		bcs	GetN0.1
+		move.l	Window1(pc),a0
+		move.l	$2e(a0),a0
+		lib	Intuition,DisplayBeep
+SimAmount1:	move.l	Window1(pc),a0
+		lea.l	WindowTitle1(pc),a1
+		move.l	#-1,a2
+		lib	Intuition,SetWindowTitles
+		move.l	Window1(pc),a0
+		lea.l	AmountGad1(pc),a1
+		lib	Intuition,RemoveGadget
+		move.l	#$31363737,AmountBuf
+		move.l	#$37323135,AmountBuf+4
+		move.w	#$0000,AmountBuf+8
+		move.l	#16777215,AmountInt
+		bsr	RefreshGad
+		tst.l	WBMsg
+		bne	SimAmount2
+		lea.l	SimDiskName(pc),a0
+		lea.l	FRDir(pc),a1
+		bsr	CopyText
+		lea.l	SimDiskName(pc),a0
+		lea.l	FRPathName(pc),a1
+		bsr	CopyText
+SimAmount2:	bra	ActivateGad1
+
+PoCCheckAmount:	lea.l	GetPoCName(pc),a5
+		cmp.l	#$7fffff00,AmountInt
+		bcs	GetN0.1
+		move.l	Window1(pc),a0
+		move.l	$2e(a0),a0
+		lib	Intuition,DisplayBeep
+PoCAmount1:	move.l	Window1(pc),a0
+		lea.l	WindowTitle2(pc),a1
+		move.l	#-1,a2
+		lib	Intuition,SetWindowTitles
+		move.l	Window1(pc),a0
+		lea.l	AmountGad1(pc),a1
+		flib	Intuition,RemoveGadget
+		move.l	#$32313437,AmountBuf
+		move.l	#$34383333,AmountBuf+4
+		move.w	#$3931,AmountBuf+8
+		move.l	#$7ffffeff,AmountInt
+		bsr	RefreshGad
+		tst.l	WBMsg
+		bne	PoCAmount2
+		lea.l	PoCDiskName(pc),a0
+		lea.l	FRDir(pc),a1
+		bsr	CopyText
+		lea.l	PoCDiskName(pc),a0
+		lea.l	FRPathName(pc),a1
+		bsr	CopyText
+PoCAmount2:	bra	ActivateGad1
+
+OilCheckAmount:	lea.l	GetOilName(pc),a5
+		cmp.l	#2147483648,AmountInt
+		bcs	GetN0.1
+		move.l	Window1(pc),a0
+		move.l	$2e(a0),a0
+		lib	Intuition,DisplayBeep
+OilAmount1:	move.l	Window1(pc),a0
+		lea.l	WindowTitle3(pc),a1
+		move.l	#-1,a2
+		lib	Intuition,SetWindowTitles
+		move.l	Window1(pc),a0
+		lea.l	AmountGad1(pc),a1
+		flib	Intuition,RemoveGadget
+		move.l	#$32313437,AmountBuf
+		move.l	#$34383336,AmountBuf+4
+		move.w	#$3437,AmountBuf+8
+		move.l	#$7fffffff,AmountInt
+		bsr	RefreshGad
+		tst.l	WBMsg
+		bne	OilAmount2
+		lea.l	OilDiskName(pc),a0
+		lea.l	FRDir(pc),a1
+		bsr	CopyText
+		lea.l	OilDiskName(pc),a0
+		lea.l	FRPathName(pc),a1
+		bsr	CopyText
+OilAmount2:	bra	ActivateGad1
+
+RRTCheckAmount:	lea.l	GetRRTName(pc),a5
+		cmp.l	#32768,AmountInt	;Max Amount+1
+		bcs	GetN0.1
+		cmp.b	#$2d,AmountBuf		;Check for negative number
+		bne	RRTAmount0.1
+		cmp.l	#$FFFF8001,AmountInt
+		bcc	GetN0.1
+RRTAmount0.1:	move.l	Window1(pc),a0
+		move.l	$2e(a0),a0
+		lib	Intuition,DisplayBeep
+RRTAmount1:	move.l	Window1(pc),a0
+		lea.l	WindowTitle4(pc),a1
+		move.l	#-1,a2
+		lib	Intuition,SetWindowTitles
+		move.l	Window1(pc),a0
+		lea.l	AmountGad1(pc),a1
+		flib	Intuition,RemoveGadget
+		move.l	#$33323736,AmountBuf
+		move.w	#$3700,AmountBuf+4
+		move.l	#$7fff,AmountInt
+		bsr	RefreshGad
+		tst.l	WBMsg
+		bne	OilAmount2
+		lea.l	RRTDiskName(pc),a0
+		lea.l	FRDir(pc),a1
+		bsr	CopyText
+		lea.l	RRTDiskName(pc),a0
+		lea.l	FRPathName(pc),a1
+		bsr	CopyText
+RRTAmount2:	bra	ActivateGad1
+
+GetN0.1:	bsr	MenusOff
+		move.l	#FRQABSOLUTEXYM+FRQLOADINGM,d5
+		bsr	FileRequester
+		tst.l	d0
+		beq	GetNOut
+
+		lea.l	FRPathName(pc),a1
+		move.l	a1,d1
+		cmp.b	#$00,(a1)
+		beq	GetNOut
+		move.l	#MODE_OLDFILE,d2
+		lib	Dos,Open
+		move.l	d0,SCCFile
+		bne	GetN1
+		bsr	FileError
+		bra	GetNOut
+
+GetN1:		bsr	MenusOff
+		move.l	Window1(pc),a0
+		lea.l	Cheat?Txt(pc),a1
+		lea.l	OKTxt(pc),a2
+		lea.l	CancelTxt(pc),a3
+		move.l	#$00,d0
+		move.l	#$00,d1
+		move.l	#$100,d2
+		move.l	#$40,d3
+		lib	Intuition,AutoRequest
+		cmp.l	#00,d0
+		beq	GetN1.1
+		bsr	TestFile
+GetN1.1:	bsr	MenusOn
+	
+GetN2:		move.l	SCCFile(pc),d1
+		lib	Dos,Close
+		move.l	#$00,SCCFile
+
+GetNOut:	bsr	MenusOn
+		bra	Window1IDCMP
+
+RefreshGad:	move.l	Win1RP(pc),a1		;clear page
+		move.l	#$00,d0
+		move.l	_GfxBase,a6
+		jsr	_LVOSetAPen(a6)
+		move.l	Win1RP(pc),a1
+		move.l	#$05,d0
+		move.l	#$0b,d1
+		add.b	YOffset(pc),d1
+		move.l	#298,d2
+		move.l	#30,d3
+		add.b	YOffset,d3
+		jsr	_LVORectFill(a6)
+		cmp.w	#$9,Game
+		bne	RefreshGad1
+		move.l	Win1RP(pc),a0
+		lea.l	RRTSpecialTxt(pc),a1
+		move.l	#$00,d0
+		move.l	#$00,d1
+		move.b	YOffset(pc),d1
+		lib	Intuition,PrintIText
+RefreshGad1:	move.l	Window1(pc),a0
+		lea.l	AmountGad1(pc),a1
+		move.l	#$00,d0
+		lib	Intuition,AddGadget
+		lea.l	AmountGad1(pc),a0
+		move.l	Window1(pc),a1
+		move.l	#$00,a2
+		flib	Intuition,RefreshGadgets
+		rts
+
+FileRequester:	move.l	a5,FRTitle
+		move.l	d5,FRFlags
+		lea.l	FileRequest1(pc),a0
+		lib	Req,FileRequester
+FROut:		rts
+
+About:		bsr	MenusOff
+		move.l	Window1(pc),a0
+		lea.l	AboutTxt1(pc),a1
+		move.l	#$00,a2		;positive text
+		lea.l	OKTxt(pc),a3	;a bit the wrong way around but...
+		move.l	#$00,d0
+		move.l	#$00,d1
+		move.l	#$134,d2
+		move.l	#$50,d3
+		lib	Intuition,AutoRequest
+		bsr	MenusOn
+		bra	Window1IDCMP
+
+Finished:	move.l	Window1(pc),a0
+		lea.l	FinitoTxt1(pc),a1
+		move.l	#$00,a2		;positive text
+		lea.l	OKTxt(pc),a3	;a bit the wrong way around but...
+		move.l	#$00,d0
+		move.l	#$00,d1
+		move.l	#$90,d2
+		move.l	#$40,d3
+		lib	Intuition,AutoRequest
+		rts
+
+TestFile:	cmp.w	#$00,Game
+		beq	TestForCity
+		cmp.w	#$01,Game
+		beq	TestForPoC
+		cmp.w	#$02,Game
+		beq	TestForPoC
+		cmp.w	#$03,Game
+		beq	TestForPoC
+		cmp.w	#$04,Game
+		beq	TestForPoC
+		cmp.w	#$05,Game
+		beq	TestForOil
+		cmp.w	#$06,Game
+		beq	TestForOil
+		cmp.w	#$07,Game
+		beq	TestForOil
+		cmp.w	#$08,Game
+		beq	TestForOil
+		cmp.w	#$09,Game
+		beq	TestForRRT
+		rts
+TestForCity:	move.l	SCCFile(pc),d1
+		move.l	#65,d2
+		move.l	#-1,d3
+		lib	Dos,Seek
+		move.l	SCCFile(pc),d1
+		lea.l	FileBuf(pc),a0
+		move.l	a0,d2
+		move.l	#$04,d3
+		flib	Dos,Read
+		tst.l	d0
+		bne	TestForCity1	
+		bsr	FileError
+		rts
+TestForCity1:	move.l	FileBuf(pc),d0
+		cmp.l	#$43495459,d0
+		bne	TestForCity2
+		bsr	CheatGame
+		rts
+TestForCity2:	cmp.w	#1,Mode
+		beq	TestForCity3
+		move.l	Window1(pc),a0
+		lea.l	WrongTxt1(pc),a1
+		lea.l	OKTxt(pc),a2
+		lea.l	CancelTxt(pc),a3
+		move.l	#$00,d0
+		move.l	#$00,d1
+		move.l	#$100,d2
+		move.l	#$40,d3
+		lib	Intuition,AutoRequest
+		cmp.l	#00,d0
+		beq	Seek_Out
+		bsr	CheatGame
+		rts
+TestForCity3:	print	<"***Break",13,10,"This is not a SimCity city-file, exiting!",13,10>,_stdout
+Seek_Out:	rts	
+
+TestForPoC:	move.l	SCCFile(pc),d1
+		move.l	#00,d2
+		move.l	#-1,d3
+		lib	Dos,Seek
+		move.l	SCCFile(pc),d1
+		lea.l	FileBuf(pc),a0
+		move.l	a0,d2
+		move.l	#$04,d3
+		flib	Dos,Read
+		tst.l	d0
+		bne	TestForPoC1	
+		bsr	FileError
+		rts
+TestForPoC1:	move.l	FileBuf(pc),d0
+		cmp.l	#$52444b20,d0
+		bne	TestForCity2
+		bsr	CheatGame
+		rts
+
+TestForOil:	move.l	SCCFile(pc),d1
+		move.l	#00,d2
+		move.l	#-1,d3
+		lib	Dos,Seek
+		move.l	SCCFile(pc),d1
+		lea.l	FileBuf(pc),a0
+		move.l	a0,d2
+		move.l	#$0a,d3
+		flib	Dos,Read
+		tst.l	d0
+		bne	TestForOil1	
+		bsr	FileError
+		rts
+TestForOil1:	lea.l	FileBuf(pc),a0
+		cmp.l	#"Blac",(a0)
+		bne	TestForCity2
+		cmp.l	#$6b20476f,4(a0)
+		bne	TestForCity2
+		cmp.w	#"ld",8(a0)
+		bne	TestForCity2
+		bsr	CheatGame
+		rts
+
+TestForRRT:	move.l	SCCFile(pc),d1
+		move.l	#13072,d2
+		move.l	#-1,d3
+		lib	Dos,Seek
+		move.l	SCCFile(pc),d1
+		lea.l	FileBuf(pc),a0
+		move.l	a0,d2
+		move.l	#$04,d3
+		flib	Dos,Read
+		tst.l	d0
+		bne	TestForRRT1	
+		bsr	FileError
+		rts
+TestForRRT1:	lea.l	FileBuf(pc),a0
+		cmp.l	#$302d342d,(a0)
+		bne	TestForCity2
+		bsr	CheatGame
+		rts
+
+CheatGame:	cmp.w	#$00,Game		;Sim
+		beq	CheatCity
+		cmp.w	#$01,Game		;PoC
+		bne	CheatGame1
+		move.l	#103,d2
+		bra	CheatPoC
+CheatGame1:	cmp.w	#$02,Game
+		bne	CheatGame2
+		move.l	#103,d2
+		bra	CheatPoC
+CheatGame2:	cmp.w	#$03,Game
+		bne	CheatGame3
+		move.l	#103,d2
+		bra	CheatPoC
+CheatGame3:	cmp.w	#$04,Game
+		bne	CheatGame4
+		move.l	#103,d2
+		bra	CheatPoC
+CheatGame4:	cmp.w	#$05,Game		;Oil
+		bne	CheatGame5
+		move.l	#7495,d2
+		bra	CheatOil
+CheatGame5:	cmp.w	#$06,Game
+		bne	CheatGame6
+		move.l	#8545,d2
+		bra	CheatOil
+CheatGame6:	cmp.w	#$07,Game
+		bne	CheatGame7
+		move.l	#9595,d2
+		bra	CheatOil
+CheatGame7:	cmp.w	#$08,Game
+		bne	CheatGame8
+		move.l	#10645,d2
+		bra	CheatOil
+CheatGame8:	cmp.w	#$09,Game		;RRT
+		bne	CheatGame9
+		move.l	#14152,d2
+		bra	CheatRRT
+CheatGame9:	rts
+
+
+CheatCity:	move.l	SCCFile(pc),d1
+		move.l	#3108,d2
+		move.l	#-1,d3
+		lib	Dos,Seek
+		move.l	SCCFile(pc),d1
+		lea.l	AmountInt(pc),a0
+		move.l	a0,d2
+		move.l	#$04,d3
+		flib	Dos,Write
+		cmp.w	#1,Mode
+		bne	CheatCity1
+		print	<"Your city now has $16, 777 215.",13,10>,_stdout
+		rts
+CheatCity1:	bsr	Finished
+		rts
+
+CheatPoC:	move.l	SCCFile(pc),d1
+		move.l	#-1,d3
+		lib	Dos,Seek
+		move.l	SCCFile(pc),d1
+		lea.l	AmountInt(pc),a0
+		move.l	a0,d2
+		move.l	#$04,d3
+		flib	Dos,Write
+		bsr	Finished
+		rts
+
+CheatOil:	move.l	SCCFile(pc),d1
+		move.l	#-1,d3
+		lib	Dos,Seek
+		move.l	SCCFile(pc),d1
+		lea.l	AmountInt(pc),a0
+		move.l	a0,d2
+		move.l	#$04,d3
+		flib	Dos,Write
+		bsr	Finished
+		rts
+
+CheatRRT:	move.l	SCCFile(pc),d1
+		move.l	#-1,d3
+		lib	Dos,Seek
+		move.l	SCCFile(pc),d1
+		move.l	AmountInt(pc),d2
+		swap	d2
+		move.l	d2,AmountInt
+		lea.l	AmountInt(pc),a0
+		move.l	a0,d2
+		move.l	#$02,d3
+		flib	Dos,Write
+		bsr	Finished
+		rts
+
+DOSCheat:	bsr	TestFile
+		bra	ShutDown
+
+NoReq:		print	<"You need req.library v2.5 or higher!",13,10>,_stdout
+		bra	ShutDown
+NoInt:		print	<"Can't open intuition.library!",13,10>,_stdout
+		bra	ShutDown
+NoGfx:		print	<"Can't open graphics.library!",13,10>,_stdout
+		bra	ShutDown
+NoWin:		print	<"Can't open Window!",13,10>,_stdout
+		bra	ShutDown
+NoPub:		print	<"Can't lock PubScreen!",13,10>,_stdout
+		bra	ShutDown
+
+ShutDown:	tst.l	PubScreen
+		beq	ShutDown9000
+		move.l	#$00,a0
+		move.l	PubScreen(pc),a1
+		lib	Intuition,UnlockPubScreen
+		move.l	#$00,PubScreen
+
+ShutDown9000:	tst.l	SCCFile
+		beq	ShutDown8000
+		move.l	SCCFile(pc),d1
+		lib	Dos,Close
+		move.l	#$00,SCCFile
+ShutDown8000:	tst.l	NILFile
+		beq	ShutDown6000
+		move.l	NILFile(pc),d1
+		lib	Dos,Close
+		move.l	#$00,NILFile
+ShutDown6000:	tst.l	HWin1
+		beq	ShutDown5000
+		move.l	HWin1(pc),a0
+		bsr	ClearMSGs
+		move.l	#$00,HWin1
+ShutDown5000:	tst.l	Window1
+		beq	ShutDown4000
+		move.l	Window1(pc),a0
+		lib	Intuition,ClearMenuStrip
+		move.l	Window1(pc),a0
+		bsr	ClearMSGs
+		move.l	#$00,Window1
+		
+ShutDown4000:
+ShutDown3000:	tst.l	_ReqBase
+		beq	ShutDown2001
+		lea.l	FileRequest1(pc),a0
+		lib	Req,PurgeFiles
+
+;Check if launched from WB
+
+ShutDown2001:	move.l	SCCTask,a4
+		move.l	pr_CLI(a4),d0
+		beq	ShutDownWB
+
+ShutDown2000:	closlib	Dos
+		closlib	Req
+		closlib	Intuition
+		closlib	Gfx
+
+ShutDownOut:	move.l	#RETURN_OK,d0
+		rts
+
+ShutDownWB:	move.l	SCCTask(pc),a4			;WAZ IZ FOR?
+		lib	Exec,Forbid
+		move.l	WBMsg(pc),a1
+		flib	Exec,ReplyMsg
+		move.l	OldLock(pc),d1
+		lib	Dos,CurrentDir
+		bra	ShutDown2000
+
+		INCLUDE	"LWF:SimCC/DosError.i"
+		INCLUDE	"LWF:SimCC/SCCCommandLineHelp.i"
+	
+MenusOn:	lea.l	Menu1(pc),a1
+		move.l	Window1(pc),a0
+		lib	Intuition,SetMenuStrip
+		rts
+
+MenusOff:	move.l	Window1(pc),a0
+		lib	Intuition,ClearMenuStrip
+		rts
+
+MenuNull:	move.l	d3,d6	
+				
+		ror.l	#5,d6	
+		lsr.l	#8,d6	
+		lsr.l	#8,d6
+		lsr.l	#8,d6
+		lsr.l	#3,d6
+
+		move.l	d3,d5
+
+		ror.l	#5,d5	
+		ror.l	#6,d5	
+		lsr.l	#8,d5
+		lsr.l	#8,d5
+		lsr.l	#8,d5
+		lsr.l	#2,d5
+				
+		move.l	#$00,d4
+		move.w	d3,d4
+		lsr.l	#5,d4
+		lsr.l	#6,d4
+		rts
+
+CheckIDCMP:	move.l	$4,a6			;made this a SubRoutine...
+		move.l	$56(a0),a2		;Give it the window structure in a0
+		move.l	#0,d1
+		move.b	$0f(a2),d1
+		move.l	#0,d0
+		bset.l	d1,d0
+		jsr	_LVOWait(a6)	
+	
+GetMsg1:	move.l	a2,a0	
+		jsr	_LVOGetMsg(a6)
+		tst.l	d0
+		beq	GetMsg2
+	
+		move.l	d0,a1 
+		move.l	$14(a1),d2		;answers with Class in d2,
+		move.w	$18(a1),d3		;Code in d3 and
+		move.w	$1a(a1),a4		;Qualifier in a4
+		move.l	$1c(a1),a5		;IAddress in a5
+		jsr	_LVOReplyMsg(a6)
+		bra	GetMsg1
+GetMsg2:	move.l	#-1,d0
+		rts
+
+ClearMSGs:	move.l	a0,d0			;Give it the window structure in a0
+		tst.l	d0
+		beq	ClearMsg3
+		move.l	a0,a3
+		lib	Exec,Forbid
+		move.l	$56(a3),a2
+ClearMsg1:	move.l	a2,a0	
+		lib	Exec,GetMsg
+		tst.l	d0
+		beq	ClearMsg2
+		move.l	d0,a1 
+		flib	Exec,ReplyMsg
+		bra	ClearMsg1
+ClearMsg2:	move.l	a3,a0
+		lib	Intuition,CloseWindow
+		lib	Exec,Permit
+ClearMsg3:	rts
+
+		ds.l	0
+
+;--------------------Structures------------------
+
+;Display stuff
+
+Window1		dc.l	0
+Win1RP		dc.l	0
+PubScreen	dc.l	0
+YOffset		dc.b	8,0
+
+;Library stuff (well what's needed anymore)
+
+		libnames
+
+;Task stuff
+
+SCCTask		dc.l	0
+
+;WB Stuff
+
+WBMsg		dc.l	0
+ArgList		dc.l	0
+ArgsLeft	dc.l	0
+OldLock		dc.l	0
+
+;File stuff
+
+_stdout		dc.l	0
+SCCAddress	dc.l	0
+SCCLength	dc.l	0
+SCCFile		dc.l	0
+FileBuf		dc.l	$ffffffff
+NILName:	dc.b	"NIL:",0
+		ds.l	0
+NILFile:	dc.l	0
+
+;req.lib stuff/requester stuff
+
+		INCLUDE	"LWF:SimCC/SCCFileRequester.i"
+
+;Other stuff XIV
+
+Mode		dc.w	0		;0=Intuition, 1=dos
+Kick		dc.w	0		;0=1.3, 1=2.0+
+
+;0 = SimCity
+;
+;1 = PoC Player #1
+;2 = PoC Player #2
+;3 = PoC Player #3
+;4 = PoC Player #4
+;
+;5 = Oil Player #1
+;6 = Oil Player #2
+;7 = Oil Player #3
+;8 = Oil Player #4
+;9 = RailRoad Tycoon
+
+Game		dc.w	0
+
+;Texts, Part I
+
+SCCName		dc.b	"SimCity 1.1 cheat by Tomi Blinnikka",0
+PoCName		dc.b	"Ports of Call cheat by Tomi Blinnikka",0
+GetSimName	dc.b	"Get SimCity city filename...",0
+GetPoCName	dc.b	"Get Ports of Call game filename...",0
+GetOilName	dc.b	"Get Oil Imperium game filename...",0
+GetRRTName	dc.b	"Get RailRoad Tycoon game filename...",0
+PositiveText1	dc.b	"Yes",0
+NegativeText1	dc.b	"No",0
+		ds.l	0
+
+;Font thing
+
+Topaz		dc.l	FontName
+		dc.w	8
+		dc.b	0
+		dc.b	0
+FontName	dc.b	"topaz.font",0
+		ds.l	0
+
+;New screen & new window structures
+
+NewWindow1	dc.w	200,31			;X,Y POS
+		dc.w	302			;WIDTH
+Win1YSize	dc.w	43			;HEIGHT
+		dc.b	0,1			;PENS
+		dc.l	MOUSEBUTTONS+CLOSEWINDOW+VANILLAKEY+RAWKEY+MENUPICK	;IDCMP FLAGS
+		dc.l	WINDOWDRAG+WINDOWDEPTH+WINDOWCLOSE+ACTIVATE	;FLAGS
+		dc.l	0,0			;GADGETS, CHECKMARK
+		dc.l	WindowTitle1		;TITLE
+		dc.l	0			;SCREEN ADDRESS
+		dc.l	0			;BITMAP			
+		dc.w	192
+		dc.w	11,300,43		;MINIMUM SIZE
+		dc.w	WBENCHSCREEN		;TYPE
+
+Win1TagList	dc.l	WA_AutoAdjust,0
+		dc.l	WA_InnerWidth,300
+		dc.l	WA_InnerHeight,30
+		dc.l	WA_Zoom,Win1ZoomXY
+		dc.l	TAG_DONE,0
+
+Win1ZoomXY	dc.w	0,20,192
+Win1ZoomY	dc.w	11
+
+WindowTitle1	dc.b	"SimCity cheat",0
+WindowTitle2	dc.b	"Ports of Call cheat",0
+WindowTitle3	dc.b	"Oil Imperium cheat",0
+WindowTitle4	dc.b	"RailRoad Tycoon cheat",0
+		ds.l	0
+
+;Gadget structures
+
+		INCLUDE "LWF:SimCC/SCCGads.i"
+		
+;Now for all the imagery and borders etc.
+
+GadgetBorder1	dc.w	-1		;Initial offsets from the origin
+		dc.w	-2		;LeftEdge and TopEdge
+		dc.b	1,2		;Pens
+		dc.b	1		;Draw Mode
+		dc.b	5		;Line Count (XY)
+		dc.l	BorderXY1	;XY's
+		dc.l	0		;Next Border
+		dc.b	0
+		ds.l	0
+BorderXY1	dc.w	0,0
+		dc.w	90,0		
+		dc.w	90,11
+		dc.w	0,11
+		dc.w	0,0
+		dc.b	0
+		ds.l	0
+
+;Menus
+
+		INCLUDE	"LWF:SimCC/SCCMenus.i"
+
+;Texts, Part II
+
+AboutTxt1:	dc.b	3,1			;PENS
+		dc.w	0			;MODE
+		dc.w	10,10			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	AboutText1		;TEXT
+		dc.l	AboutTxt2		;NEXTTEXT
+		ds.l	0
+		
+AboutTxt2:	dc.b	3,1			;PENS
+		dc.w	4			;MODE
+		dc.w	10,20			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	AboutText2		;TEXT
+		dc.l	AboutTxt3		;NEXTTEXT
+		ds.l	0
+
+AboutTxt3:	dc.b	3,1			;PENS
+		dc.w	4			;MODE
+		dc.w	10,30			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	AboutText3		;TEXT
+		dc.l	AboutTxt4		;NEXTTEXT
+		ds.l	0
+
+AboutTxt4:	dc.b	3,1			;PENS
+		dc.w	4			;MODE
+		dc.w	10,50			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	AboutText4		;TEXT
+		dc.l	0			;NEXTTEXT
+		ds.l	0
+
+		dc.b	"$VER: SimCheat 1.07, (C)opyright Tomi Blinnikka.",0
+AboutText1:	dc.b	"SimCity 1.1 cheat program v1.07",0
+AboutText2:	dc.b	"               by",0
+AboutText3:	dc.b	"         Tomi Blinnikka",0
+AboutText4:	dc.b	"        (C)opyright 1991-92",0
+		ds.l	0
+
+FinitoTxt1:	dc.b	3,1			;PENS
+		dc.w	4			;MODE
+		dc.w	10,20			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	FinitoText1		;TEXT
+		dc.l	0			;NEXTTEXT
+		ds.l	0
+FinitoText1:	dc.b	"Finished.",0
+		ds.l	0
+
+OKTxt:		dc.b	3,1			;PENS
+		dc.w	0			;MODE
+		dc.w	6,3			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	OKText1			;TEXT
+		dc.l	0			;NEXTTEXT
+		ds.l	0
+OKText1:	dc.b	"OK",0
+		ds.l	0
+CancelTxt:	dc.b	3,1			;PENS
+		dc.w	0			;MODE
+		dc.w	6,3			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	CancelText1		;TEXT
+		dc.l	0			;NEXTTEXT
+		ds.l	0
+CancelText1:	dc.b	"CANCEL!",0
+		ds.l	0
+
+Cheat?Txt:	dc.b	3,1			;PENS
+		dc.w	4			;MODE
+		dc.w	10,10			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	CheatText1		;TEXT
+		dc.l	0			;NEXTTEXT
+		ds.l	0
+
+CheatText1:	dc.b	"Cheat on this file?",0
+		ds.l	0                          
+
+WrongTxt1:	dc.b	3,1			;PENS
+		dc.w	4			;MODE
+		dc.w	10,10			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	FWrongText1		;TEXT
+		dc.l	0			;NEXTTEXT
+		ds.l	0
+
+FWrongText1:	dc.b	"Incorrect file! Try anyway?",0
+		ds.l	0
+
+Win1Txt1:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	-16,-18			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	Win1Text1		;TEXT
+		dc.l	0			;NEXTTEXT
+		ds.l	0
+Win1Text1:	dc.b	"Amount of money?",0
+		ds.l	0
+
+RRTSpecialTxt:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	205,21			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	RRTSText1		;TEXT
+		dc.l	0			;NEXTTEXT
+		ds.l	0
+RRTSText1:	dc.b	"000",0
+		ds.l	0
+
+;		section	SCC_ChipStuff,DATA,CHIP
+
+		END

@@ -1,0 +1,305 @@
+; --------------------------------------------------------------------------------------
+;
+; This source file is part of PureBasic
+; For the latest info, see http://www.purebasic.com/
+; 
+; Copyright (c) 1998-2006 Fantaisie Software
+;
+; This program is free software; you can redistribute it and/or
+; modify it under the terms of the GNU General Public License
+; as published by the Free Software Foundation; either version 2
+; of the License, or (at your option) any later version.
+;
+; This program is distributed in the hope that it will be useful,
+; but WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+; GNU General Public License for more details.
+;
+; You should have received a copy of the GNU General Public License
+; along with this program; if not, write to the Free Software
+; Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+;
+; --------------------------------------------------------------------------------------
+;
+; PB Editor Structure Viewer.
+;
+; Added check to the last PushedStructure to stop duplicates..
+; ie. stops it being minlist->minlist->minlist-> etc etc etc
+;
+
+Statement DisplayStructure{*RealList.List}
+  SHARED PBStructureView,StructureInfo(),StructureParent(),*StructureWindow
+
+  Found.b = 0
+  ;-- Debug it`s name...
+
+  If PBStructureView\DisplayRoot = 0
+
+
+  If (PBStructureView\NbPushedStructures = 0) AND (PBStructureView\GotoStructureMode = 0)
+
+    *NodeCursor.PBType = *RealList\lh_Head
+
+    For k.w=0 To PBStructureView\Code-1
+      *NodeCursor = *NodeCursor\MyNode\mln_Succ
+    Next
+
+    PBStructureView\Name = Peek$(&*NodeCursor\String)
+    ;!DPrint{2,"NAME>"+PBStructureView\Name}
+    ;!DPrint{2,"SIZE>"+Str$(*NodeCursor\Size)}
+    Found = 1
+  Else
+
+    Ok.w = 0
+
+    If PBStructureView\GotoStructureMode = 0
+      ResetList StructureInfo()
+
+      For k.w=0 To PBStructureView\Code
+        NextItem StructureInfo()
+      Next
+
+      If StructureInfo()\VarType = 7
+        PBStructureView\Name = StructureInfo()\StructureName
+        Ok.w = 1
+      EndIf
+    Else
+      Ok.w = 1
+    EndIf
+
+    If Ok
+      *NodeCursor.PBType = *RealList\lh_Head
+
+      While *NodeCursor AND (Found = 0)
+        If Peek$(&*NodeCursor\String) = PBStructureView\Name
+
+          Found = 1
+
+        Else
+          *NodeCursor = *NodeCursor\MyNode\mln_Succ
+        EndIf
+      Wend
+
+    EndIf
+  EndIf
+
+
+  If Found = 1
+    SetWindowTitles_ *StructureWindow,&PBStructureView\Name,-1
+
+    If PBStructureView\NbPushedStructures = 0
+      NDisableGadget #SV_Parent, 0
+    EndIf
+
+    If PBStructureView\ParentMode = 0
+      ; Added to stop adding lists\nodes etc!
+      If StructureParent(PBStructureView\NbPushedStructures)<>PBStructureView\Name
+        PBStructureView\NbPushedStructures + 1
+        StructureParent(PBStructureView\NbPushedStructures) = PBStructureView\Name
+      EndIf
+    EndIf
+
+    ;*TypeVar.PBTypeVar = *NodeCursor\TypeList  ; This seems to cause problems..
+    *TypeVar.PBTypeVar = *NodeCursor\TypeList
+    ;!DPrint{2,"TYPEVAR>"+Hex$(*TypeVar)}
+
+    ClearList StructureInfo()
+
+    While *TypeVar
+
+      If AddItem(StructureInfo())
+
+        If *TypeVar\Pointeur
+          a.s = "*"
+        Else
+          a.s = " "
+        EndIf
+
+        a.s = a + Peek$(*TypeVar + SizeOf.PBTypeVar)
+
+        StructureInfo()\StructureName = Peek$(*TypeVar+SizeOf.PBTypeVar+Len(a))
+
+        a + "." + StructureInfo()\StructureName
+
+        If *TypeVar\Array > -1
+          a = a + "(" + Str$(*TypeVar\Array) + ")"
+        EndIf
+
+        StructureInfo()\String  = a
+        StructureInfo()\VarType = *TypeVar\VarType
+
+      EndIf
+
+      *TypeVar = *TypeVar\NextVar
+    Wend
+
+    FirstItem StructureInfo()
+    *MyList.MinNode = StructureInfo() - 8
+    *RealListInfo.List = *MyList\mln_Pred
+
+    NGadgetAttrs   #SV_List, #GTLV_Labels, *RealListInfo
+    NGadgetAttrs   #SV_List, #GTLV_Top   , 0
+    NRefreshGadget #SV_List
+
+  EndIf
+
+  Else
+    NGadgetAttrs   #SV_List, #GTLV_Labels, *RealList
+    NGadgetAttrs   #SV_List, #GTLV_Top   , 0
+    NRefreshGadget #SV_List
+
+    PBStructureView\DisplayRoot = 0
+  EndIf
+
+End Statement
+
+;----------------------------------------------------------------------
+
+Statement OpenStructureViewer{}
+
+  SHARED EditorMessage,PBMetrics,PBStructureView,Language() ,*TagList
+  SHARED StructureParent(),*MyScreen,AlphaSortAddr
+  SHARED *StructureWindow
+
+ If *StructureWindow=0
+
+  PBStructureView\NbPushedStructures = 0
+  WindowW.w = 300
+
+
+   If AlphaSortAddr=0
+    CNIF #LoadCompiler
+     SendMessage{ #PB_MSG_GetStructureList }
+     *RealList.List = EditorMessage\mn_Data1
+    CELSE
+     *RealList.List=0
+    CEND
+
+    KI.List\lh_Head = *RealList
+
+    *RealList = &KI
+    AlphaSortStructs{*RealList}
+
+   EndIf
+
+  *RealList=AlphaSortAddr
+
+  If NCreateGadgetList(#Window_StructureViewer, *MyScreen)
+
+    HG.w  = PBMetrics\WTitleHeight+5
+    HF.w  = PBMetrics\SFontHeight+5
+    HF2.w = HF+4
+    XG.w  = 10
+
+    NSetGadgetFlags #PLACETEXT_ABOVE
+
+    NResetTagList   #GTLV_Labels,*RealList
+    NListViewGadget #SV_List, XG, HG+HF, 280, 150, Language(95), *TagList
+    HG+HF2+150
+
+    NSetGadgetFlags #PLACETEXT_IN
+    NButtonGadget   #SV_Parent, XG, HG, 100, HF, Language(96), 0
+
+    Tmp.s = ""
+    NResetTagList #GTST_MaxChars, 100
+          NAddTag #GTST_String  , &Tmp
+    NStringGadget #SV_Structure , XG+100, HG, WindowW-100-20, HF, "", *TagList : HG+HF2+8
+
+    Old_HG.w = HG
+
+    NSetGadgetFlags #PLACETEXT_IN
+    NButtonGadget #SV_Ok, XG+150-30, HG, 60, HF, Language(97), 0
+
+    HG+HF2+5
+
+    *StructureWindow.Window= OpenStandardWindow{#Window_StructureViewer, WindowW, HG, 94}
+
+    If *StructureWindow
+      Rect{NWBorderLeft-1,Old_HG-6,NWInnerWidth+2,2,1}
+      NDisableGadget #SV_Parent,1
+    Else
+      NFreeGadgetList #Window_StructureViewer
+    EndIf
+  EndIf
+
+  NUseWindow #Window_Main
+
+ Else
+   WindowToFront_  *StructureWindow
+   ActivateWindow_ *StructureWindow
+ EndIf
+
+End Statement
+
+;----------------------------------------------------------------------
+
+Statement CloseStructureWindow{}
+SHARED *StructureWindow
+
+   NCloseWindow #Window_StructureViewer
+   NFreeGadgetList #Window_StructureViewer
+   *StructureWindow=0
+End Statement
+
+;----------------------------------------------------------------------
+
+Statement HandleStructureEvents{IDCMP.l}
+
+SHARED PBStructureView,AlphaSortAddr,StructureParent()
+SHARED Language(),*StructureWindow
+
+
+Select IDCMP
+
+  Case #IDCMP_GADGETUP
+
+    PBStructureView\Code = NGadgetCode
+
+    Select NEventID
+
+      Case #SV_List
+        PBStructureView\GotoStructureMode = 0
+        !DPrint{2,"SV_List"}
+
+        DisplayStructure{AlphaSortAddr} ;*RealList}
+
+      Case #SV_Structure
+
+        PBStructureView\Name = NGetStringText(#SV_Structure)
+        PBStructureView\NbPushedStructures = 0
+        PBStructureView\GotoStructureMode  = 1
+        DisplayStructure{AlphaSortAddr} ;*RealList}
+
+      Case #SV_Parent
+
+        If PBStructureView\NbPushedStructures > 1
+          PBStructureView\NbPushedStructures-1
+          PBStructureView\Name = StructureParent(PBStructureView\NbPushedStructures)
+          PBStructureView\GotoStructureMode = 1
+          PBStructureView\ParentMode = 1
+        Else
+          PBStructureView\NbPushedStructures = 0
+          PBStructureView\GotoStructureMode  = 0
+          PBStructureView\DisplayRoot        = 1
+          NDisableGadget #SV_Parent, 1
+        EndIf
+
+        SetWindowTitles_ *StructureWindow,&Language(94),-1
+        DisplayStructure{AlphaSortAddr} ;*RealList}
+
+        PBStructureView\ParentMode = 0
+
+
+      Case #SV_Ok
+        ;IDCMP = #IDCMP_CLOSEWINDOW
+        CloseStructureWindow{}
+
+    End Select
+
+  Case #IDCMP_VANILLAKEY
+
+  Case #IDCMP_CLOSEWINDOW
+    CloseStructureWindow{}
+End Select
+   NUseWindow #Window_Main
+End Statement

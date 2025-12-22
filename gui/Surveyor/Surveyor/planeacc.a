@@ -1,0 +1,143 @@
+	nolist
+
+*  Perhaps there is more implemented in asm than really necessary, but
+*  it does not harm either.
+*  Assem is the assembler I used. Lattice's asm is still too unfamiliar.
+
+	include	"exec/types.i"
+	include	"exec/funcdef.i"
+	include	"exec/exec_lib.i"
+	include	"intuition/intuitionbase.i"
+	include	"intuition/screens.i"
+	include	"graphics/gfx.i"
+	list
+
+	xdef	_GetDotColor,_SetDotColor
+	xref	_LVOLockIBase,_LVOUnlockIBase,_IntuitionBase
+
+
+*
+*  GetDotColor(x,y)
+*  ULONG x, y;
+*
+*  GetDotColor returns the color of a point in the BitMap of the 
+*  frontmost screen with the x and y coordinates.
+*  In case of error, -1 is returned.
+*
+	offset	5*4	d2/d3/d4/a6,return adress
+GDCx	ds.l	1
+GDCy	ds.l	1
+
+	code
+_GetDotColor:
+	movem.l	d2/d3/d4/a6,-(a7)
+	move.l	_IntuitionBase,a6
+	moveq.l	#0,d0			Which one is the parameter?
+	sub.l	a0,a0			Donot change things while we are
+	jsr	_LVOLockIBase(a6)	  looking at them.
+	move.l	d0,d4			lock_value
+	move.l	ib_FirstScreen(a6),a1
+	lea.l	sc_BitMap(a1),a1	Get structure
+	move.l	GDCx(a7),d2		Get X-coord
+	move.l	GDCy(a7),d3		Get Y-coord
+	bsr	GetOff			Calculate position in bitplane
+	bmi.s	GDCerr			X/Y not inside bitplane
+	moveq.l	#0,d1
+	move.b	bm_Depth(a1),d1		Number of bitplanes
+	lsl.l	#2,d1			Scale to longword
+	lea.l	bm_Planes(a1,d1),a1	Get adress of one past last plane
+	lsr.l	#2,d1			Back to number of bitplanes
+	moveq.l	#0,d0			Clear color collector
+	bra.s	10$			Start with plane-checking
+20$	btst	d2,0(a0,d3.w)		Test X-Y bit in plane
+	beq.s	10$			Zero
+	bset	d1,d0			Set coordinating bit in color coll.
+10$	move.l	-(a1),a0		Next plane (preceding)
+	subq.b	#1,d1			Check Depth
+	bpl.s	20$			Not done yet
+GDCerr  move.l	d0,d2			Keep returnvalue
+	move.l	d4,a0			lock_value
+	jsr	_LVOUnlockIBase(a6)	Things may change again
+	move.l	d2,d0
+	movem.l	(a7)+,d2/d3/d4/a6	Done, return color or error in d0
+	rts
+
+
+*
+*  SetDotColor(x,y,Color)
+*  short x, y, Color; 
+*
+*  SetDotColor sets the color of a point in the BitMap of the
+*  frontmost screen with the x and y coordinates.
+*  In case of error, -1 is returned.
+*
+	offset	5*4	d2/d3/d4/a6,return adress
+SDCx	ds.l	1
+SDCy	ds.l	1
+Color	ds.l	1
+
+	code
+_SetDotColor:
+	movem.l	d2/d3/d4/a6,-(a7)
+	move.l	_IntuitionBase,a6
+	moveq.l	#0,d0			Which one is the parameter?
+	sub.l	a0,a0			Donot change things while we are
+	jsr	_LVOLockIBase(a6)	  looking at them.
+	move.l	d0,d4			lock_value
+	move.l	ib_FirstScreen(a6),a1
+	lea.l	sc_BitMap(a1),a1	Get structure
+	move.l	SDCx(a7),d2		Get X-coord
+	move.l	SDCy(a7),d3		Get Y-coord
+	bsr.s	GetOff			Calculate position in bitplane
+	bmi.s	SDCerr			X/Y not inside bitplane
+	moveq.l	#0,d1
+	move.b	bm_Depth(a1),d1		Number of bitplanes
+	lsl.l	#2,d1			Scale to longword
+	lea.l	bm_Planes(a1,d1),a1	Get adress of one past last plane
+	lsr.l	#2,d1			Back to number of bitplanes
+	move.l	Color(a7),d0		Get color
+	bra.s	10$			Start with plane-checking
+20$	btst	d1,d0			Check bit in color
+	beq.s	30$			Plane-bit must be cleared
+	bset.b	d2,0(a0,d3.w)		Set X-Y bit in plane
+	bra.s	10$
+30$	bclr.b	d2,0(a0,d3.w)		Clear X-Y bit in plane
+10$	move.l	-(a1),a0		Next plane (preceding)
+	subq.b	#1,d1			Check Depth
+	bpl.s	20$			Not done yet
+	moveq.l	#0,d0			No error
+SDCerr	move.l	d0,d2			Keep returnvalue
+	move.l	d4,a0			lock_value
+	jsr	_LVOUnlockIBase(a6)	Things may change again
+	move.l	d2,d0
+	movem.l	(a7)+,d2/d3/d4/a6	Done, return error in d0
+	rts
+
+
+*
+*  GetOff(BitMap,    X,    Y)
+*           a1.l, d2.l, d3.l
+*
+*  result: 
+*          d3.l  byte offset
+*          d2.l  bit  offset
+*
+*  error   CCR-N set, d0.l=-1
+*
+
+GetOff
+	cmp.w	bm_Rows(a1),d3		Y out of range?
+	bpl.s	GOerr
+	mulu	bm_BytesPerRow(a1),d3	Scale Y
+	move.l	d2,d0			Get X, for byte offset
+	lsr.l	#3,d0			Was in dots, now in bytes
+	cmp.w	bm_BytesPerRow(a1),d0	X out of range?
+	bpl.s	GOerr
+	add.l	d0,d3			Add to scaled Y, bytes ok now
+	not.b	d2			68000 counts the other way around
+	and.w	#7,d2			Select bit count
+	rts
+GOerr	moveq.l	#-1,d0
+	rts
+
+	end

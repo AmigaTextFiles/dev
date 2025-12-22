@@ -1,0 +1,1962 @@
+﻿/****************************************************************
+**                                                             
+** Name:        EasyRapa                                     
+** Author:      Sandro Barbagelata    
+** Version: 	1.1             
+** Date:        August 2020                                    
+** Interpreter: Hollywood               
+**
+**                                                         
+****************************************************************/
+
+;Ids structure 	
+;		id=Obj id
+;               obj=obj type (class name)
+;		R=lay-out row
+;		C=lay-out column
+;		pg=lay-out page
+;		rc=index string pg/r/c	
+
+
+;objlist structure
+;		objlist[k]=objname
+
+;obj structure
+;		obj[objname]
+;		name=objname
+;		param=vector with the parameter per obj line as defined in Definitions
+;		funct=vector with the functionality per obj as defined In Definitions
+;		def_val=vector with the default values per obj as defined In Definitions
+
+
+;cataloglist structure
+;		cataloglist[k].text
+;		cataloglist[k].transl
+;		cataloglist[k].usedin = the same translation can be used for different items then 
+;					name of the item [Line description into the class definition#class type] number of items 2=1  
+;					i.e pageview1_P0[pageview#Title]pageview11_P0[pageview#Title] 3
+
+
+@REQUIRE "RapaGUI", {Version = 2, Revision = 0}
+@INCLUDE "ERprocess.hws"
+@INCLUDE "intro.hws"
+@FILE 1,"EasyRapa.xml"
+
+/*
+** Toolbar images
+*/
+
+Const #icodims=30
+
+@BRUSH 1, "data/new.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims,LoadAlpha = True}
+@BRUSH 2, "data/open.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims,LoadAlpha = True}
+@BRUSH 3, "data/close.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims,LoadAlpha = True}
+@BRUSH 4, "data/save.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims,LoadAlpha = True}
+@BRUSH 5, "data/saveas.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims,LoadAlpha = True}
+@BRUSH 6, "data/reportremove_s.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims,LoadAlpha = True}
+@BRUSH 7, "data/reportadd_s.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims,LoadAlpha = True}
+@BRUSH 8, "data/paste.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims,LoadAlpha = True}
+;@BRUSH 9, "data/undo.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims,LoadAlpha = True}
+;@BRUSH 10, "data/redo.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims,LoadAlpha = True}
+@BRUSH 17, "data/wizard-icon.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims, LoadAlpha = True}
+@BRUSH 18, "data/dataexplorer_s.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims, LoadAlpha = True}
+@BRUSH 19, "data/ok.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims, LoadAlpha = True}
+@BRUSH 20, "data/cancel.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims, LoadAlpha = True}
+@BRUSH 21, "data/add.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims, LoadAlpha = True}
+@BRUSH 22, "data/testmode.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims, LoadAlpha = True}
+@BRUSH 23, "data/jump_line.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims, LoadAlpha = True}
+@BRUSH 24, "data/bgwindow.png", {SmoothScale=True,ScaleWidth=#icodims, ScaleHeight=#icodims, LoadAlpha = True}
+
+@DISPLAY 1, {width=801, height=501, color=#WHITE}
+@DISPLAY 2, {width=801, height=40, color=#GRAY}
+@DISPLAY 3, {width=851, height=40, color=#GRAY}
+
+
+
+Function p_crea_xml_param(Values$)
+	;values$ is the obj definition string stating in the project line i.e. button,button1,3,2,0,,1,ViewDgw,0
+	If Values$="" Then Return
+	
+	If LowerStr(Values$)="listview" ;for listview items ask for n. of columns to prebiult default strings 
+		Local a$ = StringRequest("ListView", "Enter number of columns",{text="3", type=#NUMERICAL})
+		dfT$,dfP$,dfI$,dfW$="","","",""
+		For Local h=1 To Val(a$)
+			dfT$=dfT$.."Title"..h.."|"
+			dfP$=dfP$.."0|"
+			dfI$=dfI$.."|"
+			dfW$=dfW$.."100|"
+		Next
+		dfT$=UnleftStr(dfT$,1)
+		dfP$=UnleftStr(dfP$,1)
+		dfI$=UnleftStr(dfI$,1)
+		dfW$=UnleftStr(dfW$,1)
+;		DebugPrint(dfT$,dfP$,dfI$,dfW$)
+	EndIf	
+
+	ww=IIf(LeftStr(os$,3)="WIN",[[ width="270"]],[[ width="220"]]); on Windows systems I increase the window width
+
+	data,n_data=SplitStr(Values$,",")	
+	
+	Local entity=LowerStr(RemoveItem (data,0)) ;determine for which class I'm editing the values
+	
+	If IsTableEmpty(data) ;restore default values
+		data=CopyTable(obj[entity].Def_val)
+		If moai.DoMethod("ER_pv", "GetPageID","active")="tab_l_o"
+			data[1]=act_boxr
+			data[2]=act_boxc
+			data[3]=ToString(moai.Get("LO_pages","active"))
+		EndIf
+		If LowerStr(Values$)="listview"
+			data[9]=dfT$
+			data[10]=dfI$
+			data[11]=dfW$
+			For z=12 To 16 data[z]=dfP$ Next		
+		EndIf	
+
+	EndIf	
+	; start building xml
+	n_row=TableItems(obj[entity].param)-1
+	moai.DoMethod("project","select","all","off")
+	prefsxml$=[[<?xml version="1.0" encoding="iso-8859-1"?>
+	
+		<dialog ID="Preference" title="]]..obj[entity].name..[[" width="450" MaximizeGadget="False" MinimizeGadget="False" CloseGadget="False">
+
+		<vgroup>
+		<hgroup>
+		<rectangle/>
+				<button id="pd_paramok" icon="19"/>
+				<button id="pd_paramcanc" icon="20"/>
+				<button id="pd_paramsavedef" icon="9"/>
+		<rectangle/>
+		</hgroup>
+		<colgroup columns="3">]]..lf$
+		
+		For Local k=0 To n_row
+;			DebugPrint(UpperStr(obj[entity].param[k]))
+		    prefsxml$=prefsxml$.."		<text ID="..Chr(34)..obj[entity].param[k]..".lbl"..Chr(34)..[[ frame="true" align="Right">]]..obj[entity].param[k].."</text>"..lf$
+		    If UpperStr(LeftStr(obj[entity].funct[k],8))="CHECKBOX"
+		       prefsxml$=prefsxml$.."		<checkbox ID="..Chr(34)..obj[entity].param[k]..Chr(34)..ww..[[ notify="selected"></checkbox >]]..lf$
+		    ElseIf UpperStr(LeftStr(obj[entity].funct[k],6))="CHOICE"
+		       prefsxml$=prefsxml$.."		<choice ID="..Chr(34)..obj[entity].param[k]..Chr(34)..">"..lf$
+		       Local zz,cc=SplitStr(obj[entity].funct[k],"|")
+		       For Local u=1 To cc-1 Do  prefsxml$=prefsxml$.."<item>"..zz[u].."</item>"..lf$
+		       prefsxml$=prefsxml$.."</choice>"..lf$
+		    ElseIf UpperStr(LeftStr(obj[entity].funct[k],7))="MCHOICE"
+				prefsxml$=prefsxml$..[[         <listview id="mchoice_lv]]..k..[[" ]]..ww..[[ height="80">
+				<column  title="For" width="120"/>
+				<column  title="Sel" Checkbox="true" width="25"/>
+			</listview>
+			]]
+		
+		    ElseIf FindStr(" MAXLEN HEIGHT WIDTH LEFT RIGHT PAGE GRIDR GRIDC "," "..UpperStr(obj[entity].param[k]).." ")>0
+		       prefsxml$=prefsxml$.."		<textentry ID="..Chr(34)..obj[entity].param[k]..Chr(34).." "..ww..[[ Accept="0123456789"></textentry>]]..lf$	
+		    ElseIf UpperStr(obj[entity].param[k])="TITLE_LO_PAGES"
+		       prefsxml$=prefsxml$.."		<textentry ID="..Chr(34)..obj[entity].param[k]..Chr(34).." "..ww..[[ Accept="|0123456789"></textentry>]]..lf$	
+		    ElseIf UpperStr(obj[entity].param[k])="ICON"
+		       prefsxml$=prefsxml$.."		<textentry ID="..Chr(34)..obj[entity].param[k]..Chr(34).." "..ww..[[ Accept="|0123456789" tooltip="Use: nothing for no icons or indicate the icon number defined on Icon tab"></textentry>]]..lf$	
+		    ElseIf UpperStr(LeftStr(obj[entity].param[k],5))="MACRO"
+		       prefsxml$=prefsxml$.."		<textentry ID="..Chr(34)..obj[entity].param[k]..Chr(34).." "..ww..[[ ReadOnly="true" ></textentry>]]..lf$	
+		    Else 
+				prefsxml$=prefsxml$..[[		<textentry ID="]]..obj[entity].param[k]..[["]]..
+				IIf(UpperStr(obj[entity].param[k])="COL_ICONS",[[ tooltip="Use: nothing for no icons or indicate the icon number"]],"")..
+				IIf(UpperStr(obj[entity].param[k])="COL_ALIGN",[[ tooltip="Use: 0-->LEFT 1-->CENTER 2-->RIGHT"]],"")..
+				IIf(UpperStr(obj[entity].param[k])="COL_CHECKBOX",[[ tooltip="Use: 0-->FALSE (Default) 1-->TRUE"]],"")..
+				IIf(UpperStr(obj[entity].param[k])="COL_EDITABLE",[[ tooltip="Use: 0-->FALSE (Default) 1-->TRUE Notification StartEditing must be set"]],"")..
+				IIf(UpperStr(obj[entity].param[k])="COL_HIDE",[[ tooltip="Use: 0-->FALSE (Default) 1-->TRUE"]],"")..
+				IIf(UpperStr(obj[entity].param[k])="COL_SORTABLE",[[ tooltip="Use: 0-->FALSE (Default) 1-->TRUE"]],"")..
+				[[></textentry>]]..lf$
+		    EndIf
+		    
+		    If UpperStr(LeftStr(obj[entity].param[k],5))="MACRO";add third column with button for macro adding
+				;prefsxml$=prefsxml$..[[<button id="pd_macrobtn_]]..obj[entity].param[k]..[[" icon="10"/>]]
+				prefsxml$=prefsxml$..[[<button id="pd_macrobtn" icon="10"/>]]
+			    ;moai.Request("","pd_macrobtn_"..obj[entity].param[k] , "ok")
+
+			Else
+				prefsxml$=prefsxml$..[[<label> </label>]]	    
+			EndIf
+		Next
+		
+		prefsxml$=prefsxml$..[[		</colgroup>
+		</vgroup>
+	</dialog>]]
+;	DebugPrint(prefsxml$)
+	zz,ww=Nil,Nil
+	
+	moai.CreateDialog (prefsxml$)
+
+;	populate param dialog form with data	
+	For Local k=0 To TableItems(obj[entity].param)-1
+	    If Not HaveItem(data,k) Then Continue	
+;	    If k>=n_data-1 Then Continue
+;		DebugPrint(">>>"..obj[entity].param[k].."<<--->>"..data[k].."<<<")
+	    If UpperStr(LeftStr(obj[entity].funct[k],8))="CHECKBOX"
+		moai.Set(obj[entity].param[k], "selected", data[k]) ;
+	    ElseIf UpperStr(LeftStr(obj[entity].funct[k],6))="CHOICE"
+		moai.Set(obj[entity].param[k], "active", ToNumber(data[k])) ;
+	    ElseIf UpperStr(LeftStr(obj[entity].funct[k],7))="MCHOICE"
+		notobj,no=SplitStr(obj[entity].funct[k],"|")
+		Local aa,no1=SplitStr(data[k],"|")
+		For Local u=1 To no-1
+		    moai.DoMethod("mchoice_lv"..k, "Insert", "Bottom", notobj[u], aa[u-1])	
+		Next	
+	    ElseIf UpperStr(LeftStr(obj[entity].param[k],2))="ID"
+		moai.Set(obj[entity].param[k], "Text", IIf(StripStr(data[k])="",p_ID_new(entity), StripStr(data[k]))) ;
+	    Else 
+		moai.Set(obj[entity].param[k], "Text", StripStr(data[k])) ;
+	    EndIf
+	Next
+	Local aa =p_ID_check(StripStr(moai.Get("ID","text")))
+	If aa>=0 Then RemoveItem(ids,aa)
+	prefsxml$=Nil	
+
+	;p_prj_line_highlight(aa)
+
+	moai.DoMethod("Preference", "showmodal")	
+
+EndFunction 
+
+
+Function p_crea_obj_dialog(objl,df)
+	;objl=true handle obj list, objl=false handle item list
+	objxml$=[[<?xml version="1.0" encoding="iso-8859-1"?>
+
+	<dialog ID="ObjList" title="Select ]]..IIf(objl,"Object to insert","Item to jump to")..[[" width="320">
+		<hgroup>
+			<combobox ID="objsel" width="250">
+			</combobox>
+			<button id="]]..IIf(objl,"ol_olok","ol_isok")..[[" icon="19"/>
+		</hgroup>
+	</dialog>
+]]
+
+	moai.CreateDialog (objxml$)
+	If objl
+		ForEach(objlist, p_obj_list ) ;populate combo box list
+	Else
+		t1={}
+		Local u=0
+		For Local k=1 To TableItems(ids)-1
+			t1[u]=ids[k].id
+			u=u+1
+		Next
+		Sort(t1)
+		ForEach(t1, p_obj_list ) ;populate combo box list		
+	EndIf	
+	objxml$,t1=Nil,Nil
+	If df<>"" Then moai.Set("objsel","value",df)
+	moai.DoMethod("ObjList", "showmodal")	
+		
+EndFunction 
+
+
+Function p_obj_list(a,b)
+	moai.DoMethod("objsel", "Insert", "Bottom", b)
+EndFunction
+
+Function p_crea_icon_dialog(ib,ip$,tb,id$,hlp$,macr$)
+	DebugPrint(os$)
+	ww=IIf(LeftStr(os$,3)="WIN",[[ width="150"]],[[ width="250"]])
+
+	icoxml$=[[<?xml version="1.0" encoding="iso-8859-1"?>
+
+	<dialog ID="iconedit" title="Edit icon data" width="320">
+		<vgroup>
+			<hgroup>
+				<button id="icd_icok" icon="19"/>
+				<button id="icd_iccanc" icon="20"/>
+			</hgroup>
+			<hline/>
+			<colgroup columns="3">				
+				<text ID="icd_id_lbl" align="Right">ID:</text>
+				<textentry ID="icd_id"]]..ww..[[></textentry>
+				<label> </label>
+
+				<text ID="icd_icon_lbl" align="Right">Icon brush n.:</text>
+				<textentry ID="icd_icon"]]..ww..[[ accept="1234567890"></textentry>
+				<label> </label>
+
+				<text ID="icd_path_lbl" align="Right">Path:</text>
+				<textentry ID="icd_path" ]]..ww..[[></textentry>
+				<button id="icd_pathbutton" icon="2" width="]]..#icodims..[["/>
+
+				<text ID="icd_toolbar_lbl" align="Right">Toolbar:</text>
+				<checkbox ID="icd_toolbar"></checkbox>
+				<label> </label>
+
+				<text ID="icd_help_lbl" align="Right">Help:</text>
+				<textentry ID="icd_help" ]]..ww..[[></textentry>
+				<label> </label>
+				
+				<text ID="icd_macro_lbl" align="Right">Macro:</text>
+				<textentry ID="icd_macro" ]]..ww..[[></textentry>
+				<button id="icd_macrobutton" icon="10" width="]]..#icodims..[["/>
+
+
+			</colgroup>
+		</vgroup>
+	</dialog>
+]]
+;	uu=moai.Request("", tb, "ok")
+
+
+	moai.CreateDialog (icoxml$)
+	moai.Set("icd_icon","text", ib)
+	moai.Set("icd_path","text",ip$)
+	moai.Set("icd_id","text",id$)
+	moai.Set("icd_help","text",hlp$)
+	moai.Set("icd_toolbar","selected", tb)
+	moai.Set("icd_macro","text",macr$)
+
+	icoxml$,ww=Nil,Nil
+	moai.DoMethod("iconedit", "showmodal")	
+	
+EndFunction 
+
+Function p_crea_menu_dialog()
+	ww=IIf(LeftStr(os$,3)="WIN",[[ width="150"]],[[ width="250"]])
+
+	mnxml$=[[<?xml version="1.0" encoding="iso-8859-1"?>
+
+	<dialog ID="Menuitem" title="Menu item" width="320">
+		<vgroup>
+			<hgroup>
+				<button id="mn_mtvok" icon="19"/>
+				<button id="mn_mtvcanc" icon="20"/>
+			</hgroup>
+			<hline/>
+			<colgroup columns="3">				
+				<text ID="ptv_Item_lbl" align="Right">Item:</text>
+				<textentry ID="ptv_Item"]]..ww..[[></textentry>
+				<label></label>
+
+				<text ID="ptv_ID_lbl" align="Right">ID:</text>
+				<textentry ID="ptv_ID"]]..ww..[[></textentry>
+				<label></label>
+
+				<text ID="ptv_Scut_lbl" align="Right">Short Cut</text>
+				<textentry ID="ptv_Scut"]]..ww..[[></textentry>
+				<label></label>
+
+				<text ID="ptv_Help_lbl" align="Right">Help</text>
+				<textentry ID="ptv_Help"]]..ww..[[></textentry>
+				<label></label>
+
+				<text ID="ptv_Disab_lbl" align="Right">Disabled:</text>
+				<checkbox ID="ptv_disab"></checkbox>
+				<label></label>
+				
+				<text ID="ptv_macro_lbl" align="Right">Macro:</text>
+				<textentry ID="ptv_macro" ]]..ww..[[></textentry>
+				<button id="mn_macrobutton" icon="10" width="]]..#icodims..[["/>
+
+			</colgroup>
+		</vgroup>
+	</dialog>
+	]]
+	
+;	DebugPrint(mnxml$)
+
+	moai.CreateDialog (mnxml$)
+
+	Local aa=moai.Get("tv", "active")
+;	uu=moai.Request("", aa, "ok")
+	tlb=moai.DoMethod(aa, "GetItem", 4)
+	
+;	uu=moai.Request("", tlb, "ok")
+	
+	If tlb="On" Then tlb=1 Else tlb=0
+	moai.Set("ptv_Item","text", moai.DoMethod(aa, "GetItem", 0))
+	moai.Set("ptv_ID","text", moai.DoMethod(aa, "GetItem", 1))
+	moai.Set("ptv_Scut","text", moai.DoMethod(aa, "GetItem", 2))
+	moai.Set("ptv_Help","text", moai.DoMethod(aa, "GetItem", 3))
+	moai.Set("ptv_disab","selected",tlb)
+	moai.Set("ptv_macro","text",macr$)
+	
+	mnxml$,ww=Nil,Nil
+	
+	moai.DoMethod("Menuitem", "showmodal")	
+	
+EndFunction 
+
+
+;=================================================================================	
+
+/*
+** Update window title
+*/	
+Function p_UpdateTitle()
+	
+	moai.Set("win", "title", "EasyRapa - " .. (projectname$) .. IIf(changed, "*", ""))
+
+	moai.Set("prf_prj_name", "text", projectname$)
+
+	moai.Set("prf_prj_fullpath", "text", fullprojectname$)
+
+EndFunction			
+
+
+/*
+** Enables/disables buttons which need changes to work
+*/
+Function p_UpdateButtonState()
+	
+	actab=moai.DoMethod("ER_pv", "GetPageID","active")
+	If (actab="tab_prj" Or actab="tab_l_o") Then actrun=True Else actrun=False
+	If actab="tab_prj" Then actccp=True Else actccp=False
+	
+	If projectname$="" Then prjon=False Else prjon=True
+
+	moai.Set("mn_addnode", "disabled",Not prjon)
+	moai.Set("mn_additem", "disabled",Not prjon)
+	moai.Set("mn_delete", "disabled",Not prjon)
+	moai.Set("mn_edit", "disabled",Not prjon)
+	moai.Set("ic_addline", "disabled",Not prjon)
+	moai.Set("ic_delete", "disabled",Not prjon)
+	moai.Set("ic_edit", "disabled",Not prjon)
+
+
+	moai.Set("mn_new", "disabled", intro)
+	moai.Set("tb_new", "disabled", intro)
+	moai.Set("mn_open", "disabled", intro)
+	moai.Set("tb_open", "disabled", intro)
+	moai.Set("mn_about", "disabled", intro)
+	moai.Set("mn_aboutrapagui", "disabled", intro)
+	moai.Set("mn_exit", "disabled", intro)
+	moai.Set("mn_lerp1", "disabled", intro)
+	moai.Set("mn_lerp2", "disabled", intro)
+	moai.Set("mn_lerp3", "disabled", intro)
+	moai.Set("mn_lerp4", "disabled", intro)
+
+
+
+	moai.Set("tb_close", "disabled", Not prjon)
+	moai.Set("mn_close", "disabled", Not prjon)
+	moai.Set("tb_save", "disabled", Not Changed)
+	moai.Set("mn_save", "disabled", Not Changed)
+	moai.Set("tb_saveas", "disabled", Not Changed)		
+	moai.Set("mn_saveas", "disabled", Not Changed)
+;	moai.Set("tb_cut", "disabled", Not(actccp And prjon))		
+;	moai.Set("mn_cut", "disabled", Not(actccp And prjon))
+;	moai.Set("tb_copy", "disabled", Not(actccp And prjon))		
+;	moai.Set("mn_copy", "disabled", Not(actccp And prjon))
+	moai.Set("mn_linedel", "disabled", (Not actccp Or Not prjon))
+	moai.Set("mn_lineadd", "disabled", (Not actccp Or Not prjon))
+	moai.Set("tb_linedel", "disabled", (Not actccp Or Not prjon))
+	moai.Set("tb_lineadd", "disabled", (Not actccp Or Not prjon))
+	moai.Set("mn_lineedit", "disabled", (Not actccp Or Not prjon))
+	moai.Set("mn_lineedit", "disabled", (Not actccp Or Not prjon))
+;	moai.Set("tb_paste", "disabled", Not(actccp And prjon))		
+;	moai.Set("mn_paste", "disabled", Not(actccp And prjon))
+	moai.Set("tb_modobj", "disabled",Not(prjon And actrun))			
+	moai.Set("tb_addobj", "disabled",Not(prjon And actrun))			
+	moai.Set("tb_runmagic", "disabled",Not(prjon And actrun))			
+	moai.Set("tb_jump", "disabled",Not prjon)			
+	moai.Set("tb_winobj", "disabled",Not prjon)			
+	moai.Set("tb_testmagic", "disabled",Not gotest)	
+	moai.Set("mn_winobj", "disabled",Not prjon)			
+	moai.Set("mn_runmagic", "disabled",Not(prjon And actrun))			
+	moai.Set("mn_jump", "disabled",Not prjon)			
+	moai.Set("mn_testmagic", "disabled",Not gotest)	
+	prjon,actccp,actccp,actab=Nil,Nil,Nil,Nil
+	
+EndFunction
+	
+Function p_menu_array_rebuilt()
+	tvarray={} ;save menu structure
+	actnode="root"
+	parent="Root"
+	p_menu2array("tv", "root")
+	actnode=Nil
+EndFunction
+		
+Function p_menu2array(id$, node)
+	Local found, t = moai.DoMethod(id$, "GetEntry", node, "Head")
+	
+	While found = True
+		t.parent=p_menu_getparent(id$,t.uid)
+		;DebugPrint(IIf(t.Node = True, "+", ""), Unpack(t.items),t.parent)
+		InsertItem(tvarray,t)
+		If t.Node = True 
+			actnode=t.id
+			t.actnode=actnode
+			p_menu2array(id$, t.uid)
+		EndIf
+		t.actnode=actnode
+		;t.parent=p_menu_getparent(id$,t.uid)
+		found, t = moai.DoMethod(id$, "GetEntry", t.uid, "Next")
+	Wend
+EndFunction
+
+Function p_menu_getparent(iid$,ud)
+	 Local found1, parent  = moai.DoMethod( iid$, "GetEntry",ud, "parent", "" )
+	 If found1
+		Return (parent.id)
+	 Else
+		Return ("Root")
+	 EndIf
+EndFunction	
+	
+/*
+** Save
+*/
+Function p_prj_Save()
+	;Save the icon list	
+	Local iconlist={}
+	For k=0 To moai.Get("ic_sel", "entries")-1 Do iconlist[k]=Pack(moai.DoMethod("ic_sel", "GetEntry", k))
+	
+	p_menu_array_rebuilt()	
+
+	OpenFile(1, fullprojectname$, #MODE_WRITE)
+		WriteTable(1, prg_lines,True,True)
+		WriteTable(1, iconlist,True,True)
+		WriteTable(1, tvarray,True,True)
+		WriteTable(1, cataloglist,True,True)
+	CloseFile(1)
+	
+	If lasterp1<>fullprojectname$
+		lasterp4=lasterp3	
+		lasterp3=lasterp2	
+		lasterp2=lasterp1	
+		lasterp1=fullprojectname$	
+		p_Update_ini()
+	EndIf
+	
+	changed = False
+	newfile=False
+	p_UpdateTitle()
+	p_UpdateButtonState()
+	
+EndFunction	
+
+
+/*
+** Save as
+*/
+Function p_prj_SaveAs()
+	 
+	Local f$ = FileRequest("Save as", "erp", #REQ_SAVEMODE,GetCurrentDirectory())
+	If f$ = "" Then Return(True)
+	projectname$=UnleftStr(FilePart(f$), 4)
+	MakeDirectory(projectname$)
+	fullprojectname$ = projectname$.."/"..projectname$..".erp"
+	p_prj_Save()
+	Return(False)		
+EndFunction
+
+
+/*
+** Save project
+*/
+Function p_prj_SaveGate()
+	If projectname$ = "Unnamed" Or projectname$=""
+		If p_prj_SaveAs() Then Return(True)
+	Else			
+		p_prj_Save()
+	EndIf		
+	
+	Return(False)
+	
+EndFunction
+
+	
+/*
+** Warn user of losing his changes
+*/
+Function p_prj_Save_Check()
+	
+	If changed
+		
+		If moai.Request("", "Prtoject has been modified. Do you want to save your changes?", "Yes|No", "question")
+			If p_prj_SaveGate() Then Return(True)
+		Else
+			If newfile Then DeleteFile(UnleftStr(PathPart(fullprojectname$),1)) 
+		EndIf
+	EndIf				
+	
+	Return(False)
+	
+EndFunction
+
+
+Function p_prj_close()
+	moai.DoMethod("ic_sel", "clear")
+	moai.DoMethod("project", "clear")
+	If moai.HaveObject("tv_my_Menu") Then moai.DoMethod("tv", "Remove","tv_my_Menu" )
+	For k=0 To moai.Get("ic_sel", "entries")	;remove all icons
+	   moai.DoMethod("ic_sel", "Remove", "first")	
+	Next
+
+	ids,ids_n=Nil,Nil
+	ids,ids_n={},{}
+	
+	projectname$=""
+	fullprojectname$=""
+	changed = False
+	moai.Set("xml", "text","")
+	moai.Set("hws", "text","")
+	p_UpdateTitle()
+	p_UpdateButtonState()
+	p_lay_out()
+EndFunction
+
+	
+/*
+** Open empty projext
+*/
+Function p_prj_New()
+	
+	If p_prj_Save_Check() Then Return
+	projname$, ok = StringRequest("New EasyRapa Project", "enter project name")
+	If ok And StrLen(projname$)>0
+		newfile=True
+		p_prj_close()
+		projectname$=projname$
+		projname$=Nil
+		fullprojectname$ = Prg_path$.."/"..projectname$
+		tvarray={}
+		MakeDirectory(fullprojectname$)
+;		moai.Set("project", "text",p_obj_def_str("window","myID")..lf$..lf$..lf$)
+		prg_lines[0]=p_obj_def_str("window","windowID")
+		prg_lines[1]=""
+		p_array2project()
+		p_IDs_refresh_list()
+		moai.DoMethod("tv", "insertnode", "tv_my_Menu", "Root", "Head","My Menu")
+		moai.DoMethod("tv", "insertnode", "tv_n_info", "tv_my_Menu", "Active","Info")		
+		moai.DoMethod("tv", "insertleaf", "tv_i_about", "tv_n_info","Active","about....","mn_about","","About this program","","")
+		moai.DoMethod("tv", "insertleaf", "tv_i_aboutrapagui", "tv_n_info","Active","About RapaGUI...","mn_aboutrapagui","","About the RapaGUI toolkit","","")
+		p_menu2array("tv", "root")
+		
+		fullprojectname$ = fullprojectname$.."/"..projectname$..".erp"
+		projectname$=projectname$..".erp"	
+		
+		changed = False
+		p_UpdateTitle()
+		p_UpdateButtonState()
+		p_catalog_build()
+		curr_prj_line=0
+		p_prj_line_highlight(curr_prj_line)
+		p_crea_xml_param(p_get_line_txt(curr_prj_line))		
+
+	EndIf
+EndFunction	
+
+Function p_obj_def_str(obj_name,obj_id); create class obj default string from definition file
+	Local aa$=obj_name..", "
+	For k=0 To TableItems(obj[obj_name].def_val)-1
+	    If obj[obj_name].param[k]="ID" And obj_id<>""
+			aa$=aa$.. obj_id
+	    ElseIf UpperStr(obj[obj_name].param[k])="EVENTHANDLER" And ToString(obj[obj_name].def_val[k])=""
+;			aa$=aa$.."p_"..UnleftStr (projectname$,4).."_EventFunc"
+;			aa$=aa$.."p_"..projectname$.."_EventFunc"
+			aa$=aa$.."p_"..ReplaceStr (projectname$,".erp","").."_EventFunc"
+	    Else
+			aa$=aa$.. ToString(obj[obj_name].def_val[k])
+	    EndIf
+	    If k<>TableItems(obj[obj_name].def_val)-1 Then aa$=aa$..", "
+	Next
+;	DebugPrint (aa$)
+	Return(aa$)
+	
+EndFunction
+
+Function p_obj_save_default(); save the current selection in param dialog to the class default definition
+	r=moai.Request("EasyRapa", "Sure to save this class configuration to the definition of "..obj_name.." Default values?", "Yes|No")
+	If r>0
+		obj_name=moai.Get("Preference","title")
+		bb1=""
+		For k=0 To TableItems(obj[obj_name].param)-1
+			bb0=p_get_param_data(obj_name,k)
+			bb1=bb1..(obj[obj_name].param[k]..",  "..bb0..",  "..obj[obj_name].funct[k])..lf$
+		Next
+		If Exists("Definitions/"..obj_name..".txt")
+			If Exists("Definitions/"..obj_name..".bak") Then DeleteFile ("Definitions/"..obj_name..".bak")
+			Rename ("Definitions/"..obj_name..".txt",obj_name..".bak")
+		EndIf
+;		DebugPrint(bb1)
+		StringToFile(bb1, "Definitions/"..obj_name..".txt")
+	EndIf
+EndFunction
+	
+Function p_get_param_data(objn,Indx);get the currently showed parameters data and convert in the form required in the definition	
+	    Local rowdata=""				
+	    If UpperStr(LeftStr(obj[objn].funct[Indx],8))="CHECKBOX"
+			rowdata=rowdata..moai.Get(obj[objn].param[Indx], "selected") ;
+	    ElseIf UpperStr(LeftStr(obj[objn].funct[Indx],6))="CHOICE"
+			rowdata=rowdata..moai.Get(obj[objn].param[Indx], "active") ;
+	    ElseIf UpperStr(LeftStr(obj[objn].funct[Indx],7))="MCHOICE"
+			Local uu=""
+			Local idd="mchoice_lv"..Indx
+			Local ne=moai.Get(idd , "entries")
+			For Local u=0 To ne-1
+				uu=uu..moai.DoMethod(idd, "GetState", u, 1)..IIf(u<ne-1,"|","")
+			Next
+			rowdata=rowdata..uu
+			ne,idd,uu=Nil,Nil,Nil
+	    Else 
+			rowdata=rowdata.. StripStr(moai.Get(obj[objn].param[Indx], "Text")) ;
+	    EndIf
+;	    DebugPrint(">>>"..rowdata)
+	Return(rowdata)
+EndFunction	
+	
+/*
+** Handles toolbar and menu events
+*/
+Function p_DoAction(id$, msg)
+;	DebugPrint(id$,  msg.triggervalue)
+	Switch id$
+	Case "open":
+		If p_prj_Save_Check() Then Break
+		
+		;Local f$ = FileRequest("Select", {Path=[["]]..Prg_path$..[["]]   , Filters="erp"})
+		;Local f$ = FileRequest("Select", {Path=[["]]..Prg_path$..[["]]} )
+		Local f$ = FileRequest("Select", "erp")
+		If f$ <> "" Then p_prj_Load(f$)
+	Case "save":
+		p_prj_SaveGate()
+	Case "saveas":
+		p_prj_SaveAs()	
+	Case "close":
+		p_prj_close()
+	Case "new":
+		p_prj_New()				
+	Case "copy":
+		moai.DoMethod("project", "copy")
+	Case "linedel": ;menu delete a line from project project
+		p_prj_delete_line()
+	Case "lineadd": ;menu delete a line from project project
+		p_prj_insert_line()
+	Case "lineedit":  ;edit current prj line
+		p_prj_edit_line()
+;	Case "paste":
+;		moai.DoMethod("project", "paste")		
+	Case "about":
+		moai.Request("EasyRapa", "EasyRapa version 1.1\n\n 2021 by Sandro Barbagelata\n sb5@libero.it", "OK")		
+	Case "aboutrapagui":
+		moai.DoMethod("EasyRapa", "aboutrapagui")	
+	Case "exit":
+		End	
+	Case "paramok"  ;object parameters ok
+		p_crea_xml_param_ok()
+	Case "paramcanc"  ;object parameters canc
+		moai.DoMethod("Preference", "EndModal",0)
+		p_IDs_refresh_list()
+		p_prj_line_highlight(curr_prj_line)
+		p_lo_box(act_boxr,act_boxc,#YELLOW)
+	Case "macrobtn" ;macro button handle on parameter dialog box
+		f$=FileRequest("Select a script to include",{Path="macro"   , Filters="txt"})
+		If f$<>""
+		   If FilePart(f$)= "__Remove macro selection.txt" Then f$=""    
+		    moai.Set("Macro", "Text", f$)
+		EndIf
+		
+		
+		
+		
+		
+	Case "paramsavedef"
+		p_obj_save_default()
+	Case "olok" ;object dialog list ok button for adding one obj to project
+		t$=moai.Get("objsel", "value")		
+		moai.DoMethod("ObjList", "EndModal",0)
+		p_crea_xml_param(t$)
+	Case "isok" ;id's dialog list ok button to jump to an object on the lay-out 
+		t$=moai.Get("objsel", "value")
+		If t$="" Then Return		
+		moai.DoMethod("ObjList", "EndModal",0)
+		
+		txt$,curr_prj_line=p_get_linedata(t$)
+		p_prj_line_highlight(curr_prj_line)
+		data=SplitStr(txt$,",")	
+		lo_actpage=ToNumber(data[4])
+		prevpg=ToNumber(moai.Get("LO_pages","active"))
+		
+		p_obj_search(data[1])
+		
+		If moai.Get("ER_pv","Active")=1
+			If lo_actpage=prevpg  
+				If p_lo_boxisbusy(act_boxr,act_boxc,lo_actpage) Then p_lo_box(act_boxr,act_boxc,#GREEN) Else p_lo_box(act_boxr,act_boxc,#GRAY)
+			Else
+				moai.Set("LO_pages","nonotify", True, "active", lo_actpage)
+				p_lay_out()
+			EndIf
+		Else
+			moai.Set("ER_pv","Active","1") ; jump to LO tab
+			moai.Set("LO_pages","nonotify", True, "active", lo_actpage)
+			p_lay_out()
+		EndIf
+
+		act_boxr,act_boxc=ToNumber(data[2]),ToNumber(data[3])
+		moai.Set("cursorpos", "text", "P"..lo_actpage.."  R"..act_boxr.." C"..act_boxc)
+		p_lo_box(act_boxr,act_boxc,#YELLOW)
+		prevpg=Nil
+
+		p_crea_xml_param(txt$)
+
+	Case "canc":
+		moai.DoMethod("Preference", "EndModal",0)
+	Case "winobj": ;open dialog For window data
+		curr_prj_line=0
+		p_prj_line_highlight(curr_prj_line)
+		p_crea_xml_param(p_get_line_txt(curr_prj_line))		
+	Case "modobj":
+		If moai.DoMethod("ER_pv", "GetPageID","active")="tab_prj"
+			curr_prj_line,txt$=p_getcurr_line()			
+			p_crea_xml_param(txt$)
+		ElseIf moai.DoMethod("ER_pv", "GetPageID","active")="tab_l_o"
+			If p_lo_boxisbusy(act_boxr,act_boxc,lo_actpage) 
+				Local act_id=ids[k].id
+				txt$,curr_prj_line=p_get_linedata(ids[k].id)				
+				p_crea_xml_param(txt$)
+			EndIf
+		EndIf
+	Case "RunMagic"
+;		moai.Set("ER_pv","Active","1") ; jump to XML tab
+		p_IDs_refresh_list()
+		p_Postprocess()
+	Case "TestMagic"
+		If gotest
+			aa=UnleftStr(fullprojectname$, 4)..".hws"
+			aa=[["]]..ReplaceStr(aa, Chr(92),Chr(47))..[["]]
+			Execute(Hol_path$.."/Hollywood "..aa)	
+		EndIf
+	Case "Jump":
+		If moai.Get("ER_pv","Active")=0
+			curr_prj_line,txt$=p_getcurr_line()
+			If txt$<>""
+				aa=SplitStr(txt$,",")
+				p_crea_obj_dialog(False,aa[1])
+			Else
+				p_crea_obj_dialog(False)		
+			EndIf
+		Else
+			p_crea_obj_dialog(False)		
+		EndIf
+		aa=Nil
+	Case "addobj":
+		If moai.DoMethod("ER_pv", "GetPageID","active")="tab_prj"
+			curr_prj_line,txt$=p_getcurr_line()
+;			DebugPrint(txt$,curr_prj_line)
+			If curr_prj_line=Nil Or txt$<>"" Then curr_prj_line=99999
+			If curr_prj_line>1 Then p_crea_obj_dialog(True)
+			
+		ElseIf moai.DoMethod("ER_pv", "GetPageID","active")="tab_l_o"
+			If p_lo_boxisbusy(act_boxr,act_boxc,lo_actpage)
+				p_msg_error("Box R"..act_boxr.." C"..act_boxc.." is already In use!")	
+			Else	
+				curr_prj_line=99999
+				p_crea_obj_dialog(True)
+			EndIf
+		EndIf
+	Case "lerp1" :
+		If lasterp1="" Then Break 
+		If p_prj_Save_Check() Then Break	
+		p_prj_Load(lasterp1)
+	Case "lerp2":
+		If lasterp2="" Then Break 
+		If p_prj_Save_Check() Then Break
+		p_prj_Load(lasterp2)
+	Case "lerp3":
+		If lasterp3="" Then Break 
+		If p_prj_Save_Check() Then Break
+		p_prj_Load(lasterp3)
+	Case "lerp4":
+		If lasterp4="" Then Break 
+		If p_prj_Save_Check() Then Break
+		p_prj_Load(lasterp4)
+		
+	EndSwitch		
+EndFunction
+
+Function p_crea_xml_param_ok()
+		If moai.Get("ID","text")="" 
+			SystemRequest("EasyRapa", "ID was not defined", "OK")
+			Return
+		EndIf	
+		If p_ID_check(StripStr(moai.Get("ID","text")))>=0 
+			SystemRequest("EasyRapa", "ID "..moai.Get("ID","text").." already in use", "OK")
+			Return
+		EndIf
+		If moai.HaveObject("GridR") Or moai.HaveObject("GridC")
+			If moai.Get("GridR","text")="" Or moai.Get("GridC","text")="" 
+				SystemRequest("EasyRapa", "Grid Row or Column were not defined", "OK")
+				Return
+			EndIf
+			If (moai.Get("GridR","text")="0" Or moai.Get("GridC","text")="0") And curr_prj_line>1
+				SystemRequest("EasyRapa", "Grid Row or Column can't be 0", "OK")
+				Return
+			EndIf
+			aa,ap,at=p_lo_boxisbusy(moai.Get("GridR","text"),moai.Get("GridC","text"),moai.Get("Page","text"))
+			If aa>0 
+				SystemRequest("EasyRapa", "Box is already booked by "..ap, "OK")
+				Return
+			EndIf
+		EndIf
+		If moai.HaveObject("n_of_Rows")
+			If moai.Get("n_of_Rows","text")="" Or moai.Get("n_of_Columns","text")="" 
+				SystemRequest("EasyRapa", "Grid Row or Column were not defined", "OK")
+				Return
+			EndIf
+		EndIf
+			
+		; end compliancy tests
+		;======================================
+		;built ERP line of parameters  i.e.  window,myID,20,10,1,1,1,testcase,myEH,1,500,400,0,0,1|0|0|0|0|0|0,1,1,1
+		Local bb=LowerStr((moai.Get("Preference","title")))
+		Local aa=bb..","
+		For k=0 To TableItems(obj[bb].param)-1 ;biulddata string
+		    aa=aa..p_get_param_data(bb,k)
+		    If k<TableItems(obj[bb].param)-1 Then aa=aa..","
+		Next
+
+		If bb<>"window" Then act_boxr, act_boxc, lo_actpage=ToNumber(moai.Get("GridR","text")), ToNumber(moai.Get("GridC","text")), ToNumber(moai.Get("Page","text"))
+	
+		p_IDs_add(aa)
+		
+		moai.DoMethod("Preference", "EndModal",0)
+		
+		If curr_prj_line<=1 And Not (bb="window" Or bb="pageview") Then curr_prj_line=linesnumber
+		If curr_prj_line=99999 
+			curr_prj_line=linesnumber
+			InsertItem( prg_lines,aa)
+		Else
+			prg_lines[curr_prj_line]=aa
+		EndIf
+		p_array2project() ;rebuild project text from array data
+			
+		p_get_window_size(aa)
+		
+		p_prj_line_highlight(curr_prj_line)
+	
+		p_lay_out()
+		changed = True
+		p_UpdateButtonState()		
+														
+		p_lo_box(act_boxr,act_boxc,#YELLOW)
+		moai.Set("cursorpos", "text", "P"..lo_actpage.."  R"..act_boxr.." C"..act_boxc)	
+EndFunction
+
+Function p_getcurr_line()
+	l_n=moai.Get("project", "active")
+	If l_n<0 Or l_n>Linesnumber Then Return
+	t$=prg_lines[l_n]
+	Return(l_n,t$)
+EndFunction
+
+Function p_get_window_size(string)
+;	DebugPrint(string)
+	Local data=SplitStr(string,",")
+	If data[0]="window"
+		lo_n_of_col=data[3]
+		lo_n_of_row=data[2]
+		lo_gridH=Int(750/lo_n_of_row)
+		lo_gridV=Int(750/lo_n_of_col)
+		Return (True)
+	EndIf
+	Return (False)
+EndFunction
+/*
+** Handles all incoming events
+*/
+Function p_EventFunc(msg)
+;	DebugPrint(msg.action)	
+	If intro Then Return
+
+	Switch msg.action
+	Case "RapaGUI":
+;		DebugPrint(msg.attribute,msg.iD)
+		Switch msg.attribute
+		Case "HasChanged":
+			If msg.triggervalue And (Not changed)
+				changed = True
+				p_UpdateTitle()		
+				p_UpdateButtonState()	
+			EndIf	
+		Case "Value":
+			If msg.id="prf_Hol_cat"
+				moai.Set("cat_Transl","title","Translation ("..moai.Get("prf_Hol_cat","value")..")")
+				If projectname$<>""
+					catfile$=PathPart(fullprojectname$).."catalogs/"..moai.Get("prf_Hol_cat","value").."/"..UnleftStr(projectname$, 3).."catalog"
+					If Exists (catfile$)
+						p_catalog_read()
+					Else
+						For k=0 To TableItems(cataloglist)-1
+							cataloglist[k].transl=""
+						Next
+					EndIf
+				EndIf
+			EndIf
+		Case "ValueChange":
+;			DebugPrint(msg.id)
+			If Not changed
+			    changed = True
+			    p_UpdateButtonState()
+			EndIf
+			If msg.id="cat_lv" Then cataloglist[msg.row].transl=msg.triggervalue
+		Case "Pressed":
+			If moai.DoMethod("ER_pv", "GetPageID","active")="tab_menu" And StartsWith (msg.id,"mn")
+				changed = True
+				p_UpdateButtonState()
+
+;				DebugPrint("<<<<",msg.id)	
+				Switch msg.id
+				Case "mn_edit":  ; menu edit button
+					itemid,nodeid,isnode=p_menu_get_active()
+					If itemid="" Then Return
+					If Not isnode Then p_crea_menu_dialog()
+				Case "mn_expand": ;unused
+					moai.DoMethod("tv", "open", "active", True)
+				Case "mn_collapse": ;unused
+					moai.DoMethod("tv", "close", "active")
+				Case "mn_addnode": ; menu add a node (column)
+					itemid,nodeid=p_menu_get_active()
+					If itemid="" Then Return
+					Local a$ = StringRequest("New Node", "Please enter Node name!")
+;					If a$<>"" Then moai.DoMethod("tv", "insertnode", "tv_n_".. p_clean_name(a$), nodeid, "Active","mn_".. p_clean_name(a$))	
+					If a$<>"" Then moai.DoMethod("tv", "insertnode", "tv_n_".. p_clean_name(a$), nodeid, "Active",a$)	
+				Case "mn_additem": ; menu add an item (line)
+					itemid,nodeid,isnode=p_menu_get_active()
+					If itemid="" Then Return
+;					DebugPrint (itemid,nodeid,isnode)
+					Local a$ = StringRequest("New Item", "Please enter Item name!")
+					If a$<>""
+						If isnode
+							moai.DoMethod("tv", "insertleaf", "tv_i_".. p_clean_name(a$), itemid,"Active",a$,"mn_".. p_clean_name(a$),"","","","")	
+						Else
+							moai.DoMethod("tv", "insertleaf", "tv_i_".. p_clean_name(a$), nodeid,itemid,a$,"mn_".. p_clean_name(a$),"","","","")	
+						EndIf	
+					EndIf
+				Case "mn_delete": ;menu delete line
+					moai.DoMethod("tv", "remove", "active")	
+				Case "mn_mtvcanc" : ;menu edit line data canc and close dialog
+					moai.DoMethod("Menuitem", "EndModal",0)
+				Case "mn_mtvok" : ; menu edit line data Ok button and close dialog
+					Local a_a=moai.Get("tv", "active")
+					moai.DoMethod(a_a, "SetItem", 0, moai.Get("ptv_Item","text"))
+					moai.DoMethod(a_a, "SetItem", 1, moai.Get("ptv_ID","text"))
+					moai.DoMethod(a_a, "SetItem", 2, moai.Get("ptv_Scut","text"))
+					moai.DoMethod(a_a, "SetItem", 3, moai.Get("ptv_Help","text"))
+					moai.DoMethod(a_a, "SetState", 4, moai.Get("ptv_disab","selected"))
+					moai.DoMethod(a_a, "SetItem", 5, moai.Get("ptv_macro","text"))
+				
+					moai.DoMethod("Menuitem", "EndModal",0)
+				Case "mn_macrobutton" :
+					f$=FileRequest("Select a script to include",{Path="macro"   , Filters="txt"})
+					If f$<>""
+					   If FilePart(f$)= "__Remove macro selection.txt" Then f$=""    
+					    moai.Set("ptv_macro", "Text", f$)
+					EndIf
+
+				EndSwitch
+			ElseIf moai.DoMethod("ER_pv", "GetPageID","active")="tab_icons"	And StartsWith (msg.id,"ic")
+
+				changed = True
+				p_UpdateButtonState()
+				Switch msg.id
+				Case "ic_edit" ;icon selection tab 
+					ic_sel_record=moai.Get("ic_sel", "active")
+					If ic_sel_record=-1 Then Return
+					Local icn,pth,tlb,id,hlp,mcr= moai.DoMethod("ic_sel", "GetEntry", ic_sel_record)
+					If tlb="On" Then tlb=1 Else tlb=0
+					editmode=True
+					p_crea_icon_dialog(icn,pth,tlb,id,hlp,mcr)
+				Case "ic_delete"
+					ic_sel_record=moai.Get("ic_sel", "active")
+;					DebugPrint(ic_sel_record)
+					If ic_sel_record>=0 
+						Local icn,pth,tlb,id,hlp= moai.DoMethod("ic_sel", "GetEntry", ic_sel_record)
+						moai.FreeImage(icn+10000)
+						moai.DoMethod("ic_sel", "Remove", ic_sel_record)
+					EndIf
+				Case "ic_addline"
+;					moai.DoMethod("ic_sel", "insert", "bottom", -1, "", "", False)
+					editmode=False
+					p_crea_icon_dialog(moai.Get("ic_sel", "entries")+1, "", False, "tb_btn_"..moai.Get("ic_sel", "entries")+1,"","")
+				Case "icd_icok" :
+				    If moai.Get("icd_path","text")=""
+					moai.Request("", "Icon path was not defined", "OK","Error")
+					Return
+				    EndIf
+					Local iconn=Val(moai.Get("icd_icon","text"))+10000
+					If editmode Then moai.FreeImage(iconn)
+					Local iconf$=moai.Get("icd_path","text")
+					If Exists(iconf$) Then LoadBrush(iconn,iconf$,{LoadAlpha = True}
+)
+						
+					If editmode
+						pos = moai.DoMethod("ic_sel", "Rename", "Active",iconn ,moai.Get("icd_icon","text"),iconf$,moai.Get("icd_toolbar","selected"),moai.Get("icd_id","text"),moai.Get("icd_help","text"),moai.Get("icd_macro","text") )
+					Else
+						pos = moai.DoMethod("ic_sel", "Insert", "Bottom",iconn ,moai.Get("icd_icon","text"),iconf$,moai.Get("icd_toolbar","selected"),moai.Get("icd_id","text"),moai.Get("icd_help","text"),moai.Get("icd_macro","text")  )
+					EndIf
+					moai.DoMethod("iconedit", "EndModal",0)
+				Case "icd_pathbutton" :
+					Local pt$=FileRequest("Select an icon","png|jpg|jpeg|iff|pcx|bmp") 
+					If pt$<>"" Then moai.Set("icd_path","text",pt$)
+				Case "icd_macrobutton" :
+					f$=FileRequest("Select a script to include",{Path="macro"   , Filters="txt"})
+					If f$<>""
+					   If FilePart(f$)= "__Remove macro selection.txt" Then f$=""    
+					    moai.Set("icd_macro", "Text", f$)
+					EndIf
+				Case "icd_iccanc" :
+					moai.DoMethod("iconedit", "EndModal",0)
+				EndSwitch	
+			ElseIf	msg.id="prf_use"
+				p_Update_ini(True)	
+			ElseIf	msg.id="prf_save"
+				p_Update_ini()	
+				SystemRequest("EasyRapa", "Preferences were saved", "OK")
+			ElseIf	msg.id="Prf_path_btn"
+				Local p$ = PathRequest("Select a path",#REQ_NORMAL,moai.Get("prf_user_path","Text"))
+				If p$<>"" Then moai.Set("prf_user_path","Text",p$)
+			ElseIf	msg.id="Hol_path_btn"
+				Local p$ = PathRequest("Select a path",#REQ_NORMAL,moai.Get("prf_hol_path","Text"))
+				If p$<>"" Then moai.Set("prf_hol_path","Text",p$)			
+			Else ;If moai.DoMethod("ER_pv", "GetPageID","active")="tab_prj"
+				p_DoAction(UnrightStr(msg.id, 3), msg)	
+			EndIf					
+		Case "Active"
+;			DebugPrint(msg.id,msg.triggervalue)
+			
+			If msg.id="project"
+				moai.Set("cursorpos", "text", "line: " .. msg.triggervalue+1)
+				curr_prj_line=msg.triggervalue
+			Else		
+				p_UpdateButtonState()
+				If msg.triggervalue<1 Then p_IDs_refresh_list()	
+	;			If msg.ID="LO_pages" Or msg.triggervalue=0 Or msg.triggervalue=1 Then p_lay_out()
+				If msg.ID="LO_pages" 
+					lo_actpage=(msg.triggervalue)
+					act_boxc,act_boxr=0,0	
+					p_lay_out()
+				EndIf
+				If msg.ID="ER_pv" And msg.triggervalue=7 Then p_catalog_build()  ;catalog tab
+	;			If msg.id="ER_pv" And msg.triggervalue<>6 Then DebugPrint(moai.DoMethod("ER_pv", "GetPageID","active")) ;prefs tab
+			EndIf
+		Case "Selected":
+;			DebugPrint(msg.id)
+			If msg.id="prf_tab_tab"
+				prf_tab=moai.Get("prf_tab_tab","selected")
+			Else	
+				p_DoAction(UnrightStr(msg.id, 3), msg)
+			EndIf
+		Case "Acknowledge":
+			prf_space=Val(moai.Get("prf_tab_spc","text"))
+
+		Case "CloseRequest":
+			If p_prj_Save_Check() Then Break
+			End
+		EndSwitch
+	Case "OnMouseDown" ;only on lay-out tab click to select a cell
+		If moai.DoMethod("ER_pv", "GetPageID","active")<>"tab_l_o" Then Return
+		If projectname$ ="" 
+			p_msg_error("Open a project first")
+			Return
+		EndIf
+		keyd=IsKeyDown("LCONTROL") ;drag cell to move in the lay-out
+;		act_pg=ToString(moai.Get("LO_pages","active"))
+;		If act_boxc>=0 And act_boxr>0 Then p_lo_box(act_boxr,act_boxc,#GRAY)
+		If Not p_lo_boxisbusy(act_boxr,act_boxc,lo_actpage) Then p_lo_box(act_boxr,act_boxc,#GRAY) Else p_lo_box(act_boxr,act_boxc,#GREEN) 
+		act_boxc=Int((MouseX()-lo_border)/lo_gridH)+1
+		act_boxr=Int((MouseY()-lo_border)/lo_gridV)+1
+		p_lo_box(act_boxr,act_boxc,#YELLOW)
+		moai.Set("cursorpos", "text", "P"..lo_actpage.."  R"..act_boxr.." C"..act_boxc)
+
+		If p_lo_boxisbusy(act_boxr,act_boxc,lo_actpage) 
+			act_id=ids[k].id
+			txt$,curr_prj_line=p_get_linedata(ids[k].id)
+			p_prj_line_highlight(curr_prj_line)
+			If keyd
+				moveLObox=True
+			Else
+				p_crea_xml_param(txt$)
+			EndIf
+		EndIf
+	Case "OnMouseUp" ;only on lay-out tab click to select a cell
+		If moai.DoMethod("ER_pv", "GetPageID","active")<>"tab_l_o" Then Return
+		If Not moveLObox Then Return
+		new_boxc=Int((MouseX()-lo_border)/lo_gridH)+1
+		new_boxr=Int((MouseY()-lo_border)/lo_gridV)+1	
+		p_lo_box(act_boxr,act_boxc,#GRAY)  
+		p_lo_box(new_boxr,new_boxc,#YELLOW)
+;		Local act_id=ids[k].id
+		txt$,curr_prj_line=p_get_linedata(act_id)
+;		DebugPrint(curr_prj_line,txt$)
+		Local t,nt=SplitStr(txt$,",")
+		txt$=""
+		For k=0 To nt-1 
+			If k=2 Then t[k]=new_boxr
+			If k=3 Then t[k]=new_boxc
+			txt$=txt$..t[k]..","
+		Next
+		txt$=UnleftStr(txt$,1)
+;		DebugPrint("<<<<",txt$)
+		moveLObox =False
+		prg_lines[curr_prj_line]=txt$
+		p_array2project()
+;		act_boxc=new_boxc
+;		act_boxr=new_boxr
+		p_IDs_refresh_list()
+		p_lay_out()
+		changed=True
+		p_UpdateButtonState()
+	Case "OnMouseMove"
+		If msg.id<>1 Or Not moveLObox Then Return
+		mmfnd,mmid,mmobj=p_lo_boxisbusy(boxr,boxc,lo_actpage)
+		If Not mmfnd Then p_lo_box(boxr,boxc,#GRAY) Else p_lo_box(boxr,boxc,#GREEN) 
+		boxc=Int((msg.x-lo_border)/lo_gridH)+1
+		boxr=Int((msg.y-lo_border)/lo_gridV)+1	
+		moai.Set ("message","Text",IIf (mmfnd, mmobj .."-->"..mmid, usedpages$)) 
+		moai.Set("cursorpos", "text", "P"..lo_actpage.."  R"..boxr.." C"..boxc)
+		p_lo_box(boxr,boxc,#YELLOW)
+
+	Case "SizeWindow"
+		aa,bb=moai.Get("win", "width"),moai.Get("win", "height")
+
+		DebugPrint("zzz",msg.height,msg.width,aa,bb)
+		
+		SelectDisplay(1)
+;		ChangeDisplaySize(msg.width, msg.height,{X = 0, Y = 0})
+		ChangeDisplaySize(aa-130, bb-250,{X = 0, Y = 0})
+;		moai.DoMethod("ret_lo", "Redraw")
+;		moai.DoMethod("project", "Redraw")
+		p_lay_out()
+	EndSwitch
+
+EndFunction
+
+
+
+Function p_menu_load()
+	For k=0 To  TableItems(tvarray )-1
+;		If moai.HaveObject(tvarray[k].id) Then moai.FreeObject (tvarray[k].id)		
+;		If moai.HaveObject(tvarray[k].id) Then moai.DoMethod("tv", "Remove", tvarray[k].id)		
+		If k=0 			
+			moai.DoMethod("tv", "insertnode", tvarray[k].id, "root","Head",tvarray[k].items[0])
+		Else	
+			If tvarray[k].node
+				moai.DoMethod("tv", "insertnode", tvarray[k].id,  tvarray[k].parent, "Tail", tvarray[k].items[0])	
+			Else
+				moai.DoMethod("tv", "insertleaf", tvarray[k].items[0], tvarray[k].parent,"Tail",tvarray[k].items[0],tvarray[k].items[1],tvarray[k].items[2],tvarray[k].items[3],tvarray[k].items[4],tvarray[k].items[5])
+			EndIf
+		EndIf
+	Next	
+	moai.DoMethod("tv", "Open", "Root", all)
+EndFunction	
+	
+	
+Function p_prj_Load(f$)
+
+	p_prj_close()	
+	
+	fnd=False
+	f0$=p_nobackslash(f$)
+	f1$=UnleftStr(FilePart(f$),4)
+	
+	If Exists(f$) Then fnd=True
+	
+	If Not fnd
+		f$=p_nobackslash(GetCurrentDirectory()).."/"..f1$.."/"..f1$..".erp"
+		If Exists(f$) Then fnd=True
+	EndIf
+
+	If Not fnd
+		f$=prg_path$.."/"..f1$.."/"..f1$..".erp"
+		If Exists(f$) Then fnd=True
+	EndIf
+
+	If Not fnd
+		SystemRequest("Error loading project","File "..f0$.." not found!","OK",#REQICON_ERROR)
+		Return
+	EndIf	
+	
+	If f$<>f0$ Then SystemRequest("Error loading project","File "..lf$..f0$..lf$..lf$.." found but with a different path!"..lf$..lf$..f$,"OK",#REQICON_WARNING)
+	
+	f0$,f1$=Nil,Nil
+	
+	projectname$ = FilePart(f$)
+	fullprojectname$ = p_nobackslash(f$)
+
+	OpenFile(1, fullprojectname$, #MODE_READ)
+		If Not Eof(1) Then prg_lines = ReadTable(1) Else SystemRequest("Error loading project","Error loading project lines!","OK",#REQICON_WARNING)	
+		If Not Eof(1) Then iconlist = ReadTable(1) Else SystemRequest("Error loading project","Error loading icon list!","OK",#REQICON_WARNING)
+		If Not Eof(1) Then tvarray = ReadTable(1) Else SystemRequest("Error loading project","Error loading menues lines!","OK",#REQICON_WARNING)
+		If Not Eof(1) Then cataloglist = ReadTable(1) Else SystemRequest("Error loading project","Error loading catalogs lines!","OK",#REQICON_WARNING)
+			
+		t = FileAttributes(1)
+		moai.Set("prf_prj_lastupd","text",t.time)
+		
+	CloseFile(1)
+
+	p_array2project();Update project with the project data
+	erricon=False
+	For k=0 To  TableItems(iconlist)-1  ; update icon list
+;		DebugPrint(">>>>",RawGet(iconlist[k],0))
+		Local iconn=Val(RawGet(iconlist[k],0))+10000
+		Local iconf$=RawGet(iconlist[k],1)
+		If Exists(iconf$) 
+			LoadBrush(iconn,iconf$,{LoadAlpha = True})
+		Else
+			erricon=True
+			SystemRequest("Error loading icon","Icon #"..(iconn-10000).." has an incorrect path, Please correct!","Ok",#REQICON_ERROR)
+			CreateBrush(iconn,#icodims,#icodims,#RED)
+			SelectBrush (iconn)
+			   TextOut(#CENTER,#CENTER,"[color=#YELLOW][b]?[/b]")
+			EndSelect
+		EndIf	
+
+		moai.DoMethod("ic_sel", "insert", "bottom", iconn,RawGet(iconlist[k],0),RawGet(iconlist[k],1),RawGet(iconlist[k],2),RawGet(iconlist[k],3),RawGet(iconlist[k],4),RawGet(iconlist[k],5))
+	Next	
+	If erricon Then moai.Set("ER_pv","Active","5") ; jump to Icon tab
+	erricon =Nil
+	p_menu_load()  ; update menu treeview
+		
+;	moai.DoMethod("tv", "Remove","tv_my_Menu" )
+	changed = False
+	gotest=False
+	p_UpdateTitle()	
+	p_UpdateButtonState()
+	p_IDs_refresh_list()
+	p_get_window_size(p_get_line_txt(0))
+	p_lay_out()
+	p_catalog_build()
+	p_prj_line_highlight(0)
+EndFunction
+
+Function p_get_linedata(actID)
+;*	Local tx$=moai.Get("project", "text")
+;*	prg_lines, linesnumber = SplitStr(tx$,lf$)
+	For Local k=0 To linesnumber -1
+;		DebugPrint(prg_lines[k])
+		If prg_lines[k]<>""
+			Local data=SplitStr(prg_lines[k],",")
+			If data[1]=actid
+				t$=prg_lines[k]
+				curr_prj_line=k
+				Break
+			EndIf
+		EndIf
+	Next	
+;	DebugPrint("<<<<",t$,curr_prj_line)
+	Return(t$,curr_prj_line)
+EndFunction
+
+Function p_clean_name(msg$)
+	Return(ReplaceStr(LowerStr(msg$)," ","_"))
+EndFunction	
+	
+Function p_get_line_txt(l_n)
+	Return(prg_lines[l_n])
+EndFunction
+
+
+Function p_IDs_refresh_list()
+	ids,ids_n=Nil,Nil
+	ids,ids_n={},{}
+
+
+	For k=0 To linesnumber -1 
+		If prg_lines[k]<>"" Then p_IDs_add (prg_lines[k])
+	Next 
+EndFunction
+
+
+Function p_array2project()
+	Local aa=""  ; update project lines from array data
+	moai.DoMethod("project", "clear")
+
+	For k=0 To TableItems(prg_lines)-1 Do moai.DoMethod("project", "Insert", k, prg_lines[k])
+	linesnumber=k
+;	moai.Set("project", "text", aa, "nonotify", True)
+EndFunction
+
+Function p_IDs_add (msg$) ; add an ID to the ID list in order to be unique ID
+	If msg$="" Then Return
+	Local data=SplitStr(msg$,",")
+	If data[4]="0" And data[2]="0" And data[3]="0" Then Return
+	InsertItem(ids,{id=StripStr(data[1]),obj=data[0],R=data[2],C=data[3],pg=data[4],rc=data[4].."/"..data[2].."/"..data[3]})	
+	ids_n[StripStr(data[1])]={id=StripStr(data[1]),obj=data[0],R=data[2],C=data[3],pg=data[4],rc=data[4].."/"..data[2].."/"..data[3]}
+EndFunction
+
+	
+Function p_ID_check(aa) ; check if an ID is already existing
+	Local retval=-1
+	For k=0 To TableItems(IDs)-1
+	    If LowerStr(ids[k].id)=LowerStr(aa)
+	       retval=k	
+	       Break
+	    EndIf	
+	Next
+	Return (retval)	
+EndFunction	
+
+Function p_ID_new(type) ; generate the id number for a new object
+	Local n=0
+	While p_ID_check(type..n+1)>0
+		n=n+1	
+	Wend
+	Return(type..n+1)
+EndFunction	
+
+Function p_lay_out()
+	SelectDisplay (1)
+	Cls
+;	Local lo_actpage=(moai.Get("LO_pages","active")) 
+	Local dw,dh= GetAttribute(#DISPLAY, 1, #ATTRWIDTH), GetAttribute(#DISPLAY, 1, #ATTRHEIGHT)
+	;DebugPrint(dw,dh)
+	lo_gridH=((dw-lo_border)/lo_n_of_col)
+	lo_gridV=((dh-lo_border)/lo_n_of_row)
+
+	SetFillStyle(#FILLCOLOR)
+	Box(0, 0, lo_border, dh, #SILVER)
+	Box(0, 0, dw, lo_border, #SILVER)
+	SetFillStyle(#FILLNONE)
+	Box(0, 0, dw, dh, #GRAY)
+
+	SetFont(#TRUETYPE_DEFAULT,lo_border/4*3)
+	SetFontStyle(#ANTIALIAS)
+
+	For Local k=lo_border To dh Step lo_gridV Do Line(0,k,dw,k,#GRAY)	
+	For Local k=lo_border To dw Step lo_gridH Do Line(k,0,k,dh,#GRAY)	
+
+	For Local k=0 To lo_n_of_row Do TextOut(lo_border/2,k*lo_gridV+lo_border+lo_gridV/2,K+1,{color=#GRAY, AnchorX = .5, AnchorY = .5})	
+	For Local k=0 To lo_n_of_col Do TextOut(k*lo_gridH+lo_border+lo_gridH/2,lo_border/2,K+1,{color=#GRAY, AnchorX = .5, AnchorY = .5})	
+
+	Global usedpages$="Used pages are: "
+	For k=0 To 20  ;mark the used pages
+		For u=0 To TableItems(ids)-1
+			If ids[u].pg=ToString(k)
+				usedpages$=usedpages$..k.."-"
+				Break
+			EndIf
+		Next
+	Next
+	usedpages$=UnleftStr(usedpages$,1)
+	moai.Set ("message","Text",usedpages$)
+	
+	SetFont(#TRUETYPE_DEFAULT,lo_gridV/2)
+	SetFontStyle(#ANTIALIAS)
+	
+	If Not IsTableEmpty(Ids)
+;*		Local tx$=moai.Get("project", "text")
+;*		prg_lines, linesnumber = SplitStr(tx$,lf$)
+		For k=0 To linesnumber -1
+;			DebugPrint(prg_lines[k])
+			If prg_lines[k]<>""			 
+				Local data=SplitStr(prg_lines[k],",")
+				If  (data[0]="window" Or (lo_actpage=0 And data[0]="pageview" And data[2]="0" And data[3]="0"))=False
+
+					If Val(data[4])=lo_actpage
+						Local gr=Int(data[2])
+						Local gc=Int(data[3])
+						If gr>0 And gc>=0
+							p_lo_box(gr,gc,#GREEN)
+							TextOut((gc-1)*lo_gridH+2+lo_border,gr*lo_gridV+lo_border,data[1],{color=#RED, AnchorX = 0, AnchorY = 1 })
+							TextOut((gc-1)*lo_gridH+2+lo_border,(gr-1)*lo_gridV+lo_border,data[0],{color=#BLUE, AnchorX = 0, AnchorY = 0})
+						EndIf
+					EndIf
+				EndIf
+			EndIf
+		Next
+
+	EndIf	
+	moai.Set("cursorpos", "text", "P"..lo_actpage.."  R"..act_boxr.." C"..act_boxc)
+;	If act_boxc>=0 And act_boxr>0 Then p_lo_box(act_boxr,act_boxc,#YELLOW)
+	moveLObox=False
+
+EndFunction		
+
+Function p_lo_box(r,c,clr)
+	If r=0 And c=0 Then Return
+	Box((c-1)*lo_gridH+lo_border,(r-1)*lo_gridV+lo_border,lo_gridH+1,lo_gridV+1,clr)
+	Box((c-1)*lo_gridH+1+lo_border,(r-1)*lo_gridV+1+lo_border,lo_gridH-1,lo_gridV-1,IIf(clr=#GRAY,#WHITE,clr))		
+EndFunction		
+
+Function p_lo_boxisbusy(r,c,pg)
+	Local fnd,o,i=False,"",""	
+	For k=0 To TableItems(ids)-1
+;	    DebugPrint(pg.."/"..r .."/"..c,ids[k].rc)
+	    If ids[k].rc=pg.."/"..r .."/"..c 
+		i,o=ids[k].id,ids[k].obj	
+		fnd=True    
+		Break
+	    EndIf
+	Next
+	;DebugPrint(i,o)
+	Return (fnd,i,o)
+EndFunction
+
+Function p_get_classes()
+	; get all the available definitions in definition directory and create obj vector with obj data
+	Global obj={}
+	Local f$,d$ = {}, {}
+	Global objlist = {} 
+	Local fcount, dcount =ReadDirectory("Definitions", f$, d$)
+	For Local k=0 To fcount-1
+		If LowerStr(RightStr(f$[k],3))<>"txt" Then Continue
+		objname=LowerStr(UnleftStr(f$[k], 4))
+;		DebugPrint(f$[k])
+		objlist[k]=objname
+		obj[objname]={name=objname,param={},funct={},def_val={}}
+		For s$ In FileLines("Definitions/"..f$[k]) Do p_get_classes_line(s$, objname)
+	Next
+	Sort(objlist)
+EndFunction	
+
+
+Function p_get_classes_line(s$,objn)
+	dta,c=SplitStr (s$,",")
+	If c<>3 Then Return
+	InsertItem (obj[objn].param,StripStr(dta[0]))
+	InsertItem (obj[objn].def_val,StripStr(dta[1]))
+	InsertItem (obj[objn].funct,StripStr(dta[2]))	
+EndFunction	
+
+
+Function p_menu_get_active()
+	Local found, active = moai.DoMethod("tv", "getentry", "active", "active", "" )
+	If Not found
+		SystemRequest("EasyRapa", "Node or item not selected!!", "OK") 
+		Return ("","",False)
+	EndIf 
+	Local found, parent  = moai.DoMethod( "tv", "getentry", active.uid, "parent", "" )
+	If found Then Return (active.id,parent.id,active.node)
+	Return (active.id,active.id,True)
+EndFunction	
+
+
+Function p_read_ini()
+	If Exists("easyrapa.ini")
+		For s$ In FileLines("easyrapa.ini")
+			Local u,c = SplitStr(s$,"=")
+			u[1]=StripStr(u[1])
+			If LowerStr(u[0])="prf_tab" And u[1]<>Nil Then prf_tab=IIf(LowerStr(u[1])="true" Or ToNumber(u[1])=1,True,False)
+			If LowerStr(u[0])="prf_space" And u[1]<>Nil Then prf_space=ToNumber(u[1])
+			If LowerStr(u[0])="erp_path" And u[1]<>Nil Then prg_path$=p_nobackslash(u[1])
+			If LowerStr(u[0])="hol_path" And u[1]<>Nil Then hol_path$=p_nobackslash(u[1])
+			If LowerStr(u[0])="hol_vers" And u[1]<>Nil Then hol_vers$=u[1]
+			If LowerStr(u[0])="rg_vers" And u[1]<>Nil Then RG_vers$=u[1]
+			If LowerStr(u[0])="prf_user_name" And u[1]<>Nil Then prf_user_name$=u[1]
+			If LowerStr(u[0])="prf_user_mail" And u[1]<>Nil Then prf_user_mail$=u[1]
+			If LowerStr(u[0])="lasterp1" And u[1]<>Nil Then lasterp1=u[1]
+			If LowerStr(u[0])="lasterp2" And u[1]<>Nil Then lasterp2=u[1]
+			If LowerStr(u[0])="lasterp3" And u[1]<>Nil Then lasterp3=u[1]
+			If LowerStr(u[0])="lasterp4" And u[1]<>Nil Then lasterp4=u[1]
+		Next			
+	EndIf
+EndFunction	
+
+
+Function p_Update_ini(use)
+	prf_tab=moai.Get("prf_tab_tab","selected")
+	prf_space=moai.Get("prf_tab_spc","text")
+	Hol_path$=moai.Get("prf_Hol_path","text")
+	Hol_vers$=moai.Get("prf_Hol_ver","text")
+	RG_vers$=moai.Get("prf_RG_ver","text")
+	prf_user_name$=moai.Get("prf_user_name","text")
+	prf_user_mail$=moai.Get("prf_user_mail","text")
+	Prg_path$=moai.Get("prf_user_path","text")
+
+	If use Then Return
+
+	OpenFile(1, "easyrapa.ini", #MODE_WRITE)
+	WriteLine(1,"ERP_path="..Prg_path$)
+	WriteLine(1,"prf_tab="..prf_tab)
+	WriteLine(1,"prf_space="..prf_space)
+	WriteLine(1,"hol_path="..Hol_path$)
+	WriteLine(1,"hol_vers="..Hol_vers$)
+	WriteLine(1,"RG_vers="..RG_vers$)
+	WriteLine(1,"prf_user_name="..prf_user_name$)
+	WriteLine(1,"prf_user_mail="..prf_user_mail$)
+	WriteLine(1,"lasterp1="..lasterp1)
+	WriteLine(1,"lasterp2="..lasterp2)
+	WriteLine(1,"lasterp3="..lasterp3)
+	WriteLine(1,"lasterp4="..lasterp4)
+	CloseFile(1)
+EndFunction	
+
+Function p_msgboard()
+	SetFontColor(#BLUE)
+	SetFont(#TRUETYPE_DEFAULT,16)
+	SetFontStyle(#ANTIALIAS)
+	SelectDisplay(2)
+	Cls
+	TextOut(#CENTER,#CENTER,msgboard1[act_msgboard],{ WordWrap=750, Align=#CENTER}); message on project tab
+	
+	SelectDisplay(3)
+	Cls
+	TextOut(#CENTER,#CENTER,msgboard2[act_msgboard],{ WordWrap=750, Align=#CENTER}); message on lay-out tab
+	
+	SelectDisplay(1)
+	act_msgboard=act_msgboard+1
+	If act_msgboard>=ListItems(msgboard1) Then act_msgboard=0
+
+	
+EndFunction	
+
+Function p_msg_error(msg)
+	Beep(#BEEPWARNING)
+	moai.Set ("message","Text",msg)	
+EndFunction	
+
+Function p_catalog_build()
+	If projectname$="" Then Return
+	upd=False
+	If cataloglist<>Nil
+		Global catlist=CopyTable(cataloglist)
+		cataloglist=Nil
+		upd=True
+	EndIf	
+	moai.DoMethod("cat_lv", "Clear")
+	Global cataloglist={}
+	
+	;add menu items to catalog lists
+	p_menu_array_rebuilt(); rebuild menu item list
+	For k=1 To TableItems(tvarray)-1
+		If tvarray[k].node
+			p_catalog_transl_add("menu",tvarray[k].id,tvarray[k].items[0],IIf(tvarray[k].node,"node","item"),"menu")
+		Else
+			p_catalog_transl_add("menu",tvarray[k].items[1],tvarray[k].items[0],IIf(tvarray[k].node,"node","item"),"menu")		
+		EndIf
+	Next
+	;end of menu items list	
+;*	prg_lines, linesnumber = SplitStr(moai.Get("project", "text"),lf$)
+	
+	For k=0 To linesnumber -1 
+		If prg_lines[k]<>"" 
+			Local data=SplitStr(prg_lines[k],",")
+			Switch data[0]	
+				Case "window" 
+					p_catalog_transl_add(data[0],data[1],data[7],obj[data[0]].param[6],data[4])
+				Case "text" 
+					p_catalog_transl_add(data[0],data[1],data[6],obj[data[0]].param[5],data[4])
+				Case "textentry"	
+;					p_catalog_transl_add(data[0],data[1],data[7],obj[data[0]].param[6])
+				Case "textview"	
+;					p_catalog_transl_add(data[0],data[1],data[6],obj[data[0]].param[5])
+				Case "label"	
+					p_catalog_transl_add(data[0],data[1],data[6],obj[data[0]].param[5],data[4])
+				Case "checkbox"
+				Case "choice"
+					p_catalog_transl_add(data[0],data[1],data[5],obj[data[0]].param[4],data[4])
+				Case "image"
+				Case "pageview"
+					p_catalog_transl_add(data[0],data[1],data[5],obj[data[0]].param[4],data[4])
+				Case "listview"
+					p_catalog_transl_add(data[0],data[1],data[10],obj[data[0]].param[9],data[4])
+				Case "progressbar"
+				Case "busybar"
+				Case "combobox"
+					p_catalog_transl_add(data[0],data[1],data[5],obj[data[0]].param[4],data[4])
+				Case "vline"
+				Case "radio"
+					p_catalog_transl_add(data[0],data[1],data[5],obj[data[0]].param[4],data[4])
+					p_catalog_transl_add(data[0],data[1],data[6],obj[data[0]].param[5],data[4])			
+				Case "hollywood"
+				Case "hline"
+				Case "button"
+					p_catalog_transl_add(data[0],data[1],data[7],obj[data[0]].param[6],data[4])
+			EndSwitch
+		EndIf	
+	Next
+	For k=0 To TableItems(cataloglist)-1
+		moai.DoMethod("cat_lv", "Insert", "bottom",cataloglist[k].text,cataloglist[k].transl,cataloglist[k].usedin )	
+	Next
+	catlist=Nil
+EndFunction
+
+Function p_catalog_transl_add(class,attr,txt,prm,pag)
+	If txt="" Then Return
+	lista, nst=False, 1
+	If FindStr(txt,"|")>0	
+		subtxt, nst=SplitStr(txt,"|")
+		lista=True
+	EndIf
+	For n=0 To nst-1
+		If lista Then txt=subtxt[n]
+		;check if the same txt is already used and update the list usedin 
+		For Local u=0 To TableItems(cataloglist)-1
+			If txt=cataloglist[u].text
+				If class="pageview"
+					cataloglist[u].usedin=cataloglist[u].usedin..attr.."~P"..n.."["..class.."#"..prm.."]"
+				ElseIf class="listview"
+					cataloglist[u].usedin=cataloglist[u].usedin..attr.."~Col_"..n.."["..class.."#"..prm.."]"
+				ElseIf class="radio"
+					cataloglist[u].usedin=cataloglist[u].usedin..attr.."~R"..n.."["..class.."#"..prm.."]"
+				Else
+					cataloglist[u].usedin=cataloglist[u].usedin..attr.."["..class.."#"..prm.."]"				
+				EndIf
+				Return	
+			EndIf
+		Next
+		;retieve previous translation for the same text
+		trls=""
+		If upd
+			For u=0 To TableItems(catlist)-1
+				If catlist[u].text=txt
+					trls=catlist[u].transl
+					Break	
+				EndIf
+			Next
+		EndIf		
+		If class="pageview"
+			InsertItem(cataloglist, {usedin=attr.."~P"..n.."["..class.."#"..prm.."]", text=txt, transl=trls, pag=pag})
+		ElseIf class="listview"
+			InsertItem(cataloglist, {usedin=attr.."~Col_"..n.."["..class.."#"..prm.."]", text=txt, transl=trls, pag=pag})
+		ElseIf class="radio" And prm="item"
+			InsertItem(cataloglist, {usedin=attr.."~R"..n.."["..class.."#"..prm.."]", text=txt, transl=trls, pag=pag})
+		Else
+			InsertItem(cataloglist, {usedin=attr.."["..class.."#"..prm.."]", text=txt, transl=trls, pag=pag})
+		EndIf
+	Next
+EndFunction
+
+
+Function p_catalog_read()
+	Local cl={}
+	For s$ In FileLines(catfile$) Do InsertItem(cl,s$)
+	For Local k=0 To TableItems(cataloglist)-1
+		cataloglist[k].transl=cl[k]
+	Next
+	cl=Nil
+EndFunction
+
+
+Function p_catalog_add_languages()
+	;	Add the list of the possible languages
+	For s$ In FileLines("data/languages.txt") Do moai.DoMethod("prf_Hol_cat", "Insert", "bottom", s$)
+EndFunction
+
+	
+Function p_nobackslash(msg$)
+	Return(ReplaceStr(msg$ , Chr(92), Chr(47)))
+EndFunction	
+
+
+Function p_obj_search(objn)
+	If hwstext$<>Nil 
+		aa=p_add_linen(hwstext$)
+		aa=ReplaceStr(aa,objn,"\27b\27P[FF0000]"..objn.."\27n\27P[000000]") 
+		moai.Set("hws", "text",aa)
+	EndIf
+	If xmltext$<>Nil 
+		aa=p_add_linen(xmltext$)
+		aa=ReplaceStr(aa,objn,"\27b\27P[FF0000]"..objn.."\27n\27P[000000]") 
+		moai.Set("xml", "text",aa)
+	EndIf
+
+EndFunction
+
+Function p_prj_line_highlight(lin)
+;	If StrLen(lin)<0 Or lin=Nil Then Return
+
+;	If lin=Nil Then Return
+;	DebugPrint(lin)
+	moai.Set("project", "active",lin)	
+;	moai.DoMethod("project", "Select", lin, "On")
+EndFunction
+
+Function p_prj_delete_line()
+	Local slc=moai.DoMethod("project", "GetSelection")
+	curr_prj_line,txt$=p_getcurr_line()
+	If curr_prj_line>1 And curr_prj_line<=linesnumber
+		aa=moai.Request("EasyRapa", "Sure to delete line(s) ".. Concat(slc,"-").."?", "OK|Cancel")	
+;		p_prj_line_highlight(curr_prj_line)
+		If aa>0
+			For Local t=0 To ListItems(slc)-1
+;				DebugPrint(prg_lines[slc[t]],slc[t])
+				If t>ListItems(prg_lines) Then Break
+				RemoveItem(prg_lines,slc[t]-t)
+			Next
+			changed=True
+			p_UpdateButtonState()
+			p_array2project() ;rebuild project text from array data
+			p_lay_out()
+			p_prj_line_highlight(slc[0])
+		EndIf
+	EndIf
+EndFunction
+
+Function p_prj_insert_line()	
+	Local slc=moai.DoMethod("project", "GetSelection")
+	curr_prj_line,txt$=p_getcurr_line()
+	For Local t=0 To ListItems(slc)-1
+		InsertItem(prg_lines,"", slc[t])
+	Next
+	If ListItems(slc)>0 
+		changed=True
+		p_UpdateButtonState()
+		p_array2project() ;rebuild project text from array data
+		p_lay_out()
+		p_prj_line_highlight(slc[0])
+	EndIf
+EndFunction
+
+
+Function p_prj_edit_line()	
+	curr_prj_line,txt$=p_getcurr_line()
+	If txt$=Nil Then Return
+	p_prj_line_highlight(curr_prj_line)
+	a$,ok = StringRequest("Modify line (only for skilled ppl)", "Please correct line content:", {text=txt$, width=600})
+	If ok
+		prg_lines[curr_prj_line]=a$
+		p_array2project() ;rebuild project text from array data
+		p_prj_line_highlight(curr_prj_line)
+	
+		p_lay_out()
+		changed = True
+		p_UpdateButtonState()
+	EndIf
+EndFunction
+
+Function p_Updatetime()
+	moai.Set ("time","Text","Time "..Int(GetTimer(1)/1000).." s")	
+EndFunction
+
+	
+	
+;=====================================================================================
+;=====================================================================================
+;=====================================================================================
+
+
+; dynamically create GUI from an external *.xml file definition
+
+msgboard1,msgboard2={},{} ; msgboard2 is referring to general   msgboard1 refers to lay-out screen
+msgboard1[0]="Use Lay Out page to define the position of the ID elements. \nAbsolute positions are not important, only relative positions are relevant (i.e. same line or same column)"
+msgboard2[0]="On Project tab order of the lines is not relevant (it is defined by the lay-out). \nOnly [color=#RED]Windows [/color] and [color=#RED]Pageview[/color] have fix positions. All other can be in any line without a specific order"
+
+msgboard1[1]="Labels text length will define the width of the item in the form\n Translations may not fit. It can be changed at a later time"
+msgboard2[1]="Reserved line positions: [color=#RED]Windows [/color] definition must be always on page 0 line 1. \n [color=#RED]Pageview[/color] for top level tabs must be on page 0 line 2. Pageview in any other position is treated as any other item"
+
+msgboard1[2]="Pageview in any col/row is intended as part of its layout layer \n Use Ctrl+Click on an item cell to drag it on a new position"
+msgboard2[2]="Has_pages ticked off, in the Windows definition, will ignore top level pageview.\n Then sub pages will be ignored"
+
+msgboard1[3]="Page 0 MUST always be filled with items despite the fact that Has_Pages is on or off \nPage layout number can be referred to both, the full page tab and the sub level pageview"
+msgboard2[3]="To delete an item simply delete the line in this page trough the menu/button functionality. \nSame way to insert a new line"
+
+msgboard1[4]="Lay-out grid can be resized by changing n of rows/columns on the Window definition box"
+msgboard2[4]="Some class attribute may be showed on the edit box, but ignored by the post processor generatring the XML/HWS code in case of selecting to use a lower RapaGui version."
+
+p_get_classes()  ;get all the available definitions In definition directory And create obj vector with obj data
+
+lf$=Chr(10)
+lo_n_of_col=10
+lo_n_of_row=20
+lo_actpage=0
+lo_border=20
+lo_gridH=0
+lo_gridV=0
+act_boxc=0
+act_boxr=0
+act_msgboard=0
+txt$=""
+prf_tab=True
+prf_space=5
+Hol_path$="C:/Barba/Hollywood9"
+Prg_path$=""
+Hol_vers$="9,0"
+RG_vers$=""
+gotest=False
+prg_menubar$=""
+prg_eventh$=""
+prf_user_name$=""
+prf_user_mail$=""
+prg_lines={} ; project lines list
+editmode=False ; switch to select append or edit icon dialog
+ids={} ; ID names list
+lasterp1=""
+lasterp2=""
+lasterp3=""
+lasterp4=""
+intro=True
+moveLObox=False ; semaphore for draging of used boes in the lay-out
+boxc,boxr=0,0 ; current lay out box row and column
+newfile=False
+
+;creare button for xml dialog parameters
+CreateBrush(9,2*#icodims,#icodims,#GRAY)
+SetFontColor(#BLUE)
+SetFont(#TRUETYPE_DEFAULT,11)
+SetFontStyle(#ANTIALIAS)
+SelectBrush (9)
+	TextOut(#CENTER,#TOP,"Save this data")
+	TextOut(#CENTER,#CENTER,"to definition")
+	TextOut(#CENTER,#BOTTOM,"file as default")
+EndSelect
+SetBrushTransparency(9, #GRAY)
+
+;creare button for xml dialog parameters modify additional parameters (i.e maro)
+CreateBrush(10,11,11,#GRAY)
+;SetFontColor(#BLUE)
+;SetFont(#TRUETYPE_DEFAULT,11)
+;SetFontStyle(#ANTIALIAS)
+SelectBrush (10)
+	TextOut(#CENTER,#CENTER,"...")
+EndSelect
+SetBrushTransparency(10, #GRAY)
+
+p_read_ini()
+
+t = GetVersion()
+OS$=UpperStr(t.platform)
+
+t = GetPlugins()
+
+For k=0 To TableItems (t)-1
+	If t[k].name="RapaGUI" Then RG_sys_vers$=(t[k].version.."."..t[k].revision)
+Next
+;DebugPrint(ToNumber(RG_sys_vers$))
+
+p_msgboard()
+SetInterval(1,p_msgboard,10000)
+
+;moai.CreateApp(FileToString("EasyRapa.xml"))
+moai.CreateApp(ReadString(1))
+
+p_catalog_add_languages()
+p_UpdateButtonState()
+p_intro()
+p_UpdateButtonState()
+
+moai.Set("prf_user_path","text",Prg_path$)
+moai.Set("prf_tab_tab","selected",prf_tab)
+moai.Set("prf_tab_spc","text",prf_space)
+moai.Set("prf_Hol_path","text",Hol_path$)
+moai.Set("prf_Hol_ver","text",Hol_vers$)
+moai.Set("prf_RG_ver","text",RG_vers$)
+moai.Set("prf_user_name","text",prf_user_name$)
+moai.Set("prf_user_mail","text",prf_user_mail$)
+If lasterp1<>"" Then moai.Set("mn_lerp1", "title", FilePart(lasterp1))
+If lasterp2<>"" Then moai.Set("mn_lerp2", "title", FilePart(lasterp2))
+If lasterp3<>"" Then moai.Set("mn_lerp3", "title", FilePart(lasterp3))
+If lasterp4<>"" Then moai.Set("mn_lerp4", "title", FilePart(lasterp4))
+
+
+Local lang = GetLanguageInfo(GetSystemLanguage())
+moai.Set("prf_Hol_cat","value",UpperStr(lang.Name))
+moai.Set("cat_Transl","title","Translation ("..moai.Get("prf_Hol_cat","value")..")")
+
+lang=Nil
+
+;projectname$ = "Unnamed"
+projectname$ =""
+fullprojectname$ =""
+
+StartTimer(1) ;timer to know the working session elapsed time
+SetInterval(1, p_Updatetime, 1000)
+
+moai.DoMethod("tv", "Open", "Root", all)
+
+p_lay_out()
+
+InstallEventHandler({RapaGUI = p_EventFunc, OnMouseDown = p_EventFunc, OnMouseUp = p_EventFunc, sizewindow= p_EventFunc, OnMouseMove= p_EventFunc})
+
+
+
+
+
+Repeat
+	 WaitEvent
+Forever

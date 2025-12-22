@@ -1,0 +1,459 @@
+
+***	CODE		GRAPHIC_POUR_BOB
+***	CODER		MARC.B
+***	DATE		3rd JUNE `92
+
+		
+;BLITS TWO BOBS INTO THE DISPLAY THE FIRST IS THE SAME SIZE AS THE
+;DISPLAY FORMING THE BACKGROUND:
+;THE SECOND IS THEN BLITTED INTO THE BACKGROUND
+;BOTH BLITS ARE PERFORMED USING THE SAME PROCESS..	   
+
+
+***	constants	***
+
+chip		equ	2
+clear		equ	$10000
+Plane_Size	equ	320/8*256
+bob_size	equ	130*12
+
+
+*********************************************
+*		INCLUDE FILES		    *
+*********************************************
+
+	incdir		sys:include/
+	include		source:include/hardware.i
+	include		exec/exec.i
+	include		exec/exec_lib.i
+
+	lea	$dff000,a5			;custom base address
+	
+
+**********************************************************
+*	OPEN GFX LIBRARY AND SAVE SYSTEM COPPER		 *
+**********************************************************
+
+	
+	move.l		#gfxname,a1
+	moveq		#0,d0
+	CALLEXEC	OpenLibrary
+	tst		d0			
+	beq		the_end			
+	move.l		d0,gfxbase		
+	move.l		d0,a0			;put gfxbase in a0 
+	move.l		38(a0),systemcopper	;save the copper address 
+
+
+
+****************************************************
+*	ALLOCATE MEMORY FOR BIT PLANES		   *
+****************************************************
+
+	
+	move.l		#Plane_Size*5,d0	;memory for 1 bitplanes
+	move.l		#chip+clear,d1		;chip memory and wipe it 
+	CALLEXEC	AllocMem
+	tst		d0			;fail (naah !!)
+	beq		exit			;yep (sell the AMIGA !!!)
+	move.l		d0,bitbase		;save pointer
+
+
+*****************************************************************
+*	LOAD BITPLANE AND SPRITE POINTERS INTO COPPER LIST      *
+*****************************************************************
+
+
+	move.l		bitbase,d0
+	lea		copper,a0
+	move.w		d0,6(a0)	
+	swap		d0
+	move.w		d0,2(a0)
+	swap		d0
+	add.l		#Plane_Size,d0
+	move.w		d0,14(a0)
+	swap		d0
+	move.w		d0,10(a0)
+	swap		d0
+	add.l		#Plane_Size,d0
+	move.w		d0,22(a0)
+	swap		d0
+	move.w		d0,18(a0)
+	swap		d0
+	add.l		#Plane_Size,d0
+	move.w		d0,30(a0)
+	swap		d0
+	move.w		d0,26(a0)
+	swap		d0
+	add.l		#Plane_Size,d0
+	move.w		d0,38(a0)
+	swap		d0
+	move.w		d0,34(a0)
+	swap		d0
+	
+	
+
+***************************************************************
+*		START CUSTOM COPPER LIST		      *
+***************************************************************	
+
+	move.l		#copper,COP1LCH(a5)
+	move.l		#0,COPJMP1(a5)
+	CALLEXEC	Forbid
+
+*************************************************************
+*		    MAIN CODE LOOP    			    *
+*************************************************************
+
+	clr.l		offset
+	clr.l		bob_offset
+	clr.l		screen_offset
+	move.l		#256,line
+	move.b		#0,finished
+
+	
+	
+wait
+	move.l		VPOSR(a5),d0		;read current beam position
+	and.l		#$0001ff00,d0		;mask all but the vertical pos
+	lsr.l		#8,d0		
+	cmp.w		#$0106,d0		;wait for end of display
+	bne		wait
+	cmp.b		#$aa,finished
+	beq		wait_1
+	bsr		blitter_prep_scrn
+	bra		wait
+
+wait_1
+	move.l		VPOSR(a5),d0		;read current beam position
+	and.l		#$0001ff00,d0		;mask all but the vertical pos
+	lsr.l		#8,d0		
+	cmp.w		#$0106,d0		;wait for end of display
+	bne		wait_1
+	btst		#6,CIAAPRA		;check left mouse button
+	beq		clean_up		;end if pressed
+	cmp.b		#$ff,finished
+	beq		wait_1
+	bsr		blitter_prep_bob
+	bra		wait_1
+
+
+**********************************************************
+*			RESTORE SYSTEM 			 *
+**********************************************************
+
+clean_up
+
+	move.l		systemcopper,COP1LCH(a5)
+	move.l		#0,COPJMP1(a5)
+	CALLEXEC	Permit
+	
+
+exit1
+	
+	move.l		#Plane_Size*5,d0
+	move.l		bitbase,a1
+	CALLEXEC	FreeMem
+
+exit
+	move.l		gfxbase,a1		;close the graphics library
+	CALLEXEC	CloseLibrary
+	
+the_end
+	rts					;exit from program
+
+
+************************************************************
+*		BLITTER OPERATIONS			   *
+************************************************************
+
+;this routine works by blitting a bob (in this case same size
+;as the display) one line at a time.it does this by
+;taking the last line of the bob and blitting it on every display
+;line (from top to bottom).next the bob pointer is increased
+;to point to the next line of the bob and the line counter is
+;decreased by one so the next blit finishes one line above
+;the last, this continues until the line counter = 0
+;which of course means all lines have been blitted
+;the graphic is stored upside down (it made things easier !!!!)
+;
+; 	offset =  holds current value to add to bitbase address 
+;	screen_offset = same as above but for bob
+;	line = holds current number of lines to be blitted
+
+
+blitter_prep_scrn
+	
+	move.l		#0,offset		clear offset
+	move.l		line,d3			load number of lines
+	sub.l		#1,d3
+	move.l		d3,line			
+	tst		d3			reached end of display
+	beq		.no_blit
+	bsr		blitter
+	add.l		#40,screen_offset	
+	rts
+
+
+;screen blit finished now prepare for bob to be blitted
+
+.no_blit
+	bsr		get_background
+	move.l		#129,line		height of bob -1
+	move.l		#0,bob_offset		offset = 0
+	move.b		#$aa,finished		set screen finished flag
+	rts
+
+
+
+blitter
+	move.l		#4,d7			number of planes
+	move.l		bitbase,a3		display address
+	add.l		offset,a3		
+	add.l		#40,offset
+	lea		screen,a2		graphic to be displayed
+	add.l		screen_offset,a2	
+	bsr		blitter_loop
+	dbra		d3,blitter
+	rts
+	
+blitter_loop
+	bsr 		blit_screen
+	add.l		#Plane_Size,a2		;find next bob plane
+	add.l		#Plane_Size,a3		;find next screen plane
+	dbra		d7,blitter_loop		;do 'till end
+	rts
+
+blit_screen
+	bsr		blitter_busy		;check blitter status
+	move.l		a2,BLTAPTH(a5)		;DMA a pointer (bob)
+	move.l		a3,BLTDPTH(a5)		;DMA d pointer (screen)
+	move.w		#0,BLTAMOD(a5)		
+	move.w		#0,BLTDMOD(a5)		
+	move.w		#0,BLTCON1(a5)
+	move.w		#$ffff,BLTAFWM(a5)	
+	move.w		#$ffff,BLTALWM(a5)
+	move.w		#$09f0,BLTCON0(a5)	
+	move.w		#(1*64)+(320/16),BLTSIZE(a5)	
+	rts
+
+*************************************************
+*		SAVE BACKGROUND			*
+*************************************************
+
+;this routine saves the background prior to the bob being blitted
+;into the display.
+;A0 = screen
+;A1 = buffer
+;the screen is the source and the buffer is the destination of the blit
+; the size of the blit is equal to total bob size i.e. 130*12*5
+; 130 line heigh	12 bytes wide	5 planes deep
+
+
+get_background
+	
+	move.l		#4,d0
+	move.l		bitbase,a0
+	move.l		#buffer,a1
+	add.l		#1810,a0
+
+background_loop
+	
+	bsr		.blitter
+	add.l		#Plane_Size,a0
+	add.l		#bob_size,a1
+	dbra		d0,background_loop
+	rts
+
+
+.blitter
+	bsr		blitter_busy		
+	move.l		a0,BLTAPTH(a5)		;DMA a pointer (screen)
+	move.l		a1,BLTDPTH(a5)		;DMA d pointer (buffer)
+	move.w		#28,BLTAMOD(a5)		
+	move.w		#0,BLTDMOD(a5)		
+	move.w		#0,BLTCON1(a5)
+	move.w		#$ffff,BLTAFWM(a5)	
+	move.w		#$ffff,BLTALWM(a5)
+	move.w		#$09f0,BLTCON0(a5)	
+	move.w		#(130*64)+(96/16),BLTSIZE(a5)	
+	rts
+
+	
+*************************************************
+*		BLIT BALLOON BOB		*
+*************************************************
+
+;this section pours the bob into the background display
+;it works along the same lines as the screen blit
+;except its setup for a cookie-cut and the graphic is the 
+;right way up
+;
+;A0 = bob    (source)
+;A1 = screen (destination)
+;A2 = buffer (now containing the preserved background)
+;A3 = bob mask
+;               -
+;minterm = AB + BC
+
+
+
+blitter_prep_bob
+	
+	move.l		#0,offset
+	move.l		line,d3
+	sub.l		#1,d3
+	move.l		d3,line
+	tst		d3
+	beq		.no_blit
+	add.l		#12,bob_offset
+	bsr		blit_bob
+	rts
+
+.no_blit
+	move.b		#$ff,finished
+	rts
+
+blit_bob
+	move.l		bitbase,a1
+	add.l		#1810,a1
+	add.l		offset,a1
+	add.l		#40,offset
+	lea		bob,a0
+	add.l		#bob_size,a0
+	move.l		a0,a3
+	sub.l		bob_offset,a3
+	add.l		#bob_size*5,a3		find bob mask (behind bob data)
+	sub.l		bob_offset,a0
+	move.l		#buffer,a2
+	add.l		#bob_size,a2
+	sub.l		bob_offset,a2
+	move.l		#4,d0
+	bsr		bob_loop
+	dbra		d3,blit_bob
+	rts
+
+bob_loop
+	bsr		.blitter
+	add.l		#Plane_Size,a1
+	add.l		#bob_size,a2
+	add.l		#bob_size,a0
+	dbra		d0,bob_loop
+	rts
+
+.blitter
+	bsr		blitter_busy		
+	move.l		a0,BLTAPTH(a5)			bob source
+	move.l		a1,BLTDPTH(a5)			destination	
+	move.l		a2,BLTCPTH(a5)			saved background
+	move.l		a3,BLTBPTH(a5)			bob mask
+	move.w		#0,BLTAMOD(a5)
+	move.w		#0,BLTBMOD(a5)
+	move.w		#0,BLTCMOD(a5)		
+	move.w		#28,BLTDMOD(a5)		
+	move.w		#0,BLTCON1(a5)
+	move.w		#$ffff,BLTAFWM(a5)	
+	move.w		#$ffff,BLTALWM(a5)
+	move.w		#$0fe2,BLTCON0(a5)	
+	move.w		#(1*64)+(96/16),BLTSIZE(a5)	
+	rts	
+
+blitter_busy
+	btst		#14,DMACONR(a5)		;blitter working ?
+	bne		blitter_busy		;yes then wait......
+	rts					
+
+
+
+***********************************************************
+*		   CUSTOM COPPER LIST			  *
+***********************************************************
+
+
+	SECTION		copper.list,CODE_C
+
+copper
+	dc.w	BPL1PTH,0000		;next 4 blank words
+	dc.w	BPL1PTL,0000		;are where we load
+	dc.w	BPL2PTH,0000		;the bitplane pointers
+	dc.w	BPL2PTL,0000
+	dc.w	BPL3PTH,0000
+	dc.w	BPL3PTL,0000
+	dc.w	BPL4PTH,0000
+	dc.w	BPL4PTL,0000
+	dc.w	BPL5PTH,0000
+	dc.w	BPL5PTL,0000
+	dc.w	SPR0PTH,0000
+	dc.w	SPR0PTL,0000		;sprite 0 pointer
+	dc.w	SPR1PTH,0000
+	dc.w	SPR1PTL,0000		;sprite 1 pointer
+	dc.w	SPR2PTH,0000
+	dc.w	SPR2PTL,0000		;sprite 2 pointer
+	dc.w	SPR3PTH,0000
+	dc.w	SPR3PTL,0000		;sprite 3 pointer
+	dc.w	SPR4PTH,0000
+	dc.w	SPR4PTL,0000		;sprite 4 pointer
+	dc.w	SPR5PTH,0000
+	dc.w	SPR5PTL,0000		;sprite 5 pointer
+	dc.w	SPR6PTH,0000
+	dc.w	SPR6PTL,0000		;sprite 6 pointer
+	dc.w	SPR7PTH,0000
+	dc.w	SPR7PTL,0000		;sprite 7 pointer
+	dc.l 	$2b01fffe		;wait for line 43
+	dc.w	DIWSTRT,$2c81		;where we start displaying
+	dc.w	DIWSTOP,$2cc1		;where we stop!
+	dc.w	BPLCON0,$5200		;this is for Amiga 1000 owners
+	dc.w	BPLCON2,$0024		
+	dc.w	DDFSTRT,$0038		;where to start the horizontal display
+	dc.w	DDFSTOP,$00d0		;and where we stop
+	dc.w	BPLCON1,$0000
+	dc.w	BPL1MOD,$0000		;not a scroller
+	dc.w	BPL2MOD,$0000		;so these are blank
+
+color_map
+		dc.w	$180,$000,$182,$fff,$184,$0f0,$186,$026
+		dc.w	$188,$038,$18a,$139,$18c,$24b,$18e,$04d
+		dc.w	$190,$820,$192,$ddd,$194,$bbb,$196,$999
+		dc.w	$198,$777,$19a,$555,$19c,$d60,$19e,$b51
+		dc.w	$1a0,$800,$1a2,$900,$1a4,$b10,$1a6,$c10
+		dc.w	$1a8,$e20,$1aa,$f30,$1ac,$222,$1ae,$333
+		dc.w	$1b0,$444,$1b2,$555,$1b4,$666,$1b6,$777
+		dc.w	$1b8,$888,$1ba,$999,$1bc,$ff0,$1be,$f70
+	
+
+		
+	
+	dc.l	$fffffffe		;wait for the impossible
+endcopper
+
+copperlen	equ	endcopper-copper
+
+
+	
+
+	
+************************************************************
+*			VARIABLES	 		   *
+************************************************************
+
+
+gfxbase		dc.l 0
+bitbase		dc.l 0
+systemcopper	dc.l 0
+offset		dc.l 0
+bob_offset	dc.l 0
+screen_offset	dc.l 0
+line		dc.l 0
+mask		dc.l 0
+finished	dc.b 0
+buffer		ds.b 12*130*5
+
+gfxname		dc.b 'graphics.library',0
+
+screen		incbin 	source:m.bateson/graphics/mts1
+bob		incbin	source:m.bateson/graphics/balloon+mask
+
+
+
+end
+	

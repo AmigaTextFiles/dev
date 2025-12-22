@@ -1,0 +1,10 @@
+#pragma libcall RTGGadToolsBase RGAddGadget 1e 09803
+#pragma libcall RTGGadToolsBase RGDisposeAnchor 24 801
+#pragma libcall RTGGadToolsBase RGDisposeGadget 2a 801
+#pragma libcall RTGGadToolsBase RGDoGadgets 30 9802
+#pragma libcall RTGGadToolsBase RGGadgetState 36 0802
+#pragma libcall RTGGadToolsBase RGNewAnchor 3c 10803
+#pragma libcall RTGGadToolsBase RGNewGadgetTags 42 801
+#pragma libcall RTGGadToolsBase RGRefreshGList 48 09803
+#pragma libcall RTGGadToolsBase RGRemGadget 4e 9802
+#pragma tagcall RTGGadToolsBase RGNewGadget 42 801

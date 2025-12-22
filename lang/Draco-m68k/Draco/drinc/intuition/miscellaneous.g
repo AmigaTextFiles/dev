@@ -1,0 +1,14 @@
+extern
+ÑCloseIntuitionLibrary()void,
+ÑCloseWorkBench()bool,
+ÑCurrentTime(*ulongÅpSeconds,ÅpMicros)void,
+ÑDoubleClick(ulongÅstartSecs,ÅstartMicros,ÅcurrentSecs,ÅcurrentMicros)bool,
+ÑLockIBase(ulongÅlockNumber)ulong,
+ÑOpenIntuitionLibrary(ulongÅversion)*IntuitionBase_t,
+ÑOpenWorkBench()*Screen_t,
+ÑRemakeDisplay()void,
+ÑRethinkDisplay()void,
+ÑUnlockIBase(ulongÅlock)void,
+ÑViewAddress()*View_t,
+ÑWBenchToBack()bool,
+ÑWBenchToFront()bool;

@@ -1,0 +1,639 @@
+##RENDPRI
+-20
+##HEADER
+
+#ifndef IM
+#define IM(o) ((struct Image *) o)
+#endif
+
+#ifndef GAD
+#define GAD(o) ((struct Gadget *) o)
+#endif
+
+#ifndef MAX
+#define MAX(x,y) ((x) > (y) ? (x) : (y))
+#endif
+
+#ifndef MIN
+#define MIN(x,y) ((x) < (y) ? (x) : (y))
+#endif
+
+/* DICE specific */
+#define HOOK __geta4
+#define A0(stuff) __A0 stuff
+#define A1(stuff) __A1 stuff
+#define A2(stuff) __A2 stuff
+
+#define HORIZ_GID       1
+#define VERT_GID        2
+#define LEFT_GID        3
+#define RIGHT_GID       4
+#define UP_GID          5
+#define DOWN_GID        6
+
+extern int SysISize( void );
+extern Object *NewImageObject( ULONG );
+extern Object *NewPropObject( ULONG, Tag, ... );
+extern Object *NewButtonObject( Object *, Tag, ... );
+extern void NotifyAttrChanges( Object *, struct GadgetInfo *, ULONG, Tag, ... );
+extern ULONG HandleMyButton( struct Gadget *, struct gpInput *, struct ButtonData * );
+extern HOOK ULONG DispatchMyButtongClass( A0(Class *), A2(Object *), A1(struct gpInput *));
+extern HOOK ULONG DispatchMyPropgClass(A0(Class *), A2(Object *), A1(struct gpLayout *));
+extern void UpdateProp( struct Window *, Object *, ULONG, LONG );
+extern HOOK ULONG BFHookFunc( void );
+
+extern struct Library           *UtilityBase;
+extern struct DrawInfo          *dri;
+extern Class                    *mypropgclass;
+extern Class                    *mybuttongclass;
+extern Object                   *SizeImage, *LeftImage, *RightImage;
+extern Object                   *UpImage, *DownImage;
+
+##SUPPORT
+
+int SysISize( void )
+{
+        return(( Scr->Flags & SCREENHIRES ) ? SYSISIZE_MEDRES : SYSISIZE_LOWRES );
+}
+
+
+Object *NewImageObject( ULONG which )
+{
+        return( NewObject( NULL, SYSICLASS,
+                           SYSIA_DrawInfo, dri,
+                           SYSIA_Which, which,
+                           SYSIA_Size, SysISize(),
+                           TAG_DONE ));
+}
+
+Object *NewPropObject( ULONG freedom, Tag tag1, ... )
+{
+        return( NewObject( mypropgclass, NULL,
+                           ICA_TARGET, ICTARGET_IDCMP,
+                           PGA_Freedom, freedom,
+                           PGA_NewLook, TRUE,
+                           PGA_Borderless, (( dri->dri_Flags & DRIF_NEWLOOK ) && ( dri->dri_Depth != 1 )),
+                           TAG_MORE, &tag1 ));
+}
+
+Object *NewButtonObject( Object *image, Tag tag1, ... )
+{
+        return( NewObject( mybuttongclass, NULL,
+                           ICA_TARGET, ICTARGET_IDCMP,
+                           GA_Image, image,
+                           TAG_MORE, &tag1 ));
+}
+
+struct ButtonData
+{
+        ULONG   TickCounter;
+};
+
+struct PropData
+{
+        LONG   *Visible;
+};
+
+void NotifyAttrChanges( Object *o, struct GadgetInfo *gi, ULONG flags, Tag attr1, ... )
+{
+        DoMethod( o, OM_NOTIFY, &attr1, gi, flags );
+}
+
+ULONG HandleMyButton( struct Gadget *gad, struct gpInput *gpi, struct ButtonData *bd )
+{
+        UWORD            selected = 0;
+        struct RastPort *rp;
+        ULONG            retval = GMR_MEACTIVE;
+
+        if (PointInImage((gpi->gpi_Mouse.X << 16) + (gpi->gpi_Mouse.Y), gad->GadgetRender))
+        {
+                selected = GFLG_SELECTED;
+        }
+        if (gpi->gpi_IEvent->ie_Class == IECLASS_RAWMOUSE && gpi->gpi_IEvent->ie_Code == SELECTUP)
+        {
+                retval = GMR_NOREUSE;
+                selected = 0;
+        }
+        if (gpi->gpi_IEvent->ie_Class == IECLASS_TIMER)
+        {
+                if (selected && !(--bd->TickCounter))
+                {
+                        bd->TickCounter = 1;
+                        NotifyAttrChanges( (Object *) gad, gpi->gpi_GInfo, 0,
+                                           GA_ID, gad->GadgetID,
+                                           TAG_DONE);
+                }
+        }
+        if ((gad->Flags & GFLG_SELECTED) != selected)
+        {
+                gad->Flags ^= GFLG_SELECTED;
+                if (rp = ObtainGIRPort(gpi->gpi_GInfo))
+                {
+                        DoMethod((Object *) gad, GM_RENDER, gpi->gpi_GInfo, rp, GREDRAW_UPDATE);
+                        ReleaseGIRPort(rp);
+                }
+        }
+        return (retval);
+}
+
+HOOK ULONG DispatchMyButtongClass( A0(Class *cl), A2(Object *o), A1(struct gpInput *gpi))
+{
+        struct ButtonData *bd = (struct ButtonData *) INST_DATA(cl, o);
+
+        switch (gpi->MethodID)
+        {
+        case GM_GOACTIVE:
+                bd->TickCounter = 2;
+                NotifyAttrChanges( o, gpi->gpi_GInfo, 0,
+                                   GA_ID, GAD(o)->GadgetID,
+                                   TAG_DONE );
+                return (GMR_MEACTIVE);
+        case GM_HANDLEINPUT:
+                return (HandleMyButton(GAD(o), gpi, bd));
+        default:
+                return( DoSuperMethodA( cl, o, ( Msg ) gpi ));
+        }
+}
+
+
+#define RecalcHVisible(window) (window->GZZWidth)
+#define RecalcVVisible(window) (window->GZZHeight)
+
+HOOK ULONG DispatchMyPropgClass(A0(Class *cl), A2(Object *o), A1(struct gpLayout *gpl))
+{
+        if (gpl->MethodID == GM_LAYOUT)
+        {
+                struct Window      *win = gpl->gpl_GInfo->gi_Window;
+                struct PropInfo    *pi = (struct PropInfo *)GAD(o)->SpecialInfo;
+                LONG                visible;
+                struct PropData    *pd = (struct PropData *)INST_DATA( cl, o );
+
+                if (pi->Flags & FREEHORIZ)
+                {
+                        visible = RecalcHVisible( win );
+                }
+                else
+                {
+                        visible = RecalcVVisible( win );
+                }
+
+                *pd->Visible = visible;
+
+                SetAttrs( o, PGA_Visible, visible, TAG_DONE );
+        }
+
+        return ( DoSuperMethodA( cl, o, (Msg) gpl ));
+}
+
+void UpdateProp( struct Window *window, Object *gadget, ULONG attr, LONG value)
+{
+        if (SetAttrs(gadget, attr, value, TAG_DONE))
+        {
+                struct PropInfo *pi = (struct PropInfo *) (GAD(gadget))->SpecialInfo;
+                NewModifyProp(GAD(gadget), window, NULL, pi->Flags, pi->HorizPot, pi->VertPot, pi->HorizBody, pi->VertBody, 1);
+        }
+}
+
+
+HOOK ULONG BFHookFunc( void )
+{
+        return (1);
+}
+
+static struct Hook BFHook =
+{
+        NULL, NULL,
+        BFHookFunc,
+};
+
+#define QUAL_SHIFT      (IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)
+#define QUAL_ALT        (IEQUALIFIER_LALT | IEQUALIFIER_RALT)
+#define QUAL_CTRL       (IEQUALIFIER_CONTROL)
+
+##SETUP
+
+        if(!( dri = GetScreenDrawInfo( Scr )))
+            return( 3L );
+
+        SizeImage   = NewImageObject( SIZEIMAGE  );
+        LeftImage   = NewImageObject( LEFTIMAGE  );
+        RightImage  = NewImageObject( RIGHTIMAGE );
+        UpImage     = NewImageObject( UPIMAGE    );
+        DownImage   = NewImageObject( DOWNIMAGE  );
+
+        if(!( SizeImage && LeftImage && RightImage && UpImage && DownImage ))
+            return( 4L );
+
+        if(!( mypropgclass = MakeClass( NULL, PROPGCLASS, NULL, sizeof( struct PropData ), 0 )))
+            return( 5L );
+
+        mypropgclass->cl_Dispatcher.h_Entry = ( ULONG (*)()) DispatchMyPropgClass;
+
+        if(!( mybuttongclass = MakeClass( NULL, BUTTONGCLASS, NULL, sizeof( struct ButtonData ), 0 )))
+            return( 5L );
+
+        mybuttongclass->cl_Dispatcher.h_Entry = ( ULONG (*)()) DispatchMyButtongClass;
+
+##CLOSEDOWN
+
+        DisposeObject( SizeImage  );
+        DisposeObject( LeftImage  );
+        DisposeObject( RightImage );
+        DisposeObject( UpImage    );
+        DisposeObject( DownImage  );
+
+        SizeImage  = NULL;
+        LeftImage  = NULL;
+        RightImage = NULL;
+        UpImage    = NULL;
+        DownImage  = NULL;
+
+        if( Scr )
+                FreeScreenDrawInfo( Scr, dri );
+
+        if( mybuttongclass ) {
+                FreeClass( mybuttongclass );
+                mybuttongclass = NULL;
+        }
+
+        if( mypropgclass ) {
+                FreeClass( mypropgclass );
+                mypropgclass = NULL;
+        }
+
+##INCLUDE
+#ifndef EXEC_EXECBASE_H
+#include <exec/execbase.h>
+#endif
+#ifndef EXEC_LIBRARIES_H
+#include <exec/libraries.h>
+#endif
+#ifndef INTUITION_ICCLASS_H
+#include <intuition/icclass.h>
+#endif
+#ifndef INTUITION_CLASSUSR_H
+#include <intuition/classusr.h>
+#endif
+#ifndef INTUITION_IMAGECLASS_H
+#include <intuition/imageclass.h>
+#endif
+#ifndef CLIB_ALIB_PROTOS_H
+#include <clib/alib_protos.h>
+#endif
+#ifndef CLIB_UTILITY_PROTOS_H
+#include <clib/utility_protos.h>
+#endif
+#ifdef PRAGMAS
+  #ifndef PRAGMAS_UTILITY_PRAGMAS
+  #include <pragmas/utility_pragmas.h>
+  #endif
+#endif
+
+
+##GLOBAL
+struct DrawInfo         *dri;
+Class                   *mypropgclass;
+Class                   *mybuttongclass;
+Object                  *SizeImage, *LeftImage, *RightImage;
+Object                  *UpImage, *DownImage;
+
+##DATA
+struct BitMap           *%wBitMap;
+
+BOOL                    %wFrozen = FALSE;
+Object                  *%wHorizGadget, *%wVertGadget;
+Object                  *%wLeftGadget, *%wRightGadget;
+Object                  *%wUpGadget, *%wDownGadget;
+
+LONG                    %wHTotal, %wVTotal;
+LONG                    %wHVisible, %wVVisible;
+
+##OPENWND
+
+LONG Open%wWindow( void )
+{
+        int resolution = SysISize();
+        WORD topborder = YOffset + 1;
+        WORD w = IM( SizeImage )->Width;
+        WORD h = IM( SizeImage )->Height;
+        WORD bw = ( resolution == SYSISIZE_LOWRES ) ? 1 : 2;
+        WORD bh = ( resolution == SYSISIZE_HIRES  ) ? 2 : 1;
+        WORD rw = ( resolution == SYSISIZE_HIRES  ) ? 3 : 2;
+        WORD rh = ( resolution == SYSISIZE_HIRES  ) ? 2 : 1;
+        WORD gw, gh;
+        struct PropData *pd;
+
+        gh = MAX( IM( LeftImage  )->Height, h  );
+        gh = MAX( IM( RightImage )->Height, gh );
+        gw = MAX( IM( UpImage    )->Width,  w  );
+        gw = MAX( IM( DownImage  )->Width,  gw );
+
+        if(!( %wHorizGadget = NewPropObject( FREEHORIZ,
+                              GA_Left, rw + 1,
+                              GA_RelBottom, bh - gh + 2,
+                              GA_RelWidth, -gw - 1 - IM( LeftImage )->Width - IM( RightImage )->Width - rw - rw,
+                              GA_Height, gh - bh - bh - 2,
+                              GA_BottomBorder, TRUE,
+                              GA_ID, HORIZ_GID,
+                              PGA_Total, %wHTotal,
+                              PGA_Visible, %wHVisible,
+                              TAG_DONE )))
+            return( 2L );
+
+        pd = ( struct PropData * )INST_DATA( mypropgclass, %wHorizGadget );
+        pd->Visible = &%wHVisible;
+
+        if(!( %wVertGadget = NewPropObject( FREEVERT,
+                             GA_RelRight, bw - gw + 3,
+                             GA_Top, topborder + rh,
+                             GA_Width, gw - bw - bw - 4,
+                             GA_RelHeight, -topborder - h - IM( UpImage )->Height - IM( DownImage )->Height - rh - rh,
+                             GA_RightBorder, TRUE,
+                             GA_Previous, %wHorizGadget,
+                             GA_ID, VERT_GID,
+                             PGA_Total, %wVTotal,
+                             PGA_Visible, %wVVisible,
+                             TAG_DONE )))
+            return( 2L );
+
+        pd = ( struct PropData * )INST_DATA( mypropgclass, %wVertGadget );
+        pd->Visible = &%wVVisible;
+
+        if(!( %wLeftGadget = NewButtonObject( LeftImage,
+                             GA_RelRight, 1 - IM( LeftImage )->Width - IM( RightImage )->Width - gw,
+                             GA_RelBottom, 1 - IM( LeftImage )->Height,
+                             GA_BottomBorder, TRUE,
+                             GA_Previous, %wVertGadget,
+                             GA_ID, LEFT_GID,
+                             TAG_DONE )))
+            return( 2L );
+
+        if(!( %wRightGadget = NewButtonObject( RightImage,
+                              GA_RelRight, 1 - IM( RightImage )->Width - gw,
+                              GA_RelBottom, 1 - IM( RightImage )->Height,
+                              GA_BottomBorder, TRUE,
+                              GA_Previous, %wLeftGadget,
+                              GA_ID, RIGHT_GID,
+                              TAG_DONE )))
+            return( 2L );
+
+        if(!( %wUpGadget = NewButtonObject( UpImage,
+                           GA_RelRight, 1 - IM( UpImage )->Width,
+                           GA_RelBottom, 1 - IM( UpImage )->Height - IM( DownImage )->Height - h,
+                           GA_RightBorder, TRUE,
+                           GA_Previous, %wRightGadget,
+                           GA_ID, UP_GID,
+                           TAG_DONE )))
+            return( 2L );
+
+        if(!( %wDownGadget = NewButtonObject( DownImage,
+                             GA_RelRight, 1 - IM( DownImage )->Width,
+                             GA_RelBottom, 1 - IM( DownImage )->Height - h,
+                             GA_RightBorder, TRUE,
+                             GA_Previous, %wUpGadget,
+                             GA_ID, DOWN_GID,
+                             TAG_DONE )))
+            return( 2L );
+
+##OPENWND-LOCALE
+
+        if(!( Localized[ %n ] )) {
+
+            %wWTags[ 9 ].ti_Data = (ULONG)CatCompArray[ %wWTags[ 9 ].ti_Data ].cca_Str;
+
+##OPENWND-LOCALE-MENUS
+
+            LocalizeMenus( &%wNewMenu[0] );
+
+##OPENWND-LOCALE-2
+
+            Localized[ %n ] = TRUE;
+        }
+
+##OPENWND-MENUS
+
+        if(!( %wMenus = CreateMenus( %wNewMenu, TAG_END )))
+                return( 5L );
+
+        LayoutMenus( %wMenus, VisualInfo, GTMN_NewLookMenus, TRUE, TAG_END );
+
+##OPENWND-2
+
+        %wWTags[4].ti_Data = MAX( 80, gw + 1 + IM(LeftImage)->Width + IM(RightImage)->Width + rw + rw + KNOBHMIN );
+        %wWTags[6].ti_Data = MAX(50, topborder + h + IM(UpImage)->Height + IM(DownImage)->Height + rh + rh + KNOBVMIN);
+        %wWTags[8].ti_Data = Scr;
+
+        if(!( %wWnd = OpenWindowTags( NULL,
+                                      WA_Gadgets, %wHorizGadget,
+                                      WA_BackFill, &BFHook,
+                                      TAG_MORE, %wWTags )))
+            return( 4L );
+
+##OPENWND-MENUS-2
+
+        SetMenuStrip( %wWnd, %wMenus );
+
+##OPENWND-END
+
+        Update%wSWindow();
+
+        return( 0L );
+}
+
+void Update%wBitMap( void )
+{
+        ULONG srcx, srcy;
+
+        if (!%wFrozen) {
+                UWORD   srcx2;
+
+                GetAttr(PGA_Top, %wHorizGadget, &srcx);
+                GetAttr(PGA_Top, %wVertGadget, &srcy);
+
+                srcx2 = ( srcx & 0xFFF0 ) >> 3;
+
+                BltTemplate( ViewBitMap->Planes[0] + ( srcy * ViewBitMap->BytesPerRow ) + srcx2,
+                             srcx - ( srcx2 << 3 ),
+                             ViewBitMap->BytesPerRow,
+                             ViewWnd->RPort,
+                             ViewWnd->BorderLeft, ViewWnd->BorderTop,
+                             MIN( ViewHTotal, ViewHVisible ), MIN( ViewVTotal, ViewVVisible));
+        }
+}
+
+void Update%wSWindow( void )
+{
+        if( SysBase->LibNode.lib_Version < 39 ) {
+                %wHVisible = RecalcHVisible( %wWnd );
+                UpdateProp( %wWnd, %wHorizGadget, PGA_Visible, %wHVisible );
+                %wVVisible = RecalcVVisible( %wWnd );
+                UpdateProp( %wWnd, %wVertGadget, PGA_Visible, %wVVisible );
+        }
+
+        if (!%wFrozen) {
+            SetAPen( %wWnd->RPort, 0 );
+            RectFill( %wWnd->RPort,
+                      %wWnd->BorderLeft + 1, %wWnd->BorderTop,
+                      %wWnd->Width - %wWnd->BorderRight - 1,
+                      %wWnd->Height - %wWnd->BorderBottom - 1 );
+        }
+
+        SetAPen( ViewWnd->RPort, 1 );
+
+        Update%wBitMap();
+}
+
+void %wScrollerLeft(LONG amount)
+{
+        LONG oldtop;
+
+        GetAttr(PGA_Top, %wHorizGadget, (ULONG *) &oldtop);
+        if (oldtop > 0)
+        {
+                UpdateProp( %wWnd, %wHorizGadget, PGA_Top, MAX(0, oldtop - amount));
+                Update%wBitMap();
+        }
+}
+
+void %wScrollerRight(LONG amount)
+{
+        LONG oldtop;
+
+        GetAttr(PGA_Top, %wHorizGadget, (ULONG *) &oldtop);
+        if (oldtop < %wHTotal - %wHVisible)
+        {
+                UpdateProp( %wWnd, %wHorizGadget, PGA_Top, MIN( %wHTotal - %wHVisible, oldtop + amount));
+                Update%wBitMap();
+        }
+}
+
+void %wScrollerUp(LONG amount)
+{
+        LONG oldtop;
+
+        GetAttr(PGA_Top, %wVertGadget, (ULONG *) &oldtop);
+        if (oldtop > 0)
+        {
+                UpdateProp( %wWnd, %wVertGadget, PGA_Top, MAX(0, oldtop - amount));
+                Update%wBitMap();
+        }
+}
+
+void %wScrollerDown(LONG amount)
+{
+        LONG oldtop;
+
+        GetAttr(PGA_Top, %wVertGadget, (ULONG *) &oldtop);
+        if (oldtop < %wVTotal - %wVVisible)
+        {
+                UpdateProp( %wWnd, %wVertGadget, PGA_Top, MIN( %wVTotal - %wVVisible, oldtop + amount));
+                Update%wBitMap();
+        }
+}
+
+BOOL %wRawKey( void )
+{
+        switch( %wMsg.Code )
+        {
+        case CURSORLEFT:
+                if( %wMsg.Qualifier & QUAL_CTRL ) %wScrollerLeft( %wHTotal );
+                else if( %wMsg.Qualifier & QUAL_SHIFT) %wScrollerLeft( %wHVisible - 1 );
+                else if( %wMsg.Qualifier & QUAL_ALT) %wScrollerLeft( 16 );
+                else %wScrollerLeft( 1 );
+                break;
+        case CURSORRIGHT:
+                if (%wMsg.Qualifier & QUAL_CTRL) %wScrollerRight( %wHTotal);
+                else if (%wMsg.Qualifier & QUAL_SHIFT) %wScrollerRight( %wHVisible - 1);
+                else if (%wMsg.Qualifier & QUAL_ALT) %wScrollerRight( 16 );
+                else %wScrollerRight( 1 );
+                break;
+        case CURSORUP:
+                if (%wMsg.Qualifier & QUAL_CTRL) %wScrollerUp( %wVTotal );
+                else if (%wMsg.Qualifier & QUAL_SHIFT) %wScrollerUp( %wVVisible - 1 );
+                else if (%wMsg.Qualifier & QUAL_ALT) %wScrollerUp( 16 );
+                else %wScrollerUp( 1 );
+                break;
+        case CURSORDOWN:
+                if (%wMsg.Qualifier & QUAL_CTRL) %wScrollerDown( %wVTotal);
+                else if (%wMsg.Qualifier & QUAL_SHIFT) %wScrollerDown( %wVVisible - 1);
+                else if (%wMsg.Qualifier & QUAL_ALT) %wScrollerDown( 16 );
+                else %wScrollerDown( 1 );
+                break;
+        }
+
+        return( TRUE );
+}
+
+BOOL %wIDCMPUpdate( void )
+{
+        struct TagItem *attrs = (struct TagItem *)%wMsg.IAddress;
+
+        switch (GetTagData(GA_ID, 0, attrs))
+        {
+        case HORIZ_GID:
+        case VERT_GID:
+                Update%wBitMap();
+                break;
+        case LEFT_GID:
+                %wScrollerLeft( 1 );
+                break;
+        case RIGHT_GID:
+                %wScrollerRight( 1 );
+                break;
+        case UP_GID:
+                %wScrollerUp( 1 );
+                break;
+        case DOWN_GID:
+                %wScrollerDown( 1 );
+                break;
+        }
+
+        return( TRUE );
+}
+
+BOOL %wSizeVerify( void )
+{
+        %wFrozen = TRUE;
+        return( TRUE );
+}
+
+BOOL %wNewSize( void )
+{
+        %wFrozen = FALSE;
+        Update%wSWindow();
+        return( TRUE );
+}
+
+
+##CLOSEWND
+
+        DisposeObject( %wHorizGadget );
+        DisposeObject( %wVertGadget );
+        DisposeObject( %wLeftGadget );
+        DisposeObject( %wRightGadget );
+        DisposeObject( %wUpGadget );
+        DisposeObject( %wDownGadget );
+
+        %wHorizGadget = NULL;
+        %wVertGadget  = NULL;
+        %wLeftGadget  = NULL;
+        %wRightGadget = NULL;
+        %wUpGadget    = NULL;
+        %wDownGadget  = NULL;
+
+##EXTERN
+extern struct BitMap *%wBitMap;
+extern LONG %wHTotal, %wVTotal, %wHVisible, %wVVisible;
+extern Object *%wHorizGadget, *%wVertGadget;
+extern void Update%wBitMap( void );
+extern void Update%wSWindow( void );
+extern void %wScrollerLeft( LONG );
+extern void %wScrollerRight( LONG );
+extern void %wScrollerUp( LONG );
+extern void %wScrollerDown( LONG );
+
+##RENDER
+
+        Update%wBitMap();
+
+##end

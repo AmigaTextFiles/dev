@@ -1,0 +1,11 @@
+OPT MODULE
+
+MODULE '*xl'
+
+OBJECT xln OF xl ; ENDOBJECT
+
+OBJECT xnn OF xn
+   name:PTR TO CHAR
+ENDOBJECT
+
+

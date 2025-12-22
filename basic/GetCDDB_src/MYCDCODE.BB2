@@ -1,0 +1,189 @@
+;MyCDCode.bb2
+
+; This is the CD code taken from Marc Le Douarain's archive MaVaTi_Blitz.lha on ; Aminet. It has been modified to remove all of the unnecessary bits for GetCDDB
+
+
+;#SCSI_CMD_SSU=$1B
+#SCSIF_WRITE=0
+#SCSIF_READ=1
+#SCSIF_AUTOSENSE=2
+;#SCSI_CMD_READSUBCHANNEL=$42
+#SCSI_CMD_READTOC=$43
+;#SCSI_CMD_PLAYAUDIO12=$A5
+;#SCSI_CMD_PAUSERESUME=$4B
+
+#SENSE_LEN=252
+#MAX_DATA_LEN=252
+#MAX_TOC_LEN=804
+
+OPENDEVERROR=0;#_FALSE
+; CDDA vars
+STATUS_CDDA.b=0 ; How the CD drive is (playing:$11, paused:$12, stopped:other values)
+TRACK.b=0       ; Track being played
+ACTUALINDEX.l=0 ; address in actualtrack
+TOTALINDEX.l=0  ; address in CD
+TOClength.b=0   ; Number of tracks
+validTOC.b=0    ; 1=We have read a valid TOC, 0=No
+DEFTYPE .b *TOCbuf       ; Buffer for Table Of Contents
+Dim TOCflags.b(100) ; 0=CDDA, 1=Data
+ONECDDAVALID.b=0    ; Is there at least one CDDA track ?
+Dim TOCaddr.l(100)  ; Track starts
+TOCCDID$=""      ; Id string of CD
+TOCCDTITLE$=""   ; Title of actual CD */
+TOCCDARTIST$=""  ; Artist
+Dim TOCCDTITLESONG$(100) ; Title of the songs...
+
+NEWTYPE.toc
+  f.w ;frames
+  s.w ;seconds
+  m.w ;minutes
+End NEWTYPE
+
+Dim cdtoc.toc(100)
+
+; Global vars
+DEFTYPE .MsgPort *msgport
+DEFTYPE .IOStdReq *ioreq
+DEFTYPE .b *scsidata
+DEFTYPE .SCSICmd *scsicmd
+DEFTYPE .b *scsisense
+
+NEWTYPE .SCSICMD10
+  opcode.b
+  b1.b
+  b2.b
+  b3.b
+  b4.b
+  b5.b
+  b6.b
+  b7.b
+  b8.b
+  control.b
+End NEWTYPE
+
+;  DoScsiCmd(UBYTE *Data, Int datasize, UBYTE *cmd, Int cmdsize, UBYTE flags)
+Function.l DoScsiCmd{*_Data,datasize,*cmd,cmdsize,flags}
+  SHARED *ioreq
+  SHARED *scsicmd
+  SHARED *scsisense
+  *ioreq\io_Length=SizeOf.SCSICmd
+  *ioreq\io_Data=*scsicmd
+  *ioreq\io_Command=#HD_SCSICMD
+  *scsicmd\scsi_Data=*_Data
+  *scsicmd\scsi_Length=datasize
+  *scsicmd\scsi_SenseActual=0
+  *scsicmd\scsi_SenseData=*scsisense
+  *scsicmd\scsi_Command=*cmd
+  *scsicmd\scsi_CmdLength=cmdsize
+  *scsicmd\scsi_Flags=flags
+  DoIO_(*ioreq)
+  Function Return *ioreq\io_Error
+End Function
+
+Function CDDAReadContents{}
+  SHARED *TOCbuf
+  SHARED TOClength.b
+  SHARED TOCaddr.l()
+  SHARED TOCflags.b()
+  SHARED validTOC.b
+  SHARED ONECDDAVALID.b
+  SHARED TOCCDID$
+  SHARED PATHDISK$
+  SHARED TOCCDARTIST$
+  SHARED TOCCDTITLE$
+  SHARED TOCCDTITLESONG$()
+  SHARED cdtoc()
+
+  DEFTYPE .SCSICMD10 command
+  command\opcode=#SCSI_CMD_READTOC
+  command\b7=$03
+  command\b8=$24
+  TOCsize.l=0
+  *TOCptr.b=0
+  validTOC=0;#_FALSE
+  err=DoScsiCmd{*TOCbuf,#MAX_TOC_LEN,&command,SizeOf.SCSICMD10,#SCSIF_READ|#SCSIF_AUTOSENSE}
+  If NOT err
+    TOCsize=((Peek.b(*TOCbuf)MOD256)*(2^8))|(Peek.b(*TOCbuf+1)MOD256)
+    TOCaddr(2)=0:TOCaddr(1)=0:TOCaddr(0)=0
+    TOClength=0
+    If(TOCsize>=2)
+        TOCsize=TOCsize-2
+    End If
+    ONECDDAVALID=0
+    *TOCptr=*TOCbuf+4
+    Repeat
+      I1$=Right$(Hex$(Peek.b(*TOCptr+4)),2)
+      I2$=Right$(Hex$(Peek.b(*TOCptr+5)),2)
+      I3$=Right$(Hex$(Peek.b(*TOCptr+6)),2)
+      I4$=Right$(Hex$(Peek.b(*TOCptr+7)),2)
+;      Request "o",I1$+"|"+I2$+"|"+I3$+"|"+I4$,"OK"
+      TOCaddr(TOClength)=Val("$"+I1$+I2$+I3$+I4$)
+;      Request "p",Str$(TOCaddr(TOClength)+150),"OK"
+      TOCflags(TOClength)=((Peek.b(*TOCptr+1) AND $4) /4) AND 1
+      ONECDDAVALID=ONECDDAVALID| ((NOT(TOCflags(TOClength)))AND 1)
+      TOClength+1
+      *TOCptr=*TOCptr+8
+    Until NOT ((*TOCptr<(*TOCbuf+4+TOCsize)) AND (TOClength<100))
+    TOClength-1
+    TOCCDID$="ID"+Right$("0000"+Str$(TOClength),2)+Right$(Hex$(TOCaddr(2)),6)+Right$(Hex$(TOCaddr(TOClength)),6)
+    validTOC=-1;#_TRUE
+  End If
+  Function Return err
+End Function
+
+Function InitCDDA{}
+  SHARED scsidev$,scsiid
+  SHARED *msgport,*ioreq,OPENDEVERROR,*scsicmd,*scsisense,*scsidata,*TOCbuf
+  CD_DRIVE_OK=0;#_FALSE
+  *msgport=CreateMsgPort_
+  If *msgport
+    *ioreq=CreateIORequest_(*msgport,SizeOf.IOStdReq)
+    If *ioreq
+      OPENDEVERROR=OpenDevice_(&scsidev$,scsiid,*ioreq,0)
+      If NOT OPENDEVERROR
+        *scsicmd=AllocMem(SizeOf.SCSICmd,0)
+        If *scsicmd
+          *scsisense=AllocMem(#SENSE_LEN,0)
+          If *scsisense
+            *scsidata=AllocMem(#MAX_DATA_LEN,0)
+            If *scsidata
+              *TOCbuf=AllocMem(#MAX_TOC_LEN,0)
+              If *TOCbuf
+                CD_DRIVE_OK=-1;#_TRUE
+              End If
+            End If
+          End If
+        End If
+      Else
+;        R=Request("CDDA Init Error","Couldn't open device:|'"+scsidev$+"'|Unit:"+Str$(scsiid),"OK!")
+      End If
+    End If
+  End If
+  Function Return CD_DRIVE_OK
+End Function
+
+Statement EndingCDDA{}
+  SHARED *msgport,*ioreq,OPENDEVERROR,*scsicmd,*scsisense,*scsidata,*TOCbuf
+  If *TOCbuf
+    FreeMem *TOCbuf,#MAX_TOC_LEN
+  End If
+  If *scsidata
+    FreeMem *scsidata,#MAX_DATA_LEN
+  End If
+  If *scsisense
+    FreeMem *scsisense,#SENSE_LEN
+  End If
+  If *scsicmd
+    FreeMem *scsicmd,SizeOf.SCSICmd
+  End If
+  If NOT OPENDEVERROR
+    CloseDevice_(*ioreq)
+  End If
+  If *ioreq
+    DeleteIORequest_(*ioreq)
+  End If
+  If *msgport
+    DeleteMsgPort_(*msgport)
+  End If
+End Statement
+

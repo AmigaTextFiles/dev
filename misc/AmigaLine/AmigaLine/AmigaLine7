@@ -1,0 +1,258 @@
+			Technical Note #7
+		How to deal with large stack needs
+
+SUMMARY
+
+
+$ 7/4 How to deal with large stack needs
+    ^ Special note: This replaces tech note #4.  Please delete #4.
+$ release
+$ 11-Jan-87 Bryce Nesbitt / TVD
+$ stack size, Workbench, CLI, process, startups, SetStack(), 68000
+
+    This note is all about what to do if there is a chance your program
+might require more than 4000 bytes of stack.
+
+----------------------------------------------------------------------------
+
+	If your program needs more than the 4000 byte default stack, it has
+    some work to do.  It will need to check if the stack it is running on.
+    If the stack is too small it must take one of two actions:
+
+    1.	Abort with an error requester.
+    2.	Allocate enough space and use SetStack() to point to it.  Source
+	for SetStack() is included.
+
+	If there is any chance at all that user input may cause your
+    program to use more stack than normal, it is vital that you leave the
+    stack checking option of your compiler enabled.  Recursive functions
+    are particularly notorious stack blowers.
+
+
+WORKBENCH
+
+	When stared from the Workbench tool, your stack size might have
+    come from one of three places:
+
+    1.	The stack field of any random Project icon.
+    2.	The stack field in your Tool's icon.
+    3.	The Workbench's default stack size.
+
+	The icon that started you tool decides the stack size.	If the
+    stack field of that icon is blank, then the default of ~4000 bytes is
+    used.
+
+       If the user sets the stack size to an odd number then the Workbench
+    tool will crash, so don't worry about that situation.
+
+
+CLI
+
+	When your code is started up it does NOT get a new process
+    invocation; as "CLI 3" your code is literally the same process that
+    runs CLI task 3.  This is the reason for the warnings about restoring
+    the environment back just the way it was before launch.
+
+	When the CLI starts a program it does create one thing anew; the
+    stack.  This is not the same stack the CLI itself uses.  The size of
+    this stack is *not* recorded in the normal "task" structure.  It must
+    be extracted from the top of the running stack.  See the examples.
+
+
+----------------------------- C EXAMPLE ------------------------------------
+#include "libraries/dosextens.h"
+char *malloc();
+struct Process *FindTask();
+
+void main()
+{
+ULONG  stacksize;
+struct Process *Process;
+char   *mem;
+
+    /* The stack size is the long pointed to by pr_ReturnAddr */
+    Process=FindTask(0L);
+    stacksize=*((ULONG *)Process->pr_ReturnAddr);
+    printf("Stack size is %ld\n",stacksize);
+
+    if (!( mem=malloc(8192) ))
+	exit(20);
+    SetStack(mem,8192L);
+
+    stacksize=*((ULONG *)Process->pr_ReturnAddr);
+    printf("Stack size is %ld\n",stacksize);
+    Delay(80L);
+}
+
+;---------------------------------------------------------------------------
+;NAME
+;    SetStack -- use a different process stack
+;    V1.0 Tuesday 19-Jan-88 04:14:15 By Bryce Nesbitt
+;
+;SYNOPSIS
+;    SetStack(newstack,size)
+;	      a1       d0
+;
+;    char *newstack;
+;    long size;
+;
+;FUNCTION
+;    This function points the current process' stack to a new memory
+;    location.	The active part of the old stack is duplicated, so no
+;    context is lost.  SetStack() also tickles the proper fields in the task
+;    structure to tell the system about the change.  At this time it does
+;    not deallocate the old stack.
+;
+;USAGE
+;    Typically this is used by a process that needs a larger stack than it
+;    might have been started with.  The stack size can be found with:
+;
+;    #include "libraries/dosextens.h"
+;    ...
+;    stack=*(ULONG *)( ((struct Process *)FindTask(0L))->pr_ReturnAddr );
+;
+;    Or in English, the long word at the address pointed to by pr_ReturnAddr.
+;
+;WARNINGS
+;    A future revision of exec may do stack blowout checking every time a
+;    process/task is switched out.  This protective feature will not be
+;    available to programs that use funky methods of swapping stacks.
+;
+;    This only works for processes, tasks are not eligible.
+;
+;    Don't skimp on stack... you'll get burned.  Any call to the dos.library,
+;    for example, takes just under 1600 bytes *minimum*.
+;
+;INPUTS
+;    newstack - Pointer to memory block for stack.  Must be longword aligned.
+;    size -	The size of the block.	Must be an even multiple of 4 bytes.
+;
+;SEE ALSO
+;    AddTask()
+
+newtop		equr a0 ;Bind names to registers
+newbottom	equr a1 ;Search & replace to assemble
+retaddr 	equr a2 ;Under Lattice V4.0
+temp1		equr a3
+temp2		equr a4
+newsize 	equr d0
+oldsize 	equr d1
+oldtop		equr d2
+;
+;SetStack()
+;V1.0 Tuesday 19-Jan-88 04:14:15 (C)1988 Bryce Nesbitt
+;1712 Marin Ave.  Berkeley, Ca  94707-2206 415-524-2110
+;ucbvax!hoser!bryce  -or-  bryce@hoser.berkeley.EDU
+;
+;Structure of stack:
+;
+;	 -------
+;	 -4 size
+;	 -8 finalRTS
+;	  ...
+;     -size blowoutdata     ;For checking stack blowouts
+
+		XDEF	_SetStack
+		XDEF	SetStack
+_SetStack	move.l	4(a7),a1
+		move.l	8(a7),d0
+SetStack	movem.l d2/a2-a4/a6,-(a7)
+
+		move.l	newsize,newtop
+		adda.l	newbottom,newtop    ;newbottom+size=newtop
+
+		move.l	4,a6		    ;exec library
+		move.l	$114(a6),temp1      ;Internal "magic";FindTask(0L);
+		lea.l	$b0(temp1),retaddr  ;&pr_ReturnAddr
+
+		move.l	(retaddr),temp1     ;Get pr_ReturnAddr
+		move.l	(temp1)+,oldsize    ;Get old stack size. temp1+...
+		move.l	temp1,oldtop	    ;...now points to old stack top
+		move.l	newtop,temp2
+copystack	move.w	-(temp1),-(temp2)
+		cmp.l	temp1,a7
+		bne.s	copystack
+
+		move.l	newsize,-4(newtop)  ;Set new stack size value
+		move.l	oldtop,temp1
+		sub.l	oldsize,temp1
+		move.l	(temp1),(newbottom) ;Copy bottom long
+
+		addq.b	#1,$127(a6)         ;Internal "magic"
+		 move.l  newtop,(retaddr)
+		 subq.l  #4,(retaddr)       ;pr_ReturnAddr is 4 under top...
+		 sub.l	 a7,oldtop	    ;Get old stack offset
+		 sub.l	 oldtop,newtop	    ;index into new stack
+		 move.l  newtop,a7
+		jsr	-$138(a6)           ;Public Permit();
+
+		movem.l (a7)+,d2/a2-a4/a6
+		rts
+		END
+
+
+-------------UUENCODED OBJECT FILE (See Fish #53 for decoder)----------------
+
+begin 644 SetStack.o
+M```#YP````````/I````$R)O``0@+P`(2.<@.B!`T<DL>``$)FX!%$7K`+`FO
+M4B(;)`LH2#DCO\MF^B%`__PF0I?!(I-2+@$G)(A9DI2/D<(N2$ZN_LA,WUP$]
+M3G4```/O`0```E-E=%-T86-K````"`$```-?4V5T4W1A8VL`````````````G
+%`````_+OD
+``
+end
+size 140
+
+;------------------ ASSEMBLY STARTUP MODULE W/STACK CHECK ------------------
+;
+; 25-Jan-87  Bryce Nesbitt
+;
+; A complete startup module for assembly language programs.  Works from
+; Workbench or CLI.
+;
+	NOLIST
+	INCLUDE "exec/types.i"
+	INCLUDE "libraries/dosextens.i"
+	LIST
+jsrlib	MACRO
+	xref _LVO\1
+	jsr  _LVO\1(a6)
+	ENDM
+;
+; On startup (A7) contains a return address,
+; 4(A7) contains the size of the stack in bytes
+;
+		move.l	4(a7),d7            ;--Get CLI stack size--
+		move.l	4,a6		    ;Get exec library pointer
+		suba.l	a1,a1		    ;Put zero in A1
+		jsrlib	FindTask	    ;Find this task
+		move.l	d0,a5
+		moveq	#0,d0		    ;Set zero for later
+		move.l	pr_CLI(a5),d1       ;Check CLI/Workbench flag
+		bne.s	fromCLI
+
+		move.l	pr_StackSize(a5),d6 ;--Get Workbench stack size--
+		lea.l	pr_MsgPort(a5),a0   ;Wait for the message
+		jsrlib	WaitPort	    ; the Workbench will send
+		lea.l	pr_MsgPort(a5),a0
+		jsrlib	GetMsg
+
+fromCLI 	move.l	d0,-(a7)            ;Save the message, or zero
+******************************************  A5-This task D7-Stack size
+
+		;...your code here...
+
+******************************************  D7-MUST contain result code
+ExitToDOS:	move.l	(a7)+,d2
+		beq.s	notWorkbench
+
+		jsrlib	Forbid	    ;Required so we won't be unloaded by
+		move.l	d2,a1	    ; the Workbench too soon.
+		jsrlib	ReplyMsg    ;Reply to the Workbench message
+
+notWorkbench	move.l	d7,d0	    ;Return result code:
+		rts		    ; 0 = ok	   10 = error
+		END		    ; 5 = warning  20 = severe failure
+
+
+
+

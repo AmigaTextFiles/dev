@@ -1,0 +1,99 @@
+#!/usr/local/bin/perl -w
+# This script updates the MSDOS & OS/2 Makefile.pc automatically from the Unix
+# one to minimise the possibility of me making a mistake.
+# It's a gross hack, but it works.
+open(MAKEFILE, "../Makefile") || die;
+rename("Makefile.pc", "Makefile.old") || die;
+open(PREVIOUS, "Makefile.old") || die;
+open(OUTPUT, ">Makefile.pc") || die;
+
+# skip the header from the Unix Makefile.
+do { $_ = <MAKEFILE>; } until m/^SHELL=/o;
+
+# retain the previous header from the PC Makefile.
+while (<PREVIOUS>)
+{
+	print OUTPUT;
+	last if /# DO NOT EDIT/;
+}
+
+while (<MAKEFILE>)
+{
+	if ($_ eq "MAKE=make\n")
+	{
+		while (<MAKEFILE>)
+		{
+			last unless $_ eq "\n";
+		}
+	}
+
+	next if /chmod/o;
+	s/\.o(\W)/\$O\1/go;
+	s/\.o$/\$O/o;
+	s/c2man([^.])/c2man.exe\1/ if (/:/ || /cp /);
+	s/^(install:) all$/\1/;
+	if (/\$\(LEX\) (.*)/)
+	{
+		print OUTPUT "\t\$(LEX) -t $1 > \$@";
+		print OUTPUT "\n";
+		$_ = "\tcp \$@ lex_yy.c\n";
+	}
+	print OUTPUT;
+	print OUTPUT "\t\$(BIND)\n" if (/\$\(LDFLAGS\) /);
+	last if m/^# y.tab.c dependancies/o;
+}
+
+# output dependancies grouped into lines.
+sub output_depend
+{
+	return if $current eq "";
+
+	$chars = length($current) + 1;
+	$current =~ s/\.o$/\$O/o;
+	print OUTPUT $current, ":";
+	foreach $file (@depends)
+	{
+		$chars += 1 + length($file);
+		if ($chars > 77)
+		{
+			print OUTPUT "\\\n\t";
+			$chars = 8 + length($file);
+		}
+		else
+		{
+			print OUTPUT " ";
+		}
+		print OUTPUT $file;
+	}
+	print OUTPUT "\n\n";
+	$current = "";
+	undef @depends;
+}
+
+# process the dependancies a bit.
+$current = "";
+undef @depends;
+while (<MAKEFILE>)
+{
+	if (m/^#/ || $_ eq "\n")
+	{
+		&output_depend;
+		print OUTPUT;
+		next;
+	}
+
+	# have we found a dependancy?
+	if (($obj,$dep) = m/^(.*):\s*(.*)/)
+	{
+		next if ($dep =~ m!^/!);	# ignore /usr/include
+		if ($obj ne $current)
+		{
+			&output_depend;
+			$current = $obj;
+		}
+		$dep =~ s!^\./!!;
+		push(@depends, $dep);
+	}
+}
+
+close OUTPUT || die;

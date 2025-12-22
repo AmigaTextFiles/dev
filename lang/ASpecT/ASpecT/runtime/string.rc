@@ -1,0 +1,284 @@
+#define STR_CELL_SIZ(len)    (1+(((len)+3)>>2))
+
+#define ASSIGN_CPTR(S,T,LEN) if(LEN > MAXSTR) {              \
+                               LEN -= MAXSTR;                \
+                               T=(char *)  (S->ARGS[1]);     \
+                             }                               \
+                             else                            \
+                               T=(char *) &(S->ARGS[1])
+
+SORTREC _S_RUNTIME_string;
+
+
+
+TERM
+DEFUN(MK_string,(LEN,ARG0),
+      unsigned LEN AND
+      TERM ARG0)
+{
+  register TERM p=NEW_CELL(STR_CELL_SIZ(LEN));
+  p->NAME=(FOURBYTES) LEN;
+  p->ARGS[0]=ARG0;
+  return p;
+}
+
+
+TERM
+DEFUN(_RUNTIME_mkSTRING,(SC),
+      char *SC)
+{ 
+#ifdef NEED_STD_DECL
+  extern int EXFUN(strlen,(CONST char *));
+#endif
+  return _RUNTIME_mk1STRING((unsigned)strlen(SC),SC,MT);
+}
+
+
+static unsigned
+DEFUN(char_array_len,(SC),
+      char *SC)
+{
+   register unsigned i;
+   for (i=0; *SC++; i++);
+   return i;
+}
+
+TERM
+DEFUN(_RUNTIME_mk0STRING,(SC),
+      char *SC)
+{
+  register unsigned I,LEN=char_array_len(SC);
+  register char *DEST;
+  register TERM H;
+  
+  if(LEN==0) return MT;
+  if(LEN > MAXSTR) {
+    H=MK_string(MAXSTR,_RUNTIME_mk0STRING(SC+MAXSTR));
+    LEN=MAXSTR;
+  }
+  else
+    H=MK_string(LEN,MT);
+  DEST=(char *) &(H->ARGS[1]);
+  for (I=0;I<LEN;I++) *DEST++ = *SC++;
+  return H;
+}
+
+
+TERM
+DEFUN(_RUNTIME_mk1STRING,(l,SC,REST),
+      unsigned l   AND
+      char     *SC AND
+      TERM REST)
+{
+  if(l) return MKxx2(MAXSTR+l,REST,(TERM)SC);
+  else  return REST;
+}
+
+
+int
+DEFUN(compare_string,(S1,S2),
+      TERM S1 AND
+      TERM S2)
+{
+  register unsigned I,LEN1,LEN2=0;
+  register char *SC1,*SC2;
+  register int RES;
+
+L01:
+
+  if(LEN1=OPN(S1)) {
+    ASSIGN_CPTR(S1,SC1,LEN1);
+    S1 = S1->ARGS[0];
+  }
+  else {
+    LEN1 = (unsigned)(S1->ARGS[0]);
+    SC1 = (char *)(S1->ARGS[1]);
+    S1 = MT;
+  }
+  
+  if(LEN2) /* skip assignment of LEN2 */
+    goto L0;
+  
+L02:
+  
+  if(LEN2=OPN(S2)) {
+    ASSIGN_CPTR(S2,SC2,LEN2);
+    S2 = S2->ARGS[0];
+  }
+  else {
+    LEN2 = (unsigned)(S2->ARGS[0]);
+    SC2 = (char *)(S2->ARGS[1]);
+    S2 = MT;
+  } 
+     
+L0:
+  
+  if(LEN1 && LEN2) {
+    if(LEN1 <= LEN2) {
+      for(I=0;I<LEN1;I++) 
+         if(RES=(*SC1++ - *SC2++))
+           goto LE;
+      LEN2 -= LEN1;
+      goto L01;
+    }
+    else /* LEN1 > LEN2 */ {
+      for(I=0;I<LEN2;I++) 
+         if(RES=(*SC1++ - *SC2++))
+           goto LE;
+      LEN1 -= LEN2;
+      goto L02;
+    }
+  }
+  if(LEN1)  return  1;
+  if(LEN2)  return -1;
+            return  0;
+
+LE:
+  if(RES>0) return  1;
+  if(RES<0) return -1;
+            return  0;
+}
+ 
+
+void
+DEFUN(STRING_TERM_to_CHAR_ARRAY,(S,MX,SC),
+      TERM     S  AND
+      unsigned MX AND
+      char     *SC)
+{
+  register unsigned I,LEN;
+  register char *SOURCE;
+L0:
+  if(LEN=OPN(S)) {
+    ASSIGN_CPTR(S,SOURCE,LEN);
+    if(LEN > MX) { /* truncation */
+      for (I=0; I < MX; I++) *SC++ = *SOURCE++;
+      *SC=__tchar(0);
+    }
+    else {
+      for (I=0; I < LEN; I++) *SC++ = *SOURCE++;
+      S=S->ARGS[0];
+      MX=MX-LEN;
+      goto L0;
+    }
+  }
+  else { 
+    SOURCE=(char *) (S->ARGS[1]);
+    for (I=0; I < MX && (*SOURCE); I++) *SC++ = *SOURCE++;
+    *SC=__tchar(0);
+  }
+}
+
+
+XEQ(_X61_X61__string)
+{
+  TERM RES=compare_string(A1,A2)==0 ? true : false;
+  free__string(S,A1); free__string(S,A2);
+  return RES;
+}
+
+
+static unsigned
+DEFUN_VOID(READ_QUOTE) { EAT_WHITESPACE(); return LAST_CH=='"'; }
+
+XREAD(read__string)
+ { unsigned I,cnt=0;
+   int ch=0;
+   TERM cb;
+   char *DEST;
+   char buf[MAXSTR];
+   FOURBYTES FPOS= FILE_I_POS;
+   *OK=false;
+   *RES=A;
+   *SYSO=SYSI;
+   if(!READ_QUOTE()) return;
+   cb=MT;
+   while (1) {
+    ch=GET_CHAR();
+    if((ch=='"') || (cnt==MAXSTR)) {
+     if(cnt){
+      if(cb==MT) {
+         cb=MK_string(cnt,MT);*RES=cb;
+      } else {
+         cb->ARGS[0]=MK_string(cnt,MT);
+         cb=cb->ARGS[0];
+      }
+      DEST=(char *) &(cb->ARGS[1]);
+      for (I=0;I<cnt;*DEST++ = buf[I++]);
+     } else if(*RES==A) *RES=MT;
+     cnt=0;
+    }
+    if(ch=='"') {
+      *OK=true;
+      if(A) free__string(S,A);
+      return;
+    }
+    ch=read_char0();
+    if(ch==-1) { 
+      to_POS(FPOS);
+      if(*RES!=MT && *RES!=NULL) free__string(S,*RES); 
+      *RES=A;
+      return; 
+    }
+    buf[cnt++]= __tchar(ch);
+   }
+ }
+ 
+
+XWRITE(write__string)
+{
+  unsigned I,LEN;
+  char *SC;
+  TERM H=A;
+  C_OUT('"');
+  
+  while (LEN=OPN(H)) {
+    ASSIGN_CPTR(H,SC,LEN);
+    for (I=0; I < LEN; I++) write_char0(__tchar(*SC++));
+    H=H->ARGS[0];
+  }
+  
+  SC = (char *)(H->ARGS[1]);
+  while (*SC) write_char0(__tchar(*SC++));
+  
+  C_OUT('"');
+  
+  free__string(S,A);
+  
+  *SYSO= SYSI;
+  *OK= true;
+}
+
+XCOPY(copy__string)
+{ 
+  return CP(A);
+}
+
+XFREE(free__string)
+{
+  register unsigned LEN;
+  register TERM S2;
+  while (LEN=OPN(A)) {
+    if(DZ_REF(A)) {
+      S2=A->ARGS[0];
+      if(LEN > MAXSTR)
+        MDEALLOC(2,A);
+      else 
+        MDEALLOC(STR_CELL_SIZ(LEN),A);
+      A=S2;
+    }
+    else break;
+  }
+}
+
+
+
+
+void
+DEFUN_VOID(STRING_RINITIALIZE) {
+   _S_RUNTIME_string =NEW_ESORT(read__string,write__string,
+                                copy__string,free__string,
+                                _X61_X61__string
+                               ,"string"
+                               );
+}

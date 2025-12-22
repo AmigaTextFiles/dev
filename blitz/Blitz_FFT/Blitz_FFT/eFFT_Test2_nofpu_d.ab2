@@ -1,0 +1,278 @@
+
+; "eFFT_Test2_nofpu.ab2" a C to Blitz adaptation by Lorence Lombardo.
+; Based on Alexander Marx "eFFT_Test.c" example.
+
+; NoFPU version with "timer.device".
+
+; Calculations made in double float with the assistance of the
+; "mtool.library", with the exception of "prtime" Macro which
+; is done using the standard ".f" type on the Blitz side.
+
+; The "mtool.library" can be obtained form here:-
+; http://aminet.net/package/util/libs/MToolLibrary
+
+; NB: some pre-calculations were made on fixed values to reduce
+;     the amount of code required. ie. 2*Pi*50*(1/6400.0) = .04908737912...
+
+; Need at least ROM 2.x
+
+; Compile with classic Blitz for less than 020.
+
+; See the archives "Blitz_MTool.lha" & "Blitz_Timer.lha" on the aminet for
+; additional information.
+
+
+; optimize 5 ; <- good for 020 or greater
+
+INCLUDE "easyFFT.include.bb2"
+INCLUDE "timer.include.bb2"
+INCLUDE "tool.include.bb2"
+
+*time1.EClockVal=0 : *time2.EClockVal=0 : myhl.l=0
+
+If easyFFT_InitLib{2}=0 Then NPrint " Could not initialize v2 easyFFT lib...!!!" : End
+If Tool_InitLib{0}=0
+   NPrint "Could not initialize mtool lib...!!!"
+   easyFFT_FreeLib{} : End
+EndIf
+
+If timer_Init{#UNIT_ECLOCK}
+   *time1=AllocVec_(SizeOf.EClockVal, #MEMF_PUBLIC)
+   *time2=AllocVec_(SizeOf.EClockVal, #MEMF_PUBLIC)
+Else
+   NPrint "Could not initialize timer...!!!"
+   easyFFT_FreeLib{} : Tool_FreeLib{}: End
+EndIf
+
+If *time1=0 OR *time2=0 Then NPrint "Could not initialize timer...!!!" : Goto exit
+
+l$=Chr$(10) : NPrint l$+"STAT.: Opened easyFFT.library V2.0."
+
+!easyFFT_eFFTnew{myhl.l, 150}
+
+If myhl=0 Then NPrint "ERROR: Failed to get handle!" : Goto exit
+
+NEWTYPE .dub : dub.l[2] : End NEWTYPE : FloatMode -1
+
+NEWTYPE .dub2 : dub0.l : dub1.l : End NEWTYPE
+
+Dim smpldat.dub(256), FFTamp.dub(256), FFTpha.dub(256), syndat.dub(256)
+
+
+Macro startime
+   !timer_ReadEClock {E_Freq.l, *time1}
+End Macro
+
+Macro stoptime
+   !timer_ReadEClock {E_Freq.l, *time2}
+End Macro
+
+
+; The following function was taken from "unsign.ab2" from "SANE.lha"
+; on the aminet.
+
+Function.f unsL{long.l}
+   If long<0 Then ret.f=256^4+long Else ret.f=long
+   Function Return ret
+End Function
+
+
+Macro prtime
+   thi.f = unsL{*time2\ev_hi} - unsL{*time1\ev_hi}
+   tlo.f = unsL{*time2\ev_lo} - unsL{*time1\ev_lo}
+   sec.f=(65536.0^2 * thi + tlo) / unsL{E_Freq}
+   NPrint "STAT.: Operation took ",sec," seconds."
+End Macro
+
+
+; The following function was taken from "mtool_support_funs.ab2" from
+; "Blitz_MTool.lha" on the aminet.
+
+; Converts a double float to an exponent free numeric string.
+
+Function.s dub2str{addy.l}
+   SHARED *_ToolBase : digits.b=16
+   buf$=String$(Chr$(0), 64) : !Tool_UmwFtoS {&buf$, addy, digits}
+   buf$=Peek$(&buf$) : x1.w=Instr(buf$,".") : x2.w=Instr(buf$,"d")
+   If x1>0 AND x2=0
+      buf$=StripTrail$(buf$, 48) : buf$=StripTrail$(buf$, 46)
+   EndIf
+   If x2>0
+      a$=Left$(buf$,x1-1) : b$=Mid$(buf$,x1+1,x2-x1-1)
+      If Mid$(buf$,x2+1,1)="-"
+         dig$=Mid$(buf$,x2+2) : StrToLong_ &dig$, &dig.l
+         If Left$(a$,1)="-"
+            buf$="-."+String$("0",dig-Len(a$)+1)+Mid$(a$,2)+b$
+         Else
+            buf$="."+String$("0",dig-Len(a$))+a$+b$
+         EndIf
+      Else
+         dig$=Mid$(buf$,x2+1) : StrToLong_ &dig$, &dig.l : digt.w=dig-Len(b$)
+         If digt<0
+            blen.w=Len(b$)+digt : b$=Left$(b$,blen)+"."+Mid$(b$,blen+1)
+         EndIf
+         buf$=a$+b$+String$("0",digt)
+      EndIf
+      If Instr(buf$,".")>0
+         buf$=StripTrail$(buf$, 48) : buf$=StripTrail$(buf$, 46)
+      EndIf
+   EndIf
+   If buf$="" OR buf$="-" Then buf$="0"
+   Function Return buf$
+End Function
+
+
+NPrint "STAT.: Got handle from easyFFT.library. (150 samples)"
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_NUM}
+NPrint "---> : Ok, library's set samples to ",Peek.l(sampn)
+
+!easyFFT_eFFTsetdat{ret.l, myhl, #eFFT_NUM, 256}
+If ret=0
+   NPrint "ERROR: Failed to set samples to 256." : Goto exit
+Else
+   NPrint "ACT. : Set Samples to 256."
+   !easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_NUM}
+   NPrint "---> : Ok, library's set samples to ",Peek.l(sampn)
+EndIf
+
+NPrint "ACT. : Set sampling rate to 6400 S/s."
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_SRATE, 6400}
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_SRATE}
+NPrint "---> : Ok, library's set sampling rate to ",Peek.l(sampn)
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_RESOL}
+NPrint "---> : Ok, library's set FFT resolution to "+dub2str{sampn}
+
+NPrint "ACT. : 'Sample' sin with 50Hz and 8 bit resolution."
+
+!Tool_UmwStoF {&mul.dub2, ".04908737912774085998535156"} ; <- carefull too many digits will blow it out...!!!
+!Tool_UmwStoF {&num.dub2, "128"}
+
+!startime
+
+For i.l=0 To 255
+   ii.dub2\dub0 = IEEEDPFlt_ (i) : PutReg d1, ii\dub1
+   ii\dub0 = IEEEDPMul_(ii\dub0, ii\dub1, mul\dub0, mul\dub1) : PutReg d1, ii\dub1
+   ii\dub0 = IEEEDPSin_ (ii\dub0, ii\dub1) : PutReg d1, ii\dub1
+   ii\dub0 = IEEEDPMul_(ii\dub0, ii\dub1, num\dub0, num\dub1) : PutReg d1, ii\dub1
+   fix.l = IEEEDPFix_ (ii\dub0, ii\dub1)
+   ii\dub0 = IEEEDPFlt_ (fix) : PutReg d1, ii\dub1
+   smpldat(i)\dub[0] = ii\dub0 : smpldat(i)\dub[1] = ii\dub1
+Next i
+
+!stoptime
+!prtime
+
+
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_SIG, &smpldat(0)}
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_DOPD, True}
+
+NPrint "ACT. : Do spectrum analizing; with settings -> TRASH-FALSE, DOPD-TRUE)."
+
+!startime
+
+!easyFFT_eFFTcalc{myhl}
+
+!stoptime
+!prtime
+
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_ASP}
+NPrint "---> :Printing now first 10 Entries."
+NPrint "      Index Frequency Amplitude(= *128)"
+NPrint "      ----- --------- -----------------"
+For i=0 To 9
+   fix.l = IEEEDPFix_ ( Peek.l(sampn+(i*8)), Peek.l(sampn+(i*8)+4) )
+   NPrint "      ", i, "     "+LSet$(Str$(i*25),10), fix
+Next i
+
+NPrint l$+"ACT. : Do spectrum analizing; with settings -> TRASH-FALSE, DOPD-FALSE)."
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_DOPD, False}
+
+!startime
+
+!easyFFT_eFFTcalc{myhl}
+
+!stoptime
+!prtime
+
+NPrint "ACT. : Do spectrum analizing; with settings -> TRASH-TRUE, DOPD-FALSE)."
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_TRASH, True}
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_DOPD, False}
+
+!startime
+
+!easyFFT_eFFTcalc{myhl}
+
+!stoptime
+!prtime
+
+NPrint "ACT. : 'Sample' sin with 50Hz and 8 bit resolution. (again! because we trashed it!)"
+
+!startime
+
+For i.l=0 To 255
+   ii.dub2\dub0 = IEEEDPFlt_ (i) : PutReg d1, ii\dub1
+   ii\dub0 = IEEEDPMul_(ii\dub0, ii\dub1, mul\dub0, mul\dub1) : PutReg d1, ii\dub1
+   ii\dub0 = IEEEDPSin_ (ii\dub0, ii\dub1) : PutReg d1, ii\dub1
+   ii\dub0 = IEEEDPMul_(ii\dub0, ii\dub1, num\dub0, num\dub1) : PutReg d1, ii\dub1
+   fix.l = IEEEDPFix_ (ii\dub0, ii\dub1)
+   ii\dub0 = IEEEDPFlt_ (fix) : PutReg d1, ii\dub1
+   smpldat(i)\dub[0] = ii\dub0 : smpldat(i)\dub[1] = ii\dub1
+Next i
+
+!stoptime
+!prtime
+
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_TRASH, False}
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_DOPD, True}
+!easyFFT_eFFTcalc{myhl}
+
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_ASP}
+For i=0 To 255
+   FFTamp(i)\dub[0]= Peek.l( sampn+(i*8) )
+   FFTamp(i)\dub[1]= Peek.l( sampn+(i*8)+4 )
+Next i
+
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_PSP}
+For i=0 To 255
+   FFTpha(i)\dub[0]= Peek.l( sampn+(i*8) )
+   FFTpha(i)\dub[1]= Peek.l( sampn+(i*8)+4 )
+Next i
+
+NPrint "ACT. : Synthesize signal now."
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_SYN, True}
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_ASP, &FFTamp(0)}
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_PSP, &FFTpha(0)}
+
+!startime
+
+!easyFFT_eFFTcalc{myhl}
+
+!stoptime
+!prtime
+
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_SYN}
+For i=0 To 255
+   syndat(i)\dub[0]= Peek.l( sampn+(i*8) )
+   syndat(i)\dub[1]= Peek.l( sampn+(i*8)+4 )
+Next i
+NPrint "       Orig.Dat.   Synth.Dat"+l$+"       ---------------------"
+For i=0 To 10
+   fix.l = IEEEDPFix_ (smpldat(i)\dub[0], smpldat(i)\dub[1])
+   ii\dub0=syndat(i)\dub[0] : ii\dub1=syndat(i)\dub[1]
+   ii\dub0=IEEEDPDiv_(ii\dub0, ii\dub1, num\dub0, num\dub1) : PutReg d1, ii\dub1
+   NPrint "       "+LSet$( Str$(fix) ,11) + dub2str{&ii}
+Next i
+
+exit:
+If *time1 Then FreeVec_(*time1)
+If *time2 Then FreeVec_(*time2)
+If myhl<>0
+   !easyFFT_eFFTfree{myhl}
+   NPrint l$+"STAT.: Free'ed handle from easyFFT.library."
+EndIf
+easyFFT_FreeLib{}
+NPrint l$+"STAT.: Closed easyFFT.library."+l$
+timer_Free {} : Tool_FreeLib{}
+End
+
+

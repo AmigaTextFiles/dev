@@ -1,0 +1,377 @@
+				fdCompile
+
+
+BackGround on AmigaDOS Shareable Libraries
+
+    'fd' files are the files that Commodore and others supply which
+    describe routines in AmigaDOS shareable libraries and how to call them.
+    As an example, here is the 'fd' file for the 'translator.library':
+
+##base _TranslatorBase
+##bias 30
+##public
+Translate(inputString,inputLength,outputBuffer,bufferSize)(A0,D0/A1,D1)
+##end
+
+    The 'translator' library has only one routine, 'Translate', in it. This
+    file says that:
+
+	- interface stubs should use the external symbol '_TranslatorBase'
+	    to save the address of the library when it is loaded
+	- the first jump vector of the library starts at offset 30 in the
+	    negative part of the library structure (thus at offset -30 from
+	    the pointer stored in '_TranslatorBase')
+	- routine 'Translate' has 4 parameters, which should be passed in
+	    registers A0, D0, A1 and D1. The symbolic names given are not
+	    important, but do provide a human reader with some help in
+	    knowing which is which.
+
+    Thus, to use the 'Translate' routine (which translates ASCII strings of
+    English text into phoneme sequences which the narrator.device can
+    pronounce), a programmer must do the following:
+
+	1) call the Exec routine 'OpenLibrary', passing it the name of the
+	    library ("translator.library"), along with a version number
+	    (often just 0). Exec will check to see if the library is
+	    already loaded. If it isn't, it will try to LoadSeg from file
+	    "LIBS:translator.library". After the load, Exec will call the
+	    library's initialization routine which will set up a Library
+	    structure which Exec can add to its list of loaded libraries.
+	    The 'OpenLibrary' call will return the address of the Library
+	    structure. Note that this pointer is actually into the middle
+	    of the structure - at negative offsets are 6-byte entries, one
+	    for each routine in the library, which are typically an
+	    absolute JMP to the loaded routine.
+	2) Store the returned pointer into "_TranslatorBase"
+	then, on each call to 'Translate':
+	3) Set up the parameter registers:
+	    A0 - address of ASCII string
+	    D0 - length of ASCII string
+	    A1 - address of buffer for phoneme sequence
+	    D1 - length of buffer for phoneme sequence
+	4) Load the Library address (from "_TransalatorBase") into A6
+	5) JSR -30(A6)
+
+    This is all well and good for an assembler programmer, but what about
+    those using high-level languages? The simple approach is to write an
+    interface routine, which takes parameters from where-ever the high-
+    level language puts them on a call (typically the stack), moves them to
+    the required register, loads the library base into A6, and does a branch
+    to the proper offset from that base. The latest Lattice C compiler is
+    able to generate the correct code directly, based on special directives
+    given to the compiler. Ignoring that technique, a C programer does the
+    following to call the routine:
+
+	1) call 'OpenLibrary' (which is itself a stub, since it lives in
+	    exec.library) with the proper parameters
+	2) store the resulting library address in the extern symbol
+	    "TranslatorBase" (C usually adds the leading '_'). NOTE: I am
+	    ignoring the case of the 'OpenLibrary' call failing.
+	then, on each call to 'Translate':
+	3) call 'Translate' with the appropriate parameters
+	then, when done with the library:
+	4) call 'CloseLibrary(TranslatorBase)' when done with the library.
+
+    Step 3 will actually call the stub routine '_Translate' which copies
+    the parameters from the stack into the proper registers, loads the
+    Library pointer from '_TranslatorBase', and does the JMP through it.
+    Since the compiler uses register A6 internally, the stub routine should
+    save and restore it.
+
+    In Draco, I did things a little bit differently:
+
+	- the compiler doesn't stick on a '_', so the stub routine names
+	    don't have one (the base name does, for consistency if someone
+	    links C and Draco stuff together)
+	- the calling convention requires the subroutine to remove the
+	    parameters from the stack, so the stubs must do that
+	- I kept the library base private to the stub routines, so for each
+	    library there is an e.g. 'OpenTranslatorLibrary' and an e.g.
+	    'CloseTranslatorLibrary'. The first is given only the version
+	    number and the second has no argument. The first returns the
+	    Library address in case the program needs it for some other
+	    reason.
+
+    Thus, the Draco sequence is:
+
+	1) call 'OpenTranslatorLibrary' with the version number
+	...
+	2) call 'Translate' as needed
+	...
+	3) call 'CloseTranslatorLibrary'
+
+    There are lots of libraries on the Amiga, and more keep coming, since
+    programmers can write more. There are LOTS of routines. Being lazy and
+    a compiler-writer to boot, I couldn't stand the idea of writing all of
+    those interface stubs in assembler. Thus, when I first ported Draco to
+    the Amiga, I wrote a program (then called 'convfd') which read in an
+    'fd' file, parsed it, and produced an object file containing all of the
+    needed interface stubs. fdCompile is the direct descendant of that
+    program, which was the first serious one I compiled with the Amiga
+    Draco compiler. fdCompile has grown a lot since then. With this as
+    introduction, here follows a description of fdCompile.
+
+
+fdCompile
+
+    The usage line for fdCompile says:
+
+	Use is: fdCompile -lLosSd fdfile ... fdfile
+
+    This means that it takes one or more flags and one or more filenames,
+    which are expected to name 'fd' files. Each such file is processed
+    independently. In the following discussion, assume that fdCompile was
+    invoked with "fdcompile -lLosSd test_lib.fd". Also, assume that file
+    'test_lib.fd' contains:
+
+	##base _TestBase
+	##bias 30
+	##public
+	DoThing(p)(a0)
+	DoOtherThing(p,inputPtr,inputLen,output)(a0,a1,d0,d1)
+	##end
+
+    The flags, in detail, are:
+
+    -l - produce an interface stub file for Draco. This is an unlinked
+	AmigaDOS object file which contains interface stubs which let a
+	Draco program open the library and call its routines. In our
+	example usage, the created file would be called 'test.o' (fdCompile
+	looks for the '_lib.fd' in the given file names.) It would contain
+	the equivalent of the following assembler code:
+
+	    _TestBase
+		    ds.b       4
+	    OpenTestLibrary
+		    movea.l    (sp)+,a1
+		    move.l     (sp)+,d0
+		    move.l     a1,-(sp)
+		    lea        L0020,a1
+		    move.l     a6,-(sp)
+		    movea.l    0x00000004,a6
+		    jsr        -552(a6)
+		    movea.l    (sp)+,a6
+		    move.l     d0,_TestBase
+		    rts 
+	    L0020   dc.b       'test.library'
+		    dc.b       0
+	    CloseTestLibrary
+		    movea.l    _TestBase,a1
+		    move.l     a6,-(sp)
+		    movea.l    0x00000004,a6
+		    jsr        -414(a6)
+		    movea.l    (sp)+,a6
+		    rts 
+	    DoThing
+		    move.l     a6,-(sp)
+		    movea.l    8(sp),a0
+		    movea.l    _TestBase,a6
+		    jsr        -30(a6)
+		    movea.l    (sp)+,a6
+		    movea.l    (sp)+,a1
+		    addq.l     #4,sp
+		    jmp        (a1)
+	    DoOtherThing
+		    move.l     a6,-(sp)
+		    movea.l    20(sp),a0
+		    movea.l    16(sp),a1
+		    move.l     12(sp),d0
+		    move.l     8(sp),d1
+		    movea.l    _TestBase,a6
+		    jsr        -36(a6)
+		    movea.l    (sp)+,a6
+		    movea.l    (sp)+,a1
+		    adda.w     #16,sp
+		    jmp        (a1)
+
+	'OpenTestLibrary' calls 'OpenLibrary' in Exec, passing the string
+	"test.library" and the version number given by the user. The
+	returned library pointer is stored into '_TestBase' and returned.
+	'CloseTestLibrary' calls 'CloseLibrary' in Exec, passing the
+	contents of '_TestBase'. Both of the calls to Exec are done
+	directly, using the pointer to the Exec library which the system
+	stores in location 4. The two interface stubs do the required
+	copying of parameters and saving/restoring of registers. This was
+	the original purpose behind fdCompile, but is of use only for
+	people who use Draco. Changing fdCompile to work with some other
+	compiler is not hard, so those who want to do that can contact me
+	and I'll send them the source to fdCompile. If I get enough
+	requests, I can send it to 'comp.source.amiga' and/or CompuServe,
+	but I don't think that will be needed.
+
+    -L - print the library entries and their offsets from the library base
+	pointer. This is of marginal use, but does supply the proper
+	offsets to those who want to do it by hand. The output for our
+	example library is:
+
+	    DoThing @ -30
+	    DoOtherThing @ -36
+
+    -o - produce a file which defines 'LVO_' symbols for the library
+	routine offsets from the library pointer. 'LVO' stands for Library
+	Vector Offset (or some such!). The file produced has an unnamed
+	HUNK_UNIT followed by a HUNK_EXT which contains EXT_ABS definitions
+	for the symbol offsets. In our example case, the file would be
+	called 'LVO_test.o' and, dumped, contains:
+
+	    hunk_ext:
+		LVO_DoThing: ext_abs: ffffffe2
+		LVO_DoOtherThing: ext_abs: ffffffdc
+
+	This file can be linked in with the other object files of a program
+	in order to define, as external symbols, the offsets, which are
+	needed in order to call the Exec routine 'SetFunction'.
+
+    -s - produce a file which has definitions for the loaded, absolute
+	addresses of the routines in the library. This is only useful with
+	libraries that are always at fixed addresses, i.e. are in the ROM,
+	or with some types of debugging. The addresses are found by
+	actually opening the library and peeking at the real vector. Again,
+	the file, in our example, would be called 'test_sym.o' and would
+	contain:
+
+	    hunk_ext:
+		#DoThing: ext_abs: 00296c20
+		#DoOtherThing: ext_abs: 00296d00
+
+	The actual addresses would of course be different. Note that the
+	symbols defined all have a '#' on the front. This is to distinguish
+	them from the interface stub routines. My intended use for this
+	type of file is to read them into a debugger I am writing, so that
+	it can do at least partially symbolic disassembly of the ROM code.
+
+    -S - this is related - it simple prints the information that '-s' puts
+	into the file. Output for our example:
+
+	    Compile @ 00296c20
+	    Match @ 00296d00
+
+    -d - this flag produces a disk-resident-library header file. The
+	AmigaDOS shareable libraries that live in LIBS: are said to be
+	disk-resident since they are not in the ROMs and therefore must be
+	loaded from disk when they are needed. Such files have a very
+	special format, which allows AmigaDOS and Exec to load them and add
+	them to the system's list of loaded libraries. I plan on writing a
+	lot of such libraries, so I wanted an automatic way of producing
+	them. I won't describe in detail what is required, but instead
+	refer the interested reader to the appropriate sections in the ROM
+	Kernel Manual. For our example, we would get a file called
+	'test_head.o', which contains (in case you are wondering, all of my
+	pretty disassemblies and object file dumps are done by my snazzy
+	new disassembler/dumper, 'Dis', which I should be sending out a
+	couple of days after this goes out):
+
+	    L0000   dc.w       0x4afc	   ; RTC_MATCHWORD
+		    dc.l       L0000
+		    dc.l       L001a
+		    dc.b       128
+		    dc.b       1
+		    dc.b       9
+		    dc.b       0
+		    dc.l       L00d8
+		    dc.l       L00e5
+		    dc.l       L001c
+	    L001a   dc.b       0,0
+	    L001c   dc.l       38	   ; positive library size
+		    dc.l       L00bc
+		    dc.l       L002c
+		    dc.l       L0048
+	    L002c   dc.b       160,8,9,0,128,10
+		    dc.l       L00d8
+		    dc.b       160,14,6,0,144,20,0,1,128,24
+		    dc.l       L00e5
+		    dc.b       0,0,0,0
+	    L0048   move.l     a1,-(sp)
+		    movea.l    d0,a1
+		    move.l     a0,34(a1)
+		    movea.l    (sp)+,a1
+		    rts 
+	    L0054   addq.w     #1,32(a6)
+		    bclr.b     #0x0003,14(a6)
+		    move.l     a6,d0
+		    rts 
+	    L0062   clr.l      d0
+		    subq.w     #1,32(a6)
+		    bne        L0074
+		    btst.b     #0x0003,14(a6)
+		    beq        L0074
+		    bsr        L0076
+	    L0074   rts 
+	    L0076   movem.l    <a1/a5/a6>,-(sp)
+		    clr.l      d0
+		    movea.l    a6,a5
+		    tst.w      32(a5)
+		    beq        L008c
+		    bset.b     #0x0003,14(a5)
+		    bra        L00b2
+	    L008c   movea.l    a5,a1
+		    movea.l    0x00000004,a6
+		    jsr        -252(a6)
+		    movea.l    a5,a1
+		    move.w     16(a5),d0
+		    suba.w     d0,a1
+		    add.w      18(a5),d0
+		    movea.l    0x00000004,a6
+		    jsr        -210(a6)
+		    move.l     34(a5),d0
+	    L00b2   movem.l    (sp)+,<a6/a5/a1>
+		    rts 
+	    L00b8   clr.l      d0
+		    rts 
+	    L00bc   dc.l       L0054
+		    dc.l       L0062
+		    dc.l       L0076
+		    dc.l       L00b8
+		    dc.l       L0000
+		    dc.l       L0000
+		    dc.l       -1
+	    L00d8   dc.b       'test.library'
+		    dc.b       0
+	    L00e5   dc.b       'test 1.0 ( 3 Aug 1989)'
+		    dc.b       13,10,0,0,0
+
+	This code includes the library header tables and data, along with
+	the required open, close, expunge and null routines. To use this
+	file to create a complete disk-resident library, it must be linked
+	with object files containing the actual library routines. Any
+	compiler-specific startup code should NOT be included. Anyone
+	intending to write such a library should be sure to understand
+	their nature fully - there are many restrictions on what features
+	of the language and its standard libraries that can be used.
+
+	Note that, in order to be compatible with the interface stubs
+	generated by the '-l' option, the actual library routines must take
+	their parameters from the registers specified in the 'fd' file.
+	Also, since the interface stubs save and restore register A6,
+	specifying no parameters in the 'fd' file will NOT let you just
+	pass the required parameters on the stack. To be compatible with
+	the standard set by the existing shareable libraries, all
+	parameters should be passed in registers. Writing the library
+	routines in a high-level language can be done if that language
+	provides facilities to get at the registers on function entry. In
+	Draco, this is done with the 'code' construct. Lattice C can, I
+	believe, do it with the proper pragmas and declarations. Aztec C
+	can do it with #asm statements.
+
+	Accompanying fdCompile in this package is an implementation of the
+	AmigaDOS pattern matcher as a general-purpose shareable library.
+	Although it is written in Draco, since it uses the standard
+	register interface, it can be called from any language. It serves
+	mostly as an example of a complete library. The header of the
+	actual library and the Draco interface stubs, were produced by
+	fdCompile from the included 'fd' file.
+
+    AmigaDOS devices are a lot like AmigaDOS libraries - they share the
+    same header structure and can be loaded from DEVS: just like libraries
+    can be loaded from LIBS:. Some devices, such as 'timer.device' and
+    'console.device' contain useful routines, just like libraries do.
+    fdCompile can handle devices as well as libraries with the '-l' flag.
+    If the specified offset is 42 instead of 30, it will assume it is
+    dealing with a device. It will then produce a 'SetXXXDevice' routine
+    instead of the 'OpenXXXLibrary' and 'CloseXXXLibrary' routines. In
+    order to use the routines in the device, the programmer must pass the
+    address of the device structure (returned by 'OpenDevice') to the
+    'SetXXXDevice' routine, so that it is available to the stubs for the
+    device's routines. Again, consult the RKM for details. I haven't added
+    the ability to deal with devices to the '-s' or '-d' code, but if
+    someone needs it, let me know.

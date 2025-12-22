@@ -1,0 +1,642 @@
+;newgetcddb.bb2
+
+VER$="$VER: GetCDDB V0.08 (23.12.99)"
+version$="GetCDDB v0.08b"
+v$="0.08B"
+
+INCDIR "misc:data_/data/blitz_projects/getcddb/"
+XINCLUDE GetCDDB_BigFunc.bb2
+XINCLUDE GetCDDB_Consts.bb2
+XINCLUDE GetCDDB_MiscFuncs.bb2
+
+WBStartup ; start from Workbench
+;NoCli ; no default CLI
+
+;------------------------------------------------------------------------=
+.InitialiseVars
+
+LoadFont 0,"XEN.font",8
+Use IntuiFont 0
+FindScreen screennum; get current screen
+;Lets grab the screen's structure...
+*scr.Screen = Peek.l(Addr Screen(screennum))
+CaseSense 0
+
+;This routine will create the GetFile gadgets image...
+Gosub _MakeGetFileShapes
+
+MaxLen discpath$=255
+discpath$=ProgsDir{}
+oldpath$=discpath$
+
+;scsidev$="scsi.device" ; don't make it default any more - OK unless
+
+Gosub getconfig
+
+Dim genrelist$(100)
+If Exists(ProgsDir{}+"CDDB.genres") ;for genres cycle gadget
+  If ReadFile(0,ProgsDir{}+"CDDB.genres")
+    FileInput 0
+    genre$=""
+    i.b=0
+    Repeat
+      inputstr$=Edit$(80)
+      If Len(inputstr$)>0
+        genre$+inputstr$+"|"
+        genrelist$(i)=inputstr$
+        If inputstr$="rock"
+          genre_num.b=i.b
+        EndIf
+        i+1
+      EndIf
+    Until Eof(0)
+  EndIf
+Else
+  genre$="blues|classical|country|data|folk|jazz|misc|newage|reggae|rock|soundtrack"
+  genrelist$(0)="blues"
+  genrelist$(1)="classical"
+  genrelist$(2)="country"
+  genrelist$(3)="data"
+  genrelist$(4)="folk"
+  genrelist$(5)="jazz"
+  genrelist$(6)="misc"
+  genrelist$(7)="newage"
+  genrelist$(8)="reggae"
+  genrelist$(9)="rock"
+  genrelist$(10)="soundtrack"
+EndIf
+
+If NOT MakeCommodity("GetCDDB",version$,"Download CDID files from the Internet") Then End
+;If NOT CreateCxBroker{"GetCDDB",version$,"Download CDID file from the Internet",0} Then End
+
+If GetIconInfo(0,ProgsName{})
+  If IconTool$(0,"CX_POPUP")="YES"
+    cx_popup.b=-1
+    noreq.b=0
+  Else
+    cx_popup.b=0
+    noreq=-1
+  EndIf
+  hotkey$=IconTool$(0,"CX_POPKEY")
+  If IconTool$(0,"AUTO_GET")="NO"
+    enabled.b=0
+    SetCxStatus 0
+  Else
+    enabled.b=-1
+  EndIf
+  If IconTool$(0,"OVERWRITE")="YES"
+    overwrite.b=-1
+  Else
+    overwrite.b=0
+  EndIf
+Else
+  cx_popup.b=-1
+  noreq=0
+  hotkey$="ctrl lalt i"
+EndIf
+r.b=SetHotKey(0,hotkey$)
+
+
+;If UCase$(ToolString{ProgsDir{}+ProgsName{},"CX_POPUP"})="YES"
+;  cx_popup.b=-1
+;  noreq.b=0
+;Else
+;  cx_popup.b=0
+;  noreq=-1
+;EndIf
+;hotkey$=ToolString{ProgsName{},"CX_POPKEY"}
+;If Len(hotkey$)>0
+;  If SetHotKey(#_POPKEY,hotkey$)
+;  Else
+;  EndIf
+;Else ; use default
+;  If SetHotKey(#_POPKEY,"ctrl lalt i")
+;  EndIf
+;EndIf
+;If UCase$(ToolString{ProgsName{},"AUTO_GET"})="NO"
+;  enabled.b=0
+;  SetCxStatus 0
+;Else
+;  enabled.b=-1
+;EndIf
+;If UCase$(ToolString{ProgsName{},"OVERWRITE"})="YES"
+;  overwrite.b=-1
+;Else
+;  overwrite.b=0
+;EndIf
+
+;--------------------------------------------------------------------
+; Creates arexx port
+.arexx
+  If FindPort_ ("GETCDDB")
+    ErrorReq{"Something is masquerading as GetCDDB on your system"}
+    End
+  EndIf
+
+  Port.l=CreateMsgPort("GETCDDB")
+  If Port.l=0
+    ErrorReq{"Unable to open message port"}
+    DeleteMsgPort Port.l
+    End
+ EndIf
+
+;------------------------------------------------------------------
+.InitialiseNEWTYPES
+;
+#GT_TagBase = (1LSL31)+$80000 ; defined for use with BevelBox
+NEWTYPE.listview
+  flag.w
+  server$
+End NEWTYPE
+
+Dim List serverlist.listview(100)
+
+If AddItem(serverlist())
+  serverlist()\server="cddb.cddb.com"
+EndIf
+;
+;------------------------------------------------------------------
+.InitGads
+;
+GTMX #_MAIN_WIN,#_CDPLAYER_MX,106,10,17,8,"",$1|$40,"OptyCDPlayer|SPlayer",num.b
+GTString #_MAIN_WIN,#_EMAIL_STRING,105,34,130,15,"Email Address:",$1,256,email$
+GTString #_MAIN_WIN,#_DEVICE_STRING,105,54,130,15,"Device:",$1,256,scsidev$
+GTTags $80080030,10
+GTInteger #_MAIN_WIN,#_UNIT_INTEGER,105,74,130,15,"Unit:",$1,scsiid
+GTShape #_MAIN_WIN,#_DISCDIR,216,95,0,0,1
+GTString #_MAIN_WIN,#_DISC_STRING,105,94,102,15,"Disc Dir:",$1,256,discpath$
+GTButton #_MAIN_WIN,#_RETRIEVE_BUTTON,136,11,60,15,"Retrieve",$10
+GTCycle #_MAIN_WIN,#_GENRE_CYCLE,105,114,130,15,"Genre:",$1,genre$,genre_num.b
+GTText #_MAIN_WIN,#_STATUS_TEXT,105,134,130,15,"Status:",0,"Ready..."
+GTButton #_MAIN_WIN,#_HIDE_BUTTON,203,11,30,15,"Hide",$10
+
+;GTButton #_SERVER_WIN,#_OK_BUTTON,100,90,60,15,"OK",$10
+GTTags #GTLV_ShowSelected,GTGadPtr(#_SERVER_WIN,#_SERVER_LIST)
+GTListView #_SERVER_WIN,#_SERVER_LIST,10,10,220,90,"",0,serverlist(),0
+
+.InitMenus
+GTMenuTitle 0,#_PROJECT_MENU,"Project"
+GTMenuItem 0,%1001,0,#_AUTO_ITEM,"Auto Get"
+GTMenuItem 0,0,0,#_GENRE_ITEM,"Update Genres"
+GTMenuItem 0,#NM_ITEMDISABLED,0,#_SERVER_ITEM,"Get Server List"
+GTMenuItem 0,0,0,3
+GTMenuItem 0,0,0,#_HIDE_ITEM,"Hide"
+GTMenuItem 0,0,0,#_QUIT_ITEM,"Quit"
+
+mainwin_x.w=10
+mainwin_y.w=15
+serverwin_x.w=10
+serverwin_y.w=15
+
+If cx_popup.b=-1
+  Gosub OpenWindow
+EndIf
+
+.Main
+
+currentid$=GetCurrentId{}
+
+;Wait
+Repeat
+  Wait
+  winEvent.l=Event
+  CXmsg.l=CommodityEvent
+  Rmsg.l=RexxEvent(Port.l)
+
+  If Rmsg.l
+    If IsRexxMsg(Rmsg.l)
+      Gosub HandleARexx
+    EndIf
+  EndIf
+  If CXmsg.l ; exchange message
+    Gosub HandleCX
+  EndIf
+  If winEvent
+    Gosub HandleIDCMP
+  EndIf
+Until winEvent=512 AND EventWindow=#_MAIN_WIN
+Gosub _quit
+
+
+;
+;---------------------------------------------------------------
+.OpenWindow
+;
+;DefaultIDCMP $024C077E ; set the IDCMP tags for window
+  DefaultIDCMP $40|$100|$200|$8000
+  Window #_MAIN_WIN,mainwin_x,mainwin_y,270,171,$20100e,version$,0,1
+  AttachGTList #_MAIN_WIN,#_MAIN_WIN
+  mainwinopen.b=-1
+  noreq.b=0
+  SetStatus{"Ready..."}
+  CreateMenuStrip 0
+  GTSetMenu 0
+  GTSetMenuChecked 0,#_PROJECT_MENU,#_AUTO_ITEM,enabled.b
+
+  If serverwinwasopen.b=-1
+    Gosub OpenServerWindow
+  EndIf
+Return
+
+.CloseWin
+  If serverwinopen.b=-1
+    Gosub CloseServerWin
+    serverwinwasopen.b=-1
+  Else
+    serverwinwasopen.b=0
+  EndIf
+;  mainwin_x=WindowX
+;  mainwin_y=WindowY
+  Free Window #_MAIN_WIN
+  DetachGTList #_MAIN_WIN
+  mainwinopen.b=0
+  noreq.b=-1
+Return
+
+;------------------------------------------------------------------------=
+.OpenServerWindow
+
+  DefaultIDCMP $40|$200
+  Window #_SERVER_WIN,serverwin_x,serverwin_y,250,120,$20100e,"Select Server...",0,1
+  AttachGTList #_SERVER_WIN,#_SERVER_WIN
+  serverwinopen.b=-1
+  winlock.l=LockWindow{#_MAIN_WIN}
+Return
+
+;------------------------------------------------------------------------=
+.CloseServerWin
+  UnlockWindow{#_MAIN_WIN,winlock}
+;  serverwin_x=WindowX
+;  serverwin_y=WindowY
+  Free Window #_SERVER_WIN
+  DetachGTList #_SERVER_WIN
+  serverwinopen.b=0
+Return
+
+;------------------------------------------------------------------------=
+._quit ; this can be used to build custom exit
+;
+email$=GTGetString(#_MAIN_WIN,#_EMAIL_STRING)
+scsiid=GTGetInteger(#_MAIN_WIN,#_UNIT_INTEGER)
+scsidev$=GTGetString(#_MAIN_WIN,#_DEVICE_STRING)
+If Len(scsidev$)=0 Then scsidev$="scsi.device"
+discpath$=GTGetString(#_MAIN_WIN,#_DISC_STRING)
+
+If mainwinopen.b=-1
+  Gosub CloseWin
+EndIf
+Free GTList #_MAIN_WIN
+Free GTList #_SERVER_WIN
+Free Screen screennum
+DeleteMsgPort Port.l
+
+If WriteFile(0,ProgsDir{}+"GetCDDB.config")
+  FileOutput 0
+  NPrint email$
+  NPrint scsidev$
+  NPrint Str$(scsiid)
+  NPrint discpath$
+  NPrint cd_num.b
+  CloseFile 0
+EndIf
+
+
+End
+; quit now!
+;
+;
+;--------------------------------------------------------------
+
+.Do_Retrieve
+Function.b Retrieve{genre$}
+
+  SHARED scsidev$
+  SHARED scsiid
+;  SHARED genrelist()
+  SHARED cdnum.b
+  SHARED genre_num.b
+  SHARED overwrite.b
+  SHARED discpath$
+  SHARED TOCCDID$
+
+  If NOT Len(genre$)
+    genre$="rock"
+  EndIf
+
+  If Exists(discpath$+TOCCDID$) AND overwrite.b=0 ;already got
+    SetStatus{"Operation successful"}
+    Function Return 0
+  EndIf
+
+  email$=GTGetString(#_MAIN_WIN,#_EMAIL_STRING)
+  If Instr(email$,"@")=0 OR Len(email$)<3
+    ErrorReq{"Please supply a valid email address"}
+  Else
+    scsiid=GTGetInteger(#_MAIN_WIN,#_UNIT_INTEGER)
+    scsidev$=GTGetString(#_MAIN_WIN,#_DEVICE_STRING)
+;    If Len(scsidev$)=0 Then scsidev$="scsi.device"
+    discpath$=GetDiscPath{}
+;    cd_num.b=GTGetAttrs(#_MAIN_WIN,#_CDPLAYER_MX,#GTMX_Active)
+    If NOT cd_num.b
+      cdplayer$="optycdplayer"
+    Else
+      cdplayer$="splayer"
+    EndIf
+    ;genre$=genrelist$(genre_num.b)
+    res.b=GetCDDB{email$,scsidev$,scsiid,cdplayer$, LCase$(genre$)}
+
+    If res.b<>-1
+      Select res.b
+        Case #_NOENTRY_ERROR
+          SetStatus{"No entry found"}
+        Default
+          SetStatus{"Operation failed"}
+      End Select
+      Function Return res.b
+    Else
+      SetStatus{"Operation successful"}
+      Function Return 0
+    EndIf
+  EndIf
+End Function
+;Return
+;------------------------------------------------------------
+.HandleIDCMP
+
+Select EventWindow
+
+Case #_SERVER_WIN
+  Select winEvent
+    Case $40
+      Select GadgetHit
+        Case #_SERVER_LIST
+          list_num.b=EventCode
+      End Select
+
+    Case $200
+      Gosub CloseServerWin
+  End Select
+
+Case #_MAIN_WIN
+  Select winEvent
+    Case $800000
+      Gosub HandleCX
+    Case $40
+      Select GadgetHit
+        Case #_DISCDIR ; Action for discdir here
+          ._discdir
+          a$=ASLPathRequest{"Select CDDA disc directory...",discpath$}
+
+          If a$="nil:" ; our flag for "cancel" button pressed
+            a$=oldpath$
+          EndIf
+          GTSetString #_MAIN_WIN,#_DISC_STRING,a$
+          discpath$=a$
+          oldpath$=a$
+
+        Case #_DISC_STRING ; Action for disc_string here
+          ._disc_string
+          discpath$=GTGetString(#_MAIN_WIN,#_DISC_STRING)
+
+        Case #_RETRIEVE_BUTTON ; Action for retrieve_button here
+          res.b=Retrieve{genrelist$(genre_num.b)}
+
+        Case #_GENRE_CYCLE ; Action for genre_cycle here
+          ._genre_cycle
+          genre_num.b=EventCode
+
+        Case #_CDPLAYER_MX
+          ._cdplayer_mx
+          cd_num.b=EventCode
+
+        Case #_HIDE_BUTTON
+          If mainwinopen.b=-1
+            Gosub CloseWin
+          EndIf
+
+        Case #_DEVICE_STRING
+          scsidev$=GTGetString(#_MAIN_WIN,#_DEVICE_STRING)
+
+        Case #_UNIT_INTEGER
+          scsiid=GTGetInteger(#_MAIN_WIN,#_UNIT_INTEGER)
+
+      End Select
+
+    Case $100
+      Select MenuHit
+        Case #_PROJECT_MENU
+          Select ItemHit
+            Case #_AUTO_ITEM
+              If GTMenuChecked(0,0,#_AUTO_ITEM)=-1
+                Gosub _enable
+              Else
+                Gosub _disable
+              EndIf
+            Case #_GENRE_ITEM
+              email$=GTGetString(#_MAIN_WIN,#_EMAIL_STRING)
+              server$="cddb.cddb.com"
+              cddbfile$="t:cddb.tmp"
+              If GetCDDBGenres{server$, cddbfile$, ProgsDir{}+"cddb.genres", email$}=-1
+                SetStatus{"Update complete"}
+              Else
+                SetStatus{"Update failed"}
+              EndIf
+              ;gosub update genres
+            Case #_SERVER_ITEM
+              Gosub OpenServerWindow
+              ;gosub get server list
+            Case #_HIDE_ITEM
+              If mainwinopen.b=-1
+                Gosub CloseWin
+              EndIf
+            Case #_QUIT_ITEM
+              Gosub _quit
+          End Select
+      End Select
+
+    Case $8000
+      If enabled.b=-1
+        ;check for new disc
+        newid$=GetCurrentId{}
+        discpath$=GetDiscPath{}
+        If newid$<>currentid$
+          ;we have a new disc
+          res.b=Retrieve{genrelist$(genre_num.b)}
+          currentid$=newid$
+        EndIf
+      EndIf
+  End Select ;#_MAIN_WIN
+End Select
+
+Return
+;--------------------------------------------------------------------
+; Processes inputs from Exchange
+
+.HandleCX
+
+If HotKeyHit=0 ;our pop key has been hit
+  If mainwinopen.b=0
+    Gosub OpenWindow
+  Else
+    Activate #_MAIN_WIN
+  EndIf
+EndIf
+
+Select ExchangeMessage
+
+  Case #CXCMD_APPEAR
+    If mainwinopen.b=0
+      Gosub OpenWindow
+    Else
+      Activate #_MAIN_WIN
+    EndIf
+
+  Case #CXCMD_DISAPPEAR
+    If mainwinopen.b=0
+      Gosub OpenWindow
+    Else
+      Activate #_MAIN_WIN
+    EndIf
+
+  Case #CXCMD_DISABLE
+    Gosub _disable
+
+  Case #CXCMD_ENABLE
+    Gosub _enable
+
+  Case #CXCMD_KILL
+    Gosub _quit
+
+  Case #CXCMD_UNIQUE
+    If mainwinopen.b=0
+      Gosub OpenWindow
+    Else
+      Activate #_MAIN_WIN
+    EndIf
+End Select
+
+Return
+
+;--------------------------------------------------------------
+.HandleARexx
+
+RxCmd$=GetRexxCommand(Rmsg,1)
+
+res.b=1 ;default - if command is not recognised then it will return this
+
+Select UCase$(RxCmd$)
+  Case "HIDE"
+    If mainwinopen.b=-1
+      Gosub CloseWin
+    EndIf
+    res.b=0
+
+  Case "ENABLE"
+    Gosub _enable
+    res.b=0
+
+  Case "DISABLE"
+    Gosub _disable
+    res.b=0
+
+  Case "QUIT"
+    ReplyRexxMsg Rmsg,0,0,""
+    Gosub _quit
+
+End Select
+
+If Instr(RxCmd$,"RETRIEVE ")
+  genre$=LCase$(Replace$(RxCmd$,"RETRIEVE ",""))
+  res.b=Retrieve{genre$}
+  Select res.b
+    Case -1
+      res.b=0
+    Case #_READ_ERROR
+      res.b=2
+    Case #_WRITE_ERROR
+      res.b=3
+    Case #_FILE_ERROR
+      res.b=4
+    Case #_ARGS_ERROR
+      res.b=5
+    Case #_HTTP_ERROR
+      res.b=6
+    Case #_TCP_ERROR
+      res.b=7
+    Case #_CD_ERROR
+      res.b=8
+    Case #_NOENTRY_ERROR
+      res.b=9
+    Case #_SERVER_ERROR
+      res.b=10
+    Case #_CLIENT_ERROR
+      res.b=11
+    Case #_UNEXPECTED_ERROR
+      res.b=12
+  End Select
+EndIf
+
+ReplyRexxMsg Rmsg,res.b,0,""
+
+Return
+;
+._MakeGetFileShapes
+;
+; This is the engine to produce the
+; GetFile shape. It will put the data
+; into shape 0 and shape 1.
+BitMap 0,20,14,2
+For t = 0 To 1
+    Line 0,0,0,13,2-t : Line 1,0,1,13,2-t
+    Line 0,0,18,0,2-t
+    Line 18,0,18,13,1+t : Line 19,0,19,13,1+t
+    Line 0,13,18,13,1+t
+    Line 4,4,4,9,1 : Line 5,4,5,9,1
+    Line 4,10,14,10,1
+    Line 6,4,8,4,1 : Line 6,5,9,5,1
+    Line 15,10,15,7,1
+    Line 9,6,15,6,1
+    Plot 9,3,1 : Plot 10,2,1
+    Line 10,2,13,2,1 : Line 15,5,15,4,1 : Plot 14,3,1
+    GetaShape t,0,0,20,14
+    Cls 3
+Next
+Free BitMap 0
+; These shapes can now be used in a
+; GTShape gadget to produce the
+; finished article.
+; Shape 0 is the GadgetRender Image and
+; Shape 1 is the SelectRender Image.
+; NB. Changing values in the above graphics
+; routine could lead to serious problems.
+; You are advised to leave WELL ALONE!
+Return
+;
+
+.getconfig
+
+If Exists(ProgsDir{}+"GetCDDB.config")
+  If ReadFile(0,ProgsDir{}+"GetCDDB.config")
+    FileInput 0
+    email$=Edit$(80)
+    scsidev$=Edit$(80)
+    scsiid=Value{Edit$(80)}
+    discpath$=Edit$(80)
+    num.b=Value{Edit$(80)}
+    CloseFile 0
+  Else
+    ErrorReq{"Unable to open config file"}
+  EndIf
+EndIf
+
+Return
+
+._enable
+  SetCxStatus -1
+  enabled.b=-1
+Return
+
+._disable
+  SetCxStatus 0
+  enabled.b=0
+Return

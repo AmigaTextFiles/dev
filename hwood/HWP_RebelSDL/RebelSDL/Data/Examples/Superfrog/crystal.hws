@@ -1,0 +1,721 @@
+/****************************************************************
+**                                                             **
+** Name:        Crystal Cracktro "Superfrog"                   **
+** Author:      Mr.X of Barracuda                              **
+** Version:     1.1                                            **
+** Date:        13.05.17                                       **
+** Interpreter: Hollywood 6.0                                  **
+** Licence:     Sample program for Hollywood                   **
+** Function:    Hollywood port of this nice cracktro           **
+**                                                             **
+** Notes:       Based on code by musashi9. He surely did the   **
+**              lion's share of the work.                      **
+**                                                             **
+** History:                                                    **
+**                                                             **
+** 1.1: (13.05.17)                                             **
+**                                                             **
+** - adapted for RebelSDL                                      **
+**                                                             **
+** 1.0: (15.01.10)                                             **
+**                                                             **
+** - initial release                                           **
+**                                                             **
+****************************************************************/
+
+/*
+** Important! Check if the used Hollywood version is at least
+** version 6.0!
+*/
+@VERSION 6,0
+
+/*
+** This script requires the RebelSDL plugin
+*/
+@REQUIRE "rebelsdl"
+
+/*
+** image data needed by the cracktro
+*/
+@BRUSH 1, "text.iff"
+@BRUSH 4, "logo.iff"
+@BRUSH 5, "text1.iff"
+@BRUSH 6, "text2.iff"
+
+/*
+** music (stream because original music is in an unsupported format)
+*/
+@MUSIC 1, "crystal.wav"
+
+/*
+** 360x288 display
+*/
+@DISPLAY {Width = 360, Height = 288}
+
+/* define z-order of a layer */
+Function p_SwapDepths(layer, pos)
+	
+	zorder[layer - 1].z = pos
+	
+EndFunction
+
+/* make point table from coordinates */
+Function p_Make3DPoint(x, y, z)
+	
+	Local p = {}
+
+	p.x = x
+	p.y = y
+	p.z = z
+    
+	Return(p)
+	
+EndFunction
+
+/* transform 3D point to 2D point */
+Function p_Transform3DPointsTo2DPoints(points, axisRotations)
+	
+	Local TransformedPointsArray = {}
+	Local sx = Sin(axisRotations.x)
+	Local cx = Cos(axisRotations.x)
+	Local sy = Sin(axisRotations.y)
+	Local cy = Cos(axisRotations.y)
+	Local sz = Sin(axisRotations.z)
+	Local cz = Cos(axisRotations.z)
+	Local x,y,z, xy,xz, yx,yz, zx,zy, scaleFactor
+
+	For Local i = 0 To ListItems(points) - 1
+
+		x = points[i].x
+		y = points[i].y
+		z = points[i].z
+
+		; rotation around x
+		xy = cx*y - sx*z
+		xz = sx*y + cx*z
+		; rotation around y
+		yz = cy*xz - sy*x
+		yx = sy*xz + cy*x
+		; rotation around z
+		zx = cz*yx - sz*xy
+		zy = sz*yx + cz*xy
+		
+		scaleFactor = focalLength/(focalLength + yz)
+		x = zx*scaleFactor
+		y = zy*scaleFactor
+		z = yz
+
+		TransformedPointsArray[i] = p_Make3DPoint(x, y, -z)
+	Next
+	
+	Return(TransformedPointsArray)	
+	
+EndFunction
+
+/* check visibility */
+Function p_IsVisibleBetween(a, b, c)
+
+	Local t0 = ((b.y - a.y) / (b.x - a.x) - (c.y - a.y) / (c.x - a.x) < 0)
+	Local t1 = (a.x <= b.x)
+	Local t2 = (a.x > c.x)
+	Local t3 = (t1 = t2)
+	
+	If t0 ~ t3 Then Return(True)	
+	
+	Return(False)
+	
+EndFunction
+
+/* begin a new polygon with color and alpha */
+Function p_BeginPoly(color, alpha)
+	
+	polycolor = color
+	polyalpha = alpha
+	If polyalpha > 100 Then polyalpha = 100
+	If polyalpha < 0 Then polyalpha = 0
+	
+	poly = {}
+	pc = 0	
+
+EndFunction
+
+/* add new vertex to poly */
+Function p_AddVertex(x, y)
+			
+	poly[pc] = x
+	pc = pc + 1
+	poly[pc] = y
+	pc = pc + 1
+
+EndFunction
+
+/* draw the filled polygon */
+Function p_EndPoly()
+	
+	; as layers are enabled, we must not use Polygon() because that would insert a new layer
+	; instead, we always modify our existing layers using SetLayerStyle()
+	SetLayerStyle(lc, {X = 85, Y = 110, Vertices = poly, Color = polycolor, Transparency = 255 - (polyalpha / 100 * 255), Hidden = False})
+	lc = lc + 1
+	
+EndFunction
+
+/* do some initialization stuff */
+Function p_PrepareBGPic()
+
+	focalLength = 250
+
+	SetFillStyle(#FILLCOLOR)
+
+	; create our background (white / black)
+	CreateBGPic(2, 360, 288)
+	SelectBGPic(2, #SELMODE_NORMAL)
+	Box(0, 0, 180, 288, #WHITE)
+	EndSelect
+
+	; enable layer insertion mode
+	SelectBGPic(2)
+
+	zorder = {}
+	
+	; insert 30 off-screen layers
+	; these 30 layers are used to draw the rotating cube which consists of 30 polygons
+	; the first 24 layers are for the cube, the last 6 layers are for the shadow on the
+	; cube faces
+	For Local k = 0 To 29
+		Polygon(-500, -500, {0, 0, 10, 0, 10, 10, 0, 10}, 3, 0, {Name = "layer" .. k + 1})
+		If k <= 23 Then zorder[k] = {layer$ = "layer" .. k + 1, z = 0}
+	Next
+
+	; make an inverted copy of the text (white becomes black)
+	CopyBrush(1, 2)
+	InvertBrush(2)
+
+	; our scroller consists of two brush layers (1 layer for black text, 1 layer for white text)
+	DisplayBrush(1, #RIGHTOUT, 250, {Name = "white"})
+	DisplayBrush(2, #RIGHTOUT, 250, {Name = "black"})
+	
+	; this is a shielding layer that sits on top of all layers
+	; it is used for fadein and fadeout
+	Box(0, 0, 360, 288, 0, {Name = "shield"})
+
+	EndSelect
+
+	; cube initialization	
+	pointsArray = {p_Make3DPoint(-50, -50, -50), p_Make3DPoint(50, -50, -50), p_Make3DPoint(50, 50, -50), p_Make3DPoint(-50, 50, -50), p_Make3DPoint(50, 0, -50), p_Make3DPoint(0, 50, -50), p_Make3DPoint(-50, 0, -50), p_Make3DPoint(0, -50, -50), p_Make3DPoint(-25, -50, -50), p_Make3DPoint(50, -25, -50), p_Make3DPoint(25, 50, -50), p_Make3DPoint(-50, 25, -50), p_Make3DPoint(-50, -50, 50), p_Make3DPoint(50, -50, 50), p_Make3DPoint(50, 50, 50), p_Make3DPoint(-50, 50, 50), p_Make3DPoint(50, 0, 50), p_Make3DPoint(0, 50, 50), p_Make3DPoint(-50, 0, 50), p_Make3DPoint(0, -50, 50), p_Make3DPoint(-25, -50, 50), p_Make3DPoint(50, -25, 50), p_Make3DPoint(25, 50, 50), p_Make3DPoint(-50, 25, 50), p_Make3DPoint(50, -50, -50), p_Make3DPoint(-50, 50, -50), p_Make3DPoint(50, 50, -50), p_Make3DPoint(-50, -50, -50), p_Make3DPoint(50, -50, 50), p_Make3DPoint(-50, 50, 50), p_Make3DPoint(50, 50, 50), p_Make3DPoint(-50, -50, 50)}
+	AxisRotations = p_Make3DPoint(0, 0, 0)
+
+	pointsArray2 = {p_Make3DPoint(-50, -50, 50), p_Make3DPoint(50, -50, 50), p_Make3DPoint(50, -50, -50), p_Make3DPoint(-50, -50, -50), p_Make3DPoint(-50, 50, 50), p_Make3DPoint(50, 50, 50), p_Make3DPoint(50, 50, -50), p_Make3DPoint(-50, 50, -50)}
+	AxisRotations2 = p_Make3DPoint(0, 0, 0)
+	
+	gen = 5
+	speednn = 0
+	speed0x = gen
+	speed0yy = 0	
+	
+	scrollpos = 360
+	fadein = True	
+	
+EndFunction
+
+/* custom sort callback for sorting the zorder table */
+Function p_SortFunc(a, b)
+	Return(a.z < b.z)
+EndFunction
+	
+/* this function gets called 50 times per second */	
+Function p_MainLoop()
+	
+	; calculate cube offsets
+	pointsArray[0].x = pointsArray[0].x + gen
+	pointsArray[7].x = pointsArray[7].x + speed0x
+	pointsArray[7].y = pointsArray[7].y + speed0yy
+	pointsArray[2].x = pointsArray[2].x - gen
+	pointsArray[5].x = pointsArray[5].x - speed0x
+	pointsArray[5].y = pointsArray[5].y - speed0yy
+	pointsArray[1].y = pointsArray[1].y + gen
+	pointsArray[4].y = pointsArray[4].y + speed0x
+	pointsArray[4].x = pointsArray[4].x - speed0yy
+	pointsArray[3].y = pointsArray[3].y - gen
+	pointsArray[6].y = pointsArray[6].y - speed0x
+	pointsArray[6].x = pointsArray[6].x + speed0yy
+	pointsArray[12].x = pointsArray[12].x + gen
+	pointsArray[19].x = pointsArray[19].x + speed0x
+	pointsArray[19].y = pointsArray[19].y + speed0yy
+	pointsArray[14].x = pointsArray[14].x - gen
+	pointsArray[17].x = pointsArray[17].x - speed0x
+	pointsArray[17].y = pointsArray[17].y - speed0yy
+	pointsArray[13].y = pointsArray[13].y + gen
+	pointsArray[16].y = pointsArray[16].y + speed0x
+	pointsArray[16].x = pointsArray[16].x - speed0yy
+	pointsArray[15].y = pointsArray[15].y - gen
+	pointsArray[18].y = pointsArray[18].y - speed0x
+	pointsArray[18].x = pointsArray[18].x + speed0yy
+	pointsArray[8].x = pointsArray[8].x + speed0x
+	pointsArray[20].x = pointsArray[20].x + speed0x
+	pointsArray[11].y = pointsArray[11].y - speed0x
+	pointsArray[23].y = pointsArray[23].y - speed0x
+	pointsArray[9].y = pointsArray[9].y + speed0x
+	pointsArray[21].y = pointsArray[21].y + speed0x
+	pointsArray[10].x = pointsArray[10].x - speed0x
+	pointsArray[22].x = pointsArray[22].x - speed0x
+	pointsArray[24].y = pointsArray[24].y + speednn
+	pointsArray[28].y = pointsArray[28].y + speednn
+	pointsArray[26].x = pointsArray[26].x - speednn
+	pointsArray[30].x = pointsArray[30].x - speednn
+	pointsArray[25].y = pointsArray[25].y - speednn
+	pointsArray[29].y = pointsArray[29].y - speednn
+	pointsArray[27].x = pointsArray[27].x + speednn
+	pointsArray[31].x = pointsArray[31].x + speednn
+    
+	If pointsArray[1].y > 0 Then speednn = gen
+
+	If pointsArray[7].x > 49
+		pointsArray[8].x = 50
+		pointsArray[9].y = 50
+		pointsArray[10].x = -50
+		pointsArray[11].y = -50
+		pointsArray[20].x = 50
+		pointsArray[21].y = 50
+		pointsArray[22].x = -50
+		pointsArray[23].y = -50
+		speed0yy = gen
+		speed0x = 0
+	EndIf
+
+	If pointsArray[7].y > -1
+		speed0yy = 0
+		speed0x = gen
+		pointsArray[8].x = -25
+		pointsArray[9].y = -25
+		pointsArray[10].x = 25
+		pointsArray[11].y = 25
+		pointsArray[24].y = -50
+		pointsArray[28].y = -50
+		pointsArray[26].x = 50
+		pointsArray[30].x = 50
+		speednn = 0
+		pointsArray[25].y = 50
+		pointsArray[29].y = 50
+		pointsArray[27].x = -50
+		pointsArray[31].x = -50
+		pointsArray[7].x = 0
+		pointsArray[7].y = -50
+		pointsArray[0].x = -50
+		pointsArray[5].x = 0
+		pointsArray[5].y = 50
+		pointsArray[2].x = 50
+		pointsArray[6].x = -50
+		pointsArray[6].y = 0
+		pointsArray[3].y = 50
+		pointsArray[4].x = 50
+		pointsArray[4].y = 0
+		pointsArray[1].y = -50
+		pointsArray[20].x = -25
+		pointsArray[21].y = -25
+		pointsArray[22].x = 25
+		pointsArray[23].y = 25
+		pointsArray[19].x = 0
+		pointsArray[19].y = -50
+		pointsArray[12].x = -50
+		pointsArray[17].x = 0
+		pointsArray[17].y = 50
+		pointsArray[14].x = 50
+		pointsArray[18].x = -50
+		pointsArray[18].y = 0
+		pointsArray[15].y = 50
+		pointsArray[16].x = 50
+		pointsArray[16].y = 0
+		pointsArray[13].y = -50
+	EndIf
+
+	AxisRotations.x = AxisRotations.x + 0.01
+	AxisRotations.y = AxisRotations.y - 0.02
+	AxisRotations.z = AxisRotations.z + 0.01
+
+	; it is important to use SelectBGPic() here because otherwise all commands would draw
+	; directly which would lead to a flickery display and much slower graphics
+	; by using SelectBGPic(), Hollywood won't draw anything before calling EndSelect()
+	SelectBGPic(2)
+	
+	Local pts2D = p_Transform3DPointsTo2DPoints(pointsArray, AxisRotations)
+
+	lc = 1
+	
+	; draw a lot of cube polygons!
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[1].x, pts2D[1].y)
+	p_AddVertex(pts2D[9].x, pts2D[9].y)
+	p_AddVertex(pts2D[4].x, pts2D[4].y)
+	p_AddVertex(pts2D[6].x, pts2D[6].y)
+	p_AddVertex(pts2D[11].x, pts2D[11].y)
+	p_AddVertex(pts2D[3].x, pts2D[3].y)
+	p_SwapDepths(1, (pts2D[1].z + pts2D[9].z + pts2D[4].z + pts2D[6].z + pts2D[11].z + pts2D[3].z + pts2D[0].z + pts2D[8].z + pts2D[7].z + pts2D[5].z + pts2D[10].z + pts2D[2].z) / 3)
+	p_EndPoly()
+	
+	p_BeginPoly($E0D090, 100)	
+	p_AddVertex(pts2D[0].x, pts2D[0].y)
+	p_AddVertex(pts2D[8].x, pts2D[8].y)
+	p_AddVertex(pts2D[7].x, pts2D[7].y)
+	p_AddVertex(pts2D[5].x, pts2D[5].y)
+	p_AddVertex(pts2D[10].x, pts2D[10].y)
+	p_AddVertex(pts2D[2].x, pts2D[2].y)
+	p_SwapDepths(2, (pts2D[1].z + pts2D[9].z + pts2D[4].z + pts2D[6].z + pts2D[11].z + pts2D[3].z + pts2D[0].z + pts2D[8].z + pts2D[7].z + pts2D[5].z + pts2D[10].z + pts2D[2].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[13].x, pts2D[13].y)
+	p_AddVertex(pts2D[21].x, pts2D[21].y)
+	p_AddVertex(pts2D[16].x, pts2D[16].y)
+	p_AddVertex(pts2D[18].x, pts2D[18].y)
+	p_AddVertex(pts2D[23].x, pts2D[23].y)
+	p_AddVertex(pts2D[15].x, pts2D[15].y)
+	p_SwapDepths(3, (pts2D[13].z + pts2D[21].z + pts2D[16].z + pts2D[18].z + pts2D[23].z + pts2D[15].z + pts2D[12].z + pts2D[20].z + pts2D[19].z + pts2D[17].z + pts2D[22].z + pts2D[14].z) / 3)
+	p_EndPoly()
+	
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[12].x, pts2D[12].y)
+	p_AddVertex(pts2D[20].x, pts2D[20].y)
+	p_AddVertex(pts2D[19].x, pts2D[19].y)
+	p_AddVertex(pts2D[17].x, pts2D[17].y)
+	p_AddVertex(pts2D[22].x, pts2D[22].y)
+	p_AddVertex(pts2D[14].x, pts2D[14].y)
+	p_SwapDepths(4, (pts2D[13].z + pts2D[21].z + pts2D[16].z + pts2D[18].z + pts2D[23].z + pts2D[15].z + pts2D[12].z + pts2D[20].z + pts2D[19].z + pts2D[17].z + pts2D[22].z + pts2D[14].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[0].x, pts2D[0].y)
+	p_AddVertex(pts2D[8].x, pts2D[8].y)
+	p_AddVertex(pts2D[20].x, pts2D[20].y)
+	p_AddVertex(pts2D[12].x, pts2D[12].y)
+	p_SwapDepths(5, (pts2D[0].z + pts2D[8].z + pts2D[20].z + pts2D[12].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[8].x, pts2D[8].y)
+	p_AddVertex(pts2D[7].x, pts2D[7].y)
+	p_AddVertex(pts2D[19].x, pts2D[19].y)
+	p_AddVertex(pts2D[20].x, pts2D[20].y)
+	p_SwapDepths(6, (pts2D[8].z + pts2D[7].z + pts2D[19].z + pts2D[20].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[6].x, pts2D[6].y)
+	p_AddVertex(pts2D[11].x, pts2D[11].y)
+	p_AddVertex(pts2D[23].x, pts2D[23].y)
+	p_AddVertex(pts2D[18].x, pts2D[18].y)
+	p_SwapDepths(7, (pts2D[6].z + pts2D[11].z + pts2D[23].z + pts2D[18].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[11].x, pts2D[11].y)
+	p_AddVertex(pts2D[3].x, pts2D[3].y)
+	p_AddVertex(pts2D[15].x, pts2D[15].y)
+	p_AddVertex(pts2D[23].x, pts2D[23].y)
+	p_SwapDepths(8, (pts2D[11].z + pts2D[3].z + pts2D[15].z + pts2D[23].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[1].x, pts2D[1].y)
+	p_AddVertex(pts2D[9].x, pts2D[9].y)
+	p_AddVertex(pts2D[21].x, pts2D[21].y)
+	p_AddVertex(pts2D[13].x, pts2D[13].y)
+	p_SwapDepths(9, (pts2D[1].z + pts2D[9].z + pts2D[21].z + pts2D[13].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[9].x, pts2D[9].y)
+	p_AddVertex(pts2D[4].x, pts2D[4].y)
+	p_AddVertex(pts2D[16].x, pts2D[16].y)
+	p_AddVertex(pts2D[21].x, pts2D[21].y)
+	p_SwapDepths(10, (pts2D[9].z + pts2D[4].z + pts2D[16].z + pts2D[21].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[5].x, pts2D[5].y)
+	p_AddVertex(pts2D[10].x, pts2D[10].y)
+	p_AddVertex(pts2D[22].x, pts2D[22].y)
+	p_AddVertex(pts2D[17].x, pts2D[17].y)
+	p_SwapDepths(11, (pts2D[5].z + pts2D[10].z + pts2D[22].z + pts2D[17].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($E0D090, 100)
+	p_AddVertex(pts2D[10].x, pts2D[10].y)
+	p_AddVertex(pts2D[2].x, pts2D[2].y)
+	p_AddVertex(pts2D[14].x, pts2D[14].y)
+	p_AddVertex(pts2D[22].x, pts2D[22].y)
+	p_SwapDepths(12, (pts2D[10].z + pts2D[2].z + pts2D[14].z + pts2D[22].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[1].x, pts2D[1].y)
+	p_AddVertex(pts2D[24].x, pts2D[24].y)
+	p_AddVertex(pts2D[7].x, pts2D[7].y)
+	p_AddVertex(pts2D[5].x, pts2D[5].y)
+	p_AddVertex(pts2D[25].x, pts2D[25].y)
+	p_AddVertex(pts2D[3].x, pts2D[3].y)
+	p_SwapDepths(13, (pts2D[1].z + pts2D[24].z + pts2D[7].z + pts2D[5].z + pts2D[25].z + pts2D[3].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[2].x, pts2D[2].y)
+	p_AddVertex(pts2D[26].x, pts2D[26].y)
+	p_AddVertex(pts2D[4].x, pts2D[4].y)
+	p_AddVertex(pts2D[6].x, pts2D[6].y)
+	p_AddVertex(pts2D[27].x, pts2D[27].y)
+	p_AddVertex(pts2D[0].x, pts2D[0].y)
+	p_SwapDepths(14, (pts2D[2].z + pts2D[26].z + pts2D[4].z + pts2D[6].z + pts2D[27].z + pts2D[0].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[13].x, pts2D[13].y)
+	p_AddVertex(pts2D[28].x, pts2D[28].y)
+	p_AddVertex(pts2D[19].x, pts2D[19].y)
+	p_AddVertex(pts2D[17].x, pts2D[17].y)
+	p_AddVertex(pts2D[29].x, pts2D[29].y)
+	p_AddVertex(pts2D[15].x, pts2D[15].y)
+	p_SwapDepths(15, (pts2D[13].z + pts2D[28].z + pts2D[19].z + pts2D[17].z + pts2D[29].z + pts2D[15].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[14].x, pts2D[14].y)
+	p_AddVertex(pts2D[30].x, pts2D[30].y)
+	p_AddVertex(pts2D[16].x, pts2D[16].y)
+	p_AddVertex(pts2D[18].x, pts2D[18].y)
+	p_AddVertex(pts2D[31].x, pts2D[31].y)
+	p_AddVertex(pts2D[12].x, pts2D[12].y)
+	p_SwapDepths(16, (pts2D[14].z + pts2D[30].z + pts2D[16].z + pts2D[18].z + pts2D[31].z + pts2D[12].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[1].x, pts2D[1].y)
+	p_AddVertex(pts2D[24].x, pts2D[24].y)
+	p_AddVertex(pts2D[28].x, pts2D[28].y)
+	p_AddVertex(pts2D[13].x, pts2D[13].y)
+	p_SwapDepths(17, (pts2D[1].z + pts2D[24].z + pts2D[28].z + pts2D[13].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[7].x, pts2D[7].y)
+	p_AddVertex(pts2D[24].x, pts2D[24].y)
+	p_AddVertex(pts2D[28].x, pts2D[28].y)
+	p_AddVertex(pts2D[19].x, pts2D[19].y)
+	p_SwapDepths(18, (pts2D[7].z + pts2D[24].z + pts2D[28].z + pts2D[19].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[2].x, pts2D[2].y)
+	p_AddVertex(pts2D[26].x, pts2D[26].y)
+	p_AddVertex(pts2D[30].x, pts2D[30].y)
+	p_AddVertex(pts2D[14].x, pts2D[14].y)
+	p_SwapDepths(19, (pts2D[2].z + pts2D[26].z + pts2D[30].z + pts2D[14].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[4].x, pts2D[4].y)
+	p_AddVertex(pts2D[26].x, pts2D[26].y)
+	p_AddVertex(pts2D[30].x, pts2D[30].y)
+	p_AddVertex(pts2D[16].x, pts2D[16].y)
+	p_SwapDepths(20, (pts2D[4].z + pts2D[26].z + pts2D[30].z + pts2D[16].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[5].x, pts2D[5].y)
+	p_AddVertex(pts2D[25].x, pts2D[25].y)
+	p_AddVertex(pts2D[29].x, pts2D[29].y)
+	p_AddVertex(pts2D[17].x, pts2D[17].y)
+	p_SwapDepths(21, (pts2D[5].z + pts2D[25].z + pts2D[29].z + pts2D[17].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[3].x, pts2D[3].y)
+	p_AddVertex(pts2D[25].x, pts2D[25].y)
+	p_AddVertex(pts2D[29].x, pts2D[29].y)
+	p_AddVertex(pts2D[15].x, pts2D[15].y)
+	p_SwapDepths(22, (pts2D[3].z + pts2D[25].z + pts2D[29].z + pts2D[15].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[6].x, pts2D[6].y)
+	p_AddVertex(pts2D[27].x, pts2D[27].y)
+	p_AddVertex(pts2D[31].x, pts2D[31].y)
+	p_AddVertex(pts2D[18].x, pts2D[18].y)
+	p_SwapDepths(23, (pts2D[6].z + pts2D[27].z + pts2D[31].z + pts2D[18].z) / 3)
+	p_EndPoly()
+
+	p_BeginPoly($80E0B0, 100)
+	p_AddVertex(pts2D[0].x, pts2D[0].y)
+	p_AddVertex(pts2D[27].x, pts2D[27].y)
+	p_AddVertex(pts2D[31].x, pts2D[31].y)
+	p_AddVertex(pts2D[12].x, pts2D[12].y)
+	p_SwapDepths(24, (pts2D[0].z + pts2D[27].z + pts2D[31].z + pts2D[12].z) / 3)
+	p_EndPoly()
+
+	; calculate new order for the first 24 layers
+	Sort(zorder, p_SortFunc)
+
+	; swap layers!
+	For Local k = 0 To 23		
+		If k + 1 <> GetAttribute(#LAYER, zorder[k].layer$, #ATTRLAYERID) Then SwapLayers(k + 1, zorder[k].layer$)
+	Next			
+
+	; next is for the surface shadows (6 layers)
+	axisRotations2.y = axisRotations2.y - 0.02
+	axisRotations2.x = axisRotations2.x + 0.01
+	axisRotations2.z = axisRotations2.z + 0.01
+
+	pts2D = p_Transform3DpointsTo2Dpoints(pointsArray2, axisRotations2)
+  
+	If p_IsVisibleBetween(pts2D[0], pts2D[1], pts2D[2], pts2D[3])
+		p_BeginPoly(0, 100 - (pts2D[0].z + pts2D[2].z))
+		p_AddVertex(pts2D[0].x, pts2D[0].y)
+		p_AddVertex(pts2D[1].x, pts2D[1].y)
+		p_AddVertex(pts2D[2].x, pts2D[2].y)
+		p_AddVertex(pts2D[3].x, pts2D[3].y)
+		p_EndPoly()
+	Else
+		HideLayer(lc)
+		lc = lc + 1	
+	EndIf
+
+	If p_IsVisibleBetween(pts2D[2], pts2D[1], pts2D[5], pts2D[6])
+		p_BeginPoly(0, 100 - (pts2D[5].z + pts2D[2].z))
+		p_AddVertex(pts2D[2].x, pts2D[2].y)
+		p_AddVertex(pts2D[1].x, pts2D[1].y)
+		p_AddVertex(pts2D[5].x, pts2D[5].y)
+		p_AddVertex(pts2D[6].x, pts2D[6].y)
+		p_EndPoly()
+	Else
+		HideLayer(lc)
+		lc = lc + 1	
+	EndIf
+
+	If p_IsVisibleBetween(pts2D[1], pts2D[0], pts2D[4], pts2D[5])
+		p_BeginPoly(0, 100 - (pts2D[4].z + pts2D[1].z))
+		p_AddVertex(pts2D[1].x, pts2D[1].y)
+		p_AddVertex(pts2D[0].x, pts2D[0].y)
+		p_AddVertex(pts2D[4].x, pts2D[4].y)
+		p_AddVertex(pts2D[5].x, pts2D[5].y)
+		p_EndPoly()
+	Else
+		HideLayer(lc)
+		lc = lc + 1	
+	EndIf
+
+	If p_IsVisibleBetween(pts2D[5], pts2D[4], pts2D[7], pts2D[6])
+		p_BeginPoly(0, 100 - (pts2D[7].z + pts2D[5].z))
+		p_AddVertex(pts2D[5].x, pts2D[5].y)
+		p_AddVertex(pts2D[4].x, pts2D[4].y)
+		p_AddVertex(pts2D[7].x, pts2D[7].y)
+		p_AddVertex(pts2D[6].x, pts2D[6].y)
+		p_EndPoly()
+	Else
+		HideLayer(lc)
+		lc = lc + 1	
+	EndIf
+
+	If p_IsVisibleBetween(pts2D[0], pts2D[3], pts2D[7], pts2D[4])
+		p_BeginPoly(0, 100 - (pts2D[7].z + pts2D[0].z))
+		p_AddVertex(pts2D[0].x, pts2D[0].y)
+		p_AddVertex(pts2D[3].x, pts2D[3].y)
+		p_AddVertex(pts2D[7].x, pts2D[7].y)
+		p_AddVertex(pts2D[4].x, pts2D[4].y)
+		p_EndPoly()
+	Else
+		HideLayer(lc)
+		lc = lc + 1	
+	EndIf
+
+	If p_IsVisibleBetween(pts2D[3], pts2D[2], pts2D[6], pts2D[7])
+		p_BeginPoly(0, 100 - (pts2D[6].z + pts2D[3].z))
+		p_AddVertex(pts2D[3].x, pts2D[3].y)
+		p_AddVertex(pts2D[2].x, pts2D[2].y)
+		p_AddVertex(pts2D[6].x, pts2D[6].y)
+		p_AddVertex(pts2D[7].x, pts2D[7].y)
+		p_EndPoly()
+	Else
+		HideLayer(lc)
+		lc = lc + 1	
+	EndIf
+
+	; position white and black text according to scrollpos
+	If scrollpos >= 180
+		SetLayerStyle("white", {X = scrollpos, PartX = 0, PartWidth = 180}, "black", {X = #RIGHTOUT})
+	Else
+		SetLayerStyle("white", {X = 180, PartX = 180 - scrollpos}, "black", {X = scrollpos, PartWidth = 180 - scrollpos})
+	EndIf
+	
+	; update scroller
+	scrollpos = scrollpos - 1
+	If scrollpos = -3740 Then scrollpos = 360
+	
+	; fade screen in/out using a shielding layer on top of all layers
+	If (fadein = True) Or (fadeout = True)
+		
+		; set shielding layer's transparency
+		SetLayerTransparency("shield", level)
+
+		If fadein = True
+				
+			level = level + 5
+			If level = 260
+				fadein = False
+				HideLayer("shield")
+			EndIf
+			
+		Else
+			
+			SetMusicVolume(1, (level / 255) * 64)
+			
+			level = level - 5
+			If level = -5
+				
+				EndSelect
+				
+				; back to BGPic 1 (black)
+				DisplayBGPic(1)
+		
+				; display cracktro credits
+				For Local k = 5 To 6	
+					DisplayBrushFX(k, #CENTER, #CENTER, {Type = #SUN, Speed = 3})
+					Wait(50)
+					RemoveLayerFX(1, {Type = #SUN, Speed = 3})
+				Next
+		
+				End
+			EndIf				
+		EndIf		
+	EndIf
+	
+	; now the display will finally be refreshed! 	
+	EndSelect
+	
+	; check for exit key
+	If (IsLeftMouse() = True) And (fadeout = False)
+		fadeout = True
+		level = 250
+		ShowLayer("shield")
+	EndIf	
+		
+EndFunction
+
+EscapeQuit(True)
+
+; start music
+PlayMusic(1, 0)
+
+; fade crystal logo in / out
+EnableLayers
+DisplayBrushFX(4, #CENTER, #CENTER, {Type = #CROSSFADE, Speed = 3})
+Wait(50)
+RemoveLayerFX(1, {Type = #CROSSFADE, Speed = 3})
+
+; create BGPic and initialization
+p_PrepareBGPic()
+
+DisplayBGPic(2)
+
+; and go!	
+Repeat
+	p_MainLoop
+	CheckEvent
+Forever	

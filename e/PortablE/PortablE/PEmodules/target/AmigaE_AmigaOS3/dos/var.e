@@ -1,0 +1,31 @@
+/* $VER: var.h 36.11 (2.6.1992) */
+OPT NATIVE
+MODULE 'target/exec/nodes'
+MODULE 'target/exec/types'
+{MODULE 'dos/var'}
+
+NATIVE {localvar} OBJECT localvar
+	{node}	node	:ln
+	{flags}	flags	:UINT
+	{value}	value	:ARRAY OF UBYTE
+	{len}	len	:ULONG
+ENDOBJECT
+
+/* bit definitions for lv_Node.ln_Type: */
+NATIVE {LV_VAR}			CONST LV_VAR			= 0	/* an variable */
+NATIVE {LV_ALIAS}		CONST LV_ALIAS		= 1	/* an alias */
+/* to be or'ed into type: */
+NATIVE {LVB_IGNORE}		CONST LVB_IGNORE		= 7	/* ignore this entry on GetVar, etc */
+NATIVE {LVF_IGNORE}		CONST LVF_IGNORE		= $80
+
+NATIVE {GVB_GLOBAL_ONLY}		CONST GVB_GLOBAL_ONLY		= 8
+NATIVE {GVF_GLOBAL_ONLY}		CONST GVF_GLOBAL_ONLY		= $100
+NATIVE {GVB_LOCAL_ONLY}		CONST GVB_LOCAL_ONLY		= 9
+NATIVE {GVF_LOCAL_ONLY}		CONST GVF_LOCAL_ONLY		= $200
+NATIVE {GVB_BINARY_VAR}		CONST GVB_BINARY_VAR		= 10		/* treat variable as binary */
+NATIVE {GVF_BINARY_VAR}		CONST GVF_BINARY_VAR		= $400
+NATIVE {GVB_DONT_NULL_TERM}	CONST GVB_DONT_NULL_TERM	= 11	/* only with GVF_BINARY_VAR */
+NATIVE {GVF_DONT_NULL_TERM}	CONST GVF_DONT_NULL_TERM	= $800
+
+NATIVE {GVB_SAVE_VAR}		CONST GVB_SAVE_VAR		= 12	/* only with GVF_GLOBAL_VAR */
+NATIVE {GVF_SAVE_VAR}		CONST GVF_SAVE_VAR		= $1000

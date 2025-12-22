@@ -1,0 +1,328 @@
+' =====================================================================
+'
+'                           MPEGA2RawMono.bas
+'                by/de Copyright 2014 Dámaso D. Estévez
+'                            {este, son, eu}
+'          AmiSpaTra - http://www.xente.mundo-r.com/amispatra/
+'
+'            All rights reserved over this derivative work:
+'                 my Hisoft Basic developpers package.
+'       Forbidden to remove ALL legal/copyrights remarks included
+'            in this package: if you create a derivate work,
+'                 you MUST to include all legal notes.
+'
+'               Converts the MPEG stream to a raw sample
+'                  sending it to a file or the screen
+'                 (mono, 16 bits, big endian & signed).
+'   If you select SCREEN, the error messages won't print habitually.
+'
+'                                 ----
+'
+'      Todos los derechos reservados sobre este trabajo derivado:
+'    mi paquete para desarrolladores que programen con Hisoft Basic.
+'          Está prohibido eliminar cualquier comentario o nota
+'     de autoría/legal de este paquete: si crea un trabajo derivado
+'        HA DE INCLUIR OBLIGATORIAMENTE TODAS LAS NOTAS LEGALES.
+'
+'              Convierte el flujo MPEG en una muestra sin
+'           formato enviándola a un fichero o a la pantalla
+'            (mono, 16 bits en formato Motorola con signo).
+'   Si elige la pantalla la mayoría de los errores no se imprimirán.
+'  Con poco esfuerzo debería poder combinar el código de este ejemplo
+'                  y el de AHI_PlayTest de mi paquete
+'               "Aminet:dev/basic/AHIDeviceDevBas.lha"
+'               para crear su propio reproductor MPEG :).
+'
+' =====================================================================
+
+REM $NOWINDOW
+REM $NOLIBRARY
+REM $NOBREAK
+
+OPTION BASE 1
+
+' ---------------------------------------------------------------------
+'                Include files and external subroutines
+'              Ficheros de inclusión y subrutinas externas
+' ---------------------------------------------------------------------
+
+'         OS / SO
+' ------------------------
+REM $include exec.bh
+REM $include dos.bh
+REM $include utility.bc
+
+' MPEGA lib / Biblioteca MPEGA
+' ----------------------------
+REM $include mpega.bh
+
+'  From/De:
+'  http://aminet.net/package/dev/basic/AST_HBRoutines
+' ---------------------------------------------------
+REM $include BLib_AST/SGetArg.bas
+REM $include BLib_AST/StrTo.bas
+REM $include BLib_AST/ChangeExt.bas
+
+' --------------------------------------------------------------------
+'    Opening the basic libraries / Abriendo las bibliotecas básicas
+' --------------------------------------------------------------------
+LIBRARY OPEN "exec.library",  36&
+LIBRARY OPEN "dos.library",   36&
+LIBRARY OPEN "mpega.library", MPEGA_VERSION&
+
+' ---------------------------------------------------------------------
+'                             Vars / Variables
+' ---------------------------------------------------------------------
+
+' Version / Versión
+' -----------------
+v$ = "$VER: MPEGA2RawMono 1.0 (10.02.2014) by Dámaso 'AmiSpaTra' Domínguez "+CHR$(0)
+
+' AmigaDOS return value: Initial hypothese
+' Valor de retorno del AmigaDOS: Hipótesis inicial
+' ------------------------------------------------
+ret& = RETURN_FAIL&
+
+' Others / Otras
+' --------------
+arg1$   = ""                  ' Argument: MPEG Filename / Argumento: Nombre del fichero MPEG
+arg2$   = ""                  ' Argument: SCREEN keyword / Argumento: Palabra clave SCREEN
+f&      = NULL&               ' File handler / Manejador de fichero
+
+c&      = MPEGA_ERR_NONE&     ' PCM counter / Contador PCM
+
+mpc$    = ""                  ' Struct's pointer / Puntero a astructura: MPEGA_CTRL
+mps&    = NULL&               ' Struct's pointer / Puntero a astructura: MPEGA_STREAM
+dummy&  = NULL&
+i%      = 1%                  ' Index / Índice
+
+DIM pcm&(MPEGA_MAX_CHANNELS&) ' PCM buffers / Tampones PCM
+
+' =====================================================================
+'                        Main code / Código principal
+' =====================================================================
+
+'               Only from CLI
+' Sólo desde la interfaz de línea de comandos
+' -------------------------------------------
+IF PEEKL(SYSTAB+8) <> 0 THEN
+	BEEP
+	GOTO salida
+END IF
+
+' Parsing the argument / Procesando el argumento
+' ----------------------------------------------
+arg1$ = SGetArg$(1%,"FILE/A,SCREEN/K")
+
+IF arg1$ = "" THEN
+	PRINT "A MPEG file is required as argument / Se exige un fichero MPEG como argumento"
+	ret& = RETURN_WARN&
+	BEEP
+	GOTO salida
+ELSE
+	arg2$ = UCASE$(SGetArg$(2%,"FILE/A,SCREEN/S"))
+END IF
+
+' (Break and error)'s traps
+' Trampas de errores e interrupción del usuario
+' ---------------------------------------------
+ON ERROR GOTO salida
+ON BREAK GOTO salida
+
+' Creating a clean struct (filled with zeroes)
+' Creación de una estructura limpia (rellena de ceros)
+' ----------------------------------------------------
+mpc& = AllocMem&(MPEGA_CTRL_sizeof%, MEMF_CLEAR& OR MEMF_PUBLIC&)
+
+' Filling it with some values (only not zeroes)
+' Rellenándola con algunos valores (sólo no nulos)
+' ------------------------------------------------
+POKEL (mpc& + mpc_bs_access%),                               NULL&
+
+POKEW (mpc& + mpc_layer_1_2% + mpl_force_mono%),             CINT(TRUE&)
+POKEW (mpc& + mpc_layer_1_2% + mpl_mono%   + mpo_freq_div%), 1%
+POKEW (mpc& + mpc_layer_1_2% + mpl_mono%   + mpo_quality%),  CINT(MPEGA_QUALITY_HIGH&)
+POKEL (mpc& + mpc_layer_1_2% + mpl_mono%   + mpo_freq_max%), 48000&
+POKEW (mpc& + mpc_layer_1_2% + mpl_stereo% + mpo_freq_div%), 1%
+POKEW (mpc& + mpc_layer_1_2% + mpl_stereo% + mpo_quality%),  CINT(MPEGA_QUALITY_HIGH&)
+POKEL (mpc& + mpc_layer_1_2% + mpl_stereo% + mpo_freq_max%), 48000&
+
+POKEW (mpc& + mpc_layer_3%   + mpl_force_mono%),             CINT(TRUE&)
+POKEW (mpc& + mpc_layer_3%   + mpl_mono%   + mpo_freq_div%), 1%
+POKEW (mpc& + mpc_layer_3%   + mpl_mono%   + mpo_quality%),  CINT(MPEGA_QUALITY_HIGH&)
+POKEL (mpc& + mpc_layer_3%   + mpl_mono%   + mpo_freq_max%), 48000&
+POKEW (mpc& + mpc_layer_3%   + mpl_stereo% + mpo_freq_div%), 1%
+POKEW (mpc& + mpc_layer_3%   + mpl_stereo% + mpo_quality%),  CINT(MPEGA_QUALITY_HIGH&)
+POKEL (mpc& + mpc_layer_3%   + mpl_stereo% + mpo_freq_max%), 48000&
+
+POKEW (mpc& + mpc_check_mpeg%),                              CINT(TRUE&)
+POKEL (mpc& + mpc_stream_buffer_size%),                      32678&
+
+' Opening the MPEG stream
+' Abriendo el flujo MPEG
+' -----------------------
+mps& = MPEGA_open&(SADD(Str2C$(arg1$)), mpc&)
+
+IF mps& <> NULL& THEN
+
+	IF arg2$ <> "SCREEN" THEN
+
+		' Opening the output file / Abriendo el fichero de salida
+		' -------------------------------------------------------
+		f& = xOpen(SADD(Str2C$(ChangeExt$(arg1$,"raw"))), MODE_NEWFILE&)
+	
+		IF f& = NULL& THEN
+			IF arg2$ <> "SCREEN" THEN
+				PRINT "Failed to open the ouput file / Imposible abrir el fichero de salida: ";ChangeExt$(arg1$,"raw")
+			END IF
+			BEEP
+			GOTO salida
+		ELSE
+
+			PRINT "Generating / Generando: ";CHR$(34)ChangeExt$(arg1$,"raw");CHR$(34)
+			PRINT "[Channels / Canales:";PEEKW(mps&+mps_dec_channels%);"- ";
+			PRINT "Frecuency / Frecuencia:";PEEKL(mps&+mps_dec_frequency%);"Hz - ";
+			PRINT "Quality / Calidad: ";
+
+			dummy& = PEEKW(mps&+mps_dec_quality%)
+			SELECT CASE dummy&
+				CASE = MPEGA_QUALITY_LOW&
+					PRINT "Low / Baja]"
+				CASE = MPEGA_QUALITY_MEDIUM&
+					PRINT "Medium / Media]"
+				CASE = MPEGA_QUALITY_HIGH&
+					PRINT "High / Alta]"
+				CASE ELSE
+					PRINT "Unexpected error!!! / ¡¡¡Error inesperado!!!]"
+			END SELECT
+
+		END IF
+
+	ELSE
+
+		'   Stardard ouput (you can redirect it)
+		' Salida estándar (podrá redireccionarla)
+		' ---------------------------------------
+		f& = xOutput&
+
+	END IF
+
+	'      Allocating memory for channels (the data are words: 2 bytes):
+	'      Generic routine (this example only needs ONE buffer -mono-).
+	'
+	' Reservando memoria para los canales (los datos son palabras: 2 octetos):
+	'  Rutina genérica (este ejemplo sólo necesita UN tampón -sonido mono-).
+	' ------------------------------------------------------------------------
+	
+	FOR i% = 1 TO MPEGA_MAX_CHANNELS&
+
+		pcm&(i%) = AllocMem&(MPEGA_PCM_SIZE&*2, MEMF_CLEAR& OR MEMF_PUBLIC&)
+
+		IF pcm&(i%) = NULL& THEN
+			IF arg2$ <> "SCREEN" THEN
+				PRINT "Can't allocate PCM buffers / Imposible reservar los tampones PCM:";i%
+			END IF
+			BEEP
+			GOTO salida
+		END IF
+
+	NEXT i%
+
+	' Decoding the frames / Descodificando los datagramas
+	' ---------------------------------------------------
+	DO
+
+		c& = MPEGA_decode_frame&(mps&, VARPTR(pcm&(1)))
+
+		IF arg2$ <> "SCREEN" THEN
+
+			' When are? / Averiguando la posición temporal
+			' --------------------------------------------
+			dummy& = MPEGA_time&(mps&, VARPTR(t&))
+
+			SELECT CASE dummy&
+				CASE = MPEGA_ERR_NONE&
+					' PRINT t&
+				CASE = MPEGA_ERR_EOF&
+					PRINT "EOF / Fin del fichero"
+				CASE = MPEGA_ERR_BADFRAME&
+					PRINT "Bad frame / Datagrama erróneo"
+				CASE = MPEGA_ERR_MEM&
+					PRINT "Memory error / Error de memoria"
+				CASE =MPEGA_ERR_NO_SYNC&
+					PRINT "No sync / Sin sincronía"
+				CASE =MPEGA_ERR_BADVALUE&
+					PRINT "Bad value / Valor erróneo"
+				CASE ELSE
+					PRINT "Unexpected error!!! / ¡¡¡Error inesperado!!!"
+			END SELECT
+
+		END IF
+
+		'      Dumping the raw (mono) audio data
+		' Volcando los datos de sonido (mono) en bruto
+		' --------------------------------------------
+		dummy& = FWrite&(f&, pcm&(1), 2, c&)
+
+	LOOP WHILE c& >= 0
+
+ELSE
+
+	PRINT "No MPEG stream in the file / No hay un flujo MPEG en el fichero"
+
+END IF
+
+ret& = RETURN_OK&
+
+' ==========================
+' The End / Fin del programa
+' ==========================
+salida:
+'-----
+
+' Disabling the user break
+' Desactivando la interrupción del usuario
+' ----------------------------------------
+BREAK OFF
+ON BREAK GOTO 0
+
+'   Freeing the memory allocated for channels
+' Liberando la memoria reservada para los canales
+' -----------------------------------------------
+FOR i% = 1 TO MPEGA_MAX_CHANNELS&
+	IF pcm&(i%) <> NULL& THEN
+		FreeMem pcm&(i%), MPEGA_PCM_SIZE&*2
+	END IF
+NEXT i%
+
+'    Closing the output file (except from xOuput&)
+' Cerrando el fichero de salida (salvo el de xOuput&)
+' ---------------------------------------------------
+IF f& <> NULL& AND arg2$<>"SCREEN" THEN
+	dummy& = xClose&(f&)
+END IF
+
+' Closing the stream
+' Cerrando el flujo
+' ------------------
+IF mps& <> NULL& THEN
+	MPEGA_close mps&
+END IF
+
+' Releasing the memory allocated by the struct
+' Liberando la memoria reservada para la estructura
+' -------------------------------------------------
+IF mpc& <> NULL& THEN
+	FreeMem mpc&, MPEGA_CTRL_sizeof%
+END IF
+
+LIBRARY CLOSE
+
+' Disablig the error trap
+' Desactivando la trampa de errores
+' ---------------------------------
+ON ERROR GOTO 0
+
+STOP ret&
+
+' =====================================================================

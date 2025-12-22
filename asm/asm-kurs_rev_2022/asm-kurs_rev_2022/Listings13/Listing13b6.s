@@ -1,0 +1,195 @@
+
+; Listing13b6.s	; Multiplikation - Cycles
+; cycles calculating mulu
+
+start:
+	move.w #$4000,$dff09a	; Interrupts disable
+waitmouse:  
+	btst	#6,$bfe001		; left mousebutton?
+	bne.s	Waitmouse	
+		
+;-----------------------------------------------------
+mul:
+	move.l  #0,d0
+	move.l  #0,d1								; 38+2n clocks
+	mulu	d0,d1			; 38		<ea> 0	; 38+2*0	
+
+	move.l  #1,d0
+	move.l  #0,d1	
+	mulu	d0,d1			; 40		<ea> 1	; 38+2*1
+
+	move.l  #2,d0
+	move.l  #0,d1	
+	mulu	d0,d1			; 40		<ea> 10	; 38+2*1
+
+	move.l  #3,d0
+	move.l  #0,d1	
+	mulu	d0,d1			; 42		<ea> 11	; 38+2*2
+	
+	nop
+	move.w #$C000,$dff09a	; Interrupts enable
+	rts
+
+	end
+
+; comparision with 68kcounter - https://68kcounter-web.vercel.app/
+; range from 38(1/0) 70(1/0) ; because content of d0 and d1 are unknown
+
+
+70 is max time. Motorola documentation only list max time for any instruction that
+has variable timing.
+
+Code:
+MULS, MULU — The multiply algorithm requires 38+2n clocks where n is defined as:
+MULU: n = the number of ones in the <ea>
+MULS: n=concatenate the <ea> with a zero as the LSB; n is the resultant number of 10
+or 01 patterns in the 17-bit source; i.e., worst case happens when the source is $5555.
+
+;------------------------------------------------------------------------------
+	>d PC
+0002592A 203c 0000 0000           MOVE.L #$00000000,D0
+00025930 223c 0000 0000           MOVE.L #$00000000,D1
+00025936 c2c0                     MULU.W D0,D1
+00025938 203c 0000 0001           MOVE.L #$00000001,D0
+0002593E 223c 0000 0000           MOVE.L #$00000000,D1
+00025944 c2c0                     MULU.W D0,D1
+00025946 203c 0000 0002           MOVE.L #$00000002,D0
+0002594C 223c 0000 0000           MOVE.L #$00000000,D1
+00025952 c2c0                     MULU.W D0,D1
+00025954 203c 0000 0003           MOVE.L #$00000003,D0
+>t
+Cycles: 6 Chip, 12 CPU. (V=0 H=18 -> V=0 H=24)
+	D0 00000000   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=1 V=0 C=0 IMASK=0 STP=0
+Prefetch 0000 (OR) 223c (MOVE) Chip latch 00000000
+00025930 223c 0000 0000           MOVE.L #$00000000,D1
+Next PC: 00025936
+>t
+Cycles: 6 Chip, 12 CPU. (V=0 H=24 -> V=0 H=30)
+	D0 00000000   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=1 V=0 C=0 IMASK=0 STP=0
+Prefetch 203c (MOVE) c2c0 (MULU) Chip latch 00000000
+00025936 c2c0                     MULU.W D0,D1
+Next PC: 00025938
+;------------------------------------------------------------------------------
+>t
+Cycles: 19 Chip, 38 CPU. (V=0 H=30 -> V=0 H=49)									; 38 cy
+	D0 00000000   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=1 V=0 C=0 IMASK=0 STP=0
+Prefetch 0000 (OR) 203c (MOVE) Chip latch 00000000
+00025938 203c 0000 0001           MOVE.L #$00000001,D0
+Next PC: 0002593e
+>t
+Cycles: 6 Chip, 12 CPU. (V=0 H=49 -> V=0 H=55)
+	D0 00000001   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=0 V=0 C=0 IMASK=0 STP=0
+Prefetch 0000 (OR) 223c (MOVE) Chip latch 00000000
+0002593E 223c 0000 0000           MOVE.L #$00000000,D1
+Next PC: 00025944
+>t
+Cycles: 6 Chip, 12 CPU. (V=0 H=55 -> V=0 H=61)
+	D0 00000001   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=1 V=0 C=0 IMASK=0 STP=0
+Prefetch 203c (MOVE) c2c0 (MULU) Chip latch 00000000
+00025944 c2c0                     MULU.W D0,D1
+Next PC: 00025946
+;------------------------------------------------------------------------------
+>t
+Cycles: 20 Chip, 40 CPU. (V=0 H=61 -> V=0 H=81)									; 40 cy
+	D0 00000001   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=1 V=0 C=0 IMASK=0 STP=0
+Prefetch 0000 (OR) 203c (MOVE) Chip latch 00000000
+00025946 203c 0000 0002           MOVE.L #$00000002,D0
+Next PC: 0002594c
+>t
+Cycles: 6 Chip, 12 CPU. (V=0 H=81 -> V=0 H=87)
+	D0 00000002   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=0 V=0 C=0 IMASK=0 STP=0
+Prefetch 0000 (OR) 223c (MOVE) Chip latch 00000000
+0002594C 223c 0000 0000           MOVE.L #$00000000,D1
+Next PC: 00025952
+>t
+Cycles: 6 Chip, 12 CPU. (V=0 H=87 -> V=0 H=93)
+	D0 00000002   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=1 V=0 C=0 IMASK=0 STP=0
+Prefetch 203c (MOVE) c2c0 (MULU) Chip latch 00000000
+00025952 c2c0                     MULU.W D0,D1
+Next PC: 00025954
+;------------------------------------------------------------------------------
+>t
+Cycles: 20 Chip, 40 CPU. (V=0 H=93 -> V=0 H=113)								; 40 cy
+	D0 00000002   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=1 V=0 C=0 IMASK=0 STP=0
+Prefetch 0000 (OR) 203c (MOVE) Chip latch 00000000
+00025954 203c 0000 0003           MOVE.L #$00000003,D0
+Next PC: 0002595a
+>t
+Cycles: 6 Chip, 12 CPU. (V=0 H=113 -> V=0 H=119)
+	D0 00000003   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=0 V=0 C=0 IMASK=0 STP=0
+Prefetch 0000 (OR) 223c (MOVE) Chip latch 00000000
+0002595A 223c 0000 0000           MOVE.L #$00000000,D1
+Next PC: 00025960
+>t
+Cycles: 6 Chip, 12 CPU. (V=0 H=119 -> V=0 H=125)
+	D0 00000003   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=1 V=0 C=0 IMASK=0 STP=0
+Prefetch 4e71 (NOP) c2c0 (MULU) Chip latch 00000000
+00025960 c2c0                     MULU.W D0,D1
+Next PC: 00025962
+;------------------------------------------------------------------------------
+>t
+Cycles: 21 Chip, 42 CPU. (V=0 H=125 -> V=0 H=146)								; 42 cy
+	D0 00000003   D1 00000000   D2 00000000   D3 00000000
+	D4 00000000   D5 00000000   D6 00000000   D7 00000000
+	A0 00000000   A1 00000000   A2 00000000   A3 00000000
+	A4 00000000   A5 00000000   A6 00000000   A7 00C60DB0
+USP  00C60DB0 ISP  00C61DB0
+T=00 S=0 M=0 X=0 N=0 Z=1 V=0 C=0 IMASK=0 STP=0
+Prefetch 33fc (MOVE) 4e71 (NOP) Chip latch 00000000
+00025962 4e71                     NOP
+Next PC: 00025964

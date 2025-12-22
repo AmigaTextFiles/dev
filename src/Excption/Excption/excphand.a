@@ -1,0 +1,100 @@
+;**************************************************************************/
+;*                                                                        */
+;*                    EXCEPTION HANDLER                                   */
+;*               ==========================================               */
+;*                                                                        */
+;*                                                                        */
+;*  MODULE      :  Exception                                              */
+;*  NOM         :  ExcpHandler.a                                          */
+;*  FONCTION    :                                                         */
+;*                                                                        */
+;*  RESPONSABLE :  HEWES Gerald                                           */
+;*  TEL         :  (1) 46 24 20 27                                        */
+;*                                                                        */
+;**************************************************************************/
+
+;**************************************************************************/
+;*                                                                        */
+;* HEW 880310 Ver 0.1 : First Soft Version                                */
+;* HEW 880324 Ver 0.2 : Handle 68000 exceptions                           */
+;* HEW 880413 Ver 0.3 : Handle 680x0 formats                              */
+;* HEW 880508 Ver 0.4 : First Released version : routines split           */
+;*                      Major name changes for better homogeneity         */
+;*                                                                        */
+;**************************************************************************/
+
+        xdef   _EIExcpHandler
+        xref   _EIEndHandler
+
+        csect  data
+
+;                /************************************************/
+;                /* Stack size saved after an Exception  for     */
+;                /* various processors. The first number refers  */
+;                /* to normal exception, the second to bus and   */
+;                /* adresse exception (bigger). Warning the OS   */
+;                /* adds 4 bytes (long word) to the stack with   */
+;                /* exception number before giving control this  */
+;                /* is not counted here. Values are in bytes     */
+;                /* For 680X0 processors X <> 0 values depend    */
+;                /* on the value of SP+8 which gives the format  */
+;                /* value.                                       */
+;                /************************************************/
+
+
+ED_ELData       dc.l  8,8,12,0,0,0,0,0,58,20,32,92,0,0,0,0   * format
+ED_ELNor        dc.l  6          * normal 68000 exception
+ED_ELBus        dc.l  14         * 68000 bus or adresse error
+
+        csect  text
+
+_EIExcpHandler EQU  *
+
+start:
+        move.l      $0(a7),d0               * trap number
+        bne.s       reset
+        addq.l      #1,d0                   * Avoid 0
+;   In the next instructions, we will dynmically determine if
+;   the processor is a 68000,68010, or 68020. Stack compensation
+;   is then different : on a 68000 only two exceptions normal and bus
+;   on a 680X0 with X <> 0, we instead compensate by reading the format
+;   at SP+a (because of the 4 bytes due to EXEC with the exception
+;   number)
+;     Test of processor is inspired from the compiled code of
+;   whatcpu by Dave Haynie.
+
+reset:
+        movea.l     #04,a0                  * get ExecBase
+        movea.l     (a0),a1                 * a1 = ExecBase
+        btst        #01,$0129(a1)           * AttnFlags = 68020 ?
+        bne         cpuX0                   * cpu = 68020
+        btst        #00,$0129(a1)           * AttnFlags = 68010 ?
+        beq         cpu00                   * cpu = 68000
+cpuX0:
+        lea         ED_ELData,a1            * get base of table
+        clr.l       d1                      * d1 = 0
+        move.w      $a(a7),d1               * get format bit 12-15
+        andi.w      #$f000,d1               * isolate format
+        lsr.w       #$4,d1                  * shift has to be < 7
+        lsr.w       #$6,d1                  * total=10, avoids * 4
+        adda.l      $0(a1,d1.w),a7          * ajust stack
+        bra         normal                  * end of 680x0
+cpu00:
+        cmp.l       #$2,d0                  * bus error ?
+        beq.s       bus                     * yes
+        cmp.l       #$3,d0                  * address error ?
+        beq.s       bus                     * yes
+        adda.l      ED_ELNor,a7             * correct SSP stack
+        bra         normal
+bus:
+        adda.l      ED_ELBus,a7             * correct SSP stack
+normal:
+        adda.l      #$4,a7                  * correct Exec LongWord
+        andi        #$dfff,sr               * move back to user mode
+        move.l      d0,-(a7)                * push argument
+        jsr         _EIEndHandler           * C handler
+        rts                                 * should never be here
+
+        END
+
+;*************************  CIVILISATION ENDS HERE  ***********************/

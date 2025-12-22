@@ -1,0 +1,1471 @@
+;	MED V2.10 player routine by Teijo Kinnunen 1990
+;	modplayer.a - the module player
+;	use the A68k-assembler (or compatible) from Fish #186
+ac_ptr	EQU	$00
+ac_len	EQU	$04
+ac_per	EQU	$06
+ac_vol	EQU	$08
+T03SZ	EQU	24
+T415SZ	EQU	8
+
+DIM	EQU	0	;set to 0 if you don't need _DimOffPlayer
+MIDI	EQU	0	;If your song(s) contain only Amiga-samples and
+			;4 tracks, set MIDI to 0. This makes the player
+			;much shorter.
+
+	IFNE	MIDI
+		xdef	_ResetMIDI
+	ENDC
+
+_ChannelOff:	;d0 = channel #
+	IFNE	MIDI
+		lea	trackdataptrs(pc),a1
+		lsl.b	#2,d0
+		adda.w	d0,a1
+		lsr.b	#2,d0
+		movea.l	(a1),a1
+		move.b	6(a1),d1	;first: is it MIDI??
+		beq.s	notcomidi	;not a midi note
+		clr.b	6(a1)
+		lea	noteondata(pc),a0
+		clr.l	(a0)		; new midi msg
+		move.b	d1,1(a0)
+		move.b	3(a1),(a0)	;prev midi channel
+		or.b	#$80,(a0)		;note off
+		moveq.l	#3,d0
+		bra.w	_AddMIDIData
+notcomidi:
+	ENDC
+		cmp.b	#4,d0
+		bge.s	notamigatrk
+		moveq.l	#1,d1
+		lsl.w	d0,d1
+		move.w	d1,$dff096
+notamigatrk:	rts
+; track # = d7, note vol = d0, song = a4
+GetRelVol:	clr.w	d1
+		clr.w	d2
+		move.b	786(a4),d1		;master volume
+		lea	770(a4),a0
+		move.b	0(a0,d7.w),d2		:track volume
+		mulu	d2,d0
+		mulu	d1,d0	;d0 = master v. * track v. * volume
+		lsr.l	#4,d0
+		lsr.w	#8,d0
+		rts
+_SoitaNuotti:	;d0 = trk #, d1 = note #, d2 = vol, d3 = instr # a3 = addr of instr
+		movem.l	d3-d7,-(sp)	;All right, let's start!!
+		move.w	d2,-(sp)
+		clr.l	d4
+		bset	d0,d4	;d4 is mask for this channel
+		movea.l	24(a6),a0	;Is this instrument in mem?
+		move.w	d3,d7
+		lsl.w	#2,d7			;d7 = instr.num << 2
+		tst.l	0(a0,d7.w)
+	IFNE	MIDI
+		bne.s	inmem
+		tst.b	4(a3)			;is MIDI channel set
+	ENDC
+		beq.w	retsn2			; NO!!!
+inmem:		add.b	766(a4),d1	;add play transpose
+		add.b	7(a3),d1	;and instr. transpose
+		cmp.b	#4,d0
+		bge.s	nodmaoff	;track # >= 4: not an Amiga channel
+		move.w	d4,$dff096		;stop this channel (dmacon)
+nodmaoff:
+	IFNE	MIDI
+		move.b	6(a5),d6		;get prev. midi note
+		beq.s	noprevmidi
+		clr.b	6(a5)
+		lea	noteondata(pc),a0
+		move.b	d6,1(a0)
+		move.b	3(a5),(a0)	;prev midi channel
+		or.b	#$90,(a0)		;note off
+		clr.b	2(a0)		;clear volume
+		movem.l	d0-d1,-(sp)
+		moveq.l	#3,d0
+		bsr.w	_AddMIDIData
+		movem.l	(sp)+,d0-d1
+noprevmidi:	tst.b	4(a3)
+		bne.w	handleMIDInote
+	ENDC
+tlwtst0:		tst.b	d1
+		bgt.s	notenot2low
+		add.b	#12,d1	;note was too low, octave up
+		bra.s	tlwtst0
+notenot2low:	cmp.b	#63,d1
+		ble.s	endpttest
+		sub.b	#12,d1	;note was too high, octave down
+endpttest:	cmp.b	#4,d0		;test track # again
+		bge.w	retsn2		;no Amiga instruments in tracks > 3
+		or.w	d4,dmaonmsk
+		subq.b	#1,d1
+		movea.l	10(a5),a1	;base of this channel's regs
+		movea.l	24(a6),a0		;get the address of...
+		movea.l	0(a0,d7.w),a0		;...this instrument
+		lsl.w	#1,d3
+		bsr.w	getinsdata
+		move.l	d0,ac_ptr(a1)		;put it in ac_ptr
+		cmp.w	#1,d3
+		bhi.s	repeat
+		
+		move.l	chipzero(pc),14(a5)	;pointer of zero word
+		move.w	#1,18(a5)		;length: 1 word
+		lsr.l	#1,d1			;shift length right
+		move.w	d1,ac_len(a1)		;and put to custom chip
+		bra.s	retsn1
+
+repeat:		tst.w	d2
+		beq.s	begin0		;rep. start < 2
+		move.w	d2,ac_len(a1)	;move repeat to hardware
+		bra.s	beginn0
+begin0:		move.w	d3,ac_len(a1)
+beginn0:		lsl.l	#1,d2		;shift
+		add.l	d2,d0		;d0 = starting address of repeat
+		move.l	d0,14(a5)	;remember rep. start
+		move.w	d3,18(a5)	;remember rep. length
+				
+retsn1:		move.w	d5,ac_per(a1)	;getinsdata puts period to d5
+		move.w	d5,8(a5)
+		move.w	(sp),ac_vol(a1)		;volume
+retsn2:		addq.l	#2,sp	;forget volume
+		movem.l	(sp)+,d3-d7
+		rts
+
+	IFNE	MIDI
+handleMIDInote:
+		lea	noteondata(pc),a0
+		add.b	#23,d1		;2 octaves higher and -1
+		bpl.s	mnot2low	;note number not too low
+		add.b	#12,d1		;it was too low, 1 octave up
+		bra.s	endmtst
+mnot2low:	tst.b	d1		;is it too high then??
+		bpl.s	endmtst		;no, not greater than 127
+		sub.b	#12,d1		;1 octave down, if yes
+endmtst:		move.b	d1,1(a0)	;MIDI msg note #
+		move.b	d1,6(a5)	;save this note number
+		move.b	d2,d4		;temporary save the volume
+		subq.b	#1,d2		;if 64 => 63
+		bpl.s	nooops
+		clr.b	d2		;oops, too low!!
+nooops:		lsl.b	#1,d2		;volume 0 - 63 => 0 - 127
+		bclr	#7,d2		;be sure that bit 7 is clear
+		move.b	d2,2(a0)	;MIDI msg volume
+		clr.w	d1
+		move.b	4(a3),d1	;get midi chan of this instrument
+		subq.b	#1,d1		;from 1-16 to 0-15
+		move.b	d1,3(a5)	;save to prev midi channel
+		move.b	#$90,(a0)	;MIDI: Note on
+		or.b	d1,(a0)		;MIDI msg Note on & channel
+		move.b	5(a3),d2	;get preset #
+		beq.s	nochgpres	;zero = no preset
+		lea	prevmidicpres(pc),a1
+		cmp.b	0(a1,d1.w),d2	;is this previous preset ??
+		beq.s	nochgpres	;yes...no need to change
+		move.b	d2,0(a1,d1.w)	;save preset to prevmidicpres
+		subq.b	#1,d2		;sub 1 to get 0 - 127
+		lea	preschgdata(pc),a0
+		move.b	#$c0,(a0)	;command: $C
+		or.b	d1,(a0)		;"or" midi channel
+		move.b	d2,1(a0)	;push the number to second byte
+		moveq.l	#5,d0		;Noteondata follows preschgdata
+		bra.s	preschanged	;struct, so this is a bit faster
+nochgpres:	moveq.l	#3,d0
+preschanged:	bsr.w	_AddMIDIData
+		move.w	d3,d7
+		bra.w	retsn2
+	ENDC
+
+waitamoment:	move.l	d0,-(sp)
+		moveq.l	#$79,d0
+wl0:		move.b	$dff007,d1
+wl1:		cmp.b	$dff007,d1
+		beq.s	wl1
+		dbf	d0,wl0
+		move.l	(sp)+,d0
+		rts
+pushnewvals:	movea.l	(a1)+,a5
+		lsr.b	#1,d0
+		bcc.s	rpnewv
+		movea.l	10(a5),a0
+		move.l	14(a5),ac_ptr(a0)
+		move.w	18(a5),ac_len(a0)
+rpnewv:		rts
+_StartDMA:		;This small routine turns on audio DMA
+		move.w	dmaonmsk(pc),d0	;dmaonmsk contains the mask of
+		beq.s	rpnewv	;the channels that must be turned on
+		bset	#15,d0	;DMAF_SETCLR: set these bits in dmacon
+		bsr.s	waitamoment
+		move.w	d0,$dff096	;do that!!!
+		bsr.s	waitamoment
+		lea	trackdataptrs(pc),a1
+		bsr.s	pushnewvals
+		bsr.s	pushnewvals
+		bsr.s	pushnewvals
+		bra.s	pushnewvals
+
+dmaonmsk:	dc.w	0
+	IFNE	MIDI
+prevmidicpres:	dc.l	0,0,0,0 ; 16 bytes
+prevmidipbend:	dc.w	$2000,$2000,$2000,$2000,$2000,$2000,$2000,$2000
+		dc.w	$2000,$2000,$2000,$2000,$2000,$2000,$2000,$2000
+	ENDC
+;	Track-data structure for each track
+;	0(ax) previous note	1(ax) previous instrument
+;	2(ax) previous volume	3(ax) previous midi channel
+;	4(ax) command		5(ax) command qualifier (data byte)
+;	6(ax) prev MIDI note	7(ax) prev. portamento speed (on MIDI
+;---and for Amiga tracks also..       tracks it's only pad byte)
+;	8(ax) previous period(w) 10(ax) base address of audio registers(l)
+;	14(ax) new sample ptr(l) 18(ax) new sample length(w)
+;	20(ax) portamento target period(w)
+;	22(ax) curr vibrato offs 23(ax) curr vibrato speed/size
+t03d:		dc.w	0,0,0,0,0
+		dc.l	$dff0a0,0
+		dc.w	0,0,0,0,0,0,0,0
+		dc.l	$dff0b0,0
+		dc.w	0,0,0,0,0,0,0,0
+		dc.l	$dff0c0,0
+		dc.w	0,0,0,0,0,0,0,0
+		dc.l	$dff0d0,0
+		dc.w	0,0,0		;24 bytes * 4 tracks = 92 bytes
+	IFNE	MIDI
+t415d:		ds.b	8*12	;8 bytes * 12 tracks = 96 bytes
+	ENDC
+trackdataptrs:	dc.l	t03d,t03d+T03SZ,t03d+2*T03SZ,t03d+3*T03SZ
+	IFNE	MIDI
+		dc.l	t415d,t415d+T415SZ,t415d+2*T415SZ,t415d+3*T415SZ
+		dc.l	t415d+4*T415SZ,t415d+5*T415SZ,t415d+6*T415SZ
+		dc.l	t415d+7*T415SZ,t415d+8*T415SZ,t415d+9*T415SZ
+		dc.l	t415d+10*T415SZ,t415d+11*T415SZ
+	ENDC
+nextblock:	dc.b	0
+		even
+numtracks:	dc.w	0
+_IntHandler:
+		movem.l	d2-d7/a2-a6,-(sp)
+		move.l	currentmodule(pc),d0
+		beq.s	stopplay
+		move.l	d0,a6	 ;a6 contains ptr to this mod
+		tst.w	40(a6)	;are we playing
+		bne.s	playing		;yes, we are
+stopplay1:	move.b	#$05,50(a6)	;counter ready for next note
+stopplay:	bclr	#0,$bfee01	;stop the timer
+		move.w	#$000f,$dff096	;stop audio DMA
+		movem.l	(sp)+,d2-d7/a2-a6	;exit interrupt
+		rts
+playing:		clr.w	dmaonmsk
+		movea.l	8(a6),a4	;ptr to MMD0song
+		add.b	#1,50(a6)
+		cmp.b	#6,50(a6)	;if counter = 6: new note and fx
+		bne.w	nonewnote	;if counter is not 6: just do fx
+	IFNE	DIM
+		move.w	dimval(pc),d0
+		beq.s	nodim
+		sub.w	dimstep(pc),d0
+		bgt.s	nostpdim
+		move.b	dimstart(pc),786(a4)
+		clr.w	40(a6)
+		clr.w	dimval
+		bra.s	stopplay1
+nostpdim:	move.w	d0,dimval
+		lsr.w	#7,d0
+		move.b	d0,786(a4)
+	ENDC
+; --- new note!! first get address of current block
+nodim:		movea.l	16(a6),a0	;a0 = address of 1st block's address
+		move.w	42(a6),d2
+		lsl.w	#2,d2		;shift to longword index
+		movea.l	0(a0,d2.w),a2	;get the pointer of the block
+		clr.w	d0
+		move.b	1(a2),d0	;get number of lines in this block
+; and advance song pointers
+		lea	48(a6),a3
+		addq.w	#1,(a3)		;very important!!! advance line!!
+		cmp.w	(a3),d0		 ;important too!!! advance block??
+		blt.s	chgblock	;yes!!!
+		tst.b	nextblock	;command F00 ??
+		beq.s	nochgblock	;no, don't change block
+chgblock:	clr.w	(a3)		;clear line number
+		cmp.w	#2,40(a6)	;play block or play song
+		bne.s	nonewseq	;play block only...
+		cmp.b	#$01,nextblock
+		beq.s	posjump
+		addq.w	#1,46(a6)	;advance sequence number
+posjump:		move.w	506(a4),d0	;get the highest seq number
+		move.w	46(a6),d1	;and current seq number
+		cmp.w	d0,d1	;is this the highest seq number
+		blt.s	nostartagain	;no
+		clr.w	46(a6)	;yes: play song again
+		clr.w	d1			;...forever!!!
+nostartagain:	clr.w	d0
+		lea	508(a4),a1	;offset of sequence table
+		move.b	0(a1,d1.w),d0	;get number of the block
+		move.w	d0,42(a6)	;and put it to block number var
+		clr.w	d1
+		move.b	505(a4),d1	;get number of blocks
+		subq.w	#1,d1		;# of blocks-1 = # of highest block
+		cmp.w	d1,d0		;is this block number too big
+		blt.s	nolstblk	;no
+		move.w	d1,42(a6)	;yes..then play just the last block
+		move.w	d1,d0
+nolstblk:	lsl.w	#2,d0
+		movea.l	0(a0,d0.w),a2	;get address of new block
+nonewseq:	clr.b	nextblock	;clear this if F00 set it
+nochgblock:	move.w	(a3),44(a6)
+; --- now start to play it
+		clr.b	50(a6)
+		clr.l	d7		;number of track
+		move.b	(a2),numtracks+1	;save # of tracks
+		addq.l	#2,a2	;skip block header...
+		move.w	numtracks(pc),d3
+		mulu	#3,d3
+		move.w	44(a6),d2
+		mulu	d2,d3
+		adda.l	d3,a2		;a2 = address of this line
+		pea	trackdataptrs(pc)
+trloop0:		clr.w	d5
+		move.l	(sp),a1
+		movea.l	(a1)+,a5	;get address of this track's struct
+		move.l	a1,(sp)
+; ---------------- get the note numbers
+		move.b	(a2)+,d5	;get the number of this note
+		move.b	(a2)+,d6	;and the 4 numbers containing fx
+		lsl.w	#8,d6
+		move.b	(a2)+,d6
+		move.b	d6,5(a5)	;save the fx numbers
+; ---------------- clear some instrument # flags
+		clr.b	d4		;d4 is a flag: if set, instr. is
+		clr.b	d3		;in range G-V. If clr, it's 1-F.
+; ---------------- and set them, if needed
+		bclr	#7,d5		;d3 is also a flag. If it's set,
+		sne.b	d4		;the instr. is in range 10 - 1V
+		bclr	#6,d5
+		sne.b	d3
+; ---------------- check if there's an instrument number
+		move.w	#$f000,d0
+		and.w	d6,d0		;d0 now contains only the # of instr
+		bne.s	instnum		;instrument number is not 0
+		tst.b	d4		;maybe it's G (instr. #0, d4 set)
+		bne.s	instnum		;yes, it really was G!!
+		tst.b	d3
+		beq.s	noinstnum	;it wasn't 10 - 1V either..
+; ---------------- if there was, GET IT!!
+instnum:		lsr.w	#8,d0		;shift it right to get number 0-F
+		lsr.b	#4,d0
+		tst.b	d4
+		beq.s	nogtov2
+		add.w	#16,d0		;if G-V, add 16 to the number
+nogtov2:		tst.b	d3
+		beq.s	no10to1v
+		add.w	#32,d0
+; ---------------- finally, save the number
+no10to1v:	subq.b	#1,d0
+		move.b	d0,1(a5) ;remember instr. number!
+; ---------------- get the pointer of data's of this sample in Song-struct
+		asl.w	#3,d0		;get address of this sample's data
+		lea	0(a4,d0.w),a3
+		moveq.l	#0,d0
+; ---------------- get volume and make it relative (0 - 100 %)
+		move.b	6(a3),d0
+		bsr.w	GetRelVol
+		move.b	d0,2(a5)	;vol of this instr to prevvol
+; ---------------- check the commands
+noinstnum:	move.w	d6,d0		;effect again...
+		lsr.w	#8,d0
+		and.b	#$0f,d0		;now check only the effect part
+		move.b	d0,4(a5)	;save the effect number
+		beq.w	noeffect	;no effect
+; ---------------- there was a command (effect), but what??
+		cmp.b	#$0f,d0		;yes effect...is it Tempo???
+		bne.s	not0f		;not Tempo
+; ---------------- it was tempo (F)
+		tst.b	d6		;Tempo !!!
+		beq.s	fx0fchgblck	;if effect qualifier (last 2 #'s)..
+		cmp.b	#$f0,d6		;..is zero, go to next block
+		bhi.s	fx0fspecial	;if it's F1-FF something special
+; ---------------- just an ordinary "change tempo"-request
+		clr.l	d0		;will happen!!!
+		move.b	d6,d0
+		bsr	_SetTempo	;change The Tempo
+		bra.w	noeffect
+; ---------------- no, it was FFx, something special will happen!!
+fx0fspecial:	cmp.b	#$f2,d6	; | rest - play | SpecialFX#2: no note..yet
+		bne.s	isfxfe	;not SpecFX2
+; ---------------- it was FF2, nothing to do now
+		move.b	d5,(a5)	;Yes!!! Save the note number
+		clr.w	d5	; clear the number for awhile
+		bra.w	noeffect
+isfxfe:		cmp.b	#$fe,d6
+		bne.s	notcmdfe
+; ---------------- it was FFE, stop playing
+		clr.w	40(a6)
+		bra.w	noeffect
+notcmdfe:	cmp.b	#$fd,d6 ;change period
+		bne.w	noeffect
+; ---------------- FFD, change the period, don't replay the note
+		cmp.b	#$04,d7 ;no tracks 4 - 15, thank you!!
+		bge.w	noeffect
+		lea	periods(pc),a0
+		tst.b	d5
+		beq.w	noeffect ;hey, no note here!!
+		subq.b	#1,d5    ;sub 1 to make "real" note number
+		lsl.b	#1,d5
+		move.w	0(a0,d5.w),d0 ;get the period
+		movea.l	10(a5),a0
+		move.w	d0,ac_per(a0) ;push the period
+		clr.b	d5 ;and clear it so that it won't be replayed
+		bra.w	noeffect      ;done!!
+; ---------------- F00, called Pattern Break in ST
+fx0fchgblck:	st.b	nextblock	;next block????...YES!!!! (F00)
+		bra.w	noeffect
+; ---------------- was not Fxx, then it's something else!!
+not0f:		cmp.b	#$0c,d0		;new volume???
+		bne.s	not0c		;NO!!!!!!!!!!!!!!!!!!!!!!
+; ---------------- change volume
+		move.b	d6,d0
+		lsr.b	#4,d0		;get number from left
+		mulu	#10,d0		;number of tens
+		move.b	d6,d1		;get again
+		and.b	#$0f,d1		;this time don't get tens
+		add.b	d1,d0		;add them
+		cmp.b	#64,d0
+		bls.s	novolov64
+		moveq.l	#64,d0
+novolov64:	bsr.w	GetRelVol
+		move.b	d0,2(a5)	;and save it....
+		bra.s	noeffect
+not0c:		cmp.b	#$0b,d0
+		bne.s	not0b
+; ---------------- cmd Bxx, "position jump", like Goto, yäk!!
+		move.w	d6,d0
+		and.w	#$00ff,d0
+		cmp.w	506(a4),d0	;test the song length
+		bhi.s	noeffect
+		move.w	d0,46(a6)
+		move.b	#$01,nextblock
+		bra.s	noeffect
+; ---------------- try portamento (3)
+not0b:		cmp.b	#$03,d0
+		bne.s	noeffect
+		subq.b	#1,d5
+		bmi.s	endtrkloop	;it was 0, do nothing
+		cmp.b	#4,d7
+		bge.s	endtrkloop	;hey, what are you trying to do??
+		lea	periods(pc),a0
+		add.b	766(a4),d5	;play transpose
+		clr.w	d0
+		move.b	1(a5),d0
+		asl.w	#3,d0
+		add.b	7(a4,d0.w),d5	;and instrument transpose
+		bmi.s	endtrkloop	;again.. too low
+		lsl.w	#1,d5
+		move.w	0(a0,d5.w),20(a5) ;period of this note is the target
+		move.b	d6,7(a5)	;remember size
+		clr.b	d5	;don't play this one
+; ---------------- everything is checked now: play or not to play??
+noeffect:	tst.b	d5	;Now we'll check if we have to play a note
+		beq.s	endtrkloop	;no.
+; ---------------- we decided to play
+		move.b	d5,(a5)
+		move.w	d7,d0
+		move.w	d5,d1
+		clr.w	d3
+		move.b	1(a5),d3
+		move.w	d3,d2
+		asl.w	#3,d3		;get address of this sample's data
+		lea	0(a4,d3.w),a3
+		move.w	d2,d3
+		clr.w	d2
+		move.b	2(a5),d2	;get volume
+		bsr	_SoitaNuotti	;play it!!!!!!!!!!!
+; ---------------- end of loop: handle next track, or quit
+endtrkloop:	addq.b	#1,d7
+		cmp.w	numtracks(pc),d7
+		blt.w	trloop0
+		addq.l	#4,sp		;trackdataptrs
+nonewnote:
+;	*********************** This code produces the effects **
+		clr.l	d7	;clear track count
+		lea	trackdataptrs(pc),a2
+trloop1:		movea.l	(a2)+,a5
+		clr.w	d5
+		clr.w	d4
+		move.b	4(a5),d6	;get the fx number
+		move.b	5(a5),d4	;and the last 2 #'s
+	IFNE	MIDI
+		tst.b	6(a5)		;first: is it MIDI??
+		bne.w	midifx
+	ENDC
+		cmp.b	#4,d7
+		bge.w	endl	;no non-MIDI effects in tracks 4 - 15
+		cmp.b	#1,d6		;effect #1
+		bne.s	nofx01
+;	**************************************** Effect 01 ******
+		btst	#5,767(a4)
+		beq.s	nost1
+		move.b	769(a4),d0
+		cmp.b	50(a6),d0
+		ble.w	endl
+nost1:		sub.w	d4,8(a5)	;slide it up!!!
+		move.w	8(a5),d5
+		cmp.w	#113,d5		;too high???
+		bge	newvals
+		move.w	#113,d5		;yes, too high!!!
+		move.w	d5,8(a5)
+		bra	newvals
+;	*********************************************************
+nofx01:		cmp.b	#2,d6
+		bne.s	nofx02
+;	**************************************** Effect 02 ******
+		btst	#5,767(a4)
+		beq.s	nost2
+		move.b	769(a4),d0
+		cmp.b	50(a6),d0
+		ble.w	endl
+nost2:		add.w	d4,8(a5)	;slide it down!!!!!!!!!
+		move.w	8(a5),d5
+		cmp.w	#856,d5		;too low??
+		ble	newvals
+		move.w	#856,d5		;too low.
+		move.w	d5,8(a5)
+		bra	newvals
+;	*********************************************************
+nofx02:		tst.b	d6
+		bne.s	nofx00
+;	**************************************** Effect 00 ******
+		tst.b	d4	;both fxqualifiers are 0s: no arpeggio!!
+		beq.w	endl
+		move.b	(a5),d1
+		bsr.w	DoArpeggio
+		subq.b	#1,d4		;-1 to make it 0 - 127
+		add.b	766(a4),d4	;add play transpose
+		clr.w	d0
+		move.b	1(a5),d0	;prev. instr #
+		asl.w	#3,d0		;get address of this sample's data
+		add.b	7(a4,d0.w),d4	;add instrument transpose
+		lsl.b	#1,d4		;shift to make index for UWORD
+		lea	periods(pc),a1
+		move.w	0(a1,d4.w),d5
+		bra.w	newvals
+;	*********************************************************
+nofx00:		cmp.b	#$0d,d6
+		beq.s	fx0d
+		cmp.b	#$0a,d6
+		bne.s	nofx0d
+;	**************************************** Effect 0D ******
+fx0d:		btst	#5,767(a4)
+		beq.s	nostD
+		move.b	769(a4),d0
+		cmp.b	50(a6),d0
+		ble.w	endl
+nostD:		move.b	d4,d1
+		move.b	2(a5),d0	;move previous vol to d0
+		and.b	#$f0,d1
+		bne.s	crescendo
+		sub.b	d4,d0	;sub from prev. vol
+		bpl.s	novolund0
+		clr.b	d0	;volumes under zero not accepted!!!
+novolund0:	move.b	d0,2(a5)	;put new vol back
+		bra.w	newvals
+crescendo:	lsr.b	#4,d1
+		add.b	d1,d0
+		cmp.b	#64,d0
+		ble.s	novolover64
+		moveq.l	#64,d0
+novolover64:	move.b	d0,2(a5)
+		bra.w	newvals
+;	*********************************************************
+nofx0d:		cmp.b	#5,d6
+		bne.s	nofx05
+;	**************************************** Effect 05 ******
+		move.w	8(a5),d5 ;this is very simple: get the old period
+		cmp.b	#3,50(a6)	;and..
+		bge.w	newvals		;if counter < 3
+		sub.w	d4,d5	;subtract effect qualifier
+		bra.w	newvals
+;	*********************************************************
+nofx05:		cmp.b	#$03,d6
+		bne.s	nofx03
+;	**************************************** Effect 03 ******
+		btst	#5,767(a4)
+		beq.s	nost3
+		move.b	769(a4),d0
+		cmp.b	50(a6),d0
+		ble.w	endl
+nost3:		move.w	20(a5),d0	;d0 = target period
+		beq.w	newvals	;no target period specified
+		move.w	8(a5),d1	;d1 = curr. period
+		move.b	7(a5),d4	;get prev. speed
+		cmp.w	d0,d1
+		bhi.s	subper	;curr. period > target period
+		add.w	d4,d1	;add the period
+		cmp.w	d0,d1
+		bge.s	targreached
+		bra.s	targnreach
+subper:		sub.w	d4,d1	;subtract
+		cmp.w	d0,d1
+		bgt.s	targnreach
+targreached:	move.w	20(a5),d1 ;eventually push target period
+		clr.w	20(a5) ;now we can forget everything
+targnreach:	move.w	d1,8(a5)
+		move.w	d1,d5
+		bra.w	newvals
+;	*********************************************************
+nofx03:		cmp.b	#$0c,d6
+		bne.s	nofx0c
+		tst.b	50(a6)
+		bne.w	endl
+		bra.w	newvals
+;	*********************************************************
+nofx0c:		cmp.b	#$04,d6
+		bne.s	nofx04
+;	**************************************** Effect 04 ******
+		tst.b	d4
+		beq.s	nonvib
+		move.b	d4,23(a5)
+nonvib:		move.b	22(a5),d0
+		lsr.b	#2,d0
+		and.w	#$1f,d0
+		clr.w	d1
+		move.b	sinetable(pc,d0.w),d1
+		move.b	23(a5),d0
+		and.w	#$000f,d0
+		mulu	d0,d1
+		lsr.w	#6,d1
+		move.w	8(a5),d5
+		tst.b	22(a5)
+		bmi.s	subvib
+		add.w	d1,d5
+		bra.s	nsubvib
+subvib:		sub.w	d1,d5
+nsubvib:		move.b	23(a5),d0
+		lsr.b	#2,d0
+		and.b	#$3c,d0
+		add.b	d0,22(a5)
+		bra.w	newvals
+sinetable:	dc.b $00,$18,$31,$4a,$61,$78,$8d,$a1,$b4,$c5,$d4,$e0,$eb,$f4,$fa,$fd
+		dc.b $ff,$fd,$fa,$f4,$eb,$e0,$d4,$c5,$b4,$a1,$8d,$78,$61,$4a,$31,$18
+;	*********************************************************
+nofx04:		cmp.b	#$0f,d6
+		bne.w	nofx0f
+;	**************************************** Effect 0F ******
+fx0f:		cmp.b	#$ff,d4
+		bne.s	no0fff
+		move.w	d7,d0
+		bsr.w	_ChannelOff
+		bra.w	endl
+no0fff:		cmp.b	#$f1,d4
+		bne.s	no0ff1
+		cmp.b	#3,50(a6)
+		bne.w	endl
+		bra.s	playfxnote
+no0ff1:		cmp.b	#$f2,d4
+		bne.s	no0ff2
+		cmp.b	#3,50(a6)
+		bne.w	endl
+		bra.s	playfxnote
+no0ff2:		cmp.b	#$f3,d4
+		bne.s	no0ff3
+		move.b	50(a6),d0
+		and.b	#2+4,d0		;is 2 or 4
+		beq.s	endl
+playfxnote:	clr.w	d0
+		move.b	1(a5),d0
+		asl.w	#3,d0		;get address of this sample's data
+		lea	0(a4,d0.w),a3	;a3 contains now address of it
+		move.w	d7,d0		;track # to d0...
+		clr.w	d1
+		move.b	(a5),d1		;get note # of previous note
+		clr.w	d2
+		move.b	2(a5),d2	;get previous volume
+		clr.w	d3
+		move.b	1(a5),d3	;and prev. sample #
+		bsr	_SoitaNuotti
+		bra.s	endl
+no0ff3:		cmp.b	#$f8,d4
+		beq.s	filteroff
+		cmp.b	#$f9,d4
+		bne.s	endl
+		bclr	#1,$bfe001
+		bra.s	endl
+filteroff:	bset	#1,$bfe001
+		bra.s	endl
+;	*********************************************************
+nofx0f:		cmp.b	#$0c,d6
+		bne.s	endl
+newvals:		tst.w	d5	;now: do the effects!!!
+		bne.s	nooldper
+		move.w	8(a5),d5 ;no new period specified: get the old
+nooldper:	movea.l	10(a5),a1	;get channel address
+		move.w	d5,ac_per(a1)	;push period
+		clr.w	d5
+	IFNE	DIM
+		tst.w	dimval
+		bne.s	endl
+	ENDC
+		move.b	2(a5),d5	;get volume
+		move.w	d5,ac_vol(a1)	;and push it
+endl:		addq.b	#1,d7	;increment channel number
+		cmp.w	numtracks(pc),d7	;all channels done???
+		blt.w	trloop1	;not yet!!!
+
+		bsr	_StartDMA	;turn on DMA
+exitint:		movem.l	(sp)+,d2-d7/a2-a6
+		rts
+_SetTempo:	tst.b	allok
+		beq.s	exstempo
+		movea.l	currentmodule(pc),a0
+		movea.l	8(a0),a0
+		move.b	d0,765(a0)
+		cmp.b	#10,d0	;If tempo <= 10, use SoundTracker tempo
+		bhi.s	calctempo
+		subq.b	#1,d0
+		move.b	d0,769(a0)
+		lsl.w	#1,d0
+		move.w	sttempo+2(pc,d0.w),d1
+		bra.s	pushtempo
+calctempo:	move.l	#470000,d1
+		divu	d0,d1
+pushtempo:	move.b	d1,$bfe401	;and set the CIA timer
+		lsr.w	#8,d1
+		move.b	d1,$bfe501
+exstempo:	rts	; vv-- These values are the SoundTracker tempos (approx.)
+sttempo:	dc.w	$0f00,2417,4833,7250,9666,12083,14500,16916,19332,21436,24163
+
+	IFNE	MIDI
+midifx:		cmp.b	#1,d6
+		bne.s	nomidi01fx
+		lea	prevmidipbend(pc),a0
+		clr.w	d1
+		move.b	3(a5),d1	;get previous midi channel
+		lsl.w	#1,d1		;UWORD index
+		tst.b	d4		;x100??
+		beq.s	resetpbend
+		move.w	0(a0,d1.w),d0	;get previous pitch bend
+		lsl.w	#3,d4		;multiply bend value by 8
+		add.w	d4,d0
+		cmp.w	#$3fff,d0
+		bls.s	bendpitch
+		move.w	#$3fff,d0
+bendpitch:	move.w	d0,0(a0,d1.w)	;save current pitch bend
+		lsr.b	#1,d1		;back to UBYTE
+		or.b	#$e0,d1
+		lea	noteondata(pc),a0
+		move.b	d1,(a0)		;midi command & channel
+		move.b	d0,1(a0)	;lower value
+		and.b	#$7f,1(a0)	;clear bit 7
+		lsr.w	#7,d0
+		and.b	#$7f,d0		;clr bit 7
+		move.b	d0,2(a0)	;higher 7 bits
+		moveq.l	#3,d0
+		bsr.w	_AddMIDIData
+		bra.w	endl
+nomidi01fx:	cmp.b	#2,d6
+		bne.s	nomidi02fx
+		lea	prevmidipbend(pc),a0
+		clr.w	d1
+		move.b	3(a5),d1
+		lsl.w	#1,d1
+		tst.b	d4
+		beq.s	resetpbend	;x200??
+		move.w	0(a0,d1.w),d0
+		lsl.w	#3,d4
+		sub.w	d4,d0
+		bpl.s	bendpitch	;not under 0
+		clr.w	d0
+		bra.s	bendpitch
+resetpbend:	tst.b	50(a6)
+		bne.w	endl
+		move.w	#$2000,d0
+		bra.s	bendpitch
+nomidi02fx:	cmp.b	#$04,d6
+		bne.s	nomidi04fx
+		moveq	#$01,d0
+		bra.s	pushctrldata
+nomidi04fx:	cmp.b	#$0e,d6		;with MIDI, this is "pan", when
+		bne.s	nomidi0efx	;values are 0 - $7f
+		moveq	#$0a,d0
+pushctrldata:	tst.b	50(a6)		;do it only once in a note
+		bne.w	endl		;(when counter = 0)
+		lea	noteondata(pc),a0 ;push "control change" data,
+		move.b	3(a5),(a0)	  ;d0 = 1. databyte, d4 = 2. db
+		or.b	#$b0,(a0)
+		move.b	d0,1(a0)
+		move.b	d4,2(a0)
+		bmi.w	endl	;0 - $7f!!
+		moveq.l	#3,d0
+		bsr.w	_AddMIDIData
+		bra.w	endl
+nomidi0efx:	cmp.b	#$0f,d6
+		bne.w	endl
+		cmp.b	#$fa,d4		;hold pedal ON
+		bne.s	nomffa
+		moveq	#$40,d0
+		moveq	#$7f,d4
+		bra.s	pushctrldata
+nomffa:		cmp.b	#$fb,d4		;hold pedal OFF
+		bne.s	nomffb
+		moveq	#$40,d0
+		moveq	#$00,d4
+		bra.s	pushctrldata
+nomffb:		bra.w	fx0f
+	ENDC
+
+DoArpeggio:	; begin note in d1, note num returned in d4
+		move.b	50(a6),d0
+		tst.b	d0
+		beq.s	arpg03
+		cmp.b	#3,d0
+		bne.s	arpgn03
+arpg03:		and.b	#$0f,d4		;counter = 0 or 3: get last number
+		add.b	d1,d4		;add it to note number
+		rts
+arpgn03:		cmp.b	#1,d0
+		beq.s	arpg14
+		cmp.b	#4,d0
+		bne.s	arpgn14
+arpg14:		lsr.b	#4,d4	;counter = 1 or 4: get the first number
+		add.b	d1,d4	;add to prev. note
+		rts
+arpgn14:		move.b	d1,d4	;2 or 5: the previous note
+cmdrts:		rts
+
+	IFNE	MIDI
+_ResetMIDI:	tst.b	allok
+		beq.s	cmdrts	;the nearest "rts"
+		movem.l	d2/a2,-(sp)
+		lea	prevmidicpres(pc),a0
+		clr.l	(a0)+	;force presets to be set again
+		clr.l	(a0)+	;(clear prev. preset numbers)
+		clr.l	(a0)+
+		clr.l	(a0)+
+		clr.b	lastcmdbyte
+		lea	midiresd(pc),a2
+		move.b	#$e0,(a2)	;reset pitchbenders & mod. wheel
+		move.b	#$b0,3(a2)
+		moveq.l	#15,d2
+respbendl:	movea.l	a2,a0
+		moveq.l	#6,d0
+		bsr.w	_AddMIDIData
+		addq.b	#1,(a2)
+		addq.b	#1,3(a2)
+		dbf	d2,respbendl
+		lea	prevmidipbend(pc),a2
+		moveq.l	#15,d2
+resprevpbends:	move.w	#$2000,(a2)+
+		dbf	d2,resprevpbends
+		movem.l	(sp)+,d2/a2
+		rts
+midiresd:	dc.b	$e0,$00,$40,$b0,$01,$00
+	ENDC
+
+getinsdata:	clr.l	d2
+		move.w	4(a0),d0	;Soitin-struct in a0, instr#<<1: d3
+		bne.s	iff5or3oct	;note # in d1 (0 - ...)
+		move.l	a0,d0
+		lea	periods(pc),a0
+		lsl.b	#1,d1
+		move.w	0(a0,d1.w),d5 ;put period to d5
+		move.l	d0,a0
+		addq.l	#6,d0		;Skip structure
+		move.l	(a0),d1		;length
+		move.w	(a3),d2
+		move.w	2(a3),d3
+		rts
+iff5or3oct:	movem.l	a1/d6-d7,-(sp)
+		clr.l	d7
+		move.w	d1,d7
+		divu	#12,d7	;octave #
+		move.l	d7,d5
+		swap	d5	;note number in this oct (0-11) is in d5
+		move.l	(a0),d1
+		cmp.b	#2,d0
+		bne.s	no3oct
+		addq.l	#6,d7
+		divu	#7,d1	;get length of the 1st octave
+		bra.s	no5oct
+no3oct:		divu	#31,d1	;get length of the 1st octave (5 octaves)
+no5oct:		move.l	d1,d0		;d0 and d1 = length of the 1st oct
+		move.w	(a3),d2
+		move.w	2(a3),d3
+		clr.w	d6
+		move.b	shiftcnt(pc,d7.w),d6
+		lsl.w	d6,d2
+		lsl.w	d6,d3
+		lsl.w	d6,d1
+		move.b	mullencnt(pc,d7.w),d6
+		mulu	d6,d0		;offset of this oct from 1st oct
+		add.l	a0,d0		;add base address to offset
+		addq.l	#6,d0		;skip structure
+		lea	periods(pc),a1
+		add.b	octstart(pc,d7.w),d5
+		lsl.b	#1,d5
+		move.w	0(a1,d5.w),d5
+		movem.l	(sp)+,a1/d6-d7
+		rts	;returns period in d5
+shiftcnt:	dc.b	4,3,2,1,1,0,2,2,1,1,0,0
+mullencnt:	dc.b	15,7,3,1,1,0,3,3,1,1,0,0
+octstart:	dc.b	12,12,12,12,24,24,0,12,12,24,24,36
+
+_AudioInit:	movem.l	a6/d2,-(sp)
+		clr.l	d2
+		movea.l	4,a6
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ alloc signal bit
+		addq.l	#1,d2
+		move.l	#-1,d0	; -1
+		jsr	-$14a(a6)	;AllocSignal()
+		tst.b	d0
+		bmi.w	initerr
+		move.b	d0,sigbitnum
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ prepare IORequest
+		lea	allocport(pc),a1
+		move.b	d0,15(a1)	;set mp_SigBit
+		move.l	a1,-(sp)
+		suba.l	a1,a1
+		jsr	-$126(a6)	;FindTask(0)
+		move.l	(sp)+,a1
+		move.l	d0,16(a1)	;set mp_SigTask
+		lea	reqlist(pc),a0
+		move.l	a0,(a0)		;NEWLIST begins...
+		addq.l	#4,(a0)
+		clr.l	4(a0)
+		move.l	a0,8(a0)	;NEWLIST ends...
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ open audio.device
+		addq.l	#1,d2
+		lea	allocreq(pc),a1
+		lea	audiodevname(pc),a0
+		clr.l	d0
+		clr.l	d1
+		movea.l	4,a6
+		jsr	-$1bc(a6)	;OpenDevice()
+		tst.l	d0
+		bne.s	initerr
+		st.b	audiodevopen
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ open ciaa.resource
+		addq.l	#1,d2
+		clr.l	d0
+		lea	ciaaname(pc),a1
+		jsr	-$1f2(a6)	;OpenResource()
+		tst.l	d0
+		beq.s	initerr
+		move.l	d0,_ciaaresource
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ attach interrupt
+		addq.l	#1,d2
+		move.l	d0,a6
+		lea	timerinterrupt(pc),a1
+		clr.l	d0	;Bit number 0: Timer A
+		jsr	-$6(a6)	;AddICRVector
+		tst.l	d0
+		bne.s	initerr
+		and.b	#%10000000,$bfee01
+		st.b	timeropen
+		clr.l	d0
+initret:		movem.l	(sp)+,a6/d2
+		rts
+initerr:		move.l	d2,d0
+		bra.s	initret
+
+_AudioRem:	move.l	a6,-(sp)
+		tst.b	timeropen
+		beq.s	rem1
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ remove interrupt
+		move.l	_ciaaresource(pc),a6
+		lea	timerinterrupt(pc),a1
+		clr.l	d0	;Bit number 0: Timer A
+		jsr	-$c(a6)		;RemICRVector
+;There is no CloseResource(). I'm not sure if I should use CloseLibrary()??
+		clr.b	timeropen
+rem1:		movea.l	4,a6
+		tst.b	audiodevopen
+		beq.s	rem2
+		move.w	#$000f,$dff096	;stop audio DMA
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ close audio.device
+		lea	allocreq(pc),a1
+		jsr	-$1c2(a6)	;CloseDevice()
+		clr.b	audiodevopen
+rem2:		clr.l	d0
+		move.b	sigbitnum(pc),d0
+		bmi.s	rem3
+;	+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+ free signal bit
+		jsr	-$150(a6)	;FreeSignal()
+		move.b	#-1,sigbitnum
+rem3:		move.l	(sp)+,a6
+		rts
+
+	IFNE	MIDI
+
+_GetSerial:	move.l	a6,-(sp)	;Get serial port for MIDI
+		bsr.s	GetSer2
+		tst.l	d0		;got the port??
+		beq.s	rgser		;yes
+		movea.l	4,a6		;no..try to flush serial.device:
+		jsr	-$84(a6)		;Forbid
+		lea	$15e(a6),a0		;ExecBase->DeviceList
+		lea	serdev(pc),a1		;"serial.device"
+		jsr	-$114(a6)		;FindName
+		tst.l	d0
+		beq.s	serdnotf		;no serial.device!!
+		move.l	d0,a1
+		jsr	-$1b6(a6)		;RemDevice
+serdnotf:	jsr	-$8a(a6)		;and Permit
+		bsr.s	GetSer2		;now try it again...
+rgser:		move.l	(sp)+,a6
+		rts
+
+GetSer2:		move.l	4,a6
+		clr.l	d0
+		lea	miscresname(pc),a1
+		jsr	-$1f2(a6)	;OpenResource()
+		move.l	d0,miscresbase
+		tst.l	d0
+		beq.s	gserror
+		move.l	d0,a6
+		lea	medname(pc),a1
+		clr.l	d0		;serial port
+		jsr	-$6(a6)		;AllocMiscResource()
+		tst.l	d0
+		bne.s	gserror
+		st.b	serportalloc
+		clr.w	intrson
+		move.w	$dff01c,d0
+		btst	#0,d0
+		sne.b	intrson
+		moveq.l	#0,d0		;TBE
+		lea	serinterrupt(pc),a1
+		move.l	4,a6
+		jsr	-$a2(a6)	;SetIntVector()
+		move.l	d0,prevtbe
+		move.w	#$8001,$dff09a	;TBE on!!
+		move.w	#114,$dff032	;set baud rate (SERPER)
+		moveq	#0,d0
+retgs:		rts
+gserror:		st	d0
+		rts
+
+intrson:		dc.b	0,0
+
+_FreeSerial:	move.l	a6,-(sp)
+		tst.l	miscresbase
+		beq.s	retfs
+		tst.b	serportalloc
+		beq.s	retfs
+		move.w	#$0001,$dff09a	;disable TBE
+		movea.l	prevtbe(pc),a1
+		moveq.l	#0,d0
+		movea.l	4,a6
+		jsr	-$a2(a6)	;SetIntVector()
+		clr.b	serportalloc
+		tst.b	intrson
+		beq.s	notbebackon
+		move.w	#$8001,$dff09a
+notbebackon:	movea.l	miscresbase(pc),a6
+		clr.l	d0		;serial port
+		jsr	-$c(a6)		;FreeMiscResource()
+		clr.b	lastcmdbyte
+retfs:		move.l	(sp)+,a6
+		rts
+
+prevtbe:		dc.l	0
+		
+SerIntHandler:	move.w	#$4000,$9a(a0)	;disable...
+		addq.b	#1,$126(a6)
+		move.w	#1,$9c(a0)	;clear intreq bit
+		move.b	bytesinbuff(pc),d0
+		beq.s	exsih		;buffer empty
+		movea.l	4(a1),a5	;get buffer read pointer
+		move.w	#$100,d1	;Stop bit
+		move.b	(a5),d1		;get byte
+		move.w	d1,$30(a0)	;and push it out!! (SERDAT)
+		addq.l	#1,a5		;add 1
+		cmpa.l	a1,a5		;shall we reset ptr??
+		bne.s	norrbuffptr	;not yet..
+		lea	sendbuffer(pc),a5
+norrbuffptr:	subq.b	#1,d0		;one less bytes in buffer
+		move.b	d0,bytesinbuff	;remember it
+		move.l	a5,4(a1)	;push new read pointer back
+exsih:		subq.b	#1,$126(a6)
+		bge.s	exsih0
+		move.w	#$c000,$9a(a0)
+exsih0:		rts
+
+_AddMIDIData:	tst.b	serportalloc
+		beq.s	retamd
+		movem.l	a2/a6,-(sp)
+		movea.l	4,a6
+		move.w	#$4000,$dff09a	;Disable interrupts
+		addq.b	#1,$126(a6)	;ExecBase->IDNestCnt
+		move.b	bytesinbuff(pc),d1
+		bne.s	noTBEreq
+		move.w	#$8001,$dff09c	;request TBE
+noTBEreq:	lea	buffptr(pc),a2	;end of buffer (ptr)
+		movea.l	(a2),a1		;buffer pointer
+adddataloop:	move.b	(a0)+,d1	;get byte
+		bpl.s	norscheck	;this isn't a status byte
+		cmp.b	#$ef,d1		;forget system messages
+		bhi.s	norscheck
+		cmp.b	lastcmdbyte(pc),d1 ;same as previos status byte??
+		beq.s	samesb		;yes, skip
+		move.b	d1,lastcmdbyte	;no, don't skip but remember!!
+norscheck:	move.b	d1,(a1)+	;push it to midi send buffer
+		addq.b	#1,bytesinbuff
+samesb:		cmpa.l	a2,a1	;end of buffer??
+		bne.s	noresbuffptr	;no, no!!
+		lea	sendbuffer(pc),a1 ;better reset it to avoid trashing
+noresbuffptr:	subq.b	#1,d0
+		bne.s	adddataloop
+		move.l	a1,(a2)		;push new buffer ptr back
+overflow:	subq.b	#1,$126(a6)
+		bge.s	retamd1
+		move.w	#$c000,$dff09a	;enable interrupts again
+retamd1:		movem.l	(sp)+,a2/a6
+retamd:		rts
+	ENDC
+
+
+
+InitPlayer:	move.l	a6,-(sp)
+		lea	filterpos(pc),a0
+		clr.b	(a0)
+		btst	#1,$bfe001
+		sne.b	(a0)
+	IFNE	MIDI
+		bsr.w	_GetSerial
+		tst.l	d0
+		bne.s	iperror
+	ENDC
+		bsr.w	_AudioInit
+		tst.l	d0
+		bne.s	iperror
+		move.l	4,a6
+		moveq	#8,d0
+		move.l	#$10002,d1
+		jsr	-$c6(a6)
+		tst.l	d0
+		beq.s	iperror
+		move.l	d0,chipzero
+	IFNE	MIDI
+		moveq.l	#5,d0	;INTB_VERTB
+		lea	vbinterrupt(pc),a1
+		jsr	-$a8(a6)	;AddIntServer()
+		move.b	#1,intserv
+	ENDC
+		st.b	allok
+		moveq.l	#6,d0
+		bsr.w	_SetTempo	;default tempo
+		clr.l	d0	;Init OK
+xip:		move.l	(sp)+,a6
+		rts
+
+iperror:		bsr.s	RemPlayer	;free all stuff
+		moveq	#-1,d0
+		bra.s	xip
+
+RemPlayer:	move.l	a6,-(sp)
+		move.l	4,a6
+		lea	currentmodule(pc),a0
+		tst.l	(a0)
+		beq.s	nostpplr
+		movea.l	(a0),a0
+		tst.w	40(a0)
+		beq.s	nostpplr
+		bsr.w	StopPlayer
+nostpplr:	lea	allok(pc),a0
+		clr.b	(a0)+
+		bclr	#1,$bfe001	;filter back on
+		move.b	(a0),d0		;prev. filter??
+		and.b	#2,d0		;only leave the filter bit
+		or.b	d0,$bfe001
+		lea	chipzero(pc),a0
+		movea.l	(a0),a1
+		clr.l	(a0)
+		move.l	a1,d0
+		beq.s	nofreecz
+		moveq	#8,d0
+		jsr	-$d2(a6)	;FreeMem()
+nofreecz:	bsr.w	_AudioRem
+	IFNE	MIDI
+		tst.b	intserv
+		beq.s	noremvbis
+		moveq.l	#5,d0	;INTB_VERTB
+		lea	vbinterrupt(pc),a1
+		jsr	-$ae(a6)	;RemIntServer()
+		clr.b	intserv
+noremvbis:	bsr.w	_FreeSerial
+	ENDC
+		move.l	(sp)+,a6
+xremp:		rts
+
+
+
+PlayModule:	tst.b	allok
+		beq.s	xremp
+		move.l	a0,d0
+		bne.s	newcmod
+		lea	currentmodule(pc),a0
+		tst.l	(a0)	;try old module
+		beq.w	xpmod3
+		movea.l	(a0),a0
+newcmod:		lea	40(a0),a1
+		clr.l	(a1)+	;reset everything
+		clr.l	(a1)+
+		clr.w	(a1)
+		not.w	(a1)+
+		move.b	#$05,(a1)
+		movea.l	8(a0),a1
+	IFNE	DIM
+		clr.w	dimval
+	ENDC
+		btst	#0,767(a1)	;filter??
+		bne.s	filteron
+		bset	#1,$bfe001
+		bra.s	ContModule
+filteron:	bclr	#1,$bfe001
+ContModule:	tst.b	allok
+		beq.s	xpmod3
+		move.l	a6,-(sp)
+		movea.l	4,a6
+		move.w	#$4000,$dff09a	;please don't disturb!!!
+		addq.b	#1,$126(a6)
+		move.l	a0,d0
+		bne.s	newcmod2
+		lea	currentmodule(pc),a0
+		tst.l	(a0)
+		beq.s	exitpmod
+		movea.l	(a0),a0
+newcmod2:	tst.b	timeropen
+		beq.s	exitpmod
+		move.w	46(a0),d1
+		movea.l	8(a0),a1
+		move.w	764(a1),d0
+	IFNE	DIM
+		move.b	786(a1),dimstart
+	ENDC
+		adda.w	d1,a1
+		move.b	508(a1),43(a0)	;init pblock
+		move.l	a0,currentmodule
+		move.w	#2,40(a0)	;pstate = play song
+		bsr.w	_SetTempo
+		or.b	#1,$bfee01
+		move.w	#$000f,$dff096
+exitpmod:	subq.b	#1,$126(a6)
+		bge.s	xpmod2
+		move.w	#$c000,$dff09a	;enable interrupts again
+xpmod2:		move.l	(sp)+,a6
+xpmod3:		rts
+
+StopPlayer:	tst.b	allok
+		beq.s	stpplrend
+		tst.l	currentmodule
+		beq.s	nocurrm
+		movea.l	currentmodule(pc),a0
+		clr.w	40(a0)		;the interrupt will stop the timer
+nocurrm:
+	IFNE	DIM
+		clr.w	dimval
+	ENDC
+	IFNE	MIDI
+		move.b	#$af,stpdata
+stpplrloop:	lea	stpdata(pc),a0
+		addq.b	#1,(a0)
+		cmp.b	#$bf,(a0)
+		bhi.s	stpplrend
+		moveq.l	#3,d0
+		bsr.w	_AddMIDIData
+		bra.s	stpplrloop
+	ENDC
+stpplrend:	rts
+
+	IFNE	DIM
+DimOffPlayer:	tst.b	allok
+		beq.s	dimnocm
+		tst.w	d0
+		beq.s	dimstp
+		moveq	#0,d1
+		move.b	dimstart(pc),d1
+		lsl.l	#7,d1		;* 128
+		move.w	d1,dimval
+		divu	d0,d1
+		move.w	d1,dimstep
+dimnocm:		rts
+dimstp:		bsr.s	_StopPlayer
+		rts
+	ENDC
+
+	IFNE	MIDI
+VBlankHandler:	subq.b	#1,(a1)
+		bne.s	exitvblank
+		move.b	#15,(a1)
+		moveq.l	#1,d0
+		lea	1(a1),a0
+		bsr.w	_AddMIDIData
+exitvblank	moveq.l	#0,d0
+		rts
+
+actsens:	dc.b	0,$FE
+intserv:	dc.b	0
+stpdata:	dc.b	0,$7b,0
+
+sendbuffer:	ds.b	128
+buffptr:		dc.l	sendbuffer
+readbuffptr:	dc.l	sendbuffer
+miscresbase:	dc.l	0
+lastcmdbyte:	dc.b	0
+	ENDC
+		even
+	IFNE	MIDI
+preschgdata:	dc.b	0,0
+noteondata:	dc.l	0
+	ENDC
+audiodevopen:	dc.b	0
+timeropen:	dc.b	0
+	IFNE	DIM
+dimval:		dc.w	0
+dimstep:		dc.w	0
+dimstart:	dc.b	0
+	ENDC
+	IFNE	MIDI
+serportalloc:	dc.b	0
+bytesinbuff:	dc.b	0
+	ENDC
+sigbitnum:	dc.b	-1
+allok:		dc.b	0
+filterpos:	dc.b	0
+		even
+timerinterrupt:	dc.w	0,0,0,0,0
+		dc.l	timerintname,0,_IntHandler
+	IFNE	MIDI
+serinterrupt:	dc.w	0,0,0,0,0
+		dc.l	serintname,buffptr,SerIntHandler
+vbinterrupt:	dc.w	0,0,0,0,0,
+		dc.l	vbintname,actsens,VBlankHandler
+	ENDC
+allocport:	dc.l	0,0	;succ, pred
+		dc.b	4,0	;NT_MSGPORT
+		dc.l	0	;name
+		dc.b	0,0	;flags = PA_SIGNAL
+		dc.l	0	;task
+reqlist:	dc.l	0,0,0	;list head, tail and tailpred
+		dc.b	5,0
+allocreq:	dc.l	0,0
+		dc.b	5,127	;NT_MESSAGE, use maximum priority (127)
+		dc.l	0,allocport	;name, replyport
+		dc.w	68		;length
+		dc.l	0	;io_Device
+		dc.l	0	;io_Unit
+		dc.w	0	;io_Command
+		dc.b	0,0	;io_Flags, io_Error
+		dc.w	0	;ioa_AllocKey
+		dc.l	sttempo	;ioa_Data
+		dc.l	1	;ioa_Length
+		dc.w	0,0,0	;ioa_Period, Volume, Cycles
+		dc.w	0,0,0,0,0,0,0,0,0,0	;ioa_WriteMsg
+ciaaname:	dc.b	'ciaa.resource',0
+timerintname:	dc.b	'Player: TimerInterrupt',0
+	IFNE	MIDI
+serintname:	dc.b	'Player: SerialInterrupt',0
+vbintname:	dc.b	'Player: VBlankInterrupt',0
+	ENDC
+audiodevname:	dc.b	'audio.device',0
+	IFNE	MIDI
+miscresname:	dc.b	'misc.resource',0
+serdev:		dc.b	'serial.device',0
+	ENDC
+medname:		dc.b	'MED player routine',0 ;yeah, our name
+_ciaaresource:	dc.l	0
+periods:		dc.w	856,808,762,720,678,640,604,570,538,508,480,453
+		dc.w	428,404,381,360,339,320,302,285,269,254,240,226
+		dc.w	214,202,190,180,170,160,151,143,135,127,120,113
+		dc.w	214,202,190,180,170,160,151,143,135,127,120,113
+		dc.w	214,202,190,180,170,160,151,143,135,127,120,113
+		dc.w	214,202,190,180,170,160,151,143,135,127,120,113
+currentmodule:	dc.l	0
+chipzero:	dc.l	0
+
+
+
+;	MED module load routines by Teijo Kinnunen 1990
+
+
+;	Function: _RelocModule(a0)
+;	a0 = pointer to module
+
+	even
+
+relocentr:
+	tst.l   (a0)
+	beq.s   norel
+	add.l   d1,(a0)
+norel:	addq.l  #4,a0
+	rts
+RelocModule:
+	move.l  a2,-(sp)
+	movea.l a0,a2
+	move.l  a2,d1		;d1 = ptr to start of module
+	lea     8(a2),a0
+	bsr.s   relocentr	;reloc song ptr
+	addq.l  #4,a0
+	bsr.s   relocentr	;reloc blockarr ptr
+	addq.l  #4,a0
+	bsr.s   relocentr	;reloc smplarr ptr
+	addq.l  #4,a0
+	bsr.s   relocentr	;reloc expdata ptr
+	movea.l 24(a2),a0
+	movea.l 8(a2),a1
+	moveq   #0,d0
+	move.b  787(a1),d0	;number of samples
+	subq.b  #1,d0
+relocs:	bsr.s   relocentr
+	dbf     d0,relocs
+	movea.l 16(a2),a0
+	move.w  504(a1),d0
+	subq.b  #1,d0
+relocb:	bsr.s   relocentr
+	dbf     d0,relocb
+	move.l  (sp)+,a2
+
+	;d1=module address
+
+	rts
+
+Relocate_modules
+	move.l #intro_data,a0
+	bsr RelocModule
+	move.l d1,intromodadd
+	move.l #ready_data,a0
+	bsr RelocModule
+	move.l d1,readymodadd
+	move.l #high_data,a0
+	bsr RelocModule
+	move.l d1,highmodadd
+	move.l #game_data,a0
+	bsr RelocModule
+	move.l d1,gamemodadd
+	rts
+
+Playintromod
+	move.l intromodadd,a0
+	bsr PlayModule
+	rts
+Playreadymod
+	move.l readymodadd,a0
+	bsr PlayModule
+	rts
+Playhighmod
+	move.l highmodadd,a0
+	bsr PlayModule
+	rts
+Playgamemod
+	move.l gamemodadd,a0
+	bsr PlayModule
+	rts
+	even
+gamemodadd
+	dc.l 0
+highmodadd
+	dc.l 0
+intromodadd
+	dc.l 0
+readymodadd
+	dc.l 0
+	even

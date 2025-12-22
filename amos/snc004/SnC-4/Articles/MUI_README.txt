@@ -1,0 +1,54 @@
+Short: Use MUI from AMOSPro
+Type: /dev/amos
+Uploader: ph@doc.ic.ac.uk (Paul Hickman)
+Author: ph@doc.ic.ac.uk (Paul Hickman)
+
+                               AMOSPro MUI Demo
+                               ================
+                               
+                               
+         By Paul Hickman (ph@doc.ic.ac.uk) - This code is Freeware                               
+         ---------------------------------------------------------
+         
+         
+         
+Contents
+========
+
+MUI-DEMO.AMOS              The Demo program - Load & Read & Run
+
+Hook.s                     Source code for the hook dispatcher in Bank 14
+Listview-Hooks.s           Source code for the popup-listview hooks (Bank 32)
+MUI.Equ                    AMOSPro Equates File for MUI Symbols
+Equate_To_Tags.AMOS        Convert Equares File into a Tag Tree (Bank 13)
+
+
+
+NOTE: The demo does not require access to any of the other files. The
+      equates are only used as souuce for the Equate_To_Tags.AMOS program,
+      which you only need to make the demo understand more non-MUI tags. 
+      
+      The assembler sources are provided for you to see if you can tell
+      me why the second one doesn't work properly :-) (See end of demo)
+      
+
+
+
+Requirements
+============
+
+
+AMOSPro - Any version
+
+/pub/aminet/dev/gui/mui21usr.lzh
+/pub/aminet/dev/gui/mui21dev.lzh (Only for programmers docs & MUI.I file)
+
+NOTE: MUI.I file is not needed - but you may want to read it to check
+      exactly how tags are spelt since the equates file was generated from
+      it.
+      
+      
+      
+
+
+

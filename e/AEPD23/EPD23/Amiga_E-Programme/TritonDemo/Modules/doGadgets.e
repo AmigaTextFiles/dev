@@ -1,0 +1,235 @@
+/* MAC2E triton.macros */
+OPT PREPROCESS
+OPT MODULE
+OPT EXPORT
+OPT OSVERSION=37,
+    REG=5
+
+#define WindowID(id)            TRWI_ID,(id)
+#define WindowTitle(t)          TRWI_TITLE,(t)
+#define WindowPosition(pos)     TRWI_POSITION,(pos)
+
+-> TRITON defs
+MODULE 'triton',
+       'libraries/triton',
+       'utility/tagitem'
+-> TRITON defs
+
+MODULE '*global'
+
+DEF mainApp:PTR TO tr_App,
+    mainProject:PTR TO tr_Project
+
+PROC doGadgets()
+  DEF closeProject=FALSE
+  DEF trmsg:PTR TO tr_Message, gadgetsProject:PTR TO tr_Project,
+      gadgetsTrWinTags, cycleEntries, mxEntries, class
+  cycleEntries:=['Entry 0', '1', '2', '3', '4',
+                 '5', '6', '7', '8', '9', NIL]
+  mxEntries:=['Choice 0', 'Choice 1', 'Choice 2', NIL]
+  gadgetsTrWinTags:=[WindowID(3), WindowTitle('Gadgets'),
+                     WindowPosition(TRWP_CENTERDISPLAY),
+    TRGR_VERT,                  TRGR_PROPSHARE OR TRGR_ALIGN,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_EQUALSHARE OR TRGR_CENTER,
+        TROB_SPACE,             NIL,
+        TROB_LINE,              TROF_HORIZ,
+        TROB_SPACE,             NIL,
+        TROB_TEXT,              NIL, TRAT_TEXT, 'GadTools', TRAT_FLAGS, TRTX_TITLE,
+        TROB_SPACE,             NIL,
+        TROB_LINE,              TROF_HORIZ,
+        TROB_SPACE,             NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_EQUALSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+        TRGR_HORIZ,             TRGR_PROPSPACES OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_SPACE,           NIL,
+          TROB_CHECKBOX,        NIL,
+            TRAT_ID,            1,
+            TRAT_VALUE,         TRUE,
+        TRGR_END,               NIL,
+        TROB_SPACE,             NIL,
+        TRGR_HORIZ,             TRGR_PROPSPACES OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_TEXT,            NIL,
+            TRAT_TEXT,          '_Checkbox',
+            TRAT_ID,            1,
+          TROB_SPACE,           NIL,
+        TRGR_END,               NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_EQUALSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+        TRGR_HORIZ,             TRGR_PROPSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_SPACE,           NIL,
+          TROB_SLIDER,          NIL,
+            TRAT_ID,            4,
+            TRSL_MIN,           1,
+            TRSL_MAX,           3,
+            TRAT_VALUE,         1,
+        TRGR_END,               NIL,
+        TROB_SPACE,             NIL,
+        TRGR_HORIZ,             TRGR_PROPSPACES OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_TEXT,            NIL,
+            TRAT_TEXT,          '_Slider: ',
+            TRAT_ID,            4,
+          TROB_TEXT,            NIL,
+            TRAT_VALUE,         1,
+            TRAT_ID,            4,
+            TRAT_MINWIDTH,      3,
+        TROB_SPACE,             NIL,
+        TRGR_END,               NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_EQUALSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+        TRGR_HORIZ,             TRGR_PROPSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_SPACE,           NIL,
+          TROB_SCROLLER,        NIL,
+            TRAT_ID,            5,
+            TRAT_VALUE,         2,
+            TRSC_TOTAL,         7,
+            TRSC_VISIBLE,       3,
+        TRGR_END,               NIL,
+        TROB_SPACE,             NIL,
+        TRGR_HORIZ,             TRGR_PROPSPACES OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_TEXT,            NIL,
+            TRAT_TEXT,          'Sc_roller: ',
+            TRAT_ID,            5,
+          TROB_TEXT,            NIL,
+            TRAT_VALUE,         2,
+            TRAT_ID,            5,
+            TRAT_MINWIDTH,      3,
+        TROB_SPACE,             NIL,
+        TRGR_END,               NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_EQUALSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+        TRGR_HORIZ,             TRGR_PROPSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_SPACE,           NIL,
+          TROB_PALETTE,         NIL,
+            TRAT_ID,            3,
+            TRAT_VALUE,         1,
+        TRGR_END,               NIL,
+        TROB_SPACE,             NIL,
+        TRGR_HORIZ,             TRGR_PROPSPACES OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_TEXT,            NIL,
+            TRAT_TEXT,          '_Palette: ',
+            TRAT_ID,            3,
+          TROB_TEXT,            NIL,
+            TRAT_VALUE,         1,
+            TRAT_ID,            3,
+            TRAT_MINWIDTH,      3,
+        TROB_SPACE,             NIL,
+        TRGR_END,               NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_EQUALSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+        TRGR_HORIZ,             TRGR_PROPSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_SPACE,           NIL,
+          TROB_CYCLE,           cycleEntries,
+            TRAT_ID,            6,
+            TRAT_VALUE,         4,
+        TRGR_END,               NIL,
+        TROB_SPACE,             NIL,
+        TRGR_HORIZ,             TRGR_PROPSPACES OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_TEXT,            NIL,
+            TRAT_TEXT,          'C_ycle: ',
+            TRAT_ID,            6,
+          TROB_TEXT,            NIL,
+            TRAT_VALUE,         4,
+            TRAT_ID,            6,
+            TRAT_MINWIDTH,      3,
+        TROB_SPACE,             NIL,
+        TRGR_END,               NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_EQUALSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+        TRGR_HORIZ,             TRGR_PROPSPACES OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_SPACE,           NIL,
+          TROB_CYCLE,           mxEntries,
+            TRAT_ID,            13,
+            TRAT_VALUE,         1,
+            TRAT_FLAGS,         TRCY_MX,
+        TRGR_END,               NIL,
+        TROB_SPACE,             NIL,
+        TRGR_HORIZ,             TRGR_PROPSPACES OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_TEXT,            NIL,
+            TRAT_TEXT,          '_MX: ',
+            TRAT_ID,            13,
+          TROB_TEXT,            NIL,
+            TRAT_VALUE,         1,
+            TRAT_ID,            13,
+            TRAT_MINWIDTH,      3,
+          TROB_SPACE,           NIL,
+        TRGR_END,               NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_EQUALSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+        TRGR_HORIZ,             TRGR_PROPSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_SPACE,           NIL,
+          TROB_STRING,          'foo bar',
+            TRAT_ID,            7,
+        TRGR_END,               NIL,
+        TROB_SPACE,             NIL,
+        TRGR_HORIZ,             TRGR_PROPSPACES OR TRGR_ALIGN OR TRGR_CENTER,
+          TROB_TEXT,            NIL,
+            TRAT_TEXT,          'S_tring',
+            TRAT_ID,            7,
+        TROB_SPACE,             NIL,
+        TRGR_END,               NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_EQUALSHARE OR TRGR_CENTER,
+        TROB_SPACE,             NIL,
+        TROB_LINE,              TROF_HORIZ,
+        TROB_SPACE,             NIL,
+        TROB_TEXT,              NIL, TRAT_TEXT, 'BOOPSI', TRAT_FLAGS, TRTX_TITLE,
+        TROB_SPACE,             NIL,
+        TROB_LINE,              TROF_HORIZ,
+        TROB_SPACE,             NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_PROPSHARE OR TRGR_ALIGN OR TRGR_CENTER,
+        TROB_SPACE,             NIL,
+        TROB_BUTTON,            NIL, TRAT_ID, 2, TRAT_TEXT, '_Button',
+        TROB_SPACE,             NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_HORIZ,               TRGR_PROPSPACES OR TRGR_ALIGN OR TRGR_CENTER,
+        TROB_SPACE,             NIL,
+        TROB_TEXT,              NIL, TRAT_TEXT, '_File:', TRAT_ID, 10,
+        TROB_SPACE,             NIL,
+        TROB_BUTTON,            TRBT_GETFILE, TRAT_ID, 10, TRAT_TEXT, '',
+        TROB_SPACE,             NIL,
+        TROB_TEXT,              NIL, TRAT_TEXT, '_Drawer:', TRAT_ID, 11,
+        TROB_SPACE,             NIL,
+        TROB_BUTTON,            TRBT_GETDRAWER, TRAT_ID, 11, TRAT_TEXT, '',
+        TROB_SPACE,             NIL,
+        TROB_TEXT,              NIL, TRAT_TEXT, '_Entry:', TRAT_ID, 12,
+        TROB_SPACE,             NIL,
+        TROB_BUTTON,            TRBT_GETENTRY, TRAT_ID, 12, TRAT_TEXT, '',
+        TROB_SPACE,             NIL,
+      TRGR_END,                 NIL,
+      TROB_SPACE,               NIL,
+      TRGR_END,                 NIL,
+    TAG_END]
+  IF gadgetsProject:=Tr_OpenProject(mainApp, gadgetsTrWinTags)
+    Tr_LockProject(mainProject)
+    WHILE closeProject=FALSE
+      Tr_Wait(mainApp,NIL)
+      WHILE trmsg:=Tr_GetMsg(mainApp)
+        IF trmsg.project=gadgetsProject
+          class:=trmsg.class
+          SELECT class
+            CASE TRMS_CLOSEWINDOW; closeProject:=TRUE
+            CASE TRMS_ERROR;       WriteF('\s\n', Tr_GetErrorString(trmsg.data))
+          ENDSELECT
+        ENDIF
+        Tr_ReplyMsg(trmsg)
+      ENDWHILE
+    ENDWHILE
+    Tr_UnlockProject(mainProject)
+    Tr_CloseProject(gadgetsProject)
+  ELSE
+    DisplayBeep(NIL)
+  ENDIF
+ENDPROC
+  /* doGadgets */

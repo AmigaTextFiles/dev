@@ -1,0 +1,4 @@
+OPT MODULE, PREPROCESS
+OPT EXPORT
+
+#define n_time LONG

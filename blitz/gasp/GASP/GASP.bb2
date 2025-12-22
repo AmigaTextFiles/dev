@@ -1,0 +1,389 @@
+
+          ;#########################
+          ;#         GASP          #
+          ;#   Genetic Algorithm   #
+          ;#     Sample Packer     #
+          ;#                       #
+          ;#  Copyright (C) 1998   #
+          ;#          by           #
+          ;# Christos Dimitrakakis #
+          ;#                       #
+          ;#########################
+
+;  This program is Free software; you can redistribute it and/or modify
+;  it under the terms of version 2 of the GNU General Public License as
+;  published by the Free Software Foundation.
+;
+;  This program is distributed in the hope that it will be useful,
+;  but WITHOUT ANY WARRANTY; without even the implied warranty of
+;  MERCHANTABILITY OR FITNESS For A PARTICULAR PURPOSE.  See the
+;  GNU General Public License For more details.
+;
+;  You should have received a copy of the GNU General Public License
+;  along with this program; if not, write to the Free Software
+;  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+;
+
+
+
+
+
+;this program loads a sound called "GAMES:e1Thumb"
+;change it to something else, or use ASL requester, or
+;use argument reading..
+
+;then it saves the following files:
+
+;RAM:std_snd - the raw sound data
+;RAM:cmp_snd - error data
+;RAM:rec_snd - raw sound, recreated from the error data
+
+;after this, cmp_snd should be compressed using an external packer
+;implementation of this program as an XPK sublib, utilizing SHRI for
+;the final packing should produce the best results
+;the error data creation is not optmized...
+
+;anyway, the program works by doing a linear prediction on the waveform
+;and then saving the prediction error on a file
+;if the prediction is perfect then all errors are 0 and you get
+;100% compression, however, this is never the case :/
+
+;the linear predictor coefficients are initially set to
+;2,-1,0,0,..,0
+;which is the simple first order linear prediction
+;a population of solutions is randomly created
+;with the size of the population equaling pop_size
+;into which a couple of simple linear prediction coefficient
+;solutions are seeded during initialization
+;All solutions are evaluated then crossed-over
+;and mutated, then re-evaluated, etc.. for max_generations
+;iterations of the algorithm
+
+;demes - if this is true then crossover can only take
+;place in a linear neighbourhood of size neigh
+
+;tour_size - how many individuals to consider, when
+; a solution is choosing a mate. Large tour_size
+; means that better solutions are selected. If it
+; is too large then premature convergence may occur.
+; this depends on population and neighbourhood size
+
+
+
+
+
+break.b=False
+dbreak.b=False
+
+
+LoadSound 0,"games:e1thumb" ;change this to something else..
+
+
+DEFTYPE .sound *mysound
+*mysound=Addr Sound(0)
+InitBank 0,*mysound\_length*2,65536
+InitBank 1,*mysound\_length*2,65536
+src.l=Bank(0)
+dst.l=Bank(1)
+
+lngth.l=*mysound\_length*2
+
+LOSS.b=0
+nofcos=8
+
+NEWTYPE .coef
+  coef.q[16]
+End NEWTYPE
+
+pop_size=4000
+max_generations=100
+demes.b=True
+neigh.w=200
+tour_size=10
+Dim ind.coef(pop_size)
+Dim fit.l(pop_size)
+Dim y.q(nofcos)
+Dim a.q(nofcos)
+
+
+Statement copysound{snd.w,dst.l,ln.l}
+  For n.l=0 To ln-1
+    Poke.b dst,PeekSound(snd,n)
+    dst+1
+  Next n
+  NPrint n
+End Statement
+
+Statement filt{src.l,dst.l,ln.l}
+  y.q=0
+  For n.l=0 To ln-1
+    y1=y0
+    y0=Peek.b (src)
+    y=(y0+y1)/2
+    Poke.b dst,y
+    src+1
+    dst+1
+  Next n
+End Statement
+
+Function.l write_errors{src.l,dst.l,ln.l,coeff.l}
+  SHARED LOSS,nofcos,y(),a()
+  DEFTYPE .coef *mycos
+  *mycos=coeff
+  For f.w=1 To nofcos
+    a(f)=*mycos\coef[f]
+    y(f)=0
+  Next f
+  y.q=0
+  est.l=0
+  error.q=0
+
+  db.b=0
+
+  For n.l=0 To ln-1
+
+    y0=0
+    For f.w=1 To nofcos
+      y0+a(f)*y(f)
+    Next f
+    y0=Int(QLimit(y0,-128,127))
+
+    y=Peek.b(src)
+
+    For f=nofcos To 2 Step -1
+      y(f)=y(f-1)
+    Next f
+    y(1)=y
+
+    If db=0
+      error=(y-y0) ASR LOSS
+    Else
+      error=0
+    EndIf
+    ;db=1-db
+
+    Poke.b dst,error
+    est+QAbs(error)
+
+    src+1
+    dst+1
+  Next n
+  Function Return est
+End Function
+
+Statement reconstruct{src.l,dst.l,ln.l,coeff.l}
+  SHARED LOSS,nofcos,y(),a()
+  DEFTYPE .coef *mycos
+  *mycos=coeff
+  For f.w=1 To nofcos
+    a(f)=*mycos\coef[f]
+    y(f)=0
+  Next f
+  y.b=0
+  est.l=0
+  error.b=0
+
+  For n.l=0 To ln-1
+
+    y0=0
+    For f.w=1 To nofcos
+      y0+a(f)*y(f)
+    Next f
+    y0=Int(QLimit(y0,-128,127))
+
+
+    error=Peek.b(src)
+
+    y=y0+(error ASL LOSS)
+
+    For f=nofcos To 2 Step -1
+      y(f)=y(f-1)
+    Next f
+    y(1)=y
+
+    Poke.b dst,y
+
+    src+1
+    dst+1
+  Next n
+End Statement
+
+Statement save_raw{pos.l,ln.l,f$}
+  If Exists(f$)
+    KillFile f$
+  EndIf
+  If WriteFile(0,f$)
+    FileOutput 0
+    For n.l=0 To ln-1
+      byte.b=Peek.b(pos)
+      Print Chr$(byte)
+      pos+1
+    Next n
+    DefaultOutput
+    CloseFile 0
+  EndIf
+  NPrint ln
+End Statement
+
+
+Statement showind{l.l}
+  SHARED nofcos
+  DEFTYPE .coef *ind
+  *ind=l
+  For f.w=1 To nofcos
+    NPrint *ind\coef[f]
+  Next f
+End Statement
+
+
+.main
+copysound{0,src,lngth}
+save_raw{src,lngth,"RAM:std_snd"}
+filt{src,src,lngth}
+
+
+Gosub initpop
+bst.l=-1
+
+gen.w=1
+Repeat
+  NPrint "Generation ",gen
+  NPrint "Evaluation"
+  Gosub evalpop
+  NPrint "BST:",bst
+  showind{&ind(0)}
+  NPrint "Crossover"
+  Gosub crosspop
+  gen+1
+Until (gen>max_generations) OR (break=True) OR (dbreak=True)
+
+
+Gosub evalpop
+
+If dbreak=False
+  dummy.l=write_errors{src,dst,lngth,&ind(0)}
+  save_raw{dst,lngth,"RAM:cmp_snd"}
+  reconstruct{dst,src,lngth,&ind(0)}
+  save_raw{src,lngth,"RAM:rec_snd"}
+EndIf
+
+
+
+End
+
+
+.initpop
+  NPrint "Initializing population"
+  For n=1 To pop_size
+    For f.w=1 To nofcos
+      ind(n)\coef[f]=(Rnd-.5)*32
+    Next f
+  Next n
+
+CNIF 1=1
+  For n=1 To 2
+    j.w=Int(Rnd(pop_size))+1
+    ind(j)\coef[1]=2
+    ind(j)\coef[2]=-1
+    For f=3 To nofcos
+      ind(j)\coef[f]=0
+    Next f
+;    showind{&ind(j)}
+  Next n
+CEND
+Return
+
+
+
+.evalpop
+  percount1=10/pop_size
+  percount2=0
+  percount=0
+  j.w=1
+  Repeat
+    fit(j)=0
+    For trials.w=1 To 1
+;      strt.l=Int(Rnd(lngth-128))
+      strt.l=0
+      fit(j)+write_errors{src+strt,dst,256,&ind(j)}
+    Next trials
+
+    If bst=-1
+      bst=fit(j)
+    Else
+      If bst>fit(j)
+        bst=fit(j)
+        For f.w=1 To nofcos
+          ind(0)\coef[f]=ind(j)\coef[f]
+        Next f
+      EndIf
+    EndIf
+    percount2+percount1
+    If percount2>=1
+      percount2-1
+      percount+1
+      NPrint percount,"0% done"
+    EndIf
+    Gosub break_test
+    j+1
+  Until (j>pop_size) OR (break=True) OR (dbreak=True)
+Return
+
+.crosspop
+  j.w=1
+  neigh2=neigh/2
+  Repeat
+    winner.w=-1
+    For tour.w=1 To tour_size
+    If demes=False
+      cr.w=Int(Rnd*pop_size)+1
+    Else
+      cr.w=QLimit(j+(Int(Rnd*(neigh+1))-neigh2),1,pop_size)
+    EndIf
+      If winner=-1
+        winner=cr
+      Else
+        If fit(cr)<fit(winner)
+          winner=cr
+        EndIf
+      EndIf
+    Next tour
+    For f.w=1 To nofcos
+      perc=Rnd(4)-2
+      ind(j)\coef[f]=.5*((1+perc)*ind(j)\coef[f]-(1-perc)*ind(winner)\coef[f])
+    Next f
+    Gosub break_test
+    j+1
+  Until (j>pop_size) OR (break=True) OR (dbreak=True)
+Return
+
+
+.mutate
+  For n=1 To 10
+    mut.w=Int(Rnd*pop_size)+1
+    For f=1 To nofcos
+      If Rnd>.5
+        ind(n)\coef[f]=Rnd(65536)-32768
+      EndIf
+    Next f
+  Next n
+Return
+
+.break_test
+  If (SetSignal_(0,#SIGBREAKF_CTRL_C)AND #SIGBREAKF_CTRL_C)
+    break=True
+    NPrint ""
+    NPrint "interrupted"
+    NPrint "==========="
+  EndIf
+
+break_test2:
+  If (SetSignal_(0,#SIGBREAKF_CTRL_D)AND #SIGBREAKF_CTRL_D)
+    dbreak=True
+    NPrint ""
+    NPrint "***BREAK***"
+    NPrint ""
+  EndIf
+Return
+
+

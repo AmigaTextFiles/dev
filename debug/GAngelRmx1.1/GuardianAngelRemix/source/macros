@@ -1,0 +1,765 @@
+	IFND	MY_MACROS_I
+MY_MACROS_I		SET	1
+
+	ifnd	_LVOSupervisor
+	include	offsets/exec_lib.i
+	endc
+
+	ifd	__M68
+		macfile	Macros:equs
+	elseif
+		include	Macros:equs
+	endc
+
+;	ifd	SYS
+;		fail	"SYS eksisterer"
+;	elseif
+SYS		macro
+		iflt	NARG-1	;NARG=2
+		move.l	(\2),a6
+		endc
+		jsr	(_LVO\1,a6)
+		endm
+;	endc
+
+	ifnd	CALL
+CALL		macro
+		iflt	NARG-1	;NARG=2
+		move.l	(\2),a6
+		endc
+		jsr	(_LVO\1,a6)
+		endm
+	endc
+
+*------ LINKLIB for calling functions where A6 is incorrect:
+
+SYSX	MACRO   ; functionOffset,libraryBase
+	IFGT	NARG-2
+		FAIL	"!!! LINK MACRO - too many arguments !!!"
+	ENDC
+	MOVE.L	A6,-(SP)
+	MOVE.L	\2,A6
+	JSR	_LVO\1(A6)
+	MOVE.L  (SP)+,A6
+	ENDM
+
+MYCALL		macro
+		iflt	NARG-2	;NARG=2
+		move.l	(\2),a6
+		endc
+		jsr	(_LVO\1,a6)
+		endm
+
+	ifnd	EXEC
+EXEC		macro
+		movea.l	(EXECBase),a6
+		jsr	(_LVO\1,a6)
+		endm
+	endc
+
+GRAF		macro
+		move.l	(GrafBase),a6
+		jsr	(_LVO\1,a6)
+		endm
+
+DOS		macro
+		move.l	(DosBase),a6
+		jsr	(_LVO\1,a6)
+		endm
+
+INT		macro
+		move.l	(IntBase),a6
+		jsr	(_LVO\1,a6)
+		endm
+
+MMU		macro
+		move.l	MmuBase,a6
+		jsr	(_LVO\1,a6)
+		endm
+
+ENF		macro
+		move.l	EnfBase,a6
+		jsr	(_LVO\1,a6)
+		endm
+
+	IFND	EXEC_EXEC_LIB_I
+CALLEXEC	macro
+		move.l	(AbsExecBase).w,a6
+		jsr	(_LVO\1,a6)
+		endm
+
+WaitBlit	macro
+		btst.b	#6,(dmaconr,cust)
+.busy\@		btst.b	#6,(dmaconr,cust)
+		bne	.busy\@
+		btst.b	#6,(dmaconr,cust)
+		endm
+	ENDC
+
+GetVBR		macro
+		psh.l	a5/a6
+		movea.l	(EXECBase),a6
+		suba.l	a0,a0
+		btst.b	#AFB_68010,(AttnFlags+1,a6)
+		beq.b	.bull
+		lea	(.getvbr,pc),a5
+		pea	(.bull)
+		jmp	(_LVOSupervisor,a6)
+;		jsr	(_LVOSupervisor,a6)
+;		rts
+;		bra	.gotvbr\@
+.getvbr		movec	vbr,a0
+		rte
+.bull		pll.l	a5/a6
+		move.l	a0,(VBRBase)
+		endm
+
+	ifd	Openlib
+		fail
+	endc
+OpenLib		macro	;libname,libfail,version(optional)
+****** EXECBASE !MUST! exist before doing OpenLib
+		lea	(\1Name),a1
+	ifd	__M68
+junk	set	RARG
+junk2	set	NARG
+		ifne	RARG-3
+		 moveq	#0,d0
+		elseif
+		 move.l	#(\3),d0
+		endc	;narg 3
+	elseif
+		ifeq	NARG-3		;NARG=3
+		 move.l	#\3,d0
+		elseif
+		 moveq	#0,d0
+		endc	;narg 3
+	endc
+		EXEC	OpenLibrary
+		move.l	d0,(\1Base)
+		beq	\2
+		endm
+
+CloseLib	macro
+****** EXECBASE !MUST! exist before doing CloseLib
+		move.l	(\1Base),d0
+		beq.b	.base_empty\@
+		movea.l	d0,a1
+		EXEC	CloseLibrary
+		clr.l	(\1Base)
+.base_empty\@
+		endm
+
+LongToString	macro
+; \1 = data register
+; \2 dscratch
+; \3 areg output
+		ifne	NARG-3
+			fail	LongToString_wrong_arg_count
+		endc
+		moveq	#7,\2
+.nybble\@	swap	\2
+		rol.l	#4,\1
+		move.b	\1,\2
+		and.w	#$0f,\2
+		move.b	(Nybble2Ascii,pc,\2.w),(\3)+
+		swap	\2
+		dbra	\2,.nybble\@
+		endm
+
+NYBBLE2ASCII	macro
+		dc.b	"0123456789ABCDEF"
+		endm
+
+Byte2Ascii	macro	*!* a1 = conversion buffer
+			*!* d1 = byte
+			*!* d2 = scratch
+			*!* stack = result
+		moveq	#0,d2		; clear d2
+		move.b	d1,d2		; copy the byte
+		lsr.b	#4,d2		; get upper nybble
+		move.b	(a1,d2.l),d2	; store in reg
+		lsl.w	#8,d2		; "swap" bytes
+		and.w	#$000f,d1	; get lower nybble
+		move.b	(a1,d1.w),d2	; store in reg
+		move.w	d2,-(sp)	; psh result word on stack
+		endm			; that's it
+
+PrintByte	macro	*!* d0 = byte
+			*!* needs an error-label \1
+		psh.l	d1-d3/a0-a1/a6	; don't crash what we don't use
+		lea	(Nybble2Ascii),a1
+		move.b	d0,d1		; pass over the byte
+		Byte2Ascii
+		move.l	(StdOut),d1	; use standard output
+		move.l	sp,d2		; where is that friggin' byte
+		moveq	#2,d3		; and there is only 1 byte = 2 ascii
+		DOS	Write		; do your business
+		add.l	d3,sp		; reset the sp
+		pll.l	d1-d3/a0-a1/a6
+		tst.l	d0		; how is business today?
+		beq	\1		; it goes to hell
+		endm			; that's all!
+
+PrintWord	macro	*!* d0 = word
+			*!* needs an error-label \1
+		psh.l	d1-d3/a0-a1/a6	; don't crash what we doesn't use
+		lea	(Nybble2Ascii),a1
+		move.b	d0,d1		; get lower byte
+		Byte2Ascii
+;		moveq	#0,d1
+		move.w	d0,d1		;copy that word
+		lsr.w	#8,d1		;get upper byte
+		Byte2Ascii
+		move.l	(StdOut),d1	; use standard output
+		move.l	sp,d2		; where is that friggin' word
+		moveq	#4,d3		; and there are only 2 bytes = 4 ascii
+		DOS	Write		; do your business
+		add.l	d3,sp		; reset the sp
+		pll.l	d1-d3/a0-a1/a6
+		tst.l	d0		; how is business today?
+		beq	\1		; it goes to hell
+		endm			; that's all!
+
+PrintLong	macro	*!* d0 = long
+			*!* needs an error-label \1
+		psh.l	d1-d3/a0-a1/a6	; don't crash what we doesn't use
+		lea	(Nybble2Ascii),a1
+;		moveq	#0,d1
+		move.b	d0,d1		; get lower byte
+		Byte2Ascii
+		move.w	d0,d1		; move it over
+		lsr.w	#8,d1		; get byte 2
+		Byte2Ascii
+		swap	d0		; get upper word
+		move.b	d0,d1		; get byte 3
+		Byte2Ascii
+		move.w	d0,d1		; move it
+		lsr.w	#8,d1		; get upper byte
+		Byte2Ascii
+		move.l	(StdOut),d1	; use standard output
+		move.l	sp,d2		; where is that friggin' long
+		moveq	#8,d3		; and there are only 4 bytes = 8 ascii
+		DOS	Write		; do your business
+		add.l	d3,sp
+		pll.l	d1-d3/a0-a1/a6
+		tst.l	d0		; how is business today?
+		beq	\1		; it goes to hell
+		endm			; that's all!
+
+PrintStr	macro	*!* a0 = adr
+			*!* needs an error-label \1
+		psh.l	d0-d3/a1/a6	; don't crash what we doesn't use
+		move.l	(StdOut),d1	; use standard output
+		move.l	a0,d2		; buffer
+.findEOS\@	tst.b	(a0)+
+		bne	.findEOS\@
+		sub.l	d2,a0
+		subq.l	#1,a0
+		move.l	a0,d3
+		DOS	Write		; do your business
+		tst.l	d0		; how is business today?
+		pll.l	d0-d3/a1/a6
+		beq	\1		; it goes to hell
+		endm			; that's all!
+
+
+PrintSPC	macro	*!* d0 = number of spaces
+		ifeq	NARG-2		;NARG=2
+		moveq	#\2,d0
+		endc
+		psh.l	d1-d3/a0-a2/a6	; don't crash what we doesn't use
+		move.l	sp,a2		; remember the stack
+		cmp.l	#255,d0		; check if there are too many
+		bgt	.to_many_spaces\@
+		move.l	d0,d3		; this is how long the string is
+		lsr.w	#1,d0
+.putspaceonstack\@
+		move.w	#"  ",-(sp)	; use the stack to build the string
+		dbra	d0,.putspaceonstack\@
+		move.l	(StdOut),d1	; use standard output
+		move.l	sp,d2		; get that adress
+		DOS	Write		; let's see it
+		move.l	a2,sp		; restore the stack
+.to_many_spaces\@
+		pll.l	d1-d3/a0-a2/a6
+		tst.l	d0
+		beq	\1
+		endm
+
+
+PrintEOL	macro
+		psh.l	d0-d3/a0-a1/a6
+		move.l	(StdOut),d1
+		move.w	#$0a00,-(sp)	; stuff a word with LF on the stack
+		move.l	sp,d2		; we know where it is now
+		moveq	#1,d3		; just the return
+		DOS	Write		; get it done
+		addq.l	#2,sp		; fix the sp
+		tst.l	d0		; check for errors
+		pll.l	d0-d3/a0-a1/a6	; restore our status
+		beq	\1		; if there was an error...
+		endm
+
+
+MyWaitBlit	macro
+		btst.b	#6,(dmaconr,cust)
+;.mybusy\@	btst.b	#6,(dmaconr,cust)
+;		beq	.mybusy1\@
+;		move.w	a0,(col00,cust)
+.mybusy2\@	btst.b	#6,(dmaconr,cust)
+		bne	.mybusy2\@
+.mybusy1\@	btst.b	#6,(dmaconr,cust)
+		endm
+
+ABSMyWaitBlit	macro
+		btst.b	#6,(DMACONR)
+.mybusy2\@	btst.b	#6,(DMACONR)
+		bne	.mybusy2\@
+.mybusy1\@	btst.b	#6,(DMACONR)
+		endm
+
+*debugged
+BNasty		macro
+		move.w	#%1000010000000000,(dmacon,cust)	;blitternasty
+		endm
+ABSBNasty	macro
+		move.w	#%1000010000000000,(DMACON)	;blitternasty
+		endm
+*debugged
+BNice		macro
+		move.w	#%0000010000000000,(dmacon,cust)	;blitternice
+		endm
+ABSBNice	macro
+		move.w	#%0000010000000000,(DMACON)	;blitternice
+		endm
+*debugged
+HoldAndGo	macro
+;		BNasty
+;		MyWaitBlit
+		OSWaitBlit
+;		jsr	$fc59ec	;jsr (a5) where a5=-228(GFXBASE)
+;		BNice
+		endm
+*debugged
+ABSHoldAndGo	macro
+		ABSBNasty
+		ABSMyWaitBlit
+		ABSBNice
+		endm
+
+OSWaitBlit	macro
+		psh.l	d0/d1/a0/a1/a6
+		GRAF	WaitBlit
+		pll.l	d0/d1/a0/a1/a6
+		endm
+
+ABSSYSHoldAndGo	macro
+		ABSBNasty
+		SYS	WaitBlit
+		ABSBNice
+		endm
+
+ABSCALLHoldAndGo	macro
+		ABSBNasty
+		move.l	a6,-(sp)
+		GRAF	WaitBlit
+		move.l	(sp)+,a6
+		ABSBNice
+		endm
+
+AbsStopCopper	macro
+		move.w	#%0000000010000000,(DMACON)
+		endm
+
+StopCopper	macro
+		move.w	#%0000000010000000,(dmacon,cust)
+		endm
+*debugged
+AbsCopperStrobe	macro
+		move.w	d0,(COPJMP1)		; anything will strobe
+		endm
+
+CopperStrobe	macro
+		move.w	d0,(copjmp1,cust)	; anything will strobe
+		endm
+
+StartCopper	macro
+		move.w	#%1000000010000000,(dmacon,cust)
+		CopperStrobe
+		endm
+
+AbsStartCopper	macro
+		move.w	#%1000000010000000,(DMACON)
+		AbsCopperStrobe
+		endm
+
+AbsUseCopperlist	macro	*!* needs 1 parameter
+		AbsStopCopper
+		move.l	#\1,(COP1LC)
+		AbsStartCopper
+		endm
+
+UseCopperlist	macro	*!* needs 1 parameter
+		StopCopper
+		move.l	#\1,(cop1lc,cust)
+		StartCopper
+		endm
+
+WaitFirebutton	macro
+.press\@	btst.b	#7,CIAApra
+		bne.b	.press\@
+		endm
+
+LMB		macro
+.getleft\@	btst.b	#6,$bfe001
+		bne	.getleft\@
+		endm
+
+LMB_ud		macro
+.getleftd\@	btst.b	#6,$bfe001
+		bne	.getleftd\@
+.getleftu\@	btst.b	#6,$bfe001
+		beq	.getleftu\@
+		endm
+
+AbsRMB		macro
+.absgetright\@	btst.b	#2,$dff016
+		bne	.absgetright\@
+		endm
+
+RMB		macro
+.getright\@	btst.b	#2,(potinp,cust)
+		bne	.getright\@
+		endm
+
+RMB_ud		macro
+.getrightd\@	btst.b	#2,(potinp,cust)
+		bne	.getrightd\@
+.getrightu\@	btst.b	#2,(potinp,cust)
+		bne	.getrightu\@
+		endm
+
+AbsRMB_ud		macro
+.agetrightd\@	btst.b	#2,$dff016
+		bne	.agetrightd\@
+.agetrightu\@	btst.b	#2,$dff016
+		bne	.agetrightu\@
+		endm
+
+RMBjump		macro
+		btst.b	#2,(potinp,cust)
+		beq	\1
+		endm
+
+AbsRMBjump	macro
+		btst.b	#2,POTINP
+		beq	\1
+		endm
+
+LMBjump		macro
+		btst.b	#6,$bfe001
+		beq	\1
+		endm
+
+LMBjsr		macro
+		btst.b	#6,$bfe001
+		bne	.nolmb\@
+		bsr	\1
+.nolmb\@	endm
+
+MMBjump		macro
+		btst.b	#4,(potinp,cust)
+		beq	\1
+		endm
+
+AbsMMBjump	macro
+		btst.b	#4,POTINP
+		beq	\1
+		endm
+
+JOY1jmp		macro
+		btst.b	#7,(CIAApra)
+		beq	\1
+		endm
+
+psh	macro
+	movem.\0	\1,-(sp)
+	endm
+
+pll	macro
+	movem.\0	(sp)+,\1
+	endm
+
+IntSave		macro
+		move.w	(intenar,cust),d0
+		or.w	#%1000000000000000,d0
+		move.w	d0,oldintenaset
+;		eor.w	#$ffff,d0
+;		move.w	d0,oldintenaclear
+;		move.w	#%0111111111111111,(intena,cust)
+		endm
+
+ABSIntSave	macro
+		move.w	INTENAR,d0
+		or.w	#%1000000000000000,d0
+		move.w	d0,oldintenaset
+;		eor.w	#$ffff,d0
+;		move.w	d0,oldintenaclear
+;		move.w	#%0111111111111111,INTENA
+		endm
+
+IntRestore	macro
+		move.w	#%0111111111111111,(intena,cust)
+		move.w	oldintenaset,(intena,cust)
+		endm
+
+ABSIntRestore	macro
+		move.w	#%0111111111111111,INTENA
+		move.w	oldintenaset,INTENA
+		endm
+
+IntOff		macro
+		move.w	#%0100000000000000,(intena,cust)
+		endm
+
+AbsIntOff	macro
+		move.w	#%0100000000000000,(INTENA)
+		endm
+
+IntOn		macro
+		move.w	#%1100000000000000,(intena,cust)
+		endm
+
+AbsIntOn	macro
+		move.w	#%1100000000000000,(INTENA)
+		endm
+
+DMASave		macro
+		move.w	(dmaconr,cust),d0	;ta vare paa dma-status
+		and.w	#%1000011111111111,d0	;fjern uoenskede bits
+		or.w	#%1000000000000000,d0	;disse skal settes
+		move.w	d0,olddmaset		;bevar status
+		eor.w	#%1000011111111111,d0	;nullstilte skal slettes
+		move.w	d0,olddmaclear	;bevar status
+		endm
+
+ABSDMASave		macro
+		move.w	(DMACONR),d0		;ta vare paa dma-status
+		and.w	#%1000011111111111,d0	;fjern uoenskede bits
+		or.w	#%1000000000000000,d0	;disse skal settes
+		move.w	d0,(olddmaset)		;bevar status
+		eor.w	#%1000011111111111,d0	;nullstilte skal slettes
+		move.w	d0,(olddmaclear)	;bevar status
+		endm
+
+DMARestore	macro
+		move.w	(olddmaset),(dmacon,cust)
+		move.w	(olddmaclear),(dmacon,cust)
+		endm
+
+DMAClear	macro
+		move.w	#%0000011111111111,(dmacon,cust)
+		endm
+
+DMAAllBplCopBlt	macro
+		move.w	#%1000001111000000,(dmacon,cust)
+		endm
+
+KillSprites	macro
+		move.w	#%0000000000100000,(dmacon,cust)	; no sprite dma
+		move.w	d0,-(sp)
+		clr.w	d0
+		move.w	d0,(spr0data,cust)
+		move.w	d0,(spr0datb,cust)
+		move.w	d0,(spr0ctl,cust)
+		move.w	d0,(spr1data,cust)
+		move.w	d0,(spr1datb,cust)
+		move.w	d0,(spr1ctl,cust)
+		move.w	d0,(spr2data,cust)
+		move.w	d0,(spr2datb,cust)
+		move.w	d0,(spr2ctl,cust)
+		move.w	d0,(spr3data,cust)
+		move.w	d0,(spr3datb,cust)
+		move.w	d0,(spr3ctl,cust)
+		move.w	d0,(spr4data,cust)
+		move.w	d0,(spr4datb,cust)
+		move.w	d0,(spr4ctl,cust)
+		move.w	d0,(spr5data,cust)
+		move.w	d0,(spr5datb,cust)
+		move.w	d0,(spr5ctl,cust)
+		move.w	d0,(spr6data,cust)
+		move.w	d0,(spr6datb,cust)
+		move.w	d0,(spr6ctl,cust)
+		move.w	d0,(spr7data,cust)
+		move.w	d0,(spr7datb,cust)
+		move.w	d0,(spr7ctl,cust)
+		move.w	(sp)+,d0
+		endm
+
+AbsWaitTop	macro
+.spin1\@	move.w	(VPOSR),d0
+		andi.w	#$0001,d0
+		beq.b	.spin1\@
+.spin2\@	move.w	(VPOSR),d0
+		andi.w	#$0001,d0
+		bne.b	.spin2\@
+		endm
+
+WaitTop		macro
+.spin3\@	move.w	(vposr,cust),d0
+		and.w	#$0001,d0
+		beq.b	.spin3\@
+.spin4\@	move.w	(vposr,cust),d0
+		and.w	#$0001,d0
+		bne.b	.spin4\@
+		endm
+
+WaitLine256	macro
+.spin5\@	move.w	(vposr,cust),d0
+		and.w	#$0001,d0
+		beq.b	.spin5\@
+		endm
+
+WaitLine0	macro
+.spin6\@	move.w	(vposr,cust),d0
+		and.w	#$0001,d0
+		bne.b	.spin6\@
+		endm
+
+WaitLine	macro
+		iflt	\1-256
+.waitl\@	cmpi.b	#\1,(vhposr,cust)
+		bne.b	.waitl\@
+		else
+.spin5\@	move.w	(vposr,cust),d0
+		andi.w	#$0001,d0
+		beq.b	.spin5\@
+.waitl2\@	cmpi.b	#(\1-256),(vhposr,cust)
+		bne.b	.waitl2\@
+		endc
+		endm
+
+AbsWaitLine	macro
+		iflt	\1-256
+.waitl\@	cmpi.b	#\1,(VHPOSR)
+		bne.b	.waitl\@
+		else
+.spin5\@	move.w	(VPOSR),d0
+		andi.w	#$0001,d0
+		beq.b	.spin5\@
+.waitl2\@	cmpi.b	#(\1-256),(VHPOSR)
+		bne.b	.waitl2\@
+		endc
+		endm
+
+IN_BLIT		macro
+
+	ifeq	1
+		ifd	Debug
+			cmp.b	#no,(Debug)
+			beq	.debugdone\@
+	endc
+		endc
+		tst.w	(_wD_owns_blitter)
+		bne	.debugdone\@
+		move.w	#1,(_wD_owns_blitter)
+		psh.l	d0/d1/a0/a1/a6
+		GRAF	OwnBlitter
+		GRAF	WaitBlit
+		pll.l	d0/d1/a0/a1/a6
+.debugdone\@
+		endm
+
+OUT_BLIT	macro
+	ifeq	1
+		ifd	Debug
+			cmp.b	#no,(Debug)
+			beq	.debugdone\@
+		endc
+	endc
+		tst.w	(_wD_owns_blitter)
+		beq	.debugdone\@
+		clr.w	(_wD_owns_blitter)
+		psh.l	d0/d1/a0/a1/a6
+		GRAF	DisownBlitter
+		pll.l	d0/d1/a0/a1/a6
+.debugdone\@
+		endm
+
+	ifnd	AFLINE
+AFLINE		macro
+		dc.w	\1
+		endm
+	endc
+
+setz		macro
+		ori.b	#4,CCR
+		endm
+
+clrz		macro
+		andi.b	#251,CCR
+		endm
+
+notz		macro
+		eori.b	#4,CCR
+		endm
+
+setc		macro
+		ori.b	#1,CCR
+		endm
+
+clrc		macro
+		andi.b	#254,CCR
+		endm
+
+notc		macro
+		eori.b	#1,CCR
+		endm
+
+setx		macro
+		ori.b	#16,CCR
+		endm
+
+clrx		macro
+		andi.b	#239,CCR
+		endm
+
+notx		macro
+		eori.b	#16,CCR
+		endm
+
+setv		macro
+		ori.b	#2,CCR
+		endm
+
+clrv		macro
+		andi.b	#253,CCR
+		endm
+
+notv		macro
+		eori.b	#2,CCR
+		endm
+
+bbcdo		macro
+		ifc	'\2',''
+		fail
+		endc
+		bcc	bbcdo_exit\@
+		moveq	#%10000,\1
+		and	ccr,\1
+		bne	\2
+bbcdo_exit\@
+		endm
+
+bbcdno		macro
+		ifc	'\2',''
+		fail
+		endc
+		bcc	\2
+		moveq	#%10000,\1
+		and	ccr,\1
+		beq	\2
+		endm
+
+	ENDC	;!MY_MACROS_I

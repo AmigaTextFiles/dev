@@ -1,0 +1,2504 @@
+
+#include "flags.h"
+
+#include <ctype.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+#include "defines.h"
+
+#include "parse.h"
+#include "pass_1.h"
+#include "stack.h"
+#include "include_file.h"
+#include "printf.h"
+
+
+int parse_string_length(char *end);
+
+int g_input_number_error_msg = YES, g_ss, g_string_size, g_input_float_mode = OFF, g_parse_floats = YES;
+int g_expect_calculations = YES, g_input_parse_if = NO, g_input_allow_leading_hashtag = NO, g_input_has_leading_hashtag = NO, g_input_parse_special_chars = YES;
+int g_input_allow_leading_ampersand = NO, g_plus_and_minus_ends_label = NO, g_get_next_token_use_substitution = YES;
+int g_newline_beginning = ON, g_parsed_double_decimal_numbers = 0, g_operand_hint, g_operand_hint_type;
+int g_input_number_turn_values_into_strings = NO;
+char g_label[MAX_NAME_LENGTH + 1];
+char g_unevaluated_expression[256];
+char g_expanded_macro_string[MAX_NAME_LENGTH + 1];
+double g_parsed_double;
+
+#ifdef SPC700
+int g_input_number_expects_dot = NO;
+#endif
+
+extern int g_source_pointer, g_source_file_size, g_parsed_int, g_macro_active, g_sizeof_g_tmp;
+extern char *g_buffer, *g_tmp, g_current_directive[256], *g_label_stack[256];
+extern unsigned char g_asciitable[256];
+extern struct active_file_info *g_active_file_info_first, *g_active_file_info_last, *g_active_file_info_tmp;
+extern struct definition *g_tmp_def;
+extern struct map_t *g_defines_map;
+extern struct macro_runtime *g_macro_stack, *g_macro_runtime_current;
+extern struct function *g_functions_first;
+extern int g_latest_stack, g_asciitable_defined, g_global_label_hint, g_parsing_function_body, g_resolve_stack_calculations;
+
+PROFILE_GLOBALS_EXTERN();
+
+
+int is_string_ending_with(char *s, char *e) {
+
+  int length_s, length_e, k;
+  
+  if (s == NULL || e == NULL)
+    return -1;
+
+  length_s = (int)strlen(s);
+  length_e = (int)strlen(e);
+
+  if (length_e > length_s)
+    return -1;
+
+  for (k = 0; k < length_e; k++) {
+    if (s[length_s - length_e + k] != e[k])
+      return -1;
+  }
+
+  return 1;
+}
+
+
+int strcaselesscmpn(char *s1, char *s2, int length) {
+
+  int n = 0;
+  
+  if (s1 == NULL || s2 == NULL)
+    return 0;
+
+  while (*s1 != 0 && *s2 != 0) {
+    if (toupper((int)*s1) != toupper((int)*s2))
+      return 1;
+    s1++;
+    s2++;
+
+    n++;
+    if (n >= length)
+      return 0;
+  }
+
+  if (*s2 != 0)
+    return 1;
+  if (*s1 != 0)
+    return -1;
+
+  return 0;
+}
+
+
+int compare_next_token(char *token) {
+
+  int ii, t, d, k, length;
+  char e;
+  
+  length = (int)strlen(token);
+
+  /* skip white space */
+  ii = g_source_pointer;
+  for (e = g_buffer[ii]; e == ' ' || e == ',' || e == '\\' || e == 0x0A; e = g_buffer[++ii]) {
+    if (e == '\\' && g_buffer[ii + 1] != 0x0A)
+      break;
+  }
+
+  /* HACK: if token == '=', then we'll take this route. in general compare_next_token() should be
+     called with an alphabetical string... */
+  if (length == 1 && token[0] == '=') {
+    if (e == '=')
+      return SUCCEEDED;
+  }
+  
+  /* MACRO mode? */
+  if (g_macro_active != 0 && e == '\\') {
+    if (g_buffer[ii + 1] == '@') {
+      char tmp_buffer[64];
+
+      snprintf(tmp_buffer, sizeof(tmp_buffer), "%d", g_macro_runtime_current->macro->calls - 1);
+
+      e = tmp_buffer[0];
+      for (t = 0; t < length && e != 0; ) {
+        if (toupper((int)token[t]) != toupper((int)e))
+          return FAILED;
+        t++;
+        e = tmp_buffer[t];
+      }
+    }
+    else if (g_buffer[ii + 1] == '?') {
+      /* TODO: do we need to implement this? */
+      return FAILED;
+    }
+    else {
+      for (d = 0, k = 0; k < 16; k++) {
+        e = g_buffer[++ii];
+        if (e >= '0' && e <= '9')
+          d = (d * 10) + e - '0';
+        else
+          break;
+      }
+
+      if (d > g_macro_runtime_current->supplied_arguments) {
+        if (g_input_number_error_msg == YES) {
+          print_error(ERROR_NONE, "COMPARE_NEXT_SYMBOL: Macro \"%s\" wasn't called with enough arguments.\n", g_macro_runtime_current->macro->name);
+        }
+        return FAILED;
+      }
+
+      ii = g_macro_runtime_current->argument_data[d - 1]->start;
+
+      e = g_buffer[ii];
+      for (t = 0; t < length && e != ' ' && e != ',' && e != 0x0A; ) {
+        if (toupper((int)token[t]) != toupper((int)e))
+          return FAILED;
+        t++;
+        e = g_buffer[++ii];
+      }
+    }
+  }
+  /* not in MACRO mode */
+  else {
+    for (t = 0; t < length && e != ' ' && e != ',' && e != 0x0A; ) {
+      if (toupper((int)token[t]) != toupper((int)e))
+        return FAILED;
+      t++;
+      e = g_buffer[++ii];
+    }
+
+    /* token has been terminated, but the other string has not? */
+    if (t == length && e != ' ' && e != ',' && e != 0x0A)
+      return FAILED;
+  }
+
+  if (t == length)
+    return SUCCEEDED;
+
+  return FAILED;
+}
+
+
+int input_next_string(void) {
+
+  int k, curly_braces = 0;
+  char e;
+  
+  /* skip white space */
+  for (e = g_buffer[g_source_pointer++]; e == ' ' || e == ','; e = g_buffer[g_source_pointer++])
+    ;
+
+  if (e == 0x0A)
+    return INPUT_NUMBER_EOL;
+
+  /* we assume it is a label */
+  g_label[0] = e;
+  for (k = 1; k < MAX_NAME_LENGTH; k++) {
+    e = g_buffer[g_source_pointer++];
+    if (e == '{')
+      curly_braces++;
+    else if (e == '}')
+      curly_braces++;
+    else if (e == 0x0A || e == ',') {
+      g_source_pointer--;
+      break;
+    }
+    else if (e == '(' || e == ')') {
+      g_source_pointer--;
+      break;
+    }
+    else if (curly_braces <= 0 && e == ' ')
+      break;
+    g_label[k] = e;
+  }
+
+  if (k == MAX_NAME_LENGTH) {
+    if (g_input_number_error_msg == YES) {
+      print_error(ERROR_NUM, "The string is too long (max %d characters allowed). Please adjust MAX_NAME_LENGTH in shared.h and recompile WLA.\n", MAX_NAME_LENGTH);
+    }
+    return FAILED;
+  }
+
+  g_label[k] = 0;
+
+  /* expand e.g., \1 and \@ */
+  if (g_macro_active != 0) {
+    if (expand_macro_arguments(g_label) == FAILED)
+      return FAILED;
+  }
+
+  if (expand_variables_inside_string(g_label, sizeof(g_label), &k) == FAILED)
+    return FAILED;
+  
+  return SUCCEEDED;
+}
+
+
+static int _input_number_return_definition(struct definition *def) {
+
+  if (def->type == DEFINITION_TYPE_VALUE) {
+    g_parsed_int = (int)def->value;
+
+    if (g_operand_hint == HINT_NONE) {
+      if (g_parsed_int > 0xFFFFFF)
+        g_operand_hint = HINT_32BIT;
+      else if (g_parsed_int > 0xFFFF && g_parsed_int <= 0xFFFFFF)
+        g_operand_hint = HINT_24BIT;
+      else if (g_parsed_int > 0xFF)
+        g_operand_hint = HINT_16BIT;
+      else
+        g_operand_hint = HINT_8BIT;
+      
+      g_operand_hint_type = HINT_TYPE_DEDUCED;
+
+#if defined(MC6809)
+      /* 5-bit values need this */
+      if (g_parsed_int >= -16 && g_parsed_int <= 15) {
+        g_operand_hint = HINT_NONE;
+        g_operand_hint_type = HINT_TYPE_NONE;
+      }
+#endif
+    }
+      
+    g_parsed_double = (double)g_parsed_int;
+    
+    return SUCCEEDED;
+  }
+  else if (def->type == DEFINITION_TYPE_STACK) {
+    /* wrap the referenced, existing stack calculation inside a new stack calculation as stack
+       calculation contains a write. the 2nd, 3rd etc. reference don't do anything by themselves.
+       but wrapping creates a new stack calculation that also makes a write */
+    stack_create_stack_stack((int)def->value);
+    return INPUT_NUMBER_STACK;
+  }
+  else if (def->type == DEFINITION_TYPE_ADDRESS_LABEL) {
+    if (g_label[0] == ':') {
+      /* we need to keep the ':' prefix */
+      if (strlen(def->string) >= MAX_NAME_LENGTH-1) {
+        if (g_input_number_error_msg == YES) {
+          print_error(ERROR_NUM, "The label is too long (max %d characters allowed). Please adjust MAX_NAME_LENGTH in shared.h and recompile WLA.\n", MAX_NAME_LENGTH);
+        }
+        return FAILED;          
+      }
+      snprintf(g_label, sizeof(g_label), ":%.254s", def->string);
+      g_string_size = def->size + 1;
+    }
+    else {
+      g_string_size = def->size;
+      memcpy(g_label, def->string, g_string_size);
+      g_label[g_string_size] = 0;
+    }
+  }
+  else {
+    g_string_size = def->size;
+    memcpy(g_label, def->string, g_string_size);
+    g_label[g_string_size] = 0;
+    
+    return INPUT_NUMBER_STRING;
+  }
+
+  /* are labels 16-bit by default? */
+  if (g_operand_hint_type != HINT_TYPE_GIVEN && g_global_label_hint == HINT_16BIT) {
+    g_operand_hint = HINT_16BIT;
+    g_operand_hint_type = HINT_TYPE_GIVEN;
+  }
+
+  process_special_labels(g_label);
+  
+  return INPUT_NUMBER_ADDRESS_LABEL;      
+}
+
+
+int expand_variables_inside_string(char *label, int max_size, int *length) {
+
+  char tmp[MAX_NAME_LENGTH + 1], formatting[8], substitution[MAX_NAME_LENGTH + 1], local[MAX_NAME_LENGTH + 1];
+  int size, i, k, substitutions = 0, max_size_tmp, p, parsed_int, input_size = 0;
+  int q, size_substitution;
+
+  /* quick exit if no curly braces are found */
+  i = 0;
+  k = NO;
+  while (label[i] != 0) {
+    if (label[i] == '{')
+      k = YES;
+    i++;
+    input_size++;
+  }
+
+  if (k == NO)
+    return SUCCEEDED;
+
+  input_size++;
+  
+  /* copy label -> local as label might be g_label that stack calculator uses */
+  if (input_size > (int)sizeof(local)) {
+    print_error(ERROR_NUM, "Buffer for substitution is too small! Please submit a bug report!\n");
+    return FAILED;
+  }
+
+  strcpy(local, label);
+  
+  max_size_tmp = sizeof(tmp);
+  
+  if (length == NULL)
+    size = input_size;
+  else
+    size = *length;
+
+  for (i = 0, k = 0; i < size && k < max_size_tmp; i++) {
+    if (local[i] == '{') {
+      int use_formatting = NO;
+      
+      i++;
+      
+      /* skip whitespace */
+      while (i < size && local[i] == ' ')
+        i++;
+
+      /* do we have formatting? */
+      if (i+5 < size && local[i] == '%' && local[i+1] == '.') {
+        /* yes! */
+        int f = 0, n;
+        char c;
+
+        use_formatting = YES;
+        formatting[f++] = '%';
+        i++;
+
+        if (local[i] != '.') {
+          print_error(ERROR_NUM, "The formatting string must begin with \"%%.\".\n");
+          return FAILED;
+        }
+
+        formatting[f++] = '.';
+        i++;
+
+        for (n = 0; n < 3; n++, i++) {
+          c = local[i];
+          if (c == '{')
+            break;
+          if (!((c >= '0' && c <= '9') || c == 'x' || c == 'X' || c == 'd' || c == 'i')) {
+            print_error(ERROR_NUM, "Unsupported formatting symbol '%c'.\n", c);
+            return FAILED;
+          }
+
+          formatting[f++] = c;
+        }
+
+        if (local[i] != '{') {
+          print_error(ERROR_NUM, "Error in formatting. Formatting string is too long?\n");
+          return FAILED;
+        }
+
+        formatting[f] = 0;
+        i++;
+      }
+
+      /* launch stack calculator */
+      p = stack_calculate(&local[i], &parsed_int, &i, YES);
+      i++;
+
+      if (p == STACK_CALCULATE_DELAY || p == INPUT_NUMBER_STACK) {
+        print_error(ERROR_NUM, "Postponed calculation is not suitable for substitution as we need immediate results.\n");
+        return FAILED;
+      }
+
+      if (p == SUCCEEDED || p == INPUT_NUMBER_FLOAT) {
+        if (p == INPUT_NUMBER_FLOAT)
+          parsed_int = (int)g_parsed_double;
+        
+        if (use_formatting == YES)
+          snprintf(substitution, sizeof(substitution), formatting, parsed_int);
+        else
+          snprintf(substitution, sizeof(substitution), "%d", parsed_int);
+      }
+      else if (p == STACK_RETURN_STRING) {
+        if (use_formatting == YES) {
+          print_error(ERROR_NUM, "Cannot use formatting with strings.\n");
+          return FAILED;
+        }
+        strcpy(substitution, g_label);
+      }
+      else if (p == STACK_RETURN_LABEL) {
+        print_error(ERROR_NUM, "Label \"%s\" cannot be used in a substitution here as its value is unknown.\n", g_label);
+        return FAILED;
+      }
+      else if (p == FAILED)
+        return FAILED;
+      else {
+        print_error(ERROR_NUM, "Unhandled return type %d from stack_calculate()! Please submit a bug report!\n", p);
+        return FAILED;
+      }
+
+      /* perform substitution */
+      size_substitution = (int)strlen(substitution);
+      for (q = 0; k < max_size_tmp && q < size_substitution; q++)
+        tmp[k++] = substitution[q];
+          
+      substitutions++;
+
+      if (use_formatting == YES) {
+        /* skip whitespace */
+        while (i+1 < size && local[i+1] == ' ')
+          i++;
+        if (i+1 < size && local[i+1] == '}')
+          i++;
+        else {
+          print_error(ERROR_NUM, "The end of the substitution is missing a '}'. Got '%c' instead.\n", local[i+1]);
+          return FAILED;
+        }
+      }
+
+      continue;
+    }
+
+    tmp[k++] = local[i];
+  }
+
+  if (substitutions > 0) {
+    /* terminate the string with substitutions */
+    if (k < max_size_tmp)
+      tmp[k] = 0;
+    else {
+      print_error(ERROR_NUM, "Cannot perform substitutions for string \"%s\", buffer is too small.\n", local);
+      return FAILED;
+    }
+
+    /* copy back the string with substitutions */
+    if (k < max_size) {
+      strcpy(label, tmp);
+      if (length != NULL)
+        *length = k;
+    }
+    else {
+      print_error(ERROR_NUM, "Cannot perform substitutions for string \"%s\", buffer is too small.\n", local);
+      return FAILED;
+    }
+  }
+
+  return SUCCEEDED;
+}
+
+
+static int _parse_value_into_string(char e) {
+
+  int k;
+        
+  /* override! */
+  g_label[0] = e;
+
+  for (k = 1; k < MAX_NAME_LENGTH; k++, g_source_pointer++) {
+    e = g_buffer[g_source_pointer];
+    g_label[k] = e;
+    if (e >= '0' && e <= '9')
+      continue;
+    else if (e >= 'a' && e <= 'z')
+      continue;
+    else if (e >= 'A' && e <= 'Z')
+      continue;
+    break;
+  }
+
+  g_label[k] = 0;
+  g_string_size = k;
+        
+  return INPUT_NUMBER_STRING;
+}
+
+
+#ifdef PROFILE_FUNCTIONS
+int _input_number(void) {
+#else
+int input_number(void) {
+#endif
+
+  char label_tmp[MAX_NAME_LENGTH + 1];
+  unsigned char e, ee, check_if_a_definition = YES, can_have_calculations = YES, use_substitution = NO;
+  int k, p, q, spaces = 0, curly_braces = 0;
+  double decimal_mul;
+#ifdef SPC700
+  int dot = 0;
+#endif
+
+
+  g_operand_hint = HINT_NONE;
+  g_operand_hint_type = HINT_TYPE_NONE;
+  g_input_has_leading_hashtag = NO;
+      
+  /* skip white space */
+  for (e = g_buffer[g_source_pointer++]; e == ' ' || e == ',' || e == '\\'; e = g_buffer[g_source_pointer++]) {
+    if (e == '\\' && g_buffer[g_source_pointer] == 0xA) {
+      g_source_pointer++;
+      next_line();
+    }
+    else if (e == '\\' && g_buffer[g_source_pointer] != 0xA)
+      break;
+  }
+
+  if (e == 0x0A)
+    return INPUT_NUMBER_EOL;
+
+  /* using substitution with quoted strings? */
+  if (e == '{') {
+    int old_position = g_source_pointer;
+    unsigned char old_e = e;
+    
+    /* skip white space */
+    while (g_buffer[g_source_pointer] == ' ')
+      g_source_pointer++;
+
+    e = g_buffer[g_source_pointer++];
+
+    if (e == '"') {
+      /* later when we parse a quoted string we'll check that it's followed by a '}', and
+         we'll use substitution in that quoted string... */
+      use_substitution = YES;
+    }
+    else {
+      /* roll back */
+      e = old_e;
+      g_source_pointer = old_position;
+    }
+  }
+  
+  /* are we parsing a macro argument, and could it begin with a '#' (ARG_IMMEDIATE)? */
+  if (g_input_allow_leading_hashtag == YES) {
+    if (e == '#') {
+      g_input_has_leading_hashtag = YES;
+      e = g_buffer[g_source_pointer++];
+    }
+  }
+
+  /* are we parsing a macro argument, and could it begin with a '&' (return
+     label as it is, don't check if it's a definition) */
+  if (g_input_allow_leading_ampersand == YES) {
+    if (e == '&') {
+      check_if_a_definition = NO;
+      can_have_calculations = NO;
+      e = g_buffer[g_source_pointer++];
+    }
+  }
+
+  if (g_expect_calculations == YES && can_have_calculations == YES) {
+    /* check the type of the expression */
+    p = g_source_pointer;
+    ee = e;
+    while (ee != 0x0A) {
+      if (ee == '{')
+        curly_braces++;
+      else if (ee == '}')
+        curly_braces--;
+      /* string / symbol -> no calculating */
+      else if (g_input_parse_if == NO && ee == '"')
+        break;
+      else if (ee == ',')
+        break;
+      else if (g_input_parse_if == NO && ((ee == '=' && g_buffer[p] == '=') || (ee == '!' && g_buffer[p] == '=')))
+        break;
+      else if (ee == ' ')
+        spaces++;
+      else if (curly_braces <= 0 && (ee == '-' || ee == '+' || ee == '*' || ee == '/' || ee == '&' || ee == '|' || ee == '^' || ee == '(' ||
+                                     ee == '<' || ee == '>' || ee == '#' || ee == '~' || ee == ':' || ee == '!' || (g_input_parse_if == YES && ee == '='))) {
+        if (ee == ':' && spaces > 0)
+          break;
+        
+        /* launch stack calculator */
+        p = stack_calculate(&g_buffer[g_source_pointer - 1], &g_parsed_int, &g_source_pointer, NO);
+
+        if (p == STACK_CALCULATE_DELAY)
+          break;
+        else if (p == STACK_RETURN_LABEL)
+          return INPUT_NUMBER_ADDRESS_LABEL;
+        else if (p == STACK_RETURN_STRING)
+          return INPUT_NUMBER_STRING;
+        else
+          return p;
+      }
+      ee = g_buffer[p];
+      p++;
+    }
+  }
+
+  /* MACRO */
+  if (g_macro_active != 0 && e == '?' && g_buffer[g_source_pointer] >= '1' && g_buffer[g_source_pointer] <= '9') {
+    struct macro_argument *ma;
+    
+    for (g_parsed_int = 0, k = 0; k < 4; k++) {
+      e = g_buffer[g_source_pointer++];
+      if (e >= '0' && e <= '9')
+        g_parsed_int = (g_parsed_int * 10) + (e - '0');
+      else {
+        g_source_pointer--;
+        break;
+      }
+    }
+
+    if (g_parsed_int > g_macro_runtime_current->supplied_arguments) {
+      print_error(ERROR_NUM, "Referencing argument number %d inside macro \"%s\". The macro has only %d arguments.\n", g_parsed_int, g_macro_runtime_current->macro->name, g_macro_runtime_current->supplied_arguments);
+      return FAILED;
+    }
+    if (g_parsed_int == 0) {
+      print_error(ERROR_NUM, "Referencing argument number %d inside macro \"%s\". Macro arguments are counted from 1.\n", g_parsed_int, g_macro_runtime_current->macro->name);
+      return FAILED;
+    }
+
+    /* use the macro argument to find its definition */
+    ma = g_macro_runtime_current->argument_data[g_parsed_int - 1];
+    k = ma->type;
+
+    if (k == INPUT_NUMBER_ADDRESS_LABEL) {
+      strcpy(g_label, ma->string);
+
+      hashmap_get(g_defines_map, g_label, (void*)&g_tmp_def);
+      if (g_tmp_def != NULL)
+        return _input_number_return_definition(g_tmp_def);
+      else {
+        print_error(ERROR_NUM, "Cannot find definition for \"%s\".\n", g_label);
+        return FAILED;
+      }
+    }
+    else {
+      print_error(ERROR_ERR, "? can be only used to evaluate definitions.\n");
+      return FAILED;
+    }
+  }
+  if (g_macro_active != 0 && e == '\\') {
+    struct macro_argument *ma;
+    int exit_here = YES;
+    int start_i = g_source_pointer;
+    unsigned char start_e = e;
+
+    if (g_buffer[g_source_pointer] == '@') {
+      g_source_pointer++;
+      g_parsed_int = g_macro_runtime_current->macro->calls - 1;
+
+      if (g_buffer[g_source_pointer] != ' ' && g_buffer[g_source_pointer] != 0xA && g_buffer[g_source_pointer] != ',')
+        exit_here = NO;
+      else
+        return SUCCEEDED;
+    }
+    else if (g_buffer[g_source_pointer] >= '0' && g_buffer[g_source_pointer] <= '9') {
+      for (g_parsed_int = 0, k = 0; k < 4; k++) {
+        e = g_buffer[g_source_pointer++];
+        if (e >= '0' && e <= '9')
+          g_parsed_int = (g_parsed_int * 10) + (e - '0');
+        else {
+          g_source_pointer--;
+          break;
+        }
+      }
+
+      if (g_buffer[g_source_pointer] != ' ' && g_buffer[g_source_pointer] != 0xA && g_buffer[g_source_pointer] != ',' && g_buffer[g_source_pointer] != '.')
+        exit_here = NO;
+    }
+    else
+      exit_here = NO;
+
+    if (exit_here == YES) {
+      if (g_parsed_int > g_macro_runtime_current->supplied_arguments) {
+        print_error(ERROR_NUM, "Referencing argument number %d inside macro \"%s\". The macro has only %d arguments.\n", g_parsed_int, g_macro_runtime_current->macro->name, g_macro_runtime_current->supplied_arguments);
+        return FAILED;
+      }
+      if (g_parsed_int == 0) {
+        print_error(ERROR_NUM, "Referencing argument number %d inside macro \"%s\". Macro arguments are counted from 1.\n", g_parsed_int, g_macro_runtime_current->macro->name);
+        return FAILED;
+      }
+
+      /* return the macro argument */
+      ma = g_macro_runtime_current->argument_data[g_parsed_int - 1];
+      k = ma->type;
+      g_input_has_leading_hashtag = ma->has_leading_hashtag;
+      
+      if (k == INPUT_NUMBER_ADDRESS_LABEL) {
+        strcpy(g_label, ma->string);
+        process_special_labels(g_label);
+      }
+      else if (k == INPUT_NUMBER_STRING) {
+        strcpy(g_label, ma->string);
+        g_string_size = (int)strlen(ma->string);
+      }
+      else if (k == INPUT_NUMBER_STACK)
+        g_latest_stack = (int)ma->value;
+      else if (k == SUCCEEDED) {
+        g_parsed_int = (int)ma->value;
+        g_parsed_double = ma->value;
+      }
+      else {
+        print_error(ERROR_ERR, "Macro argument list has been corrupted! Please send a bug report!\n");
+        return FAILED;
+      }
+
+      /* does the MACRO argument number end with a .b/.w/.l/.d? */
+      if (e == '.') {
+        e = g_buffer[g_source_pointer+1];
+        if (e == 'b' || e == 'B') {
+          g_operand_hint = HINT_8BIT;
+          g_operand_hint_type = HINT_TYPE_GIVEN;
+          g_source_pointer += 2;
+        }
+        else if (e == 'w' || e == 'W') {
+          g_operand_hint = HINT_16BIT;
+          g_operand_hint_type = HINT_TYPE_GIVEN;
+          g_source_pointer += 2;
+        }
+        else if (e == 'l' || e == 'L') {
+          g_operand_hint = HINT_24BIT;
+          g_operand_hint_type = HINT_TYPE_GIVEN;
+          g_source_pointer += 2;
+        }
+        else if (e == 'd' || e == 'D') {
+          g_operand_hint = HINT_32BIT;
+          g_operand_hint_type = HINT_TYPE_GIVEN;
+          g_source_pointer += 2;
+        }
+      }
+
+      return k;
+    }
+    else {
+      g_source_pointer = start_i;
+      e = start_e;
+    }
+  }
+
+  /* is it a hexadecimal value? */
+  g_parsed_int = 0;
+  if (e >= '0' && e <= '9') {
+    for (k = 0; 1; k++) {
+      if (g_buffer[g_source_pointer+k] >= '0' && g_buffer[g_source_pointer+k] <= '9')
+        continue;
+      if (g_buffer[g_source_pointer+k] >= 'a' && g_buffer[g_source_pointer+k] <= 'f')
+        continue;
+      if (g_buffer[g_source_pointer+k] >= 'A' && g_buffer[g_source_pointer+k] <= 'F')
+        continue;
+      if (g_buffer[g_source_pointer+k] == 'h' || g_buffer[g_source_pointer+k] == 'H') {
+        g_parsed_int = 1;
+        break;
+      }
+      break;
+    }
+  }
+
+  if (e == '$' || g_parsed_int == 1 || (e == '0' && (g_buffer[g_source_pointer] == 'x' || g_buffer[g_source_pointer] == 'X'))) {
+    if (g_parsed_int == 1)
+      g_source_pointer--;
+    else if (e == '0')
+      g_source_pointer++;
+    for (g_parsed_int = 0, k = 0; k < 8; k++, g_source_pointer++) {
+      e = g_buffer[g_source_pointer];
+      if (e >= '0' && e <= '9')
+        g_parsed_int = (g_parsed_int << 4) + e - '0';
+      else if (e >= 'A' && e <= 'F')
+        g_parsed_int = (g_parsed_int << 4) + e - 'A' + 10;
+      else if (e >= 'a' && e <= 'f')
+        g_parsed_int = (g_parsed_int << 4) + e - 'a' + 10;
+      else if (e == 'h' || e == 'H') {
+        g_source_pointer++;
+        e = g_buffer[g_source_pointer];
+        break;
+      }
+      else
+        break;
+    }
+
+    if (e == '.') {
+      e = g_buffer[g_source_pointer+1];
+      if (e == 'b' || e == 'B') {
+        g_operand_hint = HINT_8BIT;
+        g_operand_hint_type = HINT_TYPE_GIVEN;
+        g_source_pointer += 2;
+      }
+      else if (e == 'w' || e == 'W') {
+        g_operand_hint = HINT_16BIT;
+        g_operand_hint_type = HINT_TYPE_GIVEN;
+        g_source_pointer += 2;
+      }
+      else if (e == 'l' || e == 'L') {
+        g_operand_hint = HINT_24BIT;
+        g_operand_hint_type = HINT_TYPE_GIVEN;
+        g_source_pointer += 2;
+      }
+      else if (e == 'd' || e == 'D') {
+        g_operand_hint = HINT_32BIT;
+        g_operand_hint_type = HINT_TYPE_GIVEN;
+        g_source_pointer += 2;
+      }
+    }
+
+    if (g_operand_hint == HINT_NONE) {
+      if (g_parsed_int > 0xFFFFFF)
+        g_operand_hint = HINT_32BIT;
+      else if (g_parsed_int > 0xFFFF && g_parsed_int <= 0xFFFFFF)
+        g_operand_hint = HINT_24BIT;
+      else if (g_parsed_int > 0xFF)
+        g_operand_hint = HINT_16BIT;
+      else
+        g_operand_hint = HINT_8BIT;
+
+      g_operand_hint_type = HINT_TYPE_DEDUCED;
+
+#if defined(MC6809)
+      /* 5-bit values need this */
+      if (g_parsed_int >= -16 && g_parsed_int <= 15) {
+        g_operand_hint = HINT_NONE;
+        g_operand_hint_type = HINT_TYPE_NONE;
+      }
+#endif
+    }
+    
+    g_parsed_double = (double)g_parsed_int;
+    
+    return SUCCEEDED;
+  }
+
+  if (e == '%' || (e == '0' && (g_buffer[g_source_pointer] == 'b' || g_buffer[g_source_pointer] == 'B'))) {
+    if (e == '0' && g_input_number_turn_values_into_strings == YES)
+      return _parse_value_into_string(e);
+        
+    if (e == '0')
+      g_source_pointer++;
+    for (g_parsed_int = 0, k = 0; k < 32; k++, g_source_pointer++) {
+      e = g_buffer[g_source_pointer];
+      if (e == '0' || e == '1')
+        g_parsed_int = (g_parsed_int << 1) + e - '0';
+      else
+        break;
+    }
+
+    if (k == 32) {
+      if (g_buffer[g_source_pointer] == '0' || g_buffer[g_source_pointer] == '1') {
+        print_error(ERROR_NUM, "Too many bits in a binary value, max is 32.\n");
+        return FAILED;
+      }
+    }
+
+    if (e == '.') {
+      e = g_buffer[g_source_pointer+1];
+      if (e == 'b' || e == 'B') {
+        g_operand_hint = HINT_8BIT;
+        g_operand_hint_type = HINT_TYPE_GIVEN;
+        g_source_pointer += 2;
+      }
+      else if (e == 'w' || e == 'W') {
+        g_operand_hint = HINT_16BIT;
+        g_operand_hint_type = HINT_TYPE_GIVEN;
+        g_source_pointer += 2;
+      }
+      else if (e == 'l' || e == 'L') {
+        g_operand_hint = HINT_24BIT;
+        g_operand_hint_type = HINT_TYPE_GIVEN;
+        g_source_pointer += 2;
+      }
+      else if (e == 'd' || e == 'D') {
+        g_operand_hint = HINT_32BIT;
+        g_operand_hint_type = HINT_TYPE_GIVEN;
+        g_source_pointer += 2;
+      }
+    }
+
+    g_parsed_double = (double)g_parsed_int;
+
+    return SUCCEEDED;
+  }
+  
+  if (e >= '0' && e <= '9') {
+    int max_digits = 10;
+
+    if (g_input_number_turn_values_into_strings == YES)
+      return _parse_value_into_string(e);
+    
+    /* we are parsing decimals when q == 1 */
+    q = 0;
+    g_parsed_double = e-'0';
+    g_parsed_double_decimal_numbers = 0;
+    decimal_mul = 0.1;
+    for (k = 0; k < max_digits; k++, g_source_pointer++) {
+      e = g_buffer[g_source_pointer];
+      if (e >= '0' && e <= '9') {
+        if (k == max_digits - 1) {
+          if (q == 0)
+            print_error(ERROR_NUM, "Too many digits in the integer value. Max 10 is supported.\n");
+          else {
+            print_error(ERROR_NUM, "Too many digits in the floating point value. Max %d is supported.\n", MAX_FLOAT_DIGITS);
+          }
+          return FAILED;
+        }
+        
+        if (q == 0) {
+          /* still parsing an integer */
+          g_parsed_double = g_parsed_double*10 + e-'0';
+        }
+        else {
+          g_parsed_double = g_parsed_double + decimal_mul*(e-'0');
+          decimal_mul /= 10.0;
+          g_parsed_double_decimal_numbers = g_parsed_double_decimal_numbers*10 + (e-'0');
+        }
+      }
+      else if (e == '.') {
+        if (q == 1) {
+          print_error(ERROR_NUM, "Syntax error.\n");
+          return FAILED;
+        }
+        e = g_buffer[g_source_pointer+1];
+        if (e >= '0' && e <= '9') {
+          /* float mode, read decimals */
+          if (g_parse_floats == NO)
+            break;
+          q = 1;
+          max_digits = MAX_FLOAT_DIGITS+1;
+        }
+        else if (e == 'b' || e == 'B') {
+          g_operand_hint = HINT_8BIT;
+          g_operand_hint_type = HINT_TYPE_GIVEN;
+          g_source_pointer += 2;
+          break;
+        }
+        else if (e == 'w' || e == 'W') {
+          g_operand_hint = HINT_16BIT;
+          g_operand_hint_type = HINT_TYPE_GIVEN;
+          g_source_pointer += 2;
+          break;
+        }
+        else if (e == 'l' || e == 'L') {
+          g_operand_hint = HINT_24BIT;
+          g_operand_hint_type = HINT_TYPE_GIVEN;
+          g_source_pointer += 2;
+          break;
+        }
+        else if (e == 'd' || e == 'D') {
+          g_operand_hint = HINT_32BIT;
+          g_operand_hint_type = HINT_TYPE_GIVEN;
+          g_source_pointer += 2;
+          break;
+        }
+      }
+      else if ((e >= 'a' && e <= 'z') || (e >= 'A' && e <= 'Z')) {
+        /* a number directly followed by a letter when parsing a integer/float -> syntax error */
+        print_error(ERROR_NUM, "Syntax error.\n");
+        return FAILED;
+      }
+      else
+        break;
+    }
+
+    /* drop the decimals */
+    g_parsed_int = (int)g_parsed_double;
+
+    if (g_operand_hint == HINT_NONE) {
+      if (g_parsed_int > 0xFFFFFF)
+        g_operand_hint = HINT_32BIT;
+      else if (g_parsed_int > 0xFFFF && g_parsed_int <= 0xFFFFFF)
+        g_operand_hint = HINT_24BIT;
+      else if (g_parsed_int > 0xFF)
+        g_operand_hint = HINT_16BIT;
+      else
+        g_operand_hint = HINT_8BIT;
+
+      g_operand_hint_type = HINT_TYPE_DEDUCED;
+
+#if defined(MC6809)
+      /* 5-bit values need this */
+      if (g_parsed_int >= -16 && g_parsed_int <= 15) {
+        g_operand_hint = HINT_NONE;
+        g_operand_hint_type = HINT_TYPE_NONE;
+      }
+#endif
+    }
+    
+    if (q == 1 && g_input_float_mode == ON)
+      return INPUT_NUMBER_FLOAT;
+
+    return SUCCEEDED;
+  }
+  
+  if (e == '\'') {
+    if (g_buffer[g_source_pointer + 1] == '\'') {
+      /* '?' */
+      g_parsed_int = g_buffer[g_source_pointer];
+      g_source_pointer += 2;
+    }
+    else if (g_buffer[g_source_pointer] == '\\' && (g_buffer[g_source_pointer+1] == 't' ||
+                                                    g_buffer[g_source_pointer+1] == 'r' ||
+                                                    g_buffer[g_source_pointer+1] == 'n' ||
+                                                    g_buffer[g_source_pointer+1] == '0') && g_buffer[g_source_pointer+2] == '\'') {
+      /* '\?' */
+      g_source_pointer++;
+      if (g_buffer[g_source_pointer] == 't')
+        g_parsed_int = '\t';
+      else if (g_buffer[g_source_pointer] == 'r')
+        g_parsed_int = '\r';
+      else if (g_buffer[g_source_pointer] == 'n')
+        g_parsed_int = '\n';
+      else if (g_buffer[g_source_pointer] == '0')
+        g_parsed_int = '\0';
+      g_source_pointer += 2;
+    }
+    else {
+      if (g_input_number_error_msg == YES)
+        print_error(ERROR_NUM, "Malformed '?' detected!\n");
+      return FAILED;
+    }
+
+    g_parsed_double = (double)g_parsed_int;
+    
+    return SUCCEEDED;
+  }
+
+  if (e == '"') {
+    for (k = 0; k < MAX_NAME_LENGTH; ) {
+      e = g_buffer[g_source_pointer++];
+
+      if (e == '\\' && g_buffer[g_source_pointer] == '\\') {
+        /* let process_string_for_special_characters() handle '\\' */
+        g_label[k++] = '\\';
+        g_label[k++] = '\\';
+        g_source_pointer++;
+        continue;
+      }
+      else if (e == '\\' && g_buffer[g_source_pointer] == '"') {
+        g_label[k++] = '"';
+        g_source_pointer++;
+        continue;
+      }
+
+      if (e == '"') {
+        int is_string_split = -1;
+        
+        /* check for "string".length */
+        if (g_buffer[g_source_pointer+0] == '.' &&
+            (g_buffer[g_source_pointer+1] == 'l' || g_buffer[g_source_pointer+1] == 'L') &&
+            (g_buffer[g_source_pointer+2] == 'e' || g_buffer[g_source_pointer+2] == 'E') &&
+            (g_buffer[g_source_pointer+3] == 'n' || g_buffer[g_source_pointer+3] == 'N') &&
+            (g_buffer[g_source_pointer+4] == 'g' || g_buffer[g_source_pointer+4] == 'G') &&
+            (g_buffer[g_source_pointer+5] == 't' || g_buffer[g_source_pointer+5] == 'T') &&
+            (g_buffer[g_source_pointer+6] == 'h' || g_buffer[g_source_pointer+6] == 'H')) {
+          /* yes, we've got it! calculate the length and return the integer */
+          g_source_pointer += 7;
+          g_label[k] = 0;
+          g_parsed_int = (int)get_label_length(g_label);
+          g_parsed_double = (double)g_parsed_int;
+
+          return SUCCEEDED;
+        }
+
+        /* does the string continue on the next line? */
+        if (g_buffer[g_source_pointer] == ' ' && g_buffer[g_source_pointer+1] == '\\' && g_buffer[g_source_pointer+2] == 0x0A)
+          is_string_split = 3;
+        if (g_buffer[g_source_pointer] == '\\' && g_buffer[g_source_pointer+1] == 0x0A)
+          is_string_split = 2;
+
+        if (is_string_split > 0) {
+          int skip = is_string_split;
+
+          while (g_buffer[g_source_pointer+skip] == ' ')
+            skip++;
+
+          if (g_buffer[g_source_pointer+skip] == '"') {
+            g_source_pointer += skip + 1;
+            e = g_buffer[g_source_pointer++];
+
+            /* as we skipped a 0x0A before we need to advance the line counter as well */
+            next_line();
+          }
+        }
+
+        if (e == '"')
+          break;
+      }
+      
+      if (e == 0 || e == 0x0A) {
+        print_error(ERROR_NUM, "String wasn't terminated properly.\n");
+        return FAILED;
+      }
+
+      g_label[k++] = e;
+    }
+
+    if (k >= MAX_NAME_LENGTH)
+      print_error(ERROR_WRN, "String parsing was interrupted due to buffer getting full.\n");
+    
+    g_label[k] = 0;
+
+    /* expand e.g., \1 and \@ */
+    if (g_macro_active != 0) {
+      if (expand_macro_arguments(g_label) == FAILED)
+        return FAILED;
+      k = (int)strlen(g_label);
+    }
+
+    if (g_input_parse_special_chars == YES && process_string_for_special_characters(g_label, &k) == FAILED)
+      return FAILED;
+
+    if (use_substitution) {
+      if (expand_variables_inside_string(g_label, sizeof(g_label), &k) == FAILED)
+        return FAILED;
+
+      /* make sure we are followed by a '}' */
+
+      /* skip white space */
+      while (g_buffer[g_source_pointer] == ' ')
+        g_source_pointer++;
+
+      if (g_buffer[g_source_pointer] != '}') {
+        print_error(ERROR_NUM, "The string used in substitution isn't followed by a '}'.\n");
+        return FAILED;
+      }
+
+      g_source_pointer++;
+    }
+    
+    if (k >= MAX_NAME_LENGTH) {
+      if (g_input_number_error_msg == YES) {
+        print_error(ERROR_NUM, "The string is too long (max %d characters allowed). Please adjust MAX_NAME_LENGTH in shared.h and recompile WLA.\n", MAX_NAME_LENGTH);
+      }
+      return FAILED;
+    }
+
+    g_label[k] = 0;
+    g_string_size = k;
+
+    return INPUT_NUMBER_STRING;
+  }
+
+  /* the last choice is a label */
+  g_label[0] = e;
+  curly_braces = 0;
+  for (k = 1; k < MAX_NAME_LENGTH; k++) {
+    e = g_buffer[g_source_pointer++];
+    if (e == '{')
+      curly_braces++;
+    else if (e == '}')
+      curly_braces--;
+    else if (e == 0x0A || e == ')' || e == ',' || e == ']') {
+      g_source_pointer--;
+      break;
+    }
+    else if (g_plus_and_minus_ends_label == YES && (e == '-' || e == '+')) {
+      g_source_pointer--;
+      break;
+    }
+#ifdef SPC700
+    else if (e == '.' && g_input_number_expects_dot == YES)
+      dot = k;
+#endif
+    else if (e == ' ' && curly_braces <= 0)
+      break;
+    g_label[k] = e;
+
+    /* is it actually a function? */
+    if (k == 3 && strcaselesscmpn(g_label, "asc('", 4) == 0) {
+      int parsed_chars = 0;
+      
+      if (parse_function_asc(&g_buffer[g_source_pointer], &g_parsed_int, &parsed_chars) == FAILED)
+        return FAILED;
+      
+      g_source_pointer += parsed_chars;
+      g_parsed_double = (double)g_parsed_int;
+
+      return SUCCEEDED;
+    }
+    if (k == 7 && strcaselesscmpn(g_label, "defined(", 8) == 0) {
+      int parsed_chars = 0;
+          
+      if (parse_function_defined(&g_buffer[g_source_pointer], &g_parsed_int, &parsed_chars) == FAILED)
+        return FAILED;
+      
+      g_source_pointer += parsed_chars;
+      g_parsed_double = (double)g_parsed_int;
+
+      return SUCCEEDED;
+    }
+    if (k == 6 && strcaselesscmpn(g_label, "exists(", 7) == 0) {
+      int parsed_chars = 0;
+          
+      if (parse_function_exists(&g_buffer[g_source_pointer], &g_parsed_int, &parsed_chars) == FAILED)
+        return FAILED;
+      
+      g_source_pointer += parsed_chars;
+      g_parsed_double = (double)g_parsed_int;
+
+      return SUCCEEDED;
+    }
+
+    if (e == '(') {
+      g_source_pointer--;
+      break;
+    }
+  }
+
+  if (k == MAX_NAME_LENGTH) {
+    if (g_input_number_error_msg == YES) {
+      print_error(ERROR_NUM, "The label is too long (max %d characters allowed). Please adjust MAX_NAME_LENGTH in shared.h and recompile WLA.\n", MAX_NAME_LENGTH);
+    }
+    return FAILED;
+  }
+
+  /* size hint? */
+  if (g_label[k-2] == '.') {
+    if (g_label[k-1] == 'b' || g_label[k-1] == 'B') {
+      g_operand_hint = HINT_8BIT;
+      g_operand_hint_type = HINT_TYPE_GIVEN;
+      k -= 2;
+    }
+    else if (g_label[k-1] == 'w' || g_label[k-1] == 'W') {
+      g_operand_hint = HINT_16BIT;
+      g_operand_hint_type = HINT_TYPE_GIVEN;
+      k -= 2;
+    }
+    else if (g_label[k-1] == 'l' || g_label[k-1] == 'L') {
+      g_operand_hint = HINT_24BIT;
+      g_operand_hint_type = HINT_TYPE_GIVEN;
+      k -= 2;
+    }
+    else if (g_label[k-1] == 'd' || g_label[k-1] == 'D') {
+      g_operand_hint = HINT_32BIT;
+      g_operand_hint_type = HINT_TYPE_GIVEN;
+      k -= 2;
+    }
+#ifdef SPC700
+    else if (g_label[k-1] >= '0' && g_label[k-1] <= '7') {
+      k -= 2;
+      g_source_pointer -= 2;
+    }
+#endif
+  }
+#ifdef SPC700
+  else if (dot > 0) {
+    g_source_pointer -= k - dot;
+    k -= k - dot;
+  }
+#endif
+  
+  g_label[k] = 0;
+  
+  /* expand e.g., \1 and \@ */
+  if (g_macro_active != 0) {
+    if (expand_macro_arguments(g_label) == FAILED)
+      return FAILED;
+    k = (int)strlen(g_label);
+  }
+
+  if (expand_variables_inside_string(g_label, sizeof(g_label), &k) == FAILED)
+    return FAILED;
+
+  /* label_tmp contains the label without possible prefix ':' */
+  if (strlen(g_label) > 1 && g_label[0] == ':')
+    strcpy(label_tmp, &g_label[1]);
+  else
+    strcpy(label_tmp, g_label);
+
+  /* check for "string".length */
+  if (strstr(g_label, ".length") != NULL) {
+    parse_string_length(strstr(g_label, ".length"));
+    return SUCCEEDED;
+  }
+  else if (strstr(g_label, ".LENGTH") != NULL) {
+    parse_string_length(strstr(g_label, ".LENGTH"));
+    return SUCCEEDED;
+  }
+
+  if (check_if_a_definition == YES && g_parsing_function_body == NO) {
+    /* check if the label is actually a definition */
+    if (hashmap_get(g_defines_map, g_label, (void*)&g_tmp_def) != MAP_OK)
+      hashmap_get(g_defines_map, label_tmp, (void*)&g_tmp_def);
+    if (g_tmp_def != NULL)
+      return _input_number_return_definition(g_tmp_def);
+  }
+
+  /* are labels 16-bit by default? */
+  if (g_operand_hint_type != HINT_TYPE_GIVEN && g_global_label_hint == HINT_16BIT) {
+    g_operand_hint = HINT_16BIT;
+    g_operand_hint_type = HINT_TYPE_GIVEN;
+  }
+
+  process_special_labels(g_label);
+
+  return INPUT_NUMBER_ADDRESS_LABEL;
+}
+
+
+int process_special_labels(char *label) {
+
+  if (strcaselesscmp(label, "__label__") == 0) {
+    /* we have a reference to g_label_stack[0]! */
+    strcpy(label, g_label_stack[0]);
+
+    /* if we are processing g_label, update g_string_size as well */
+    if (label == g_label)
+      g_string_size = (int)strlen(label);
+  }
+
+  return SUCCEEDED;
+}
+
+
+int parse_string_length(char *end) {
+
+  /* remove ".length" from the end of label (end points to inside of label) */
+  end[0] = 0;
+
+  /* check if the label is actually a definition - it should be or else we'll give an error */
+  hashmap_get(g_defines_map, g_label, (void*)&g_tmp_def);
+  
+  if (g_tmp_def != NULL) {
+    if (g_tmp_def->type == DEFINITION_TYPE_VALUE) {
+      if (g_input_number_error_msg == YES)
+        print_error(ERROR_NUM, ".length of a value does not make any sense.\n");
+      return FAILED;
+    }
+    else if (g_tmp_def->type == DEFINITION_TYPE_STACK) {
+      if (g_input_number_error_msg == YES)
+        print_error(ERROR_NUM, ".length of a pending computation does not make any sense.\n");
+      return FAILED;
+    }
+    else if (g_tmp_def->type == DEFINITION_TYPE_ADDRESS_LABEL) {
+      if (g_input_number_error_msg == YES)
+        print_error(ERROR_NUM, ".length of an address label does not make any sense.\n");
+      return FAILED;
+    }
+    else {
+      g_string_size = g_tmp_def->size;
+      memcpy(g_label, g_tmp_def->string, g_string_size);
+      g_label[g_string_size] = 0;
+
+      g_parsed_int = (int)strlen(g_label);
+      g_parsed_double = (double)g_parsed_int;
+          
+      return SUCCEEDED;
+    }
+  }
+
+  return FAILED;
+}
+
+
+void skip_whitespace(void) {
+
+  while (1) {
+    if (g_source_pointer >= g_source_file_size)
+      break;
+    if (g_buffer[g_source_pointer] == ' ' || (g_buffer[g_source_pointer] == '\\' && g_buffer[g_source_pointer+1] == 0xA)) {
+      g_source_pointer++;
+      g_newline_beginning = OFF;
+      continue;
+    }
+    if (g_buffer[g_source_pointer] == 0xA) {
+      g_source_pointer++;
+      next_line();
+      continue;
+    }
+    break;
+  }
+}
+
+
+int get_next_plain_string(void) {
+
+  int curly_braces = 0;
+  char c;
+  
+  skip_whitespace();
+
+  g_ss = 0;
+  while (1) {
+    if (g_ss >= MAX_NAME_LENGTH) {
+      print_error(ERROR_NONE, "GET_NEXT_PLAIN_STRING: Too long for a string.\n");
+      return FAILED;
+    }
+
+    c = g_buffer[g_source_pointer];
+
+    if (c == '{')
+      curly_braces++;
+    else if (c == '}')
+      curly_braces--;
+    else if (c == 0xA)
+      break;
+
+    if (curly_braces > 0) {
+      g_label[g_ss] = c;
+      g_ss++;
+      g_source_pointer++;
+    }
+    /* NOTE: casting to (unsigned char) is needed to get UTF-8 to work */
+    else if ((unsigned char)c > 127 || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '{' || c == '}' || c == '\\' || c == '@' || c == ':') {
+      g_label[g_ss] = c;
+      g_ss++;
+      g_source_pointer++;
+    }
+    else
+      break;
+  }
+
+  g_label[g_ss] = 0;
+
+  /* expand e.g., \1 and \@ */
+  if (g_macro_active != 0) {
+    if (expand_macro_arguments(g_label) == FAILED)
+      return FAILED;
+    g_ss = (int)strlen(g_label);
+  }
+
+  if (expand_variables_inside_string(g_label, sizeof(g_label), &g_ss) == FAILED)
+    return FAILED;
+  
+  return SUCCEEDED;
+}
+
+
+int get_next_token(void) {
+
+  skip_whitespace();
+
+  /* skip leading commas */
+  while (g_buffer[g_source_pointer] == ',')
+    g_source_pointer++;
+  
+  /* "string"? */
+  if (g_buffer[g_source_pointer] == '"') {
+    for (g_ss = 0, g_source_pointer++; g_buffer[g_source_pointer] != 0xA && g_buffer[g_source_pointer] != '"'; ) {
+      if (g_buffer[g_source_pointer] == '\\' && g_buffer[g_source_pointer + 1] == '"') {
+        g_tmp[g_ss++] = '"';
+        g_source_pointer += 2;
+      }
+      else
+        g_tmp[g_ss++] = g_buffer[g_source_pointer++];
+    }
+
+    if (g_buffer[g_source_pointer] == 0xA) {
+      print_error(ERROR_NONE, "GET_NEXT_TOKEN: String wasn't terminated properly.\n");
+      return FAILED;
+    }
+    g_tmp[g_ss] = 0;
+    g_source_pointer++;
+
+    /* expand e.g., \1 and \@ */
+    if (g_macro_active != 0) {
+      if (expand_macro_arguments(g_tmp) == FAILED)
+        return FAILED;
+      g_ss = (int)strlen(g_tmp);
+    }
+
+    if (process_string_for_special_characters(g_tmp, &g_ss) == FAILED)
+      return FAILED;
+
+    if (g_get_next_token_use_substitution == YES) {
+      if (expand_variables_inside_string(g_tmp, g_sizeof_g_tmp, &g_ss) == FAILED)
+        return FAILED;
+    }
+    
+    return GET_NEXT_TOKEN_STRING;
+  }
+
+  if (g_buffer[g_source_pointer] == '.') {
+    g_tmp[0] = '.';
+    g_source_pointer++;
+    for (g_ss = 1; g_buffer[g_source_pointer] != 0x0A && g_buffer[g_source_pointer] != ' ' && g_buffer[g_source_pointer] != '-' && g_ss < MAX_NAME_LENGTH; ) {
+      g_tmp[g_ss] = g_buffer[g_source_pointer];
+      g_current_directive[g_ss - 1] = toupper((int)g_buffer[g_source_pointer]);
+      g_source_pointer++;
+      g_ss++;
+    }
+    g_current_directive[g_ss - 1] = 0;
+  }
+  else if (g_buffer[g_source_pointer] == '=' || g_buffer[g_source_pointer] == '>' || g_buffer[g_source_pointer] == '<' || g_buffer[g_source_pointer] == '!') {
+    for (g_ss = 0; g_buffer[g_source_pointer] != 0xA && (g_buffer[g_source_pointer] == '=' || g_buffer[g_source_pointer] == '!' || g_buffer[g_source_pointer] == '<' || g_buffer[g_source_pointer] == '>')
+           && g_ss < MAX_NAME_LENGTH; g_tmp[g_ss++] = g_buffer[g_source_pointer++]);
+  }
+  else {
+    int curly_brackets = 0;
+    
+    for (g_ss = 0; g_ss < MAX_NAME_LENGTH; ) {
+      unsigned char e = g_buffer[g_source_pointer];
+
+      if (e == 0xA)
+        break;
+      else if (e == '{')
+        curly_brackets++;
+      else if (e == '}') {
+        curly_brackets--;
+        if (curly_brackets < 0)
+          break;
+      }
+      if (curly_brackets == 0) {
+        if (e == ',')
+          break;
+        if (e == ' ')
+          break;
+        if (g_ss > 0 && e == '(')
+          break;
+      }
+      g_tmp[g_ss] = e;
+      g_ss++;
+      g_source_pointer++;
+    }
+  }
+
+  if (g_ss >= MAX_NAME_LENGTH) {
+    print_error(ERROR_NONE, "GET_NEXT_TOKEN: Too long for a token.\n");
+    return FAILED;
+  }
+
+  g_tmp[g_ss] = 0;
+
+  /* expand e.g., \1 and \@ */
+  if (g_macro_active != 0) {
+    if (expand_macro_arguments(g_tmp) == FAILED)
+      return FAILED;
+    g_ss = (int)strlen(g_tmp);
+  }
+
+  if (g_get_next_token_use_substitution == YES) {
+    if (expand_variables_inside_string(g_tmp, g_sizeof_g_tmp, &g_ss) == FAILED)
+      return FAILED;
+  }
+  
+  return SUCCEEDED;
+}
+
+
+int compare_and_skip_next_symbol(char symbol) {
+
+  int pos = g_source_pointer;
+  
+  while (g_buffer[pos] == ' ')
+    pos++;
+
+  if (g_buffer[pos] == symbol) {
+    pos++;
+    g_source_pointer = pos;
+    return SUCCEEDED;
+  }
+
+  return FAILED;
+}
+
+
+int skip_next_token(void) {
+
+  int c;
+  
+  for (c = g_buffer[g_source_pointer]; c == ' ' || c == ',' || (c == '\\' && g_buffer[g_source_pointer+1] == 0xA) || c == 0xA; c = g_buffer[++g_source_pointer]) {
+    if (c == 0xA)
+      next_line();
+  }
+
+  if (g_buffer[g_source_pointer] == '"') {
+    for (g_source_pointer++; g_buffer[g_source_pointer] != 0x0A && g_buffer[g_source_pointer] != '"'; g_source_pointer++)
+      ;
+    if (g_buffer[g_source_pointer] == 0x0A) {
+      print_error(ERROR_NONE, "SKIP_NEXT_TOKEN: String wasn't terminated properly.\n");
+      return FAILED;
+    }
+    g_source_pointer++;
+
+    return SUCCEEDED;
+  }
+  else if (g_buffer[g_source_pointer] == '=' || g_buffer[g_source_pointer] == '>' || g_buffer[g_source_pointer] == '<' || g_buffer[g_source_pointer] == '!') {
+    for (; g_buffer[g_source_pointer] != 0xA && (g_buffer[g_source_pointer] == '=' || g_buffer[g_source_pointer] == '!' || g_buffer[g_source_pointer] == '<' || g_buffer[g_source_pointer] == '>'); g_source_pointer++)
+      ;
+  }
+  else {
+    for (; g_buffer[g_source_pointer] != 0x0A && g_buffer[g_source_pointer] != ' ' && g_buffer[g_source_pointer] != ','; g_source_pointer++)
+      ;
+  }
+  
+  return SUCCEEDED;
+}
+
+
+int _expand_macro_arguments_one_pass(char *in, int *expands, int *move_up) {
+
+  char t[MAX_NAME_LENGTH + 1];
+  int i, j, k;
+
+
+  memset(g_expanded_macro_string, 0, MAX_NAME_LENGTH + 1);
+
+  for (i = 0, k = 0; i < MAX_NAME_LENGTH && k < MAX_NAME_LENGTH; i++) {
+    if (in[i] == '?' && in[i + 1] >= '1' && in[i + 1] <= '9') {
+      struct macro_argument *ma;
+      int d = 0;
+
+      (*expands)++;
+      i++;
+
+      for (; i < MAX_NAME_LENGTH && in[i] != 0; i++) {
+        if (in[i] >= '0' && in[i] <= '9')
+          d = (d * 10) + in[i] - '0';
+        else
+          break;
+      }
+      i--;
+
+      if (d <= 0 || d > g_macro_runtime_current->supplied_arguments) {
+        if (g_input_number_error_msg == YES) {
+          print_error(ERROR_NUM, "EXPAND_MACRO_ARGUMENTS: Macro \"%s\" wasn't called with enough arguments, ?%d is out of range.\n", g_macro_runtime_current->macro->name, d);
+        }
+    
+        return FAILED;
+      }
+
+      /* use the macro argument to find its definition */
+      ma = g_macro_runtime_current->argument_data[d - 1];
+
+      if (ma->type == INPUT_NUMBER_ADDRESS_LABEL) {
+        strcpy(g_label, ma->string);
+
+        hashmap_get(g_defines_map, g_label, (void*)&g_tmp_def);
+        if (g_tmp_def != NULL) {
+          int type = _input_number_return_definition(g_tmp_def);
+
+          if (type == SUCCEEDED)
+            snprintf(t, sizeof(t), "%d", g_parsed_int);
+          else if (type == INPUT_NUMBER_ADDRESS_LABEL)
+            strcpy(t, g_label);
+          else if (type == INPUT_NUMBER_STRING)
+            strcpy(t, g_label);
+          else {
+            print_error(ERROR_ERR, "The definition cannot be converted to a string.\n");
+            return FAILED;
+          }
+        
+          for (j = 0; j < MAX_NAME_LENGTH && k < MAX_NAME_LENGTH; j++, k++) {
+            g_expanded_macro_string[k] = t[j];
+            if (t[j] == 0)
+              break;
+          }
+        }
+        else {
+          print_error(ERROR_NUM, "Cannot find definition for \"%s\".\n", g_label);
+          return FAILED;
+        }
+      }
+      else {
+        print_error(ERROR_ERR, "? can be only used to evaluate definitions.\n");
+        return FAILED;
+      }
+    }
+    else if (in[i] == '\\') {
+      if (in[i + 1] == '"' || in[i + 1] == 'n' || in[i + 1] == '\\' || in[i + 1] == 'r' || in[i + 1] == 't' || in[i + 1] == 'x' || in[i + 1] == '0') {
+        g_expanded_macro_string[k++] = in[i];
+        i++;
+        g_expanded_macro_string[k++] = in[i];
+      }
+      /* HACK: "\?1" question works only at the beginning of a string, elsewhere "\?" -> "?" */
+      else if (i > 0 && in[i + 1] == '?') {
+        i++;
+        g_expanded_macro_string[k++] = in[i];
+      }
+      else if (in[i + 1] == '@') {
+        /* we found '@' -> expand! */
+        (*expands)++;
+        i++;
+
+        snprintf(t, sizeof(t), "%d", g_macro_runtime_current->macro->calls - 1);
+        for (j = 0; j < MAX_NAME_LENGTH && k < MAX_NAME_LENGTH; j++, k++) {
+          g_expanded_macro_string[k] = t[j];
+          if (t[j] == 0)
+            break;
+        }
+      }
+      else if (in[i + 1] == '?') {
+        /* we found '?' -> expand! */
+        int d = 0, type;
+        
+        (*expands)++;
+        i++;
+
+        i++;
+        for (; i < MAX_NAME_LENGTH && in[i] != 0; i++) {
+          if (in[i] >= '0' && in[i] <= '9')
+            d = (d * 10) + in[i] - '0';
+          else
+            break;
+        }
+        i--;
+
+        if (d <= 0 || d > g_macro_runtime_current->supplied_arguments) {
+          if (g_input_number_error_msg == YES) {
+            print_error(ERROR_NUM, "EXPAND_MACRO_ARGUMENTS: Macro \"%s\" wasn't called with enough arguments, \\?%d is out of range.\n", g_macro_runtime_current->macro->name, d);
+          }
+    
+          return FAILED;
+        }
+
+        type = g_macro_runtime_current->argument_data[d-1]->type;
+        if (type == SUCCEEDED) {
+          if (g_macro_runtime_current->argument_data[d-1]->has_leading_hashtag == YES)
+            strcpy(t, "ARG_IMMEDIATE");
+          else
+            strcpy(t, "ARG_NUMBER");
+        }
+        else if (type == INPUT_NUMBER_FLOAT) {
+          if (g_macro_runtime_current->argument_data[d-1]->has_leading_hashtag == YES)
+            strcpy(t, "ARG_IMMEDIATE");
+          else
+            strcpy(t, "ARG_NUMBER");
+        }
+        else if (type == INPUT_NUMBER_ADDRESS_LABEL)
+          strcpy(t, "ARG_LABEL");
+        else if (type == INPUT_NUMBER_STRING)
+          strcpy(t, "ARG_STRING");
+        else if (type == INPUT_NUMBER_STACK)
+          strcpy(t, "ARG_PENDING_CALCULATION");
+        else
+          strcpy(t, "???");
+        
+        for (j = 0; j < MAX_NAME_LENGTH && k < MAX_NAME_LENGTH; j++, k++) {
+          g_expanded_macro_string[k] = t[j];
+          if (t[j] == 0)
+            break;
+        }
+      }
+      else if (in[i + 1] == '.') {
+        /* we found '.' -> expand! */
+        (*expands)++;
+        i++;
+
+        snprintf(t, sizeof(t), "%s", g_macro_runtime_current->macro->name);
+        for (j = 0; j < MAX_NAME_LENGTH && k < MAX_NAME_LENGTH; j++, k++) {
+          g_expanded_macro_string[k] = t[j];
+          if (t[j] == 0)
+            break;
+        }
+      }
+      else if (in[i + 1] == '!') {
+        /* we found '!' -> expand! */
+        (*expands)++;
+        i++;
+
+        snprintf(t, sizeof(t), "%s", get_file_name(g_active_file_info_last->filename_id));
+        for (j = 0; j < MAX_NAME_LENGTH && k < MAX_NAME_LENGTH; j++, k++) {
+          g_expanded_macro_string[k] = t[j];
+          if (t[j] == 0)
+            break;
+        }
+      }
+      else if (in[i + 1] >= '0' && in[i + 1] <= '9') {
+        /* handle numbers, e.g., \1 */
+        int d = 0, type;
+
+        (*expands)++;
+        (*move_up)++;
+        i++;
+        for (; i < MAX_NAME_LENGTH && in[i] != 0; i++) {
+          if (in[i] >= '0' && in[i] <= '9')
+            d = (d * 10) + in[i] - '0';
+          else
+            break;
+        }
+        i--;
+
+        if (d > g_macro_runtime_current->supplied_arguments) {
+          if (g_input_number_error_msg == YES) {
+            print_error(ERROR_NUM, "EXPAND_MACRO_ARGUMENTS: Macro \"%s\" wasn't called with enough arguments, \\%d is out of range.\n", g_macro_runtime_current->macro->name, d);
+          }
+    
+          return FAILED;
+        }
+
+        type = g_macro_runtime_current->argument_data[d - 1]->type;
+
+        /* replace e.g., \1 in the string with processed macro argument */
+        if (type == SUCCEEDED) {
+          char tmp_string[32];
+          int i;
+
+          snprintf(tmp_string, sizeof(tmp_string), "%d", (int)g_macro_runtime_current->argument_data[d - 1]->value);
+          for (i = 0; k < MAX_NAME_LENGTH && i < (int)sizeof(tmp_string); i++, k++) {
+            if (tmp_string[i] == 0)
+              break;
+            g_expanded_macro_string[k] = tmp_string[i];
+          }
+        }
+        else if (type == INPUT_NUMBER_ADDRESS_LABEL || type == INPUT_NUMBER_STRING) {
+          int i;
+
+          for (i = 0; k < MAX_NAME_LENGTH; i++, k++) {
+            char c = g_macro_runtime_current->argument_data[d - 1]->string[i];
+            if (c == 0)
+              break;
+            g_expanded_macro_string[k] = c;
+          }
+        }
+        else if (type == INPUT_NUMBER_STACK) {
+          if (g_input_number_error_msg == YES) {
+            print_error(ERROR_NUM, "EXPAND_MACRO_ARGUMENTS: Macro argument \\%d is a pending stack calculation and cannot be expanded into a string.\n", d);
+          }
+    
+          return FAILED;
+        }
+        else {
+          if (g_input_number_error_msg == YES) {
+            print_error(ERROR_NUM, "EXPAND_MACRO_ARGUMENTS: Macro argument \\%d is of unknown type, please submit a bug report.\n", d);
+          }
+    
+          return FAILED;
+        }
+      }
+      else {
+        if (g_input_number_error_msg == YES) {
+          print_error(ERROR_NUM, "EXPAND_MACRO_ARGUMENTS: Unsupported special character '%c'.\n", in[i + 1]);
+        }
+    
+        return FAILED;
+      }
+    }
+    else
+      g_expanded_macro_string[k++] = in[i];
+
+    if (in[i] == 0)
+      break;
+  }
+
+  if (k >= MAX_NAME_LENGTH) {
+    if (g_input_number_error_msg == YES) {
+      print_error(ERROR_NUM, "EXPAND_MACRO_ARGUMENTS: The result string is too large, increase MAX_NAME_LENGTH and compile WLA DX again.\n");
+    }
+    
+    return FAILED;
+  }
+
+  memcpy(in, g_expanded_macro_string, MAX_NAME_LENGTH);
+  in[MAX_NAME_LENGTH] = '\0';
+
+  return SUCCEEDED;
+}
+
+
+int _expand_macro_arguments(char *in, int *expands) {
+
+  int move_up = 0;
+
+  if (_expand_macro_arguments_one_pass(in, expands, &move_up) == FAILED)
+    return FAILED;
+
+  /* macro argument numbers? if we find and expand some, we'll need to recursively call this function */
+  if (move_up > 0) {
+    /* move up one macro call in the hierarchy */
+    g_macro_active--;
+    if (g_macro_active > 0) {
+      g_macro_runtime_current = &g_macro_stack[g_macro_active - 1];
+      /* recursive call to self */
+      return _expand_macro_arguments(in, expands);
+    }
+  }
+
+  return SUCCEEDED;
+}
+  
+
+int expand_macro_arguments(char *in) {
+
+  /* save the current macro_runtime pointers */
+  struct macro_runtime* mr = g_macro_runtime_current;
+  int ma = g_macro_active, expands = 0, ret;
+
+  ret = _expand_macro_arguments(in, &expands);
+
+  /* return the current macro_runtime as recursive _expand_macro_arguments() might have modified it */
+  g_macro_runtime_current = mr;
+  g_macro_active = ma;
+
+  return ret;
+}
+
+
+int process_string_for_special_characters(char *label, int *string_size) {
+
+  int size, read, write;
+
+  if (string_size == NULL)
+    size = (int)strlen(label);
+  else
+    size = *string_size;
+  
+  for (read = 0, write = 0; read < size; ) {
+    /* handle '\\' */
+    if (label[read] == '\\' && label[read + 1] == '\\') {
+      label[write++] = '\\';
+      read += 2;
+    }    
+    /* handle '\0' */
+    else if (label[read] == '\\' && label[read + 1] == '0') {
+      label[write++] = 0;
+      read += 2;
+    }
+    /* handle '\t' */
+    else if (label[read] == '\\' && label[read + 1] == 't') {
+      label[write++] = '\t';
+      read += 2;
+    }
+    /* handle '\r' */
+    else if (label[read] == '\\' && label[read + 1] == 'r') {
+      label[write++] = '\r';
+      read += 2;
+    }
+    /* handle '\n' */
+    else if (label[read] == '\\' && label[read + 1] == 'n') {
+      label[write++] = '\n';
+      read += 2;
+    }
+    /* handle '\"' */
+    else if (label[read] == '\\' && label[read + 1] == '\"') {
+      label[write++] = '\"';
+      read += 2;
+    }
+    /* handle '\\' */
+    else if (label[read] == '\\' && label[read + 1] == '\\') {
+      label[write++] = '\\';
+      read += 2;
+    }
+    /* handle '\x' */
+    else if (label[read] == '\\' && label[read + 1] == 'x') {
+      char tmp_a[8], *tmp_b;
+      int tmp_c;
+
+      read += 2;
+      snprintf(tmp_a, sizeof(tmp_a), "%c%c", label[read], label[read + 1]);
+      
+      tmp_c = (int)strtol(tmp_a, &tmp_b, 16);
+      if (*tmp_b) {
+        print_error(ERROR_INP, "'\\x' needs hexadecimal byte (00-FF) data.\n");
+        return FAILED;
+      }
+
+      label[write++] = tmp_c;
+      read += 2;
+    }
+    /* handle '\<' */
+    else if (label[read] == '\\' && label[read + 1] == '<') {
+      read += 2;
+      if (read >= size) {
+        print_error(ERROR_INP, "'\\<' needs character data.\n");
+        return FAILED;
+      }
+      label[write++] = label[read] | 0x80;
+      read++;
+    }
+    /* handle '\>' */
+    else if (read == 0 && label[read] == '\\' && label[read + 1] == '>') {
+      print_error(ERROR_INP, "'\\>' needs character data (previous byte).\n");
+      return FAILED;
+    }
+    else if (read < size - 2 && label[read + 1] == '\\' && label[read + 2] == '>') {
+      label[write++] = label[read] | 0x80;
+      read += 3;
+    }
+    else
+      label[write++] = label[read++];
+  }
+
+  /* terminate the string */
+  label[write] = 0;
+
+  if (string_size != NULL)
+    *string_size = write;
+
+  return SUCCEEDED;
+}
+
+
+static int _save_stack_calculation(struct stack_item *stack_items, int stacksize, int linenumber, int filename_id) {
+
+  struct stack *s;
+  
+  s = calloc(sizeof(struct stack), 1);
+  if (s == NULL) {
+    free(stack_items);
+    print_error(ERROR_STC, "Out of memory error while allocating room for a new calculation stack.\n");
+    return FAILED;
+  }
+
+  init_stack_struct(s);
+
+  s->stacksize = stacksize;
+  s->stack_items = stack_items;
+
+  if (linenumber < 0)
+    s->linenumber = g_active_file_info_last->line_current;
+  else
+    s->linenumber = linenumber;
+
+  if (filename_id < 0)
+    s->filename_id = g_active_file_info_last->filename_id;
+  else
+    s->filename_id = filename_id;
+
+  s->is_function_body = g_parsing_function_body;
+
+  /* all stacks will be definition stacks by default. pass_4 will mark
+     those that are referenced to be STACK_POSITION_CODE stacks */
+  s->position = STACK_POSITION_DEFINITION;
+
+  calculation_stack_insert(s);
+
+  s->is_single_instance = YES;
+  
+  return SUCCEEDED;
+}
+
+
+static int _clone_stack_calculation(struct stack_item **stack_items_out, struct stack_item *stack_items, int stacksize, char *function_name) {
+
+  struct stack_item *si;
+  int i;
+  
+  si = calloc(sizeof(struct stack_item) * stacksize, 1);
+  if (si == NULL) {
+    print_error(ERROR_NUM, "Out of memory error while parsing function \"%s\".\n", function_name);
+    return FAILED;
+  }
+
+  for (i = 0; i < stacksize; i++) {
+    struct stack_item *out = &si[i], *in = &stack_items[i];
+    
+    out->value = in->value;
+    out->type = in->type;
+    out->sign = in->sign;
+    out->can_calculate_deltas = in->can_calculate_deltas;
+    out->has_been_replaced = in->has_been_replaced;
+    out->is_in_postfix = in->is_in_postfix;
+    if (out->type == STACK_ITEM_TYPE_LABEL)
+      strcpy(out->string, in->string);
+    else
+      out->string[0] = 0;
+  }
+
+  *stack_items_out = si;
+
+  return SUCCEEDED;
+}
+
+
+static int _reset_has_been_replaced_status(struct stack_item *stack_items, int stacksize) {
+
+  struct stack *s;
+  int i;
+
+  for (i = 0; i < stacksize; i++) {
+    stack_items[i].has_been_replaced = NO;
+
+    /* dig deeper */
+    if (stack_items[i].type == STACK_ITEM_TYPE_STACK) {
+      s = find_stack_calculation((int)stack_items[i].value, YES);
+      if (s == NULL)
+        return FAILED;
+      
+      _reset_has_been_replaced_status(s->stack_items, s->stacksize);
+    }
+  }
+
+  return SUCCEEDED;
+}
+
+
+static int _clone_contained_stack_calculations(struct stack_item *stack_items, int stacksize, char *function_name) {
+
+  struct stack_item *si;
+  struct stack *s;
+  int i;
+
+  for (i = 0; i < stacksize; i++) {
+    if (stack_items[i].type == STACK_ITEM_TYPE_STACK) {
+      s = find_stack_calculation((int)stack_items[i].value, YES);
+      if (s == NULL)
+        return FAILED;
+
+      if (_clone_stack_calculation(&si, s->stack_items, s->stacksize, function_name) == FAILED)
+        return FAILED;
+
+      if (_save_stack_calculation(si, s->stacksize, s->linenumber, s->filename_id) == FAILED)
+        return FAILED;
+
+      stack_items[i].value = g_latest_stack;
+
+      if (_clone_contained_stack_calculations(si, s->stacksize, function_name) == FAILED)
+        return FAILED;
+    }
+  }
+
+  return SUCCEEDED;
+}
+
+
+static int _replace_labels_inside_stack_calculation(struct stack_item *stack_items, int stacksize, char *label, int result, int parsed_int, double parsed_double, char *parsed_label, int parsed_stack) {
+
+  struct stack *s;
+  int j;
+
+  for (j = 0; j < stacksize; j++) {
+    struct stack_item *si = &stack_items[j];
+
+    if (si->type == STACK_ITEM_TYPE_STACK) {
+      /* dig deeper! */
+      s = find_stack_calculation((int)si->value, YES);
+      if (s == NULL)
+        return FAILED;
+      
+      if (_replace_labels_inside_stack_calculation(s->stack_items, s->stacksize, label, result, parsed_int, parsed_double, parsed_label, parsed_stack) == FAILED)
+        return FAILED;
+    }
+    else if (si->type == STACK_ITEM_TYPE_LABEL) {
+      if (si->has_been_replaced == NO && label[0] == si->string[0] && strcmp(label, si->string) == 0) {
+        if (result == SUCCEEDED) {
+          si->type = STACK_ITEM_TYPE_VALUE;
+          si->value = parsed_int;
+          si->sign = SI_SIGN_POSITIVE;
+        }
+        else if (result == INPUT_NUMBER_FLOAT) {
+          si->type = STACK_ITEM_TYPE_VALUE;
+          si->value = parsed_double;
+          si->sign = SI_SIGN_POSITIVE;
+        }
+        else if (result == INPUT_NUMBER_ADDRESS_LABEL) {
+          strcpy(si->string, parsed_label);
+          si->sign = SI_SIGN_POSITIVE;
+        }
+        else {
+          si->type = STACK_ITEM_TYPE_STACK;
+          si->value = parsed_stack;
+          si->sign = SI_SIGN_POSITIVE;
+        }
+      }
+    }    
+  }
+
+  return SUCCEEDED;
+}
+
+
+int parse_function(char *in, char *name, int *found_function, int *parsed_chars) {
+
+  int res, source_pointer_original = g_source_pointer, source_pointer_backup, i, j;
+  struct function *fun = g_functions_first;
+  struct stack_item *si;
+  char c1 = name[0];
+
+  /* NOTE! we assume that 'in' is actually '&g_buffer[xyz]', so
+     let's update g_source_pointer for input_number() */
+
+  g_source_pointer = (int)(in - g_buffer);
+  source_pointer_backup = g_source_pointer;
+
+  /* find the function */
+  while (fun != NULL) {
+    if (c1 == fun->name[0]) {
+      if (strcmp(name, fun->name) == 0)
+        break;
+    }
+    fun = fun->next;
+  }
+
+  if (fun == NULL) {
+    *found_function = NO;
+    return SUCCEEDED;
+  }
+    
+  /* we found the function! let's parse the arguments */
+  *found_function = YES;
+
+  /* is the function just a constant? */
+  if (fun->type == SUCCEEDED) {
+    g_parsed_int = fun->value;
+    g_parsed_double = (double)fun->value;
+
+    return SUCCEEDED;
+  }
+
+  /* clone the stack calculation */
+  if (_clone_stack_calculation(&si, fun->stack->stack_items, fun->stack->stacksize, name) == FAILED)
+    return FAILED;
+
+  /* clone all contained stack calculations */
+  if (_clone_contained_stack_calculations(si, fun->stack->stacksize, name) == FAILED) {
+    free(si);
+    return FAILED;
+  }
+
+  if (g_parsing_function_body == NO) {
+    if (_reset_has_been_replaced_status(si, fun->stack->stacksize) == FAILED) {
+      free(si);
+      return FAILED;
+    }
+  }
+
+  for (i = 0; i < fun->nargument_names; i++) {
+    res = input_number();
+
+    if (res == FAILED) {
+      free(si);
+      return FAILED;
+    }
+    else if (res != SUCCEEDED && res != INPUT_NUMBER_ADDRESS_LABEL && res != INPUT_NUMBER_STACK && res != INPUT_NUMBER_FLOAT) {
+      free(si);
+      print_error(ERROR_NUM, "Argument %d is not a value, label or a pending calculation.\n", i+1);
+      return FAILED;
+    }
+
+    if (res == INPUT_NUMBER_STACK) {
+      /* mark all instances of argument names in the stack as has-been-replaced */
+      struct stack *stack;
+
+      stack = find_stack_calculation(g_latest_stack, YES);
+      if (stack == NULL) {
+        free(si);
+        return FAILED;
+      }
+      
+      for (j = 0; j < stack->stacksize; j++) {
+        if (stack->stack_items[j].type == STACK_ITEM_TYPE_LABEL) {
+          int k;
+
+          for (k = 0; k < fun->nargument_names; k++) {
+            if (strcmp(fun->argument_names[k], stack->stack_items[j].string) == 0) {
+              stack->stack_items[j].has_been_replaced = YES;
+              break;
+            }
+          }
+        }
+      }
+    }
+    
+    /* substitute the result into the stack calculation */
+    for (j = 0; j < fun->stack->stacksize; j++) {
+      struct stack_item *sij = &si[j];
+      
+      if (sij->type == STACK_ITEM_TYPE_STACK) {
+        struct stack *s;
+
+        s = find_stack_calculation((int)sij->value, YES);
+        if (s == NULL) {
+          free(si);
+          return FAILED;
+        }
+
+        if (_replace_labels_inside_stack_calculation(s->stack_items, s->stacksize, fun->argument_names[i], res, g_parsed_int, g_parsed_double, g_label, g_latest_stack) == FAILED) {
+          free(si);
+          return FAILED;
+        }
+      }
+      else if (sij->type == STACK_ITEM_TYPE_LABEL) {
+        if (strcmp(fun->argument_names[i], sij->string) == 0) {
+          if (res == SUCCEEDED) {
+            sij->type = STACK_ITEM_TYPE_VALUE;
+            sij->value = g_parsed_int;
+            sij->sign = SI_SIGN_POSITIVE;
+          }
+          else if (res == INPUT_NUMBER_FLOAT) {
+            sij->type = STACK_ITEM_TYPE_VALUE;
+            sij->value = g_parsed_double;
+            sij->sign = SI_SIGN_POSITIVE;
+          }
+          else if (res == INPUT_NUMBER_ADDRESS_LABEL) {
+            strcpy(sij->string, g_label);
+            sij->sign = SI_SIGN_POSITIVE;
+          }
+          else {
+            sij->type = STACK_ITEM_TYPE_STACK;
+            sij->value = g_latest_stack;
+            sij->sign = SI_SIGN_POSITIVE;
+          }
+        }
+      }
+    }
+  }
+
+  if (g_buffer[g_source_pointer] != ')') {
+    free(si);
+    print_error(ERROR_NUM, "Malformed \"%s()\" detected!\n", name);
+    return FAILED;
+  }
+
+  /* skip ')' */
+  g_source_pointer++;
+
+  /* count the parsed chars */
+  *parsed_chars = (int)(g_source_pointer - source_pointer_backup);
+
+  /* return g_source_pointer */
+  g_source_pointer = source_pointer_original;
+
+  /* try to parse the stack calculation */
+  if (g_parsing_function_body == NO && resolve_stack(si, fun->stack->stacksize) == SUCCEEDED) {
+    struct stack s;
+    double dou;
+
+    init_stack_struct(&s);
+    s.stack_items = si;
+    s.linenumber = fun->line_number;
+    s.filename_id = fun->filename_id;
+
+    if (compute_stack(&s, fun->stack->stacksize, &dou) == FAILED)
+      return FAILED;
+
+    free(si);
+
+    g_parsed_double = dou;
+    g_parsed_int = (int)dou;
+
+    return SUCCEEDED;
+  }
+
+  /* save the stack calculation */
+  _save_stack_calculation(si, fun->stack->stacksize, -1, -1);
+
+  return INPUT_NUMBER_STACK;
+}
+
+
+int parse_function_asc(char *in, int *result, int *parsed_chars) {
+
+  int res, old_expect = g_expect_calculations, source_pointer_original = g_source_pointer, source_pointer_backup;
+  
+  /* NOTE! we assume that 'in' is actually '&g_buffer[xyz]', so
+     let's update g_source_pointer for input_number() */
+
+  g_source_pointer = (int)(in - g_buffer);
+  source_pointer_backup = g_source_pointer;
+
+  g_expect_calculations = NO;
+  res = input_number();
+  g_expect_calculations = old_expect;
+
+  if (res != SUCCEEDED || g_parsed_int < 0 || g_parsed_int > 255) {
+    print_error(ERROR_NUM, "asc() requires an immediate value between 0 and 255.\n");
+    return FAILED;
+  }
+  
+  if (g_buffer[g_source_pointer] != ')') {
+    print_error(ERROR_NUM, "Malformed \"asc(?)\" detected!\n");
+    return FAILED;
+  }
+
+  /* skip ')' */
+  g_source_pointer++;
+
+  /* count the parsed chars */
+  *parsed_chars = (int)(g_source_pointer - source_pointer_backup);
+
+  /* return g_source_pointer */
+  g_source_pointer = source_pointer_original;
+  
+  if (g_asciitable_defined == 0) {
+    print_error(ERROR_WRN, "No .ASCIITABLE defined. Using the default n->n -mapping.\n");
+    *result = g_parsed_int;
+  }
+  else
+    *result = (int)g_asciitable[g_parsed_int];
+
+  return SUCCEEDED;
+}
+
+
+int parse_function_defined(char *in, int *result, int *parsed_chars) {
+
+  int res, old_expect = g_expect_calculations, source_pointer_original = g_source_pointer, source_pointer_backup;
+  struct definition *d;
+
+  /* NOTE! we assume that 'in' is actually '&g_buffer[xyz]', so
+     let's update g_source_pointer for input_number() */
+
+  g_source_pointer = (int)(in - g_buffer);
+  source_pointer_backup = g_source_pointer;
+
+  g_expect_calculations = NO;
+  res = get_next_plain_string();
+  g_expect_calculations = old_expect;
+
+  if (res != SUCCEEDED) {
+    print_error(ERROR_NUM, "defined() requires a definition name string.\n");
+    return FAILED;
+  }
+  
+  if (g_buffer[g_source_pointer] != ')') {
+    print_error(ERROR_NUM, "Malformed \"defined(?)\" detected!\n");
+    return FAILED;
+  }
+
+  /* skip ')' */
+  g_source_pointer++;
+
+  /* count the parsed chars */
+  *parsed_chars = (int)(g_source_pointer - source_pointer_backup);
+
+  /* return g_source_pointer */
+  g_source_pointer = source_pointer_original;
+
+  /* try to find the definition */
+  hashmap_get(g_defines_map, g_label, (void*)&d);
+
+  if (d != NULL)
+    *result = 1;
+  else
+    *result = 0;
+  
+  return SUCCEEDED;
+}
+
+
+int parse_function_exists(char *in, int *result, int *parsed_chars) {
+
+  int res, old_expect = g_expect_calculations, source_pointer_original = g_source_pointer, source_pointer_backup;
+  FILE *f;
+  
+  /* NOTE! we assume that 'in' is actually '&g_buffer[xyz]', so
+     let's update g_source_pointer for input_number() */
+
+  g_source_pointer = (int)(in - g_buffer);
+  source_pointer_backup = g_source_pointer;
+
+  g_expect_calculations = NO;
+  res = input_number();
+  g_expect_calculations = old_expect;
+
+  if (res != INPUT_NUMBER_ADDRESS_LABEL && res != INPUT_NUMBER_STRING) {
+    print_error(ERROR_NUM, "exists() requires a file name string.\n");
+    return FAILED;
+  }
+  
+  if (g_buffer[g_source_pointer] != ')') {
+    print_error(ERROR_NUM, "Malformed \"exists(?)\" detected!\n");
+    return FAILED;
+  }
+
+  /* skip ')' */
+  g_source_pointer++;
+
+  /* count the parsed chars */
+  *parsed_chars = (int)(g_source_pointer - source_pointer_backup);
+
+  /* return g_source_pointer */
+  g_source_pointer = source_pointer_original;
+  
+  f = fopen(g_label, "rb");
+  if (f == NULL)
+    *result = 0;
+  else {
+    *result = 1;
+
+    fclose(f);
+  }
+  
+  return SUCCEEDED;
+}
+
+
+#ifdef PROFILE_FUNCTIONS
+int input_number(void) {
+
+  int ret;
+  PROFILE_VARIABLES();
+
+  PROFILE_START();
+  ret = _input_number();
+  PROFILE_END("input_number");
+
+  return ret;
+}
+#endif
+ 

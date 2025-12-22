@@ -1,0 +1,548 @@
+
+  \ ***********************************************************
+  \
+  \       ATTACHED HARDWARE SPRITE FROM IFF IMAGERY DEMO
+  \
+  \ ***********************************************************
+  \
+  \ This code demonstrates how to create a simple HeliOS single
+  \ playfield display and generate an attached hardware sprite
+  \ using bitmapped imagery derived from an IFF ILBM file.
+  \
+  \ One IFF file is loaded as the display backdrop picture and
+  \ another IFF is loaded as imagery for the hardware sprite.
+  \
+  \ The hardware sprite is moved around the screen using the mouse.
+  \
+  \ Press <Space> to quit when finished.
+  \
+  \ ***********************************************************
+
+
+  \ ***********************************************************
+  \ Re-initialise HeliOS dictionary to standard CORE vocabulary
+  \ ***********************************************************
+
+  \ This should always be used at the start of any program which
+  \ is to be repeatedly recompiled.
+
+  FORGET **CORE**
+
+  \ *************************
+  \ Load include symbol files
+  \ *************************
+  \
+  \ These "include files" are pre-compiled (for speed) versions of the
+  \ Amiga includes and the Helios system includes.
+  \
+  \ Uncomment the lines below for standalone compilation, but otherwise
+  \ it is better to set these include files from the Helios Forth menus
+
+  AMIGAINCLUDE HeliOS:HeliOS_AmigaInclude
+  USERINCLUDE  HeliOS:HeliOS_UserInclude
+
+  \ ****************************************
+  \ Create display imagery file name strings
+  \ ****************************************
+
+  \ These files are ordinary IFF's (and may be "PowerPacked" if required)
+  \
+  \ The pictures here will be loaded into each of the display BitMaps.
+  \
+
+  $CONSTANTL Slice1Pic $Helios:Source/Data/Pic2$
+
+  \ **************************************
+  \ Create display configuration constants
+  \ **************************************
+  \
+  \ Collect all "display-specific" parameters here and generate "named"
+  \ constants which make references easier than using numeric values.
+  \
+  \ Collecting these together here makes it easier to adjust things at any
+  \ time without having to search source code to replace values individually.
+  \
+
+
+  256                      CONSTANT DisplayHeight      \ Full PAL display
+  320                      CONSTANT DisplayWidth       \ Lores display
+  44                       CONSTANT DisplayTopLine     \ Display start
+
+  DisplayWidth             CONSTANT Slice1Width        \ Lores width
+  DisplayWidth 32 +        CONSTANT Slice1RasterWidth  \ Raster=screenwidth
+  DisplayHeight            CONSTANT Slice1Height       \ Slice height
+  DisplayHeight 32 +       CONSTANT Slice1RasterHeight \ Slice Raster=Displayheight
+  0                        CONSTANT Slice1Mode         \ Lores
+  3                        CONSTANT Slice1Planes       \ Slice bitplanes
+
+  \ The calculation below takes the number of bitplanes and calculates
+  \ how many colours this represents.
+  \
+  \ One bitplane gives two colours.
+  \
+  \ Each additional bitplane multiplies the number of colours by two.
+  \
+  \ Performing a single LSL operation on any number multipies by 2, so we
+  \ have a quick method of multiplying by two for our colour calculation.
+  \
+  \ In this case, we need "2 to the power 3", which is 2*2*2=8.
+  \
+  \ e.g.                              2*2*2
+  \                                   ^ ^ ^
+  \                                   Total number of planes = 3
+  \
+  \
+  \ So, we take the first value two
+  \
+  \ e.g.                              2*2*2
+  \                                   ^
+  \                                  Initial start value of 2
+  \
+  \ and we now need to multiply it by two "the_number_of_planes minus_one"
+  \ more times.
+  \
+  \ e.g.                              2*2*2
+  \                                     ^ ^
+  \                                     Total planes minus one
+  \
+  \
+  \ So, Number of colours = 2 operated on by LSL NumberOfPlanes-1 times.
+  \
+
+  2 Slice1Planes 1- LSL    CONSTANT Slice1Colours      \ A-slice colours
+
+  \ ***********************
+  \ Error handling routines
+  \ ***********************
+
+  \ This error handler allows all errors to be routed via a comprehensive
+  \ sequential closedown routine, which is associated with the HeliOS
+  \ system error handler word ERROR".
+  \
+  \ When ERROR" senses an error, it prints an associated error message
+  \ delimited by '"' characters, and then closes everything down using the
+  \ routine CLOSEDOWN below which you have supplied.
+  \
+  \ This simplifies errors checks to the use of a single word, ERROR", which
+  \ displays a text message and closes eveything down.
+  \
+
+  0 VARIABLE (CLOSEDOWN)
+
+  : ?CLOSEDOWNERROR
+
+  IF
+    CR
+    CR
+    TYPE
+    CR
+    CR
+    ." Press <Space> to quit!"
+    CR
+    CR
+    WAITSPACE
+    (CLOSEDOWN) @EXECUTE
+    QUIT
+  ELSE
+    DDROP
+  THEN
+  ;
+
+  LATESTCFA VARIABLE ERROR1
+
+  \ ****************************************
+  \ Create display pointer storage variables
+  \ ****************************************
+
+  \ Here we create a set of "pointers", initially set to a "null" value.
+  \
+  \ These "pointers" are set up as "long addresses" when various components
+  \ of the display system are allocated and initialised.
+  \
+  \ Note that initially these are all set to zero, and we clear them back
+  \ to zero when we de-allocate the associated resource.
+  \
+  \ These DPOINTERs are all initially set to "null" by using '0.'.
+  \
+  \ When we allocate memory or Amiga system resources in the program at
+  \ run-time, these pointers are updated to contain the 32-bit address
+  \ of the newly allocated resource.
+  \
+  \ Subsequently the symbolic DPOINTER name can be used in your code to
+  \ represent the associated address.
+
+  0. DPOINTER Display1             \ Main Display structure pointer
+  0. DPOINTER Slice1               \ Slice 1 Slice structure pointer
+
+  0. DPOINTER Slice1_ColorMap      \ Slice 1 ColourMap structure pointer
+
+  0. DPOINTER Slice1_RasInfo       \ Slice 1 RasInfo structure pointer
+
+  0. DPOINTER Slice1_BMap          \ Slice 1 BitMap structure pointer
+
+  0. DPOINTER Slice1_SliceControl  \ Slice 1 SliceControl structure pointer
+
+  \ *************
+  \ Colour tables
+  \ *************
+
+  \ Each colour entry requies 2 bytes of storage space
+
+  CREATEL Slice1_ColorTable        \ Create longword pointer to table
+  Slice1Colours 2* 0 ALLOTFILL     \ Allocate Slice1 colours * 2 bytes
+
+  \ ***********************************
+  \ Create Display and Slice structures
+  \ ***********************************
+
+  \ This routine simply makes blank structures, which then need to be
+  \ initialised later (in the CREATE_DISPLAY routine).
+
+  : CREATE_DSLICES
+
+  DS_SIZEOF MAKESTRUCTURE Display1 MAKEPOINTER  \ Main "Display" structure
+
+  SL_SIZEOF MAKESTRUCTURE Slice1   MAKEPOINTER  \ Display "Slice" structure
+  ;
+
+  : FREE_DSLICES
+
+  Slice1    DDUP FREEMEMORY   CLEARPOINTER
+  Display1  DDUP FREEMEMORY   CLEARPOINTER
+  ;
+
+  \ ******************************
+  \ Create RasInfo structures etc.
+  \ ******************************
+
+  : CREATE_RASINFO
+
+  \ First allocate and initialise complete RasInfo structures.
+  \
+  \ This routine automatically allocates all BitMaps etc.
+  \
+
+  Slice1RasterWidth Slice1RasterHeight Slice1Planes  OPENRASINFO
+  DFLAG0= ERROR" Fail: RasInfo1"
+  Slice1_RasInfo MAKEPOINTER
+
+  \ Set invisible area "sprite margins" for slice RasInfo
+
+  16              Slice1_RasInfo         ri_RxOffset    INDEX!L
+  16              Slice1_RasInfo         ri_RyOffset    INDEX!L
+
+  \ Store BitMap pointer - often useful for later reference
+
+  Slice1_RasInfo  ri_BitMap INDEXD@L Slice1_BMap MAKEPOINTER
+  ;
+
+  : FREE_RASINFO
+
+  Slice1_RasInfo   DDUP CLOSERASINFO   CLEARPOINTER
+  ;
+
+  \ ********************************
+  \ Create Display/Slice Copperlists
+  \ ********************************
+
+  \ This function builds the main display copperlist by:
+  \
+  \ 1. Initialising the Slice data structure
+  \ 2. Calling MAKECOPSTRIP for the slice, to build a copperlist
+  \ 3. Calling MAKEDISPLAY to build the master Display copperlist
+  \
+
+  : CREATE_DISPLAY
+
+  \ First initialise main display structures
+
+  Slice1                           Display1  DS_Slice     INDEXD!L
+
+  Slice1Width                      Slice1    SL_DWidth    INDEX!L
+  Slice1Height                     Slice1    SL_DHeight   INDEX!L
+  DisplayTopLine                   Slice1    SL_DyOffset  INDEX!L
+  Slice1_RasInfo                   Slice1    SL_RasInfo   INDEXD!L
+  Slice1_ColorMap                  Slice1    SL_ColorMap  INDEXD!L
+  Slice1Mode                       Slice1    SL_Modes     INDEX!L
+
+  \ Generate copper list information for each of the display slices
+
+  Slice1 MAKECOPSTRIP
+  D0= ERROR" Fail: Slice1CopStrip"
+
+  \ Make display
+
+  Display1 MAKEDISPLAY
+  D0= ERROR" Fail: Display1"
+  ;
+
+  : FREE_DISPLAY
+
+  Display1                 FREEDISPLAY
+  Slice1                   FREECOPSTRIP
+  ;
+
+  \ ********************************************************
+  \ Create SliceControl structures for double buffered slice
+  \ ********************************************************
+
+  \ SliceControl structures are used to control any slices which perform
+  \ mapping or scrolling functions, or which require double or triple
+  \ playfield buffering.
+  \
+  \ In this case we have one slice which does not scroll, is not mapped,
+  \ but IS double buffered.
+  \
+
+  : CREATE_SLICECONTROL
+
+  \ Make SliceControl for double buffered bitmap display
+
+  Slice1  0 0 MAKESLICECONTROL
+  DFLAG0= ERROR" Fail: SliceControl1"
+  Slice1_SliceControl MAKEPOINTER
+
+  \ Install slice controls into HeliOS display control system
+
+  Slice1_SliceControl  INSTALLSLICECONTROL
+  ;
+
+  : FREE_SLICECONTROL
+
+  CLEARSLICECONTROLS
+  Slice1_SliceControl  CLOSESLICECONTROL
+  ;
+
+  \ These routines load an IFF picture into supplied BitMap, and correctly
+  \ initialises the supplied ColorTable.
+  \
+  \ The ColorTable is then used to create an initialised ColorMap structure.
+  \
+
+  : CREATE_IMAGERY
+
+  Slice1_BMap
+  Slice1_ColorTable
+  Slice1Pic
+  10 2 DOSLIB                        \ Call to internal HeliOS library
+  10 <> ERROR" Fail: Slice1Pic"
+
+  Slice1_ColorTable  Slice1Colours MAKECOLORMAP  \ Allocate ColourMap
+  DFLAG0= ERROR" Fail: Slice1ColorMap"
+  Slice1_ColorMap MAKEPOINTER
+  ;
+
+  : FREE_IMAGERY
+
+  Slice1_ColorMap  DDUP FREECOLORMAP  CLEARPOINTER
+  ;
+
+  \ ***********************************
+  \ Create hardware sprite colour table
+  \ ***********************************
+
+  \ This colour table simply specifies a few arbitrary colours which we
+  \ will then set into colour registers 16 to 31
+
+  CREATEL MySpriteColourTable
+
+  HEX
+
+  0000 ,  \ Colour 16
+  0FFF ,  \ Colour 17
+  0CC0 ,  \ Colour 18
+  0F00 ,  \ Colour 19
+  0AAA ,  \ Colour 20
+  0999 ,  \ Colour 21
+  0888 ,  \ Colour 22
+  0777 ,  \ Colour 23
+  0666 ,  \ Colour 24
+  0555 ,  \ Colour 25
+  0444 ,  \ Colour 26
+  0333 ,  \ Colour 27
+  0222 ,  \ Colour 28
+  0111 ,  \ Colour 29
+  00F0 ,  \ Colour 30
+  000F ,  \ Colour 31
+
+  DECIMAL
+
+  \ ***********************
+  \ Allocate pointer stores
+  \ ***********************
+
+  0. DPOINTER  MyHSpriteData1
+  0. DPOINTER  MyHSpriteData2
+
+  CREATEL MYFILE $ HeliOS:Source/Data/16ColourHSTestBrush$
+
+  \ MAKEATTHSPRITE  ( - - - HSpriteData1(l), HSpriteData2(l) )
+  \                         or null for failure
+
+  : MAKEATTHSPRITE
+
+  MYFILE  2 3 DOSLIB
+  2 =
+  IF
+    D>R                       \ Save BitMap pointer
+    1 2                       \ IDs
+    1                         \ Number of images
+    DI                        \ BitMap
+    5 5                       \ X and Y offsets
+    9 9                       \ Width and height
+    MAKEATTHSPRITEBLOCK_BMAP  \ Make HSprite definition blocks
+    DR> CLOSEBMAP             \ Restore BitMap pointer and close BitMap
+  ELSE
+    0.
+    0.
+  THEN
+  ;
+
+  \ **********************
+  \ Set up hardware sprite
+  \ **********************
+
+  \ First we set sprite colours 16 to 31
+  \ Then we create hardware sprite definition blocks
+  \ Then we install the hardware sprites
+
+  : SetupHSprite
+
+  Slice1 MySpriteColourTable 16 16 SETSLICECOLOURS
+
+  MAKEATTHSPRITE
+  DFLAG
+  IF
+    MyHSpriteData2 MAKEPOINTER
+    MyHSpriteData1 MAKEPOINTER
+
+    MyHSpriteData1 0 HSPRITE_INSTALL
+    MyHSpriteData2 1 HSPRITE_INSTALL
+    0
+  ELSE
+    DDDROP
+    1
+  THEN
+  ;
+
+  \ **************************
+  \ Close down hardware sprite
+  \ **************************
+
+  \ First we remove the hardware sprites
+  \ Then we de-allocate the sprite definitions
+
+  : FREE_HSPRITE
+
+  MyHSpriteData1 HSPRITE_REMOVE
+  MyHSpriteData2 HSPRITE_REMOVE
+
+  MyHSpriteData2  DDUP FREEHSPRITEBLOCK  CLEARPOINTER
+  MyHSpriteData1  DDUP FREEHSPRITEBLOCK  CLEARPOINTER
+  ;
+
+  \ ********************************
+  \ Display and move hardware sprite
+  \ ********************************
+
+  \ Switch on mouse position reporting
+  \ Switch off the HeliOS mouse pointer image
+  \ Repeatedly set the sprite to the current mouse pointer position
+
+  : TestHSprite
+
+  1 REPORTMOUSE
+  0 HELIOSMPOINTER
+
+  BEGIN
+    0 MOUSEX MOUSEY 0 MyHSpriteData1 HSPRITE_PLACE
+    1 MOUSEX MOUSEY 0 MyHSpriteData2 HSPRITE_PLACE
+    ?TERMINAL 32 =
+  UNTIL
+  ;
+
+
+  \ *********************
+  \ Close down everything
+  \ *********************
+
+  : CLOSEDOWN
+
+  FREE_HSPRITE
+  FREE_SLICECONTROL
+  FREE_DISPLAY
+  FREE_IMAGERY
+  FREE_RASINFO
+  FREE_DSLICES
+  RESETERROR"
+  ;
+
+  LATESTCFA (CLOSEDOWN) !
+
+  : TestDisplay          \ Start of program
+
+  SCRCLR
+
+  CR
+  ."        **********************************************************"
+  CR 6 FPENSET
+  ."              ATTACHED HARDWARE SPRITE FROM IFF IMAGERY DEMO"
+  CR 1 FPENSET
+  ."        **********************************************************"
+  CR
+  CR
+  ."        This code demonstrates how to create a simple HeliOS single"
+  CR
+  ."        playfield display and generate an attached hardware sprite"
+  CR
+  ."        using bitmapped imagery derived from an IFF ILBM file."
+  CR
+  CR
+  ."        One IFF file is loaded as the display backdrop picture and"
+  CR
+  ."        another IFF is loaded as imagery for the hardware sprite."
+  CR
+  CR
+  ."        The hardware sprite can then be moved around using the mouse."
+  CR
+  CR
+  ."        Press <Space> to quit demo."
+  CR
+  CR
+  ."        **********************************************************"
+  CR 6 FPENSET
+  ."                  Press <Space> or <L-Mouse> to see Demo          "
+  CR 1 FPENSET
+  ."        **********************************************************"
+  CR
+
+  WAITSPACE
+
+  SCRCLR
+
+  ERROR1 SETERROR"       \ Redirect system errors to our routine ERROR1
+
+  CREATE_DSLICES
+  CREATE_RASINFO
+  CREATE_IMAGERY
+  CREATE_DISPLAY
+  CREATE_SLICECONTROL
+
+  SetupHSPrite ERROR" Failed to open HSprite!"
+
+  HeliOS_On
+
+  1 FrameRate !L
+
+  Display1 SHOWDISPLAY
+
+  TestHSprite
+
+  HeliOS_Off
+
+  0 REPORTMOUSE
+
+  CLOSEDOWN
+  ;
+
+  TestDisplay

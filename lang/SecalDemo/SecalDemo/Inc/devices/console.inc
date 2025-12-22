@@ -1,0 +1,70 @@
+include "inc/exec/types.inc";
+include "inc/exec/io.inc";
+
+def CD_ASKKEYMAP = (CMD_NONSTD+0);
+def CD_SETKEYMAP = (CMD_NONSTD+1);
+def CD_ASKDEFAULTKEYMAP = (CMD_NONSTD+2);
+def CD_SETDEFAULTKEYMAP = (CMD_NONSTD+3);
+
+def SGR_PRIMARY = 0;
+def SGR_BOLD = 1;
+def SGR_ITALIC = 3;
+def SGR_UNDERSCORE = 4;
+def SGR_NEGATIVE = 7;
+
+def SGR_NORMAL = 22;
+def SGR_NOTITALIC = 23;
+def SGR_NOTUNDERSCORE = 24;
+def SGR_POSITIVE = 27;
+
+def SGR_BLACK = 30;
+def SGR_RED = 31;
+def SGR_GREEN = 32;
+def SGR_YELLOW = 33;
+def SGR_BLUE = 34;
+def SGR_MAGENTA = 35;
+def SGR_CYAN = 36;
+def SGR_WHITE = 37;
+def SGR_DEFAULT = 39;
+
+def SGR_BLACKBG = 40;
+def SGR_REDBG = 41;
+def SGR_GREENBG = 42;
+def SGR_YELLOWBG = 43;
+def SGR_BLUEBG = 44;
+def SGR_MAGENTABG = 45;
+def SGR_CYANBG = 46;
+def SGR_WHITEBG = 47;
+def SGR_DEFAULTBG = 49;
+
+def SGR_CLR0 = 30;
+def SGR_CLR1 = 31;
+def SGR_CLR2 = 32;
+def SGR_CLR3 = 33;
+def SGR_CLR4 = 34;
+def SGR_CLR5 = 35;
+def SGR_CLR6 = 36;
+def SGR_CLR7 = 37;
+
+def SGR_CLR0BG = 40;
+def SGR_CLR1BG = 41;
+def SGR_CLR2BG = 42;
+def SGR_CLR3BG = 43;
+def SGR_CLR4BG = 44;
+def SGR_CLR5BG = 45;
+def SGR_CLR6BG = 46;
+def SGR_CLR7BG = 47;
+
+def DSR_CPR = 6;
+
+def CTC_HSETTAB = 0;
+def CTC_HCLRTAB = 2;
+def CTC_HCLRTABSALL = 5;
+
+def TBC_HCLRTAB = 0;
+def TBC_HCLRTABSALL = 3;
+
+def M_LNM = 20;
+def M_ASM = ">1";
+def M_AWM = "?7";
+

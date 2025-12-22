@@ -1,0 +1,1113 @@
+;bb version of collision course alpha
+;
+
+
+;#COMPILE = 0 ;uncomment when making local
+
+
+CNIF #COMPILE = 0
+    WBStartup
+;    NoCli
+
+    level.b = 1
+
+    plinp.b = 1 ;second joyport (0 mouse) (-1 keys)
+
+    Dim done.b(#_DOLEN)
+
+    For a.b = 0 To #_DOLEN
+        done(a) = False
+    Next
+CEND
+
+;game$ = "CCA - Compiled 18/03/98"
+;ok.b = Request(game$,"Quick instuctions:|move with cursor keys.|Q to quit P to play again (at game over prompt)","Lets GO!"
+
+;*******************************************************************************************************************************
+;*******************************************************************************************************************************
+;*******************************************************************************************************************************
+
+.play
+
+AMIGA
+
+db.b = 0                          ; VARIABLE LIBRARY / INITIALIZATIONS
+moo.w   ;-_misc vars
+baa.q   ;/
+count.w
+countb.w
+countc.w
+todraw.b=0
+x.q     ; \
+y.q     ;  \__Line coordinates
+xb.q    ;  /
+yb.q    ; /
+xw.w
+yw.w
+xbw.w
+ybw.w
+vibrato.q        ; background shake factor
+channel.b = 1    ; next sound channel
+explopal.b = 1   ; next explosion pal operation
+ob_pal_a.b = 11  ; obstacle pals
+ob_pal_b.b = 6
+ob_pal_c.b = 1
+score_a.w=0      ; score control
+score_b.b=0        ;
+high_score.l=0
+nazi.b=0         ; evil variable that never should have happened
+                 ;   but was allowed to exist due to mass stupidity
+exit.b           ; end condition
+obst.b=0         ; next obstacle to do
+
+DEFTYPE .worm bob
+
+If done(#_ARRAYS) = False
+
+    Dim obstac.obstacle(#OBS) ; array of obstacles
+
+    Dim toblits.toblit(50)            ;QUEUE TO BLIT
+
+    Dim sinlup.q(#ROT)                ;sine and cosine look up tables
+    Dim coslup.q(#ROT)
+    For count=0 To #ROT
+        sinlup(count)=Sin(((2 * Pi) / #ROT) * count)
+        coslup(count)=Cos(((2 * Pi) / #ROT) * count)
+    Next
+
+    Dim bombs.bomb(#BOMB)             ;missiles
+    Dim explo.explosion(#BOMB)        ;explosions
+    Dim fumes.trail(#SMOKE)           ;trail
+
+    done(#_ARRAYS) = True
+
+EndIf
+
+Gosub initgame
+
+BLITZ
+ForcePAL
+
+CreateDisplay 0:DisplayPalette 0,0:DisplayBitMap 0,0,4
+
+; MAIN LOOP
+;------------------
+._main
+
+exit.b = False
+
+done(#_CLRSCRN) = False
+done(#_CLRVARS) = False
+Gosub init_reset ; set / reset variables and screen
+
+Repeat ; main loop
+
+
+   ; VWait 5
+    If Rnd(1) > .5
+        Sound 0, 3
+    Else
+        Sound 1,3
+    End If
+
+    Repeat    ;action LOOP - exit on die or "q"
+
+        Gosub paltwist
+        Gosub levels
+
+        VWait
+
+        DisplayPalette 0,0
+        DisplayBitMap 0,db,0,0,4,Rnd(vibrato),Rnd(vibrato)
+        vibrato = 0
+
+        db = 1 - db : Use BitMap db
+        UnBuffer db
+
+        Gosub moveplayer
+        Gosub blitstack
+        If level <> 2 Then Gosub permobs
+        Gosub do_explo
+        Gosub clouds
+        Gosub shoot
+        If level <> 2 Then Gosub obs
+        Gosub blit_player1
+        Gosub movebombs
+
+    Until RawStatus($10) OR bob\flag = 1 ; action loop
+
+    x = bob\x * 2: y = bob\y
+    Gosub die
+    CopyBitMap 0,1
+
+    If score_a > high_score
+        high_score = score_a
+        Sound 5,3
+    EndIf
+
+    done(#_CLRSCRN) = False
+    Gosub init_reset
+    Gosub again
+    done(#_CLRSCRN) = False
+    done(#_CLRVARS) = False
+    Gosub init_reset
+
+Until exit = True
+
+AMIGA
+
+CNIF #COMPILE = 1
+Return
+CEND
+
+End
+
+
+;*******************************************************************************************************************************
+;*******************************************************************************************************************************
+
+BLITZ
+
+._blitz_subs
+;--------------------
+
+
+;*******************************************************************************************************************************
+.init_reset   ; THING TO BE INITIALIZED / Re-Initialised
+
+
+    If done(#_CLRVARS) = False
+
+        bob\x = 170,130,Rnd(#ROT),0,0.5,0         ;VAR RESETS
+                      #
+        score_a.w=0 ; master score_a control
+        score_b.b=0 ; roger wilco
+
+        For count = 0 To #OBS
+            obstac(count)\age = 0
+        Next
+        todraw=0
+        For count = 0 To #BOMBB
+            bombs(count)\flag = Off
+            explo(count)\time = 0
+        Next
+        curfume.b = 0;     trail info
+        For count = 0 To #SMOKE
+            fumes(count)\rad = 0
+        Next
+        vibrato = 0
+        FlushBuffer 0
+        FlushBuffer 1
+
+        done(#_CLRVARS) = True
+
+    EndIf
+
+
+    If done(#_CLRSCRN) = False
+
+        VWait
+        DisplayBitMap 0,1,0,0,4,Rnd(vibrato),Rnd(vibrato)
+                                        ;BITMAP RESETS
+        Use BitMap 0            ; draw playfield box
+        Cls
+        Box  #SXA,#SYA,#SXB,#SYB,1
+        Boxf  #SXA,0,#SXB,#SYA,12
+        Box  #SXA,0,#SXB,#SYA,1
+
+        FNSOutput 0,1
+        FNSPrint 1,150,5,"Collision Course Alpha"
+        a$ = "Todays Highest " + Str$(high_score)
+        FNSPrefs 0,11
+        FNSOutput 0,1
+        FNSPrint 2,20,10,"Score 0"
+        FNSPrint 2,480,10,a$
+
+        VWait
+        DisplayBitMap 0,0,0,0,4,Rnd(vibrato),Rnd(vibrato)
+        Use BitMap 1
+
+        Cls
+        Box  #SXA,#SYA,#SXB,#SYB,1
+        Boxf  #SXA,0,#SXB,#SYA,12
+        Box  #SXA,0,#SXB,#SYA,1
+
+        FNSOutput 1,1
+        FNSPrint 1,150,5,"Collision Course Alpha"
+        FNSPrefs 0,11
+        FNSOutput 1,1
+        FNSPrint 2,20,10,"Score 0"
+        FNSPrint 2,480,10,a$
+
+        done(#_CLRSCRN) = True
+    EndIf
+
+Return
+
+;*******************************************************************************************************************************
+.levels     ; process new level
+
+    Select level
+        Case 0
+
+            score_b+1;
+            If score_b > 25
+                FNSPrefs 0,12
+                FNSPrint 2,67,10,Str$(score_a)
+                FNSOutput 0,1
+                FNSPrint 2,67,10,Str$(score_a)
+                score_b = 0
+                score_a+1
+                FNSPrefs 0,11
+                FNSPrint 2,67,10,Str$(score_a)
+                FNSOutput 1,1
+                FNSPrint 2,67,10,Str$(score_a)
+                nazi+1
+                If nazi>4
+                    nazi = 0
+
+                    obstac(0)\x = #SXA + 30 + Rnd(#XWID-60)
+                    obstac(0)\y = #SYA + 15 + Rnd(#YWID-30)
+                    obstac(0)\age = 30
+                    If score_a < 20
+                        obstac(0)\life = Rnd(score_a * 2) + 40
+                    Else
+                        obstac(0)\life = Rnd(30) + 50
+                    EndIf
+
+                EndIf
+            EndIf
+        Case 1
+            score_b+1;
+            If score_b > 20
+                FNSPrefs 0,12
+                FNSPrint 2,67,10,Str$(score_a)
+                FNSOutput 0,1
+                FNSPrint 2,67,10,Str$(score_a)
+                score_b = 0
+                score_a+1
+                FNSPrefs 0,11
+                FNSPrint 2,67,10,Str$(score_a)
+                FNSOutput 1,1
+                FNSPrint 2,67,10,Str$(score_a)
+                nazi+1
+                If nazi > 4
+                    nazi = 0
+
+                    obstac(0)\x = #SXA + 30 + Rnd(#XWID-60)
+                    obstac(0)\y = #SYA + 15 + Rnd(#YWID-30)
+                    obstac(0)\age = 30
+                    If score_a < 20
+                        obstac(0)\life = Rnd(score_a * 2) + 40
+                    Else
+                        obstac(0)\life = Rnd(30) + 50
+                    EndIf
+
+                EndIf
+            EndIf
+
+        Case 2
+            score_b+1;
+            If score_b > 30
+                FNSPrefs 0,12
+                FNSPrint 2,67,10,Str$(score_a)
+                FNSOutput 0,1
+                FNSPrint 2,67,10,Str$(score_a)
+                score_b = 0
+                score_a+1
+                FNSPrefs 0,11
+                FNSPrint 2,67,10,Str$(score_a)
+                FNSOutput 1,1
+                FNSPrint 2,67,10,Str$(score_a)
+
+            EndIf
+
+    End Select
+Return
+
+;*******************************************************************************************************************************
+.blit_player1
+
+    Use BitMap 2
+    Cls 0              ;EEK overcomplex trig stuff
+    x = 2*(#PL_MID_X + 3 * sinlup(bob\r)) ;where wings cross
+    y = #PL_MID_Y + 3 * coslup(bob\r)
+
+    moo = bob\r - #ROT_4   ;rotational pos of a wing
+    If moo < 0 Then moo = #ROT + moo
+                                         ;a wing tip
+    xb = 2*(#PL_MID_X + (3 + bob\rt / #SCL) * sinlup(moo))
+    yb = #PL_MID_Y + (3 + bob\rt / #SCL) * coslup(moo)
+    Line x, y,xb,yb,4
+
+    moo = bob\r + #ROT_4 ;wing2
+    If moo >= #ROT Then moo = moo - #ROT
+    xb = 2*(#PL_MID_X + (3 - bob\rt / #SCL) * sinlup(moo))
+    yb = #PL_MID_Y + (3 - bob\rt / #SCL) * coslup(moo)
+    Line x, y,xb,yb,4
+                      ;center line
+    x = 2*(#PL_MID_X + 4 * sinlup(bob\r))
+    y = #PL_MID_Y + 4 * coslup(bob\r)
+    Line x, y, 2 * (#PL_MID_X - 1 * sinlup(bob\r)), #PL_MID_Y - 1  * coslup(bob\r),4
+
+    GetaShape 1,0,0,#PL_X,#PL_Y
+    MidHandle 1
+    Use BitMap db
+
+    If BlitColl(1,2*bob\x,bob\y) = True  Then bob\flag = 1
+
+    BBlit db,1,2 * bob\x,bob\y
+
+    If Rnd(12) < 7
+        fumes(curfume)\x = 2 * (bob\x + (- 6 +Rnd(3)) * sinlup(bob\r)) ;add trail
+        fumes(curfume)\y = bob\y + (- 6 + Rnd(3)) * coslup(bob\r);
+        fumes(curfume)\rad = 1;
+    End If
+Return
+
+;*******************************************************************************************************************************
+.clouds               ;I'm forever blowing bubbles
+    If fumes(curfume)\rad > 0
+        toblits(todraw)\shp = 21+fumes(curfume)\rad
+        toblits(todraw)\x = fumes(curfume)\x
+        toblits(todraw)\y = fumes(curfume)\y
+        todraw+1
+        Blit 21+fumes(curfume)\rad,fumes(curfume)\x,fumes(curfume)\y
+        fumes(curfume)\rad + 1
+        If fumes(curfume)\rad > 4 Then fumes(curfume)\rad = 0
+    End If
+
+    moo = curfume - 10
+    If moo < 0 Then moo = #SMOKE + moo
+    If fumes(moo)\rad > 0
+       toblits(todraw)\shp = 21+fumes(moo)\rad
+       toblits(todraw)\x = fumes(moo)\x
+       toblits(todraw)\y = fumes(moo)\y
+       todraw+1
+       Blit 21+fumes(moo)\rad,fumes(moo)\x,fumes(moo)\y
+
+       fumes(moo)\rad + 1
+       If fumes(moo)\rad > 4 Then fumes(moo)\rad = 0
+    End If
+
+    moo = curfume - 20     ; Pretty bubbles in the air
+    If moo < 0 Then moo = #SMOKE + moo
+    If fumes(moo)\rad > 0
+       toblits(todraw)\shp = 21+fumes(moo)\rad
+       toblits(todraw)\x = fumes(moo)\x
+       toblits(todraw)\y = fumes(moo)\y
+       todraw+1
+       Blit 21+fumes(moo)\rad,fumes(moo)\x,fumes(moo)\y
+       fumes(moo)\rad + 1
+       If fumes(moo)\rad > 4 Then fumes(moo)\rad = 0
+    End If
+    curfume + 1
+    If curfume>#SMOKE Then curfume = 0
+Return
+
+;*******************************************************************************************************************************
+.shoot         ; drop a new bomb
+    If Rnd(12) > 2 Then Return ; this shouldn't always happen
+
+    moo = -1
+    For count = 0 To #BOMBB
+        If bombs(count)\flag = Off Then moo = count
+    Next
+    If moo = -1 Then Return ; oh dear, no free bombs
+
+    Sound 4, 8,60
+
+    Select Int(Rnd(4))
+            ; from left
+        Case 0 : bombs(moo)\x = (#SXA+6)/2 : bombs(moo)\y = Rnd(#YWID-24)+12+#SYA
+                 bombs(moo)\xd = Rnd(1)+1
+                 bombs(moo)\yd = 0; Rnd(1)-.5
+                 bombs(moo)\flag = 2
+            ; from top
+        Case 1 : bombs(moo)\x = (Rnd(#XWID-24)+12)/2 : bombs(moo)\y = #SYA + 6
+                 bombs(moo)\xd = 0;Rnd(1)-.5
+                 bombs(moo)\yd = Rnd(1)+1
+                 bombs(moo)\flag = 3
+            ;from right
+        Case 2 : bombs(moo)\x = (#SXB-6)/2 : bombs(moo)\y = Rnd(#YWID-24)+12+#SYA
+                 bombs(moo)\xd = -Rnd(1)-1 : bombs(moo)\yd = 0;Rnd(1)-.5
+                 bombs(moo)\flag = 4
+            ; from bottom
+        Case 3 : bombs(moo)\x = (Rnd(#XWID-24)+12)/2 : bombs(moo)\y = #SYB - 6
+                 bombs(moo)\xd = 0;Rnd(1)-.5
+                 bombs(moo)\yd = -Rnd(1)-1
+                 bombs(moo)\flag = 5
+    End Select
+Return
+
+;*******************************************************************************************************************************
+.movebombs
+    For count = 0 To #BOMBB
+        If bombs(count)\flag > 1
+            USEPATH bombs(count)
+            \x + \xd
+            \y + \yd
+            If \x*2 < #SXA + 3 Then \flag = 0
+            If \x*2 > #SXB - 3 Then \flag = 0
+            If \y < #SYA + 3 Then \flag = 0
+            If \y > #SYB - 3 Then \flag = 0
+            If \flag > 1
+                If BlitColl(\flag,\x*2,\y) = True Then Gosub new_explo
+                If \flag > 1 Then BBlit db,\flag,\x*2,\y
+            End If
+        End If
+    Next
+Return
+
+;*******************************************************************************************************************************
+.do_explo      ; bomb explosions
+    For count = 0 To #BOMBB
+        If explo(count)\time > 0
+            USEPATH explo(count)
+            toblits(todraw)\shp = 6+\time
+            toblits(todraw)\x = \x*2
+            toblits(todraw)\y = \y
+            todraw+1
+            Blit 6+ \time  ,\x * 2,\y
+            vibrato + (\time / 5)
+            \time + 1
+            If \time > 17
+                \time = 0
+                toblits(todraw)\shp = 0
+                toblits(todraw)\x = \x*2
+                toblits(todraw)\y = \y
+                todraw+1
+                Circlef \x *2,\y,22,11,0
+            End If
+        End If
+    Next
+Return
+
+;*******************************************************************************************************************************
+.new_explo      ; turn a bomb into an explosion
+    USEPATH bombs(count)
+
+    If \x*2 < #SXA + 24 Then Return ;no explo ?
+    If \x*2 > #SXB - 24 Then Return
+    If \y < #SYA + 12 Then Return
+    If \y > #SYB - 12 Then Return
+
+    \flag = 0;die
+
+    moo = -1
+    For countb = 0 To #BOMBB      ;nark
+        If explo(countb)\time = 0 Then moo = countb
+    Next
+    If moo = -1 Then Return ; oh dear, no free explosions
+
+    explo(moo)\x = \x
+    explo(moo)\y = \y
+    explo(moo)\time = 1
+
+    Sound 3, channel,Rnd(50)
+    Gosub next_channel
+Return
+
+;*******************************************************************************************************************************
+.next_channel
+    channel * 2
+    If channel > 8 Then channel = 1
+Return
+
+;*******************************************************************************************************************************
+.die
+    db = 1 - db : Use BitMap db
+    Gosub blitstack
+
+    Sound 2, 3
+    VWait
+    Sound 2, 12
+
+    db = 0
+    Use BitMap 0
+    For countc = 0 To 50
+        Gosub paltwist
+
+
+        VWait
+        DisplayPalette 0,0
+        vibrato = 0
+
+        For count = 0 To #BOMBB
+            If explo(count)\time > 0
+                Blit 6+explo(count)\time,explo(count)\x*2,explo(count)\y
+                explo(count)\time + 1
+                vibrato + (explo(count)\time / 5)
+                If explo(count)\time > 17
+                    explo(count)\time = 0
+                    Circlef explo(count)\x*2,explo(count)\y,22,11,0
+                End If
+            End If
+        Next
+
+        vibrato + countc / 8
+        DisplayBitMap 0,0,0,0,4,Rnd(vibrato),Rnd(vibrato)
+        For countb = 0 To 15
+            xw = Rnd(#ROT)
+            yw = countc
+            Line x,y,x + yw * sinlup(xw) * 2,y + yw * coslup(xw),Rnd(3)+13
+        Next
+    Next
+    DisplayBitMap 0,0,0,0,4,0,0
+    For count = 0 To 50
+        Gosub paltwist
+        VWait
+        DisplayPalette 0,0
+    Next
+Return
+
+;*******************************************************************************************************************************
+.paltwist
+    AGAPalRGB 0,10,255,Rnd(250),0   ; Pal adjustments
+
+    AGAPalRGB 0,13,AGAPalRed(explopal+31),AGAPalGreen(explopal+31),AGAPalBlue(explopal+31)
+    AGAPalRGB 0,14,AGAPalRed(explopal+32),AGAPalGreen(explopal+32),AGAPalBlue(explopal+32)
+    AGAPalRGB 0,15,AGAPalRed(explopal+33),AGAPalGreen(explopal+33),AGAPalBlue(explopal+33)
+    explopal+1
+    If explopal > 97 Then explopal = 0
+
+    AGAPalRGB 0,5,AGAPalRed(ob_pal_a + 140),AGAPalGreen(ob_pal_a + 140),AGAPalBlue(ob_pal_a + 140)
+    AGAPalRGB 0,6,AGAPalRed(ob_pal_b + 140),AGAPalGreen(ob_pal_b + 140),AGAPalBlue(ob_pal_b + 140)
+    AGAPalRGB 0,7,AGAPalRed(ob_pal_c + 140),AGAPalGreen(ob_pal_c + 140),AGAPalBlue(ob_pal_c + 140)
+    ob_pal_a + 1
+    ob_pal_b + 1
+    ob_pal_c + 1
+    If ob_pal_a > 60 Then ob_pal_a = 0
+    If ob_pal_b > 60 Then ob_pal_b = 0
+    If ob_pal_c > 60 Then ob_pal_c = 0
+
+Return
+
+;*******************************************************************************************************************************
+.blitstack
+    For count=0 To todraw-1
+
+        If toblits(count)\shp=0 : Circlef toblits(count)\x,toblits(count)\y,22,11,0
+           Else Blit toblits(count)\shp,toblits(count)\x,toblits(count)\y
+        End If
+
+    Next count
+
+    todraw=0
+Return
+
+;*******************************************************************************************************************************
+.moveplayer
+    Select level
+        Case 0
+
+            bob\x = bob\x + bob\acc * sinlup(bob\r)
+            bob\y = bob\y + bob\acc * coslup(bob\r)
+
+            If plinp = -1
+                If RawStatus($4C) = True Then bob\acc = 2.7
+                If RawStatus($4F) = True Then bob\rt = bob\rt + .7
+                If RawStatus($4E) = True Then bob\rt = bob\rt - .7
+            Else
+                If Joyb(plinp) = 1 Then bob\acc = 2.7
+                If Joyx(plinp) = -1 Then bob\rt = bob\rt + .7
+                If Joyx(plinp) = 1 Then bob\rt = bob\rt - .7
+            EndIf
+
+            bob\rt = QLimit(bob\rt, -4, 4)
+        Case 1
+
+            bob\x = bob\x + (bob\acc + .3) * sinlup(bob\r)
+            bob\y = bob\y + (bob\acc + .3) * coslup(bob\r)
+
+            If plinp = -1
+                If RawStatus($4C) = True Then bob\acc = 3.0
+                If RawStatus($4F) = True Then bob\rt = bob\rt + .9
+                If RawStatus($4E) = True Then bob\rt = bob\rt - .9
+            Else
+                If Joyb(1) = 1 Then bob\acc = 3.0
+                If Joyx(1) = -1 Then bob\rt = bob\rt + .9
+                If Joyx(1) = 1 Then bob\rt = bob\rt - .9
+
+            EndIf
+
+            bob\rt = QLimit(bob\rt, -4.5, 4.5)
+        Case 2
+            bob\x = bob\x + (bob\acc - .1) * sinlup(bob\r)
+            bob\y = bob\y + (bob\acc - .1) * coslup(bob\r)
+
+            If plinp = -1
+                If RawStatus($4C) = True Then bob\acc = 2.0
+                If RawStatus($4F) = True Then bob\rt = bob\rt + .8
+                If RawStatus($4E) = True Then bob\rt = bob\rt - .8
+            Else
+                If Joyb(1) = 1 Then bob\acc = 1.0
+                If Joyx(1) = -1 Then bob\rt = bob\rt + .8
+                If Joyx(1) = 1 Then bob\rt = bob\rt - .8
+
+            EndIf
+
+            bob\rt = QLimit(bob\rt, -5, 5)
+
+    End Select
+
+    bob\r = bob\r + bob\rt
+    If bob\acc > 1 Then bob\acc = bob\acc - .05
+    If bob\acc < 1 Then bob\acc = 1
+    If bob\rt > 0 Then bob\rt = bob\rt - .3
+    If bob\rt < 0 Then bob\rt = bob\rt + .3
+    If bob\rt < .3 AND bob\rt > -.3 Then bob\rt = 0
+    If bob\r >= #ROT Then bob\r = bob\r - #ROT
+    If bob\r <0 Then bob\r = bob\r + #ROT
+Return
+
+;*******************************************************************************************************************************
+.obs
+    If obstac(0)\age > 0
+        BBlit db,obstac(0)\age,obstac(0)\x,obstac(0)\y
+        obstac(0)\age +1
+        If obstac(0)\age > obstac(0)\life Then obstac(0)\age = -1
+    EndIf
+Return
+
+;*******************************************************************************************************************************
+.permobs
+    If obstac(0)\age < 0
+        Blit obstac(0)\life,obstac(0)\x,obstac(0)\y
+        toblits(todraw)\shp = obstac(0)\life
+        toblits(todraw)\x = obstac(0)\x
+        toblits(todraw)\y = obstac(0)\y
+        todraw+1
+        obstac(0)\age +1
+    EndIf
+Return
+
+;*******************************************************************************************************************************
+.again
+
+    justin.b = True
+    justout.b = False
+    countdown.l = 1000
+
+    dir.q = 0
+    rot.q = 80
+    rotb.q = 80
+
+
+    xb.q = 200 * sinlup(Int(rot)) + 310
+    yb.q = 120 * coslup(Int(rot)) + 20
+    x.q = 200 * sinlup(Int(rot)) + 310
+    y.q = 120 * coslup(Int(rot)) + 20
+                                                                                                                            
+    PaletteInfo 0
+    palr.w = AGAPalRed(3)
+    palg.w = AGAPalGreen(3)
+    palb.w = AGAPalBlue(3)
+    palrb.w = AGAPalRed(2)
+    palgb.w = AGAPalGreen(2)
+    palbb.w = AGAPalBlue(2)
+
+
+    AGAPalRGB 0,3,200,50,75
+    AGAPalRGB 0,2,150,40,60
+
+    DisplayPalette 0,0
+
+    Repeat
+
+        Select justin
+            Case True:
+                ;Poke.w $dff180,$050                ; remaining frame time indicator
+
+                VWait
+
+                DisplayBitMap 0,db,0,0,4,10 - 10 * sinlup(Int(rot)),0
+
+                db = 1 - db : Use BitMap db
+
+                Line 310,20,xb,yb,0
+                Circlef xb,yb,70,35,0
+                Circle xb,yb,70,35,0
+                xb = x
+                yb = y
+
+
+                x = 200 * sinlup(Int(rot)) + 310
+                y = 120 * coslup(Int(rot)) + 20
+                x + Rnd(2)
+                y + Rnd(1)
+
+                Line 310,20,x,y,4
+                Circlef x,y,70,35,3
+                Circle x,y,70,35,2
+                FNSOutput db
+
+                x - 10
+                y - 5
+                rotb = QWrap(rot - 75,0,512)
+                FNSPrint 1,x + 50 * sinlup(Int(rotb)),y + 25 * coslup(Int(rotb)), "O"
+                rotb = QWrap(rotb + 50 ,0,512)
+                FNSPrint 1,x + 50 * sinlup(Int(rotb)),y + 25 * coslup(Int(rotb)), "V"
+                rotb = QWrap(rotb + 50 ,0,512)
+                FNSPrint 1,x + 50 * sinlup(Int(rotb)),y + 25 * coslup(Int(rotb)), "E"
+                rotb = QWrap(rotb + 50 ,0,512)
+                FNSPrint 1,x + 50 * sinlup(Int(rotb)),y + 25 * coslup(Int(rotb)), "R"
+                rotb = QWrap(rotb + 106 ,0,512)
+                FNSPrint 1,x + 50  * sinlup(Int(rotb)),y + 25 * coslup(Int(rotb)), "E"
+                rotb = QWrap(rotb + 50 ,0,512)
+                FNSPrint 1,x + 50 * sinlup(Int(rotb)),y + 25 * coslup(Int(rotb)), "M"
+                rotb = QWrap(rotb + 50 ,0,512)
+                FNSPrint 1,x + 50 * sinlup(Int(rotb)),y + 25 * coslup(Int(rotb)), "A"
+                rotb = QWrap(rotb + 50 ,0,512)
+                FNSPrint 1,x + 50 * sinlup(Int(rotb)),y + 25 * coslup(Int(rotb)), "G"
+
+                x + 10
+                y + 5
+
+                rot + dir
+
+                If rot < 256
+                    dir - .06
+                    rot = QLimit(rot, -1, 80)
+                EndIf
+
+                If rot > 256
+                    dir + .06
+                    rot = QLimit(rot, 432, 513)
+                EndIf
+
+                rot = QWrap(rot ,0 ,512 )
+
+                ; !!!!!!!OOoh no countdown!!!!!!!!!
+                ;countdown - 1
+                If countdown <= 1
+
+                    Line 310,20,x,y,0
+                    Circlef x,y,70,35,0
+                    Circle x,y,70,35,0
+                    DisplayBitMap 0,db,0,0,4,10 - 10 * sinlup(Int(rot)),0
+                    db = 1 - db : Use BitMap db
+                    Line 310,20,xb,yb,0
+                    Circlef xb,yb,70,35,0
+                    Circle xb,yb,70,35,0
+
+                    justin = False
+                EndIf
+
+            Case False:
+
+        End Select
+
+        If RawStatus($10) Then exit = True : justout = True
+
+        If Joyb(plinp) = 1 Then justout = True
+        If RawStatus($19) Then justout = True
+
+    Until justout = True
+
+    If justin = True
+        Line 310,20,x,y,0
+        Circlef x,y,70,35,0
+        Circle x,y,70,35,0
+        db = 1 - db : Use BitMap db
+        Line 310,20,xb,yb,0
+        Circlef xb,yb,70,35,0
+        Circle xb,yb,70,35,0
+    EndIf
+                                                                                                                            
+
+    AGAPalRGB 0,3,palr,palg,palb
+    AGAPalRGB 0,2,palrb,palgb,palbb
+
+    DisplayPalette 0,0
+
+Return
+
+;*******************************************************************************************************************************
+;*******************************************************************************************************************************
+
+._ami_subs
+
+AMIGA
+
+;*******************************************************************************************************************************
+.initgame
+
+
+
+    If done(#_FONTS) = False
+
+        suc.l = InstallFNS(1,?free_dat)
+        If suc.l <> 1 Then End
+        suc.l = InstallFNS(2,?sies_dat)
+        If suc.l <> 2 Then End
+        FNSPrefs 0,11
+
+        done(#_FONTS) = True
+
+    EndIf
+
+    If done(#_SFX) = False
+
+        If Exists("sfx/siren.8svx") = False
+            error$ = "Unable to open sfx item"
+            Goto nofile
+        EndIf
+        LoadSound 0,"sfx/siren.8svx"
+
+        If Exists("sfx/cymbal.8svx") = False
+            error$ = "Unable to open sfx item"
+            Goto nofile
+        EndIf
+        LoadSound 1,"sfx/cymbal.8svx"
+
+        If Exists("sfx/death.8svx") = False
+            error$ = "Unable to open sfx item"
+            Goto nofile
+        EndIf
+        LoadSound 2,"sfx/death.8svx"
+
+        If Exists("sfx/bang.8svx") = False
+            error$ = "Unable to open sfx item"
+            Goto nofile
+        EndIf
+        LoadSound 3,"sfx/bang.8svx"   ;load sounds
+
+        If Exists("sfx/pipe.8svx") = False
+            error$ = "Unable to open sfx item"
+            Goto nofile
+        EndIf
+        LoadSound 4,"sfx/pipe.8svx"   ;load sounds
+
+        If Exists("sfx/lostinspace1.8svx") = False
+            error$ = "Unable to open sfx item"
+            Goto nofile
+        EndIf
+        LoadSound 5,"sfx/lostinspace1.8svx"   ;load sounds
+
+        done(#_SFX) = True
+    EndIf
+
+
+
+    If done(#_SHPS) = False
+
+        LoadShapes 2,"shp/cca1.shp"
+        Select level
+            Case 0
+                LoadShapes 30, "shp/cca2.shp"
+            Case 1
+                LoadShapes 30, "shp/cca3.shp"
+        End Select
+       ; CludgeShapes 2,79,?shapes_dat    ;Cludge shapes DUh!
+
+        done(#_SHPS) = True
+
+    EndIf
+
+
+    If done(#_DISP) = False
+
+        BitMap 0,700,288,4  ; front playfield 16 colour bitmap
+        Cls
+        BitMap 1,700,288,4  ; front playfield 16 colour bitmap
+        Cls
+
+
+       ;ShapesBitMap 1,2             ;for drawing directly onto shapes 'bitmap'
+        ;MidHandle 1
+
+        Buffer 1,16384
+        Buffer 0,16384
+
+
+        InitCopList 0,45,256,$13138,8,256,-4
+        DisplayControls 0,0,$1c00,$00ee
+
+        done(#_DISP) = True
+
+    EndIf
+    ;something was messing with this shape? init every game
+    BitMap 2,#PL_X,#PL_Y,4       ; draw a ship on me
+    InitShape 1,#PL_X,#PL_Y,4    ; draw a ship on me
+
+    If done(#_BACKG) = False
+        BitMap 4,700,288,4  ; back playfield 16 colour bitmap
+
+        CNIF #COMPILE = 0
+            If NumPars<>1
+                If Exists("backs/dune.ilbm") = False
+                    error$ = "Unable to open default background||dune.ilbm"
+                    Goto nofile
+                EndIf
+                LoadBitMap 4,"backs/dune.ilbm",1
+            Else
+                Gosub userimage
+            End If
+        CEND
+
+        CNIF #COMPILE = 1
+            If image_set.b = True
+                ILBMInfo back
+                xw = ILBMWidth
+                yw = ILBMHeight
+                LoadBitMap 4, back ,1
+                Use BitMap 4
+                    ;add whole blocks
+                GetaShape 1, 0, 0, xw, yw
+                For count = 0 To (700 / xw) - 1
+                    For countb = 0 To (288 / yw) - 1
+                        ;Request "thing", Str$(count) + "/" + Str$(countb), "Hmmm Nice"
+                        Blit 1, count * xw, countb * yw
+                    Next countb
+                Next count
+                    ;add x remainders
+                xbw = 700 MOD xw
+              ;  Request "x remainder", Str$(xbw) , "Hmmm Nice"
+                If xbw <> 0
+                    GetaShape 1, 0, 0, xbw, yw
+                    count = (700 / xw)
+                    For countb = 0 To (288 / yw) - 1
+               ;         Request "thing", Str$(count) + "/" + Str$(countb), "Hmmm Nice"
+                        Blit 1, count * xw, countb * yw
+                    Next countb
+                EndIf
+                    ;add y remainders
+                ybw = 288 MOD yw
+               ; Request "y remainder", Str$(ybw) , "Hmmm Nice"
+                If ybw <> 0
+                    GetaShape 1, 0, 0, xw, ybw
+                    countb = (288 / yw)
+                    For count = 0 To (700 / xw) - 1
+                ;        Request "thing", Str$(count) + "/" + Str$(countb), "Hmmm Nice"
+                        Blit 1, count * xw, countb * yw
+                    Next count
+                EndIf
+                    ; add the corner bit
+                If xbw <> 0 AND ybw <> 0
+                    GetaShape 1, 0, 0, xbw, ybw
+                    count =  (700 / xw)
+                    countb = (288 / yw)
+                 ;   Request "thing", Str$(count) + "/" + Str$(countb), "Hmmm Nice"
+                    Blit 1, count * xw, countb * yw
+                EndIf
+            Else
+
+                LoadBitMap 4, "backs/dune.ilbm",1
+            EndIf
+        CEND
+
+        done(#_BACKG) = True
+    EndIf
+    If done(#_LEVEL) = False
+        InitPalette 0,256                ; set pal up
+
+        Select level
+            Case 0
+                the$ = "img/base.pal"
+            Case 1
+                the$ = "img/base1.pal"
+            Case 2
+                the$ = "img/base.pal"
+        End Select
+
+        If Exists(the$) = False
+            error$ = "Unable to open palette"
+            Goto nofile
+        EndIf
+
+        LoadPalette 0,the$
+        Gosub initcolours
+
+
+        done(#_LEVEL) = True
+    EndIf
+
+
+    For baa = 0 To 250
+        If baa < 50
+            DisplayRGB 0,11,baa / 3,baa*5,200,baa
+        Else
+            DisplayRGB 0,11,baa,250-(baa),0,baa+50
+        EndIf
+    Next
+
+Return
+
+;*******************************************************************************************************************************
+.userimage       ;if a valid custom image has been selected
+    ok.b = 0     ; then load it.
+
+    If ReadFile(0,Par$(1)) = True
+        If Lof(0) > 16
+            FileInput 0
+            pic$ = Inkey$(8)
+            pic$ = Inkey$(4)
+            If pic$ = "ILBM"
+                ILBMInfo Par$(1)
+                If (ILBMDepth < 5) AND (ILBMWidth > 699) AND (ILBMHeight > 287)
+                    ok = 1
+                Else
+                    error$ = "custom image " + Par$(1) + " was not of correct size or depth"
+                End If
+            Else
+                error$ = "custom image " + Par$(1) + " was not identified as an ILBM"
+            End If
+        Else
+            error$ = "custom image " + Par$(1) + " could not be verified"
+        End If
+    Else
+        error$ = "Unable to open custom image  " + Par$(1)
+    End If
+
+
+    DefaultInput
+    CloseFile 0
+
+    If ok = 1
+        LoadBitMap 4,Par$(1),1          ; load custom
+    Else
+
+        ok = Request("Using Default background image",error$,"OK")
+
+        If Exists("backs/dune.ilbm") = False
+            error$ = "Unable to open default background||dune.ilbm"
+            Goto nofile
+        EndIf
+        LoadBitMap 4,"backs/dune.ilbm",1      ; load default
+    EndIf
+Return
+
+;*******************************************************************************************************************************
+.nofile
+    ok = Request("CCA - file read error",error$,"Gah!")
+End
+
+;*******************************************************************************************************************************
+.initcolours
+    ; put palette from background image into main pal
+    PaletteInfo 1
+    For count=17 To 31
+        AGAPalRGB 0,count,AGAPalRed(count - 16),AGAPalGreen(count - 16),AGAPalBlue(count - 16)  ; back playfield colours
+    Next
+
+    AGAPalRGB 0,0,AGAPalRed(0),AGAPalGreen(0),AGAPalBlue(0)
+
+   ; Free Palette 1
+
+    PaletteInfo 0
+    AGAPalRGB 0,13,AGAPalRed(31),AGAPalGreen(31),AGAPalBlue(31)
+    AGAPalRGB 0,14,AGAPalRed(32),AGAPalGreen(32),AGAPalBlue(32)
+    AGAPalRGB 0,15,AGAPalRed(33),AGAPalGreen(33),AGAPalBlue(33)
+
+Return
+
+
+
+;*******************************************************************************************************************************
+;*******************************************************************************************************************************
+;*******************************************************************************************************************************
+
+free_dat:   IncBin "fns/FREE.FNS"
+sies_dat:   IncBin "fns/A.FNS"
+;shapes_dat: IncBin "shp/cca.shp"

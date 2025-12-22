@@ -1,0 +1,1020 @@
+
+; Listing19b1.s
+; only output information
+
+1.   c                     Dump state of the CIA, disk drives and custom registers.
+2.   r                     Dump state of the CPU.
+	 rc[d]                 Show CPU instruction or data cache contents.
+3.   m <address> [<lines>] Memory dump starting at <address>.
+4.   e[x]                  Dump contents of all custom registers, ea = AGA colors.
+4b.	 ea					   AGA colors
+4c.  ex		
+5.   i [<addr>]            Dump contents of interrupt and trap vectors.
+6.   il [<mask>]           Exception breakpoint.
+7.   dm                    Dump current address space map.
+8.   mg <address>          Memory dump starting at <address> in GUI.
+8b.  dg <address>          Disassembly starting at <address> in GUI.
+9.	 o <0-2|addr> [<lines>] View memory as Copper instructions.
+10.  d <address> [<lines>]  Disassembly starting at <address>.
+10b. dppc/do				switch disassembly output from 68k to PPC and backwards
+11.	 H[H] <cnt>             Show PC history (HH=full CPU info) <cnt> instructions.
+12.  T or Tt                Show exec tasks and their PCs.
+	 Td,Tl,Tr,Tp,Ts,TS,Ti,TO,TM,Tf Show devs, libs, resources, ports, semaphores,
+							residents, interrupts, doslist, memorylist, fsres.
+13.  sp <addr> [<addr2][<size>] Dump sprite information.
+14.  rc[d]                 Show CPU instruction or data cache contents.			; A1200 CPU mit Cache
+14b. rcd
+  
+;------------------------------------------------------------------------------																								
+c		Dump state of the CIA, disk drives and custom registers.				; 1.
+
+>c
+A: CRA 00 CRB 08 ICR 00 IM 0a TA ffff (ffff) TB 0863 (0863)
+TOD 000dc3 (000dc3) ALARM 000000    CYC=87DF3A00
+B: CRA 04 CRB 84 ICR 04 IM 00 TA ffff (ffff) TB ffff (ffff)
+TOD 000027 (000000) ALARM 0000ac    CLK=3
+DEBUG: drive 0 motor off cylinder  1 sel no ro mfmpos 0/101344
+DEBUG: drive 1 motor off cylinder  0 sel no ro mfmpos 0/101344
+side 0 dma 0 off 9 word 3EF2 pt 00000000 len 4000 bytr 0000 adk 1100 sync 0000
+DMACON: 03f0 INTENA: 602c (602c) INTREQ: 0040 (0040) VPOS: 28 HPOS: a3
+INT: 0000 IPL: -1
+COP1LC: 00000420, COP2LC: 00014fb0 COPPTR: 00014fb4
+DIWSTRT: 0581 DIWSTOP: 40c1 DDFSTRT: 003c DDFSTOP: 00d0
+BPLCON 0: 0200 1: 0000 2: 0024 3: 0c00 4: 0011 LOF=1/1 HDIW=0 VDIW=1
+Average frame time: 959681.50 ms [frames: 3959 time: -495588219]
+
+;------------------------------------------------------------------------------
+r		 Dump state of the CPU.													; 2.
+
+>r																				; A500
+  D0 00000001   D1 00C22B10   D2 00000FA0   D3 00000FA8 
+  D4 00000001   D5 0000003E   D6 00308A6B   D7 00308A78 
+  A0 00C22B10   A1 00C22C20   A2 00C063D8   A3 00C15674 
+  A4 00C24228   A5 00FF4134   A6 00FF4128   A7 00C24224 
+USP  00C24224 ISP  00C80000 
+T=00 S=0 M=0 X=0 N=0 Z=0 V=0 C=0 IMASK=0 STP=0
+Prefetch 00ff (ILLEGAL) 303c (MOVE) Chip latch 00000000
+00C15678 303c 00ff                MOVE.W #$00ff,D0
+Next PC: 00c1567c
+
+																				; D0-D6,A0-A7		Data- and Adressregister
+																				; USP=A7			User-Stackpointer
+																				; ISP				Supervisor and Interrupt Stackpointer
+																				; T=00 S=0 M=0 X=0 N=0 Z=0 V=0 C=0 - Condition Code-Flags
+																				; IMASK				Interrupt-Mask shows current Interupt
+																				; STP				STOP = CPU is in stopped state (STOP instruction)
+																				; Prefetch
+																				; Chip latch:		Chip latch = last chipset bus accessed value.
+																				;					It is generally zero in non-cycle-exact mode.
+																				; current instruction
+																				; Next PC			NEXT Program counter adress
+
+																				; to get the STP=1 state
+																				; (every interrupt wakes CPU up from stop state)																				 
+
+																				;		lea     .l(pc),a0
+																				;		move.l  a0,$20.w 	; privilege violation handler
+																				;.l:
+																				;		stop    #$2000
+																				;		nop
+
+;------------------------------------------------------------------------------
+>r																				; A1200
+  D0 00000000   D1 0053DBFF   D2 40000000   D3 00000000
+  D4 00000000   D5 00000000   D6 80000000   D7 C0000000
+  A0 00C00CBE   A1 00C09732   A2 00FE77E4   A3 00C00CC2
+  A4 00F814C4   A5 00C0A73E   A6 00C00B28   A7 00C0259E
+USP  00C0A780 ISP  00C0259E SFC  00000000 DFC  00000000
+CACR 00000001 VBR  00000000 CAAR 00000000 MSP  08002318
+T=00 S=1 M=0 X=0 N=0 Z=0 V=0 C=0 IMASK=0 STP=1
+Prefetch 00f81478 20802240 (1) 60e6 (Bcc) 2080 (MOVE) 2240 (MOVEA) Chip latch 00000000
+00f81476 60e6                     bra.b #$e6 == $00f8145e (T)
+Next PC: 00f81478
+>
+;------------------------------------------------------------------------------
+>r																				; A4000
+  D0 00000000   D1 00000000   D2 00000001   D3 00000000
+  D4 00000000   D5 08003320   D6 00000000   D7 00000000
+  A0 08000A36   A1 08003320   A2 08003272   A3 08000A3A
+  A4 00F814CC   A5 08003220   A6 080008A0   A7 08002316
+USP  08003262 ISP  08002316 SFC  00000000 DFC  00000000
+CACR 00008000 TC   00000318 ITT0 00FFC000 ITT1 00FFC000
+DTT0 0000C040 DTT1 00FFC000 BUSC 00000000 VBR  00000000
+URP  00000000 SRP  00000000 PCR  04300602
+T=00 S=1 M=0 X=0 N=0 Z=0 V=0 C=0 IMASK=0 STP=1
+0: 7FFF-7FFFFFFF-FFFFF800 +nan 7FFF-7FFFFFFF-FFFFF800 +nan
+2: 7FFF-7FFFFFFF-FFFFF800 +nan 7FFF-7FFFFFFF-FFFFF800 +nan
+4: 7FFF-7FFFFFFF-FFFFF800 +nan 7FFF-7FFFFFFF-FFFFF800 +nan
+6: 7FFF-7FFFFFFF-FFFFF800 +nan 7FFF-7FFFFFFF-FFFFF800 +nan
+FPSR: 00000000 FPCR: 00000000 FPIAR: 00f80c9c N=0 Z=0 I=0 NAN=0
+00f8147e 60e6                     bra.b #$e6 == $00f81466 (T)
+Next PC: 00f81480
+>
+;------------------------------------------------------------------------------
+m <address> [<lines>]	Memory dump starting at <address>.						; 3.
+
+>m 420
+00000420 0180 005A 00E2 0000 0120 0000 0122 0C80  ...Z..... ..."..
+00000430 0124 0000 0126 0478 0128 0000 012A 0478  .$...&.x.(...*.x
+00000440 012C 0000 012E 0478 0130 0000 0132 0478  .,.....x.0...2.x
+00000450 0134 0000 0136 0478 0138 0000 013A 0478  .4...6.x.8...:.x
+00000460 013C 0000 013E 0478 0C01 FFFE 008A 0000  .<...>.x........
+00000470 FFFE FFFF FFFF FFFE FE00 FF00 0000 0000  ................
+00000480 0000 0000 0007 FB80 0000 0000 0000 0000  ................
+00000490 0000 0000 0000 0000 0000 0000 0000 0000  ................
+
+>m 420 1
+00000420 0180 005A 00E2 0000 0120 0000 0122 0C80  ...Z..... ..."..
+
+>m 420 2
+00000420 0180 005A 00E2 0000 0120 0000 0122 0C80  ...Z..... ..."..
+00000430 0124 0000 0126 0478 0128 0000 012A 0478  .$...&.x.(...*.x
+
+>m																				; with every m the next addresses are output from here on
+
+>m dff002																		; custom chip registers
+00DFF002 **** **** **** ****Custom chipset* ****  ****************				; ?
+00DFF012 **** **** **** ****Custom chipset* ****  ****************
+00DFF022 **** **** **** ****Custom chipset* ****  ****************
+
+>m bfe000																		
+00BFE000 **** **** **** ****CIA** **** **** ****  ****************				; ?
+00BFE010 **** **** **** ****CIA** **** **** ****  ****************
+00BFE020 **** **** **** ****CIA** **** **** ****  ****************
+
+>m bfd000
+00BFD000 **** **** **** ****CIA** **** **** ****  ****************				; ?
+00BFD010 **** **** **** ****CIA** **** **** ****  ****************
+00BFD020 **** **** **** ****CIA** **** **** ****  ****************
+
+>m fc0000																		; 256KB Kickstart ROM
+00FC0000 1111 4EF9 00FC 00D2 0000 FFFF 0022 0005  ..N.........."..
+00FC0010 0022 0002 FFFF FFFF 6578 6563 2033 342E  ."......exec 34.
+00FC0020 3220 2832 3820 4F63 7420 3139 3837 290D  2 (28 Oct 1987).
+
+;------------------------------------------------------------------------------
+e[x]		Dump contents of all custom registers								; 4. "e" dumps custom registers
+																				; this shows the actual values from current reasterposition	
+>e
+002 DMACONR	03F0	102 BPLCON1	0000
+004 VPOSR	8000	104 BPLCON2	0024
+006 VHPOSR	001F	106 BPLCON3	0C00
+00A JOY0DAT	2E15	108 BPL1MOD	0000
+00C JOT1DAT	0000	10A BPL2MOD	0000
+00E CLXDAT	8022	10C BPLCON4	0011
+010 ADKCONR	1100	10E CLXCON2	0000
+012 POT0DAT	0000	110 BPL1DAT	0000
+014 POT1DAT	0000	112 BPL2DAT	0000
+016 POTGOR	0000	114 BPL3DAT	0000
+018 SERDATR	0000	116 BPL4DAT	0000
+01A DSKBYTR	0000	118 BPL5DAT	0000
+01C INTENAR	602C	11A BPL6DAT	0000
+01E INTREQR	0060	11C BPL7DAT	0000
+020 DSKPTH	0000	11E BPL8DAT	0000
+022 DSKPTL	0000	120 SPR0PTH	0000
+024 DSKLEN	4000	122 SPR0PTL	0CC8
+02A VPOSW	8001	124 SPR1PTH	0000
+02C VHPOSW	0000	126 SPR1PTL	0484
+02E COPCON	0000	128 SPR2PTH	0000
+030 SERDAT	0000	12A SPR2PTL	0484
+032 SERPER	0174	12C SPR3PTH	0000
+034 POTGO	0F00	12E SPR3PTL	0484
+036 JOYTEST	0000	130 SPR4PTH	0000
+038 STREQU	0000	132 SPR4PTL	0484
+03A STRVBL	0000	134 SPR5PTH	0000
+03C STRHOR	0000	136 SPR5PTL	0484
+03E STRLONG	0000	138 SPR6PTH	0000
+040 BLTCON0	07CA	13A SPR6PTL	0484
+042 BLTCON1	3000	13C SPR7PTH	0000
+044 BLTAFWM	1FFF	13E SPR7PTL	0484
+046 BLTALWM	FFFF	140 SPR0POS	0000
+048 BLTCPTH	0000	142 SPR0CTL	0000
+04A BLTCPTL	FFAC	144 SPR0DATA	0000
+04C BLTBPTH	0000	146 SPR0DATB	0000
+04E BLTBPTL	1004	148 SPR1POS	0000
+050 BLTAPTH	00C1	14A SPR1CTL	0000
+052 BLTAPTL	7194	14C SPR1DATA	0000
+054 BPTDPTH	0000	14E SPR1DATB	0000
+056 BLTDPTL	FFAC	150 SPR2POS	0000
+058 BLTSIZE	0000	152 SPR2CTL	0000
+05A BLTCON0L	0000	154 SPR2DATA	0000
+05C BLTSIZV	000A	156 SPR2DATB	0000
+05E BLTSIZH	0002	158 SPR3POS	0000
+060 BLTCMOD	FFAC	15A SPR3CTL	0000
+062 BLTBMOD	FFF8	15C SPR3DATA	0000
+064 BLTAMOD	0000	15E SPR3DATB	0000
+066 BLTDMOD	FFAC	160 SPR4POS	0000
+070 BLTCDAT	0000	162 SPR4CTL	0000
+072 BLTBDAT	0000	164 SPR4DATA	0000
+074 BLTADAT	FFFF	166 SPR4DATB	0000
+076 BLTDDAT	0000	168 SPR5POS	0000
+07C LISAID	FFFF	16A SPR5CTL	0000
+07E DSKSYNC	0000	16C SPR5DATA	0000
+080 COP1LCH	0000	16E SPR5DATB	0000
+082 COP1LCL	0420	170 SPR6POS	0000
+084 COP2LCH	0001	172 SPR6CTL	0000
+086 COP2LCL	4FB0	174 SPR6DATA	0000
+088 COPJMP1	0000	176 SPR6DATB	0000
+08A COPJMP2	0000	178 SPR7POS	0000
+08E DIWSTRT	0581	17A SPR7CTL	0000
+090 DIWSTOP	40C1	17C SPR7DATA	0000
+092 DDFSTRT	003C	17E SPR7DATB	0000
+094 DDFSTOP	00D0	180 COLOR00	005A
+096 DMACON	03F0	182 COLOR01	0FFF
+098 CLXCON	0000	184 COLOR02	0002
+09A INTENA	602C	186 COLOR03	0F80
+09C INTREQ	0060	188 COLOR04	0000
+09E ADKCON	1100	18A COLOR05	0000
+0A0 AUD0LCH	0000	18C COLOR06	0000
+0A2 AUD0LCL	0000	18E COLOR07	0000
+0A4 AUD0LEN	0000	190 COLOR08	0000
+0A6 AUD0PER	0004	192 COLOR09	0000
+0A8 AUD0VOL	0000	194 COLOR10	0000
+0AA AUD0DAT	0000	196 COLOR11	0000
+0B0 AUD1LCH	0000	198 COLOR12	0000
+0B2 AUD1LCL	0000	19A COLOR13	0000
+0B4 AUD1LEN	0000	19C COLOR14	0000
+0B6 AUD1PER	0004	19E COLOR15	0000
+0B8 AUD1VOL	0000	1A0 COLOR16	0000
+0BA AUD1DAT	0000	1A2 COLOR17	0D22
+0C0 AUD2LCH	0000	1A4 COLOR18	0000
+0C2 AUD2LCL	0000	1A6 COLOR19	0ABC
+0C4 AUD2LEN	0000	1A8 COLOR20	0444
+0C6 AUD2PER	0004	1AA COLOR21	0555
+0C8 AUD2VOL	0000	1AC COLOR22	0666
+0CA AUD2DAT	0000	1AE COLOR23	0777
+0D0 AUD3LCH	0000	1B0 COLOR24	0888
+0D2 AUD3LCL	0000	1B2 COLOR25	0999
+0D4 AUD3LEN	0000	1B4 COLOR26	0AAA
+0D6 AUD3PER	0004	1B6 COLOR27	0BBB
+0D8 AUD3VOL	0000	1B8 COLOR28	0CCC
+0DA AUD3DAT	0000	1BA COLOR29	0DDD
+0E0 BPL1PTH	0000	1BC COLOR30	0EEE
+0E2 BPL1PTL	FFB0	1BE COLOR31	0FFF
+0E4 BPL2PTH	0001	1C0 HTOTAL	00E3
+0E6 BPL2PTL	4FB0	1C2 HSSTOP	0000
+0E8 BPL3PTH	0000	1C4 HBSTRT	0000
+0EA BPL3PTL	0000	1C6 HBSTOP	0000
+0EC BPL4PTH	0000	1C8 VTOTAL	0138
+0EE BPL4PTL	0000	1CA VSSTOP	0000
+0F0 BPL5PTH	0000	1CC VBSTRT	0000
+0F2 BPL5PTL	0000	1CE VBSTOP	0000
+0F4 BPL6PTH	0000	1DC BEAMCON0	0020
+0F6 BPL6PTL	0000	1DE HSSTRT	0000
+0F8 BPL7PTH	0000	1E0 VSSTRT	0000
+0FA BPL7PTL	0000	1E2 HCENTER	0000
+0FC BPL8PTH	0000	1E4 DIWHIGH	0000
+0FE BPL8PTL	0000	1FC FMODE	0000
+100 BPLCON0	0200	1FE NO-OP(NULL)	0180
+
+;------------------------------------------------------------------------------
+e[x]		Dump contents of all custom registers								; 4b. "ex" dumps custom registers
+
+>ex
+000 BLTDDAT     0000    0000 00000000 CPU       100 BPLCON0     A200    A200 0001F310 COP
+002 DMACONR     23F0    0000 00000000 CPU       102 BPLCON1     0000    0000 0001F2F0 COP
+004 VPOSR       8000    0000 00000000 CPU       104 BPLCON2     0024    0024 0001F2E0 COP
+006 VHPOSR      6908    0000 00000000 CPU       106 BPLCON3     0C00    0000 00000000 CPU
+00A JOY0DAT     CF60    0000 00000000 CPU       108 BPL1MOD     0000    0000 0001F2F4 COP
+00C JOY1DAT     0000    0000 00000000 CPU       10A BPL2MOD     0000    0000 0001F2F8 COP
+00E CLXDAT      8022    0000 00000000 CPU       10C BPLCON4     0011    0000 00000000 CPU
+010 ADKCONR     1100    0000 00000000 CPU       10E CLXCON2     0000    0000 00000000 CPU
+012 POT0DAT     0000    0000 00000000 CPU       110 BPL1DAT     0000    0000 00000000 CPU
+014 POT1DAT     0000    0000 00000000 CPU       112 BPL2DAT     0000    0000 00000000 CPU
+016 POTGOR      0000    0000 00000000 CPU       114 BPL3DAT     0000    0000 00000000 CPU
+018 SERDATR     0000    0000 00000000 CPU       116 BPL4DAT     0000    0000 00000000 CPU
+01A DSKBYTR     0000    0000 00000000 CPU       118 BPL5DAT     0000    0000 00000000 CPU
+01C INTENAR     602C    0000 00000000 CPU       11A BPL6DAT     0000    0000 00000000 CPU
+01E INTREQR     0040    0000 00000000 CPU       11C BPL7DAT     0000    0000 00000000 CPU
+020 DSKPTH      0000    0000 00000000 CPU       11E BPL8DAT     0000    0000 00000000 CPU
+022 DSKPTL      0000    0000 00000000 CPU       120 SPR0PTH     0000    0000 0000042C COP
+024 DSKLEN      4000    0000 00000000 CPU       122 SPR0PTL     0C84    0C80 00000430 COP
+02A VPOSW       8001    0000 00000000 CPU       124 SPR1PTH     0000    0000 00000434 COP
+02C VHPOSW      0000    0000 00000000 CPU       126 SPR1PTL     047C    0478 00000438 COP
+02E COPCON      0000    0000 00000000 CPU       128 SPR2PTH     0000    0000 0000043C COP
+030 SERDAT      0000    0000 00000000 CPU       12A SPR2PTL     047C    0478 00000440 COP
+032 SERPER      0174    0000 00000000 CPU       12C SPR3PTH     0000    0000 00000444 COP
+034 POTGO       0F00    0F00 00FE450A CPU       12E SPR3PTL     047C    0478 00000448 COP
+036 JOYTEST     0000    0000 00000000 CPU       130 SPR4PTH     0000    0000 0000044C COP
+038 STREQU      0000    0000 00000000 CPU       132 SPR4PTL     047C    0478 00000450 COP
+03A STRVBL      0000    0000 00000000 CPU       134 SPR5PTH     0000    0000 00000454 COP
+03C STRHOR      0000    0000 00000000 CPU       136 SPR5PTL     047C    0478 00000458 COP
+03E STRLONG     0000    0000 00000000 CPU       138 SPR6PTH     0000    0000 0000045C COP
+040 BLTCON0     0100    0100 00C4E9CC CPU       13A SPR6PTL     047C    0478 00000460 COP
+042 BLTCON1     0000    0000 00C4E9CC CPU       13C SPR7PTH     0000    0000 00000464 COP
+044 BLTAFWM     FFFF    FFFF 00C4E9A6 CPU       13E SPR7PTL     047C    0478 00000468 COP
+046 BLTALWM     FFFF    FFFF 00C4E9A6 CPU       140 SPR0POS     6EA0    0000 00000000 CPU
+048 BLTCPTH     0001    0001 00FC7616 CPU       142 SPR0CTL     7E00    0000 00000000 CPU
+04A BLTCPTL     A27C    A59C 00FC7616 CPU       144 SPR0DATA    0000    0000 00000000 CPU
+04C BLTBPTH     0000    0000 00FC7606 CPU       146 SPR0DATB    0000    0000 00000000 CPU
+04E BLTBPTL     1004    102C 00FC7606 CPU       148 SPR1POS     FE00    0000 00000000 CPU
+050 BLTAPTH     0001    0001 00C4E9BC CPU       14A SPR1CTL     FF00    0000 00000000 CPU
+052 BLTAPTL     A0F0    5870 00C4E9BC CPU       14C SPR1DATA    0000    0000 00000000 CPU
+054 BLTDPTH     0001    0001 00C4E9DE CPU       14E SPR1DATB    0000    0000 00000000 CPU
+056 BLTDPTL     A0F0    9E70 00C4E9DE CPU       150 SPR2POS     FE00    0000 00000000 CPU
+058 BLTSIZE     0000    0228 00C4E9E6 CPU       152 SPR2CTL     FF00    0000 00000000 CPU
+05A BLTCON0L    0000    0000 00000000 CPU       154 SPR2DATA    0000    0000 00000000 CPU
+05C BLTSIZV     0008    0000 00000000 CPU       156 SPR2DATB    0000    0000 00000000 CPU
+05E BLTSIZH     0028    0000 00000000 CPU       158 SPR3POS     FE00    0000 00000000 CPU
+060 BLTCMOD     FFAC    FFAC 00FC7622 CPU       15A SPR3CTL     FF00    0000 00000000 CPU
+062 BLTBMOD     FFF8    FFF8 00FC760C CPU       15C SPR3DATA    0000    0000 00000000 CPU
+064 BLTAMOD     0000    0000 00C4E9C0 CPU       15E SPR3DATB    0000    0000 00000000 CPU
+066 BLTDMOD     0000    0000 00C4E9E2 CPU       160 SPR4POS     FE00    0000 00000000 CPU
+070 BLTCDAT     0000    0000 00000000 CPU       162 SPR4CTL     FF00    0000 00000000 CPU
+072 BLTBDAT     0000    FFFF 00FC5CF6 CPU       164 SPR4DATA    0000    0000 00000000 CPU
+074 BLTADAT     0000    FFFF 00FC7600 CPU       166 SPR4DATB    0000    0000 00000000 CPU
+076 BLTDDAT     0000    0000 00000000 CPU       168 SPR5POS     FE00    0000 00000000 CPU
+07C LISAID      FFFF    0000 00000000 CPU       16A SPR5CTL     FF00    0000 00000000 CPU
+07E DSKSYNC     0000    0000 00000000 CPU       16C SPR5DATA    0000    0000 00000000 CPU
+080 COP1LCH     0000    0000 00000000 CPU       16E SPR5DATB    0000    0000 00000000 CPU
+082 COP1LCL     0420    0000 00000000 CPU       170 SPR6POS     FE00    0000 00000000 CPU
+084 COP2LCH     0001    0001 00FC6D6C CPU       172 SPR6CTL     FF00    0000 00000000 CPU
+086 COP2LCL     F280    F280 00FC6D6C CPU       174 SPR6DATA    0000    0000 00000000 CPU
+088 COPJMP1     0000    0000 00000000 CPU       176 SPR6DATB    0000    0000 00000000 CPU
+08A COPJMP2     0000    0000 00000000 CPU       178 SPR7POS     FE00    0000 00000000 CPU
+08C COPINS      0000    0000 00000000 CPU       17A SPR7CTL     FF00    0000 00000000 CPU
+08E DIWSTRT     0581    0581 0001F2D8 COP       17C SPR7DATA    0000    0000 00000000 CPU
+090 DIWSTOP     40C1    40C1 0001F2E4 COP       17E SPR7DATB    0000    0000 00000000 CPU
+092 DDFSTRT     003C    003C 0001F2E8 COP       180 COLOR00     005A    005A 0001F288 COP
+094 DDFSTOP     00D0    00D0 0001F2EC COP       182 COLOR01     0FFF    0FFF 0001F28C COP
+096 DMACON      23F0    0000 00000000 CPU       184 COLOR02     0002    0002 0001F290 COP
+098 CLXCON      0000    0000 00000000 CPU       186 COLOR03     0F80    0F80 0001F294 COP
+09A INTENA      602C    C000 00FE93DC CPU       188 COLOR04     0000    0000 00000000 CPU
+09C INTREQ      0040    0020 00FC1354 CPU       18A COLOR05     0000    0000 00000000 CPU
+09E ADKCON      1100    0000 00000000 CPU       18C COLOR06     0000    0000 00000000 CPU
+0A0 AUD0LCH     0000    0000 00000000 CPU       18E COLOR07     0000    0000 00000000 CPU
+0A2 AUD0LCL     0000    0000 00000000 CPU       190 COLOR08     0000    0000 00000000 CPU
+0A4 AUD0LEN     0000    0000 00000000 CPU       192 COLOR09     0000    0000 00000000 CPU
+0A6 AUD0PER     0004    0000 00000000 CPU       194 COLOR10     0000    0000 00000000 CPU
+0A8 AUD0VOL     0000    0000 00000000 CPU       196 COLOR11     0000    0000 00000000 CPU
+0AA AUD0DAT     0000    0000 00000000 CPU       198 COLOR12     0000    0000 00000000 CPU
+0B0 AUD1LCH     0000    0000 00000000 CPU       19A COLOR13     0000    0000 00000000 CPU
+0B2 AUD1LCL     0000    0000 00000000 CPU       19C COLOR14     0000    0000 00000000 CPU
+0B4 AUD1LEN     0000    0000 00000000 CPU       19E COLOR15     0000    0000 00000000 CPU
+0B6 AUD1PER     0004    0000 00000000 CPU       1A0 COLOR16     0000    0000 0001F298 COP
+0B8 AUD1VOL     0000    0000 00000000 CPU       1A2 COLOR17     0D22    0D22 0001F29C COP
+0BA AUD1DAT     0000    0000 00000000 CPU       1A4 COLOR18     0000    0000 0001F2A0 COP
+0C0 AUD2LCH     0000    0000 00000000 CPU       1A6 COLOR19     0ABC    0ABC 0001F2A4 COP
+0C2 AUD2LCL     0000    0000 00000000 CPU       1A8 COLOR20     0444    0444 0001F2A8 COP
+0C4 AUD2LEN     0000    0000 00000000 CPU       1AA COLOR21     0555    0555 0001F2AC COP
+0C6 AUD2PER     0004    0000 00000000 CPU       1AC COLOR22     0666    0666 0001F2B0 COP
+0C8 AUD2VOL     0000    0000 00000000 CPU       1AE COLOR23     0777    0777 0001F2B4 COP
+0CA AUD2DAT     0000    0000 00000000 CPU       1B0 COLOR24     0888    0888 0001F2B8 COP
+0D0 AUD3LCH     0000    0000 00000000 CPU       1B2 COLOR25     0999    0999 0001F2BC COP
+0D2 AUD3LCL     0000    0000 00000000 CPU       1B4 COLOR26     0AAA    0AAA 0001F2C0 COP
+0D4 AUD3LEN     0000    0000 00000000 CPU       1B6 COLOR27     0BBB    0BBB 0001F2C4 COP
+0D6 AUD3PER     0004    0000 00000000 CPU       1B8 COLOR28     0CCC    0CCC 0001F2C8 COP
+0D8 AUD3VOL     0000    0000 00000000 CPU       1BA COLOR29     0DDD    0DDD 0001F2CC COP
+0DA AUD3DAT     0000    0000 00000000 CPU       1BC COLOR30     0EEE    0EEE 0001F2D0 COP
+0E0 BPL1PTH     0001    0001 0001F2FC COP       1BE COLOR31     0FFF    0FFF 0001F2D4 COP
+0E2 BPL1PTL     6590    5280 0001F300 COP       1C0 HTOTAL      00E3    0000 00000000 CPU
+0E4 BPL2PTH     0001    0001 0001F304 COP       1C2 HSSTOP      0000    0000 00000000 CPU
+0E6 BPL2PTL     B590    A280 0001F308 COP       1C4 HBSTRT      0000    0000 00000000 CPU
+0E8 BPL3PTH     0000    0000 00000000 CPU       1C6 HBSTOP      0000    0000 00000000 CPU
+0EA BPL3PTL     0000    0000 00000000 CPU       1C8 VTOTAL      0138    0000 00000000 CPU
+0EC BPL4PTH     0000    0000 00000000 CPU       1CA VSSTOP      0000    0000 00000000 CPU
+0EE BPL4PTL     0000    0000 00000000 CPU       1CC VBSTRT      0000    0000 00000000 CPU
+0F0 BPL5PTH     0000    0000 00000000 CPU       1CE VBSTOP      0000    0000 00000000 CPU
+0F2 BPL5PTL     0000    0000 00000000 CPU       1DC BEAMCON0    0020    0000 00000000 CPU
+0F4 BPL6PTH     0000    0000 00000000 CPU       1DE HSSTRT      0000    0000 00000000 CPU
+0F6 BPL6PTL     0000    0000 00000000 CPU       1E0 VSSTRT      0000    0000 00000000 CPU
+0F8 BPL7PTH     0000    0000 00000000 CPU       1E2 HCENTER     0000    0000 00000000 CPU
+0FA BPL7PTL     0000    0000 00000000 CPU       1E4 DIWHIGH     0000    0000 00000000 CPU
+0FC BPL8PTH     0000    0000 00000000 CPU       1FC FMODE       0000    0000 00000000 CPU
+0FE BPL8PTL     0000    0000 00000000 CPU       1FE NULL        0000    0000 00000000 CPU
+
+;------------------------------------------------------------------------------
+ea = AGA colors.																; 4c. "ea" dumps all AGA color registers.
+
+>ea
+  0 00000000  64 00000000 128 00000000 192 00000000
+  1 00000000  65 00000000 129 00000000 193 00000000
+  2 00000000  66 00000000 130 00000000 194 00000000
+  3 00000000  67 00000000 131 00000000 195 00000000
+  4 00000000  68 00000000 132 00000000 196 00000000
+  5 00000000  69 00000000 133 00000000 197 00000000
+  6 00000000  70 00000000 134 00000000 198 00000000
+  7 00000000  71 00000000 135 00000000 199 00000000
+  8 00000000  72 00000000 136 00000000 200 00000000
+  9 00000000  73 00000000 137 00000000 201 00000000
+ 10 00000000  74 00000000 138 00000000 202 00000000
+ 11 00000000  75 00000000 139 00000000 203 00000000
+ 12 00000000  76 00000000 140 00000000 204 00000000
+ 13 00000000  77 00000000 141 00000000 205 00000000
+ 14 00000000  78 00000000 142 00000000 206 00000000
+ 15 00000000  79 00000000 143 00000000 207 00000000
+ 16 00000000  80 00000000 144 00000000 208 00000000
+ 17 00000000  81 00000000 145 00000000 209 00000000
+ 18 00000000  82 00000000 146 00000000 210 00000000
+ 19 00000000  83 00000000 147 00000000 211 00000000
+ 20 00000000  84 00000000 148 00000000 212 00000000
+ 21 00000000  85 00000000 149 00000000 213 00000000
+ 22 00000000  86 00000000 150 00000000 214 00000000
+ 23 00000000  87 00000000 151 00000000 215 00000000
+ 24 00000000  88 00000000 152 00000000 216 00000000
+ 25 00000000  89 00000000 153 00000000 217 00000000
+ 26 00000000  90 00000000 154 00000000 218 00000000
+ 27 00000000  91 00000000 155 00000000 219 00000000
+ 28 00000000  92 00000000 156 00000000 220 00000000
+ 29 00000000  93 00000000 157 00000000 221 00000000
+ 30 00000000  94 00000000 158 00000000 222 00000000
+ 31 00000000  95 00000000 159 00000000 223 00000000
+ 32 00000000  96 00000000 160 00000000 224 00000000
+ 33 00000000  97 00000000 161 00000000 225 00000000
+ 34 00000000  98 00000000 162 00000000 226 00000000
+ 35 00000000  99 00000000 163 00000000 227 00000000
+ 36 00000000 100 00000000 164 00000000 228 00000000
+ 37 00000000 101 00000000 165 00000000 229 00000000
+ 38 00000000 102 00000000 166 00000000 230 00000000
+ 39 00000000 103 00000000 167 00000000 231 00000000
+ 40 00000000 104 00000000 168 00000000 232 00000000
+ 41 00000000 105 00000000 169 00000000 233 00000000
+ 42 00000000 106 00000000 170 00000000 234 00000000
+ 43 00000000 107 00000000 171 00000000 235 00000000
+ 44 00000000 108 00000000 172 00000000 236 00000000
+ 45 00000000 109 00000000 173 00000000 237 00000000
+ 46 00000000 110 00000000 174 00000000 238 00000000
+ 47 00000000 111 00000000 175 00000000 239 00000000
+ 48 00000000 112 00000000 176 00000000 240 00000000
+ 49 00000000 113 00000000 177 00000000 241 00000000
+ 50 00000000 114 00000000 178 00000000 242 00000000
+ 51 00000000 115 00000000 179 00000000 243 00000000
+ 52 00000000 116 00000000 180 00000000 244 00000000
+ 53 00000000 117 00000000 181 00000000 245 00000000
+ 54 00000000 118 00000000 182 00000000 246 00000000
+ 55 00000000 119 00000000 183 00000000 247 00000000
+ 56 00000000 120 00000000 184 00000000 248 00000000
+ 57 00000000 121 00000000 185 00000000 249 00000000
+ 58 00000000 122 00000000 186 00000000 250 00000000
+ 59 00000000 123 00000000 187 00000000 251 00000000
+ 60 00000000 124 00000000 188 00000000 252 00000000
+ 61 00000000 125 00000000 189 00000000 253 00000000
+ 62 00000000 126 00000000 190 00000000 254 00000000
+ 63 00000000 127 00000000 191 00000000 255 00000000
+
+;------------------------------------------------------------------------------
+i [<addr>]            Dump contents of interrupt and trap vectors.				; 5.	exception 3 vector points (i)
+
+>i
+$00000000 00:    Reset:SSP $00000000  $00000080 32:      TRAP 00 $00FC0836
+$00000004 01:     EXECBASE $00C00276  $00000084 33:      TRAP 01 $00FC0838
+$00000008 02:    BUS ERROR $00FC0818  $00000088 34:      TRAP 02 $00FC083A
+$0000000C 03:    ADR ERROR $00FC081A  $0000008C 35:      TRAP 03 $00FC083C
+$00000010 04:    ILLEG OPC $00FC081C  $00000090 36:      TRAP 04 $00FC083E
+$00000014 05:     DIV BY 0 $00FC081E  $00000094 37:      TRAP 05 $00FC0840
+$00000018 06:          CHK $00FC0820  $00000098 38:      TRAP 06 $00FC0842
+$0000001C 07:        TRAPV $00FC0822  $0000009C 39:      TRAP 07 $00FC0844
+$00000020 08:   PRIVIL VIO $00FC090E  $000000A0 40:      TRAP 08 $00FC0846
+$00000024 09:        TRACE $00FC0826  $000000A4 41:      TRAP 09 $00FC0848
+$00000028 10:    LINEA EMU $00FC0828  $000000A8 42:      TRAP 10 $00FC084A
+$0000002C 11:    LINEF EMU $00FC082A  $000000AC 43:      TRAP 11 $00FC084C
+$0000003C 15:   INT Uninit $00FC0832  $000000B0 44:      TRAP 12 $00FC084E
+$00000060 24:   INT Unjust $00FC0834  $000000B4 45:      TRAP 13 $00FC0850
+$00000064 25:    Lvl 1 Int $00FC0C8E  $000000B8 46:      TRAP 14 $00FC0852
+$00000068 26:    Lvl 2 Int $00FC0CE2  $000000BC 47:      TRAP 15 $00FC0854
+$0000006C 27:    Lvl 3 Int $00FC0D14  
+$00000070 28:    Lvl 4 Int $00FC0D6C  
+$00000074 29:    Lvl 5 Int $00FC0DFA  
+$00000078 30:    Lvl 6 Int $00FC0E40  
+$0000007C 31:          NMI $00FC0E86  
+
+																				; i [<addr>]	; ?
+																				; i 6c ; shows always the complete list
+																				; "i 6c" means show vectors like VBR=6c.
+																				; If you only want to see contents of 6c, you can simple type "m 6c 1"
+
+;------------------------------------------------------------------------------
+il [<mask>]           Exception breakpoint.										; 6. Exception breakpoint.
+
+>il
+Exception breakpoint mask: FFFFFFFF 00FFFFFF
+
+;------------------------------------------------------------------------------
+dm                    Dump current address space map.							; 7.
+
+>dm
+00000000    2048K/4 =     512K ID C16 Chip memory
+00200000    8192K/0 =    8192K -- F16 <none>
+00A00000    2048K/0 =    2048K -- CIA CIA
+00C00000     512K/1 =     512K ID C16 Slow memory
+00C80000    1024K/0 =    1024K -- C16 Custom chipset
+00D80000     256K/0 =     256K -- C16 <none>
+00DC0000      64K/0 =      64K -- C16 Battery backed up clock (MSM6242B)
+00DD0000      64K/0 =      64K -- C16 <none>
+00DE0000     128K/0 =     128K -- C16 Custom chipset
+00E00000     512K/1 =     512K ID F16 Kickstart ROM (F6290043)
+00E80000      64K/0 =      64K -- F16 <none>
+00E90000      64K/1 =      64K -- F16 Filesystem autoconfig
+00EA0000     384K/0 =     384K -- F16 <none>
+00F00000      64K/1 =      64K -- F16 UAE Boot ROM
+00F10000     448K/0 =     448K -- F16 <none>
+00F80000     512K/1 =     512K ID F16 Kickstart ROM (F6290043)
+
+;------------------------------------------------------------------------------
+mg <address>          Memory dump starting at <address> in GUI.					; 8. 
+ 
+ >mg <address>																	; no reaction	function???
+																				
+;------------------------------------------------------------------------------
+ dg <address>          Disassembly starting at <address> in GUI.				; 8b.
+
+>dg																				; no reaction  function???
+
+;------------------------------------------------------------------------------
+ o <0-2|addr> [<lines>]		View memory as Copper instructions.					; 9.
+
+>o 420
+ 00000420: 0180 005a          	;  COLOR00 := 0x005a
+ 00000424: 00e2 0000          	;  BPL1PTL := 0x0000
+ 00000428: 0120 0000          	;  SPR0PTH := 0x0000
+ 0000042c: 0122 0c80          	;  SPR0PTL := 0x0c80
+ 00000430: 0124 0000          	;  SPR1PTH := 0x0000
+ 00000434: 0126 0478          	;  SPR1PTL := 0x0478
+ 00000438: 0128 0000          	;  SPR2PTH := 0x0000
+ 0000043c: 012a 0478          	;  SPR2PTL := 0x0478
+ 00000440: 012c 0000          	;  SPR3PTH := 0x0000
+ 00000444: 012e 0478          	;  SPR3PTL := 0x0478
+ 00000448: 0130 0000          	;  SPR4PTH := 0x0000
+ 0000044c: 0132 0478          	;  SPR4PTL := 0x0478
+ 00000450: 0134 0000          	;  SPR5PTH := 0x0000
+ 00000454: 0136 0478          	;  SPR5PTL := 0x0478
+ 00000458: 0138 0000          	;  SPR6PTH := 0x0000
+ 0000045c: 013a 0478          	;  SPR6PTL := 0x0478
+ 00000460: 013c 0000          	;  SPR7PTH := 0x0000
+ 00000464: 013e 0478          	;  SPR7PTL := 0x0478
+ 00000468: 0c01 fffe          	;  Wait for vpos >= 0x0c and hpos >= 0x00
+                        		;  VP 0c, VE 7f; HP 00, HE fe; BFD 1
+ 0000046c: 008a 0000          	;  COPJMP2 := 0x0000
+
+ >o 420 2
+ 00000420: 0180 005a          	;  COLOR00 := 0x005a
+ 00000424: 00e2 0000          	;  BPL1PTL := 0x0000
+
+
+ >o 0 2
+*00015044: 2c01 fffe          	;  Wait for vpos >= 0x2c and hpos >= 0x00
+                        		;  VP 2c, VE 7f; HP 00, HE fe; BFD 1
+ 00015048: 0100 0200          	;  BPLCON0 := 0x0200
+
+ >o 1 2							;  aktuelle Adresse von COP1LCH
+ 00000420: 0180 005a          	;  COLOR00 := 0x005a
+ 00000424: 00e2 0000          	;  BPL1PTL := 0x0000
+
+ >o 2 2							;  aktuelle Adresse von COP2LCH
+ 00014fb0: 2b01 fffe          	;  Wait for vpos >= 0x2b and hpos >= 0x00
+                        		;  VP 2b, VE 7f; HP 00, HE fe; BFD 1
+ 00014fb4: 0180 005a          	;  COLOR00 := 0x005a
+
+;------------------------------------------------------------------------------
+d <address> [<lines>]  Disassembly starting at <address>.						; 10.
+
+ >d C1674c
+00C1674C 343c 000f                MOVE.W #$000f,D2
+00C16750 363c 000f                MOVE.W #$000f,D3
+00C16754 383c 000f                MOVE.W #$000f,D4
+00C16758 3a3c 000f                MOVE.W #$000f,D5
+00C1675C 3c3c 000f                MOVE.W #$000f,D6
+00C16760 303c 00f0                MOVE.W #$00f0,D0
+00C16764 323c 00f0                MOVE.W #$00f0,D1
+
+>d C1674c 3
+00C1674C 343c 000f                MOVE.W #$000f,D2
+00C16750 363c 000f                MOVE.W #$000f,D3
+00C16754 383c 000f                MOVE.W #$000f,D4
+
+>d																				; with every d the next disassembly lines are output from here on
+;------------------------------------------------------------------------------
+>dppc				(>dpc in WinUAE 4.4)										; 10b.
+0000000C  00FC081A
+00000010  00FC081C
+00000014  00FC081E
+00000018  00FC0820
+
+																				; with 
+																				; >dppc and >do you can switch the disassembly output from original 
+																				; 68k to PPC and backwards
+;------------------------------------------------------------------------------
+H[H] <cnt>             Show PC history (HH=full CPU info) <cnt> instructions.	; 11.
+
+																				; but last 500 instructions are automatically stored when any normal break
+																				; point is active. H <number of instructions> command lists them.
+
+>H
+-1 00FC0F94 60e6                     BT .B #$e6 == $00fc0f7c (T)
+
+>HH
+  D0 00000000   D1 00000000   D2 40000000   D3 50FB016C 
+  D4 00049493   D5 00000000   D6 80000000   D7 C0000000 
+  A0 00C0040C   A1 00C031DA   A2 00FDFF50   A3 00C00410 
+  A4 00FC0FE2   A5 00C041E0   A6 00C00276   A7 00C80000 
+USP  00C04222 ISP  00C80000 
+T=00 S=1 M=0 X=0 N=0 Z=0 V=0 C=0 IMASK=0 STP=1
+Prefetch 2000 (MOVE) 4e72 (STOP) Chip latch 00000000
+00FC0F94 60e6                     BT .B #$e6 == $00fc0f7c (T)
+
+>HH 3
+  D0 00000000   D1 00000000   D2 40000000   D3 50FB016C 
+  D4 00049493   D5 00000000   D6 80000000   D7 C0000000 
+  A0 00C0040C   A1 00C031DA   A2 00FDFF50   A3 00C00410 
+  A4 00FC0FE2   A5 00C041E0   A6 00C00276   A7 00C80000 
+USP  00C04222 ISP  00C80000 
+T=00 S=1 M=0 X=0 N=0 Z=0 V=0 C=0 IMASK=0 STP=1
+Prefetch 2000 (MOVE) 4e72 (STOP) Chip latch 00000000
+00FC0F94 60e6                     BT .B #$e6 == $00fc0f7c (T)
+
+;------------------------------------------------------------------------------
+T or Tt                Show exec tasks and their PCs.							; 12.
+  Td,Tl,Tr,Tp,Ts,TS,Ti,TO,TM,Tf Show devs, libs, resources, ports, semaphores,
+                        residents, interrupts, doslist, memorylist, fsres.
+
+>T
+Execbase at 0x00C00276
+Current:
+00C031DA: TASK    'input.device'
+Ready:
+Waiting:
+00C05750: TASK    'UAE fs automounter'
+          Waiting signals: 00002000
+          SP: 00c05fa4 PC: 00f00294
+00C1E158: PROCESS 'RAM'
+
+          Waiting signals: 00000100
+          SP: 00c1e6ac PC: 00ff469c
+00C06E30: PROCESS 'DH0'
+
+          Waiting signals: 00002100
+          SP: 00c08650 PC: 00f00f32
+00C01AF8: TASK    'UAE fs worker'
+          Waiting signals: 00000100
+          SP: 00c0234c PC: 00f00360
+00C08660: PROCESS 'DH1'
+
+          Waiting signals: 00002100
+          SP: 00c09e80 PC: 00f00f32
+00C0ACC6: TASK    'trackdisk.device'
+          Waiting signals: 00000300
+          SP: 00c0af24 PC: 00feaaf6
+00C09E90: PROCESS 'File System'
+
+          Waiting signals: 00000100
+          SP: 00c0a274 PC: 00ff469c
+00C0A790: PROCESS 'File System'
+
+          Waiting signals: 00000100
+          SP: 00c0ab74 PC: 00ff469c
+00C1A370: PROCESS 'Workbench'
+
+          Waiting signals: 80000000
+          SP: 00c1b758 PC: 00ff36de
+00C054C6: TASK    'trackdisk.device'
+          Waiting signals: 00000300
+          SP: 00c0619c PC: 00feaaf6
+00C031DA: TASK    'input.device'
+          Waiting signals: c0000000
+          SP: 00c04226 PC: 00fe5f3c
+
+;------------------------------------------------------------------------------
+  Td,Tl,Tr,Tp,Ts,TS,Ti,TO,TM,Tf Show devs, libs, resources, ports, semaphores,
+                        residents, interrupts, doslist, memorylist, fsres.
+
+>Td
+00c02b24 3 0 34.1 2 keyboard.device
+00c02c5c 3 0 34.1 1 gameport.device
+00c02de6 3 0 34.1 8 timer.device (timer 34.1 (18 Aug 1987)
+)
+00c02ee4 3 0 34.1 0 audio.device (audio 34.1 (18 Aug 1987)
+)
+00c03184 3 0 34.1 6 input.device
+00c044c0 3 0 34.1 1 console.device
+00c0459c 3 0 34.1 3 trackdisk.device
+00c0526c 3 0 50.1 0 uaehf.device (UAE hardfile.device 0.6)
+
+;------------------------------------------------------------------------------
+  Td,Tl,Tr,Tp,Ts,TS,Ti,TO,TM,Tf Show devs, libs, resources, ports, semaphores,
+                        residents, interrupts, doslist, memorylist, fsres.
+
+>Tl
+00c00276 9 0 34.2 2 exec.library (exec 34.2 (28 Oct 1987)
+)
+00c0192e 8 0 34.1 2 expansion.library (expansion 34.1 (18 Aug 1987)
+)
+00c028f6 0 0 34.1 1 graphics.library
+00c04466 0 0 34.1 1 layers.library
+00c0481c 0 0 34.3 1 intuition.library
+00c051b8 9 0 34.1 1 mathffp.library (mathffp 34.1 (18 Aug 1987)
+)
+00c051fe 0 0 34.1 2 romboot.library
+00c06290 0 0 34.3 5 dos.library (dos 34.3 (9 Dec 1987)
+)
+00c0667a 9 0 34.1 1 ramlib.library (ramlib 34.1 (18 Aug 1987)
+)
+00c0df14 9 0 34.2 2 icon.library (icon 34.2 (22 Jun 1988)
+)
+00c0e1d0 0 0 1.1 1 environment
+
+;------------------------------------------------------------------------------
+  Td,Tl,Tr,Tp,Ts,TS,Ti,TO,TM,Tf Show devs, libs, resources, ports, semaphores,
+                        residents, interrupts, doslist, memorylist, fsres.
+>Tr
+00c023ca 8 0 potgo.resource
+00c023f8 8 0 keymap.resource
+00c02460 8 0 ciaa.resource
+00c024f8 8 0 ciab.resource
+00c02596 8 0 disk.resource
+00c02634 8 0 misc.resource
+00c05126 8 0 uae.resource
+00c055a8 8 0 FileSystem.resource
+
+;------------------------------------------------------------------------------
+  Td,Tl,Tr,Tp,Ts,TS,Ti,TO,TM,Tf Show devs, libs, resources, ports, semaphores,
+                        residents, interrupts, doslist, memorylist, fsres.
+
+>Tp
+00c0cb50 4 0 SetPatch-01
+00c0caa8 4 0 FF2:)
+00016d26 4 0 Workbench
+00016d48 4 0 Workbench
+00c118d8 4 0 IDCMP
+
+;------------------------------------------------------------------------------
+  Td,Tl,Tr,Tp,Ts,TS,Ti,TO,TM,Tf Show devs, libs, resources, ports, semaphores,
+                        residents, interrupts, doslist, memorylist, fsres.
+
+>Ts
+;------------------------------------------------------------------------------
+
+>TS
+
+;------------------------------------------------------------------------------
+
+>Ti
+ 1 1: 00C002CA
+  [H] 00000000
+ 2 1: 00C002D6
+  [H] 00C02596
+      00C025E4 (C=00FC4AE8 D=00C02596) ''
+ 3 1: 00C002E2
+  [H] 00000000
+ 4 2: 00C002EE
+  [S] 00c02358 +20 (C=00f0042a D=00C02372) 'UAE fs'
+  [S] 00c0248a +00 (C=00fc4684 D=00C02460) 'ciaa.resource'
+ 5 3: 00C002FA
+  [S] <none>
+ 6 3: 00C00306
+  [S] 00c02940 +10 (C=00fc6d48 D=00C028F6) ''
+  [S] 00c02d8c +00 (C=00fe5824 D=00C02C5C) 'gameport.device'
+  [S] 00c02e88 +00 (C=00fe935a D=00C02E5E) 'timer.device'
+  [S] 00c02388 -10 (C=00f0058c D=00C0239E) 'UAE heart beat'
+ 7 3: 00C00312
+  [H] 00C028F6
+      00C0296C (C=00FC6DFA D=00C028F6) ''
+ 8 4: 00C0031E
+  [H] 00C02FAE
+      00C02FE0 (C=00FC35E4 D=00C02FAE) 'audio.device'
+ 9 4: 00C0032A
+  [H] 00C0301A
+      00C0304C (C=00FC35E4 D=00C0301A) 'audio.device'
+10 4: 00C00336
+  [H] 00C03086
+      00C030B8 (C=00FC35E4 D=00C03086) 'audio.device'
+11 4: 00C00342
+  [H] 00C030F2
+      00C03124 (C=00FC35E4 D=00C030F2) 'audio.device'
+12 5: 00C0034E
+  [H] 00000000
+13 5: 00C0035A
+  [H] 00C02596
+      00C025FA (C=00FC4B00 D=00C02596) ''
+14 6: 00C00366
+  [S] 00c02522 +00 (C=00fc4678 D=00C024F8) 'ciab.resource'
+15 6: 00C00372
+  [H] 00000000
+16 7: 00C0037E
+  [S] <none>
+
+;------------------------------------------------------------------------------
+  Td,Tl,Tr,Tp,Ts,TS,Ti,TO,TM,Tf Show devs, libs, resources, ports, semaphores,
+                        residents, interrupts, doslist, memorylist, fsres.
+>TO
+ROOTNODE: 00c05538 DOSINFO: 00c00574
+00c0e144: Type=1 Port=00c086bc Lock=00305715 'Assembler3'
+00c0e114: Type=1 Port=00c086bc Lock=00304691 'Assembler2'
+00c0e934: Type=0 Port=00000000 Lock=00000000 'PIPE'
+ - H=00c0e91c Stack= 6000 Pri= 5 Start=00000000 Seg=00000000 GV=ffffffff
+00c0e8dc: Type=0 Port=00000000 Lock=00000000 'AUX'
+ - H=00c0e8c4 Stack= 1000 Pri= 5 Start=00000000 Seg=00000000 GV=003018f6
+00c0e884: Type=0 Port=00000000 Lock=00000000 'SPEAK'
+ - H=00c0e86c Stack= 6000 Pri= 5 Start=00000000 Seg=00000000 GV=ffffffff
+00c1163c: Type=1 Port=00c1e1b4 Lock=00303b25 'CLIPS'
+00c0eaec: Type=1 Port=00c1e1b4 Lock=00303ab1 'ENV'
+00c0ea94: Type=1 Port=00c1e1b4 Lock=0030383b 'T'
+00c0e0bc: Type=2 Port=00c1e1b4 Lock=00000000 'RAM DISK'
+ - VolumeDate=00000000 00000000 00000000 LockList=00000000 DiskType=444f5300
+00c0ca4c: Type=0 Port=00000000 Lock=00000000 'NEWCON'
+ - H=00c0ca34 Stack= 1000 Pri= 5 Start=00000000 Seg=00000000 GV=003018f6
+00c014f4: Type=0 Port=00c0a7ec Lock=00000000 'DF1'
+ - H=00000000 Stack=    0 Pri= 0 Start=00c014dc Seg=00000000 GV=00000000
+   trackdisk.device:1 003fe25c
+    TableSize       12
+    SizeBlock       128
+    SecOrg          0
+    Surfaces        2
+    SectorPerBlock  1
+    BlocksPerTrack  11
+    Reserved        2
+    PreAlloc        11
+    Interleave      0
+    LowCyl          0
+    HighCyl         79 (Total 80)
+    NumBuffers      5
+    BufMemType      0x00000003
+    MaxTransfer     0x03444658
+    Mask            0x72047018
+    BootPri         678035572
+    DosType         0x4e952341
+00c00d6c: Type=0 Port=00c09eec Lock=00000000 'DF0'
+ - H=00000000 Stack=    0 Pri= 0 Start=00c00d54 Seg=00000000 GV=00000000
+   trackdisk.device:0 003fe25c
+    TableSize       12
+    SizeBlock       128
+    SecOrg          0
+    Surfaces        2
+    SectorPerBlock  1
+    BlocksPerTrack  11
+    Reserved        2
+    PreAlloc        11
+    Interleave      0
+    LowCyl          0
+    HighCyl         79 (Total 80)
+    NumBuffers      5
+    BufMemType      0x00000003
+    MaxTransfer     0x03444658
+    Mask            0x72047018
+    BootPri         678035572
+    DosType         0x4e952341
+00c00c00: Type=2 Port=00c086bc Lock=00000000 '05b_Assembler'
+ - VolumeDate=00000ed9 00000000 00000000 LockList=00305715 DiskType=444f5300
+00c00b4c: Type=1 Port=00c06e8c Lock=003002e1 'S'
+00c00afc: Type=1 Port=00c06e8c Lock=003002cd 'L'
+00c00aac: Type=1 Port=00c06e8c Lock=003002b9 'C'
+00c00a54: Type=1 Port=00c06e8c Lock=003002a5 'FONTS'
+00c009fc: Type=1 Port=00c06e8c Lock=0030028f 'DEVS'
+00c009a4: Type=1 Port=00c06e8c Lock=00300279 'LIBS'
+00c0091c: Type=1 Port=00c06e8c Lock=00300263 'SYS'
+00c007c8: Type=2 Port=00c06e8c Lock=00000000 'WB13'
+ - VolumeDate=00000ed8 00000000 00000000 LockList=00303a0f DiskType=444f5300
+00c00724: Type=0 Port=00000000 Lock=00000000 'PRT'
+ - H=00ff8d2c Stack= 1000 Pri= 0 Start=00000008 Seg=00000000 GV=003018f6
+00c006e4: Type=0 Port=00000000 Lock=00000000 'PAR'
+ - H=00ff8d2c Stack=  800 Pri= 0 Start=00000004 Seg=00000000 GV=003018f6
+00c006a4: Type=0 Port=00000000 Lock=00000000 'SER'
+ - H=00ff8d2c Stack=  800 Pri= 0 Start=00000000 Seg=00000000 GV=003018f6
+00c00664: Type=0 Port=00000000 Lock=00000000 'RAW'
+ - H=00000000 Stack=  700 Pri= 5 Start=00000004 Seg=00ff9c1c GV=003018f6
+00c00624: Type=0 Port=00000000 Lock=00000000 'CON'
+ - H=00000000 Stack=  700 Pri= 5 Start=00000000 Seg=00ff9c1c GV=003018f6
+00c005e4: Type=0 Port=00c1e1b4 Lock=00000000 'RAM'
+ - H=00000000 Stack=    0 Pri= 0 Start=00000000 Seg=00000000 GV=00000000
+00c05600: Type=0 Port=00c06e8c Lock=00000000 'DH0'
+ - H=00f0fe4c Stack= 6000 Pri=10 Start=00c04de8 Seg=00f00008 GV=ffffffff
+   uaehf.device:0 0030158c
+    TableSize       16
+    SizeBlock       128
+    SecOrg          0
+    Surfaces        64
+    SectorPerBlock  1
+    BlocksPerTrack  127
+    Reserved        2
+    PreAlloc        0
+    Interleave      0
+    LowCyl          1
+    HighCyl         420498 (Total 420498)
+    NumBuffers      50
+    BufMemType      0x00000001
+    MaxTransfer     0x7ffffffe
+    Mask            0xfffffffe
+    BootPri         0
+    DosType         0x444f5300
+00c056c8: Type=0 Port=00c086bc Lock=00000000 'DH1'
+ - H=00f0fe4c Stack= 6000 Pri=10 Start=00c055e0 Seg=00f00008 GV=ffffffff
+   uaehf.device:1 003015be
+    TableSize       16
+    SizeBlock       128
+    SecOrg          0
+    Surfaces        64
+    SectorPerBlock  1
+    BlocksPerTrack  127
+    Reserved        2
+    PreAlloc        0
+    Interleave      0
+    LowCyl          1
+    HighCyl         420498 (Total 420498)
+    NumBuffers      50
+    BufMemType      0x00000001
+    MaxTransfer     0x7ffffffe
+    Mask            0xfffffffe
+    BootPri         -128
+    DosType         0x444f5300
+
+;------------------------------------------------------------------------------
+  Td,Tl,Tr,Tp,Ts,TS,Ti,TO,TM,Tf Show devs, libs, resources, ports, semaphores,
+                        residents, interrupts, doslist, memorylist, fsres.
+
+>TM
+00c004c2 10 0 Fast Memory
+Attributes 0005 First 00c00958 Lower 00c004e8 Upper 00c7e800 Free 413984
+ 00c00958: 00c00958-00c00988,00c015a0,00000030 (48)
+ 00c015a0: 00c015a0-00c015d0,00c05558,00000030 (48)
+ 00c05558: 00c05558-00c05570,00c06768,00000018 (24)
+ 00c06768: 00c06768-00c06e30,00c0b160,000006c8 (1736)
+ 00c0b160: 00c0b160-00c0bd68,00c0c268,00000c08 (3080)
+ 00c0c268: 00c0c268-00c0c290,00c0c2a0,00000028 (40)
+ 00c0c2a0: 00c0c2a0-00c0c508,00c0c520,00000268 (616)
+ 00c0c520: 00c0c520-00c0c9c8,00c0ca00,000004a8 (1192)
+ 00c0ca00: 00c0ca00-00c0ca30,00c0ca88,00000030 (48)
+ 00c0ca88: 00c0ca88-00c0caa0,00c0caf0,00000018 (24)
+ 00c0caf0: 00c0caf0-00c0cb18,00c0cb30,00000028 (40)
+ 00c0cb30: 00c0cb30-00c0cb50,00c0cba8,00000020 (32)
+ 00c0cba8: 00c0cba8-00c0cbb8,00c0df48,00000010 (16)
+ 00c0df48: 00c0df48-00c0df58,00c0df68,00000010 (16)
+ 00c0df68: 00c0df68-00c0df70,00c0dfe8,00000008 (8)
+ 00c0dfe8: 00c0dfe8-00c0e000,00c0e170,00000018 (24)
+ 00c0e170: 00c0e170-00c0e1b8,00c0e290,00000048 (72)
+ 00c0e290: 00c0e290-00c0e2b0,00c0e2e0,00000020 (32)
+ 00c0e2e0: 00c0e2e0-00c0e730,00c0e750,00000450 (1104)
+ 00c0e750: 00c0e750-00c0e768,00c0e970,00000018 (24)
+ 00c0e970: 00c0e970-00c0ea80,00c0f5a8,00000110 (272)
+ 00c0f5a8: 00c0f5a8-00c0f850,00c10ea0,000002a8 (680)
+ 00c10ea0: 00c10ea0-00c10eb8,00c11668,00000018 (24)
+ 00c11668: 00c11668-00c11690,00c14830,00000028 (40)
+ 00c14830: 00c14830-00c157d8,00c15c68,00000fa8 (4008)
+ 00c15c68: 00c15c68-00c15c70,00c164c8,00000008 (8)
+ 00c164c8: 00c164c8-00c164e0,00c165e8,00000018 (24)
+ 00c165e8: 00c165e8-00c16618,00c16648,00000030 (48)
+ 00c16648: 00c16648-00c174c0,00c1b7c8,00000e78 (3704)
+ 00c1b7c8: 00c1b7c8-00c1c528,00c1e6c8,00000d60 (3424)
+ 00c1e6c8: 00c1e6c8-00c7e800,00000000,00060138 (393528)
+
+00000400 10 -10 Chip Memory
+Attributes 0003 First 00017958 Lower 00000420 Upper 00080000 Free 427688
+ 00017958: 00017958-00080000,00000000,000686a8 (427688)
+
+;------------------------------------------------------------------------------
+  Td,Tl,Tr,Tp,Ts,TS,Ti,TO,TM,Tf Show devs, libs, resources, ports, semaphores,
+                        residents, interrupts, doslist, memorylist, fsres.
+>Tf
+00c055a8: 'UAE fs'
+
+;------------------------------------------------------------------------------
+sp <addr> [<addr2][<size>] Dump sprite information.								; 13. 
+
+>sp  0c80
+    000C80 7277 8201 
+114 000C84 1111110000000000
+115 000C88 1333331000000000
+116 000C8C 1222231000000000
+117 000C90 1222310000000000
+118 000C94 1222231000000000
+119 000C98 1221223100000000
+120 000C9C 0110122310000000
+121 000CA0 0000012231000000
+122 000CA4 0000001223100000
+123 000CA8 0000000121000000
+124 000CAC 0000000010000000
+125 000CB0 0000000000000000
+126 000CB4 0000000000000000
+127 000CB8 0000000000000000
+128 000CBC 0000000000000000
+129 000CC0 0000000000000000
+Sprite address 00000C80, width = 16
+OCS: StartX=239 StartY=114 EndY=130
+ECS: StartX=956 (239.0) StartY=114 EndY=130
+Attach: 0. AGA SSCAN/SH10 bit: 0
+
+>m 0C80 20
+00000C80 7277 8201 0000 FC00 7C00 FE00 7C00 8600  rw......|...|...
+00000C90 7800 8C00 7C00 8600 6E00 9300 0700 6980  x...|...n.....i.
+00000CA0 0380 04C0 01C0 0260 0080 0140 0000 0080  .......`...@....
+00000CB0 0000 0000 0000 0000 0000 0000 0000 0000  ................
+00000CC0 0000 0000 0000 0000 0000 0000 0000 0000  ................
+
+;------------------------------------------------------------------------------
+rc[d]   Show CPU instruction or data cache contents.  							; 14. A1200 CPU mit Cache	
+
+14a.
+>rc																				; no reaction on A500 configuration
+
+>rcd																			; no reaction on A500 configuration
+;------------------------------------------------------------------------------
+
+>seg																			; 15. 
+No executable loaded
+
+;------------------------------------------------------------------------------
+ open
+e[x]																			; Dump contents of all custom registers, ea = AGA colors.
+
+its 
+>e or >ex
+but not
+e 100, e100 or e[100]															; not one result, always complet list

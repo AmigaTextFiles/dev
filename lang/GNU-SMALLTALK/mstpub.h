@@ -1,0 +1,64 @@
+/***********************************************************************
+ *
+ *	Public definitions for calling in to Smalltalk.
+ *
+ ***********************************************************************/
+
+
+/***********************************************************************
+ *
+ * Copyright (C) 1990, 1991, 1992 Free Software Foundation, Inc.
+ * Written by Steve Byrne.
+ *
+ * This file is part of GNU Smalltalk.
+ *
+ * GNU Smalltalk is free software; you can redistribute it and/or modify it
+ * under the terms of the GNU General Public License as published by the Free
+ * Software Foundation; either version 1, or (at your option) any later 
+ * version.
+ * 
+ * GNU Smalltalk is distributed in the hope that it will be useful, but WITHOUT
+ * ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or 
+ * FITNESS FOR A PARTICULAR PURPOSE.  See the GNU General Public License for
+ * more details.
+ * 
+ * You should have received a copy of the GNU General Public License along with
+ * GNU Smalltalk; see the file COPYING.  If not, write to the Free Software
+ * Foundation, 675 Mass Ave, Cambridge, MA 02139, USA.  
+ *
+ ***********************************************************************/
+
+/*
+ *    Change Log
+ * ============================================================================
+ * Author      Date       Change 
+ * sbb	      1 Jan 92	  Created.
+ *
+ */
+
+
+#ifndef __MSTPUB__
+#define __MSTPUB__
+
+#ifndef __MST__
+#include "mst.h"
+#endif /* __MST__ */
+
+extern OOP      msgSend(), strMsgSend(), registerOOP(), msgEval();
+extern void	msgSendf(), unregisterOOP();
+
+/* Convert C datatypes to Smalltalk types */
+
+extern OOP	intToOOP(), floatToOOP(), boolToOOP(), charToOOP(),
+		stringToOOP(), symbolToOOP(), cObjectToOOP();
+
+/* Convert Smalltalk datatypes to C data types */
+
+extern long	OOPToInt(); 
+extern double	OOPToFloat();
+extern int 	OOPToBool();
+extern char	OOPToChar();
+extern char	*OOPToString();
+extern voidPtr	OOPToCObject();
+
+#endif /* __MSTPUB__ */

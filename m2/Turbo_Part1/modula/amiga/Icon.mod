@@ -1,0 +1,6 @@
+IMPLEMENTATION MODULE Icon ;
+
+IMPORT M2Lib ;
+
+BEGIN IconBase := M2Lib.OpenLib( ICONNAME, VERSION )
+END Icon.

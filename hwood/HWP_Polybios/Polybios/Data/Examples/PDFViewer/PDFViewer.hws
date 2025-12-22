@@ -1,0 +1,219 @@
+/****************************************************************
+**                                                             **
+** Name:        PDFViewer                                      **
+** Author:      Andreas Falkenhahn                             **
+** Version:     1.1                                            **
+** Date:        22.06.19                                       **
+** Interpreter: Hollywood 7.1                                  **
+** Licence:     Freeware                                       **
+** Function:    Simple PDF viewer written in Hollywood         **
+**                                                             **
+** History:                                                    **
+**                                                             **
+** 1.1: (22.06.19)                                             **
+**                                                             **
+** - added support for password-protected PDFs                 **
+**                                                             **
+** 1.0: (15.04.18)                                             **
+**                                                             **
+** - initial release                                           **
+**                                                             **
+****************************************************************/
+
+
+/*
+** We require the Polybios plugin
+*/
+@REQUIRE "polybios"
+
+
+/*
+** Give me a 1024x860 screen with a nice gradient
+*/
+@DISPLAY {Width = 1024, Height = 860, FillStyle = #FILLGRADIENT, GradientStartColor = $FFFF00, GradientEndColor = $DDB104}
+
+
+/*
+** Load the logo graphics
+*/
+@BRUSH 1, "logo.png", {LoadAlpha = True}
+
+
+/*
+** Show a new page
+*/
+Function p_ShowPage(idx)
+
+	; we use the new 7.1 failsafe syntax here to signal that it's ok if those commands fail
+	?FreeBrush(2)
+	?RemoveLayer("page")
+	
+	; get PDF page as a vector brush from Polybios
+   	pdf.GetBrush(1, idx, 2, loadalpha)
+   	
+   	; and draw it!
+	DisplayBrush(2, #CENTER, #CENTER, {Name = "page", AnchorX = 0.5, AnchorY = 0.5, Rotate = r, ScaleX = s, ScaleY = s, InsertPos = 1})
+	
+	; update status bar
+	SetLayerStyle("status", {X = #RIGHT, Text = "page " .. idx .. "/" .. pages})
+	 			
+EndFunction
+
+
+/*
+** Main event handler
+*/	
+Function p_EventFunc(msg)
+	
+	Switch msg.action
+	Case "OnKeyDown":
+		Switch msg.key
+		Case "F5":
+			Local f$ = FileRequest("Select document", "pdf")
+			If Not f$ Then Return
+		
+			; clean up old document
+			If docloaded
+				FreeLayers(False)
+				FreeBrush(2)
+				pdf.CloseDocument(1)
+				docloaded = False
+			EndIf
+
+			; open new PDF
+			ExitOnError(False)
+			pdf.OpenDocument(1, f$)
+			Local err = GetLastError()
+			ExitOnError(True)
+			
+			If err
+				
+				Local lstate = 0
+						
+				Repeat
+				
+					Switch pdf.GetLastError()
+					Case #PDFERR_PASSWORD:
+						Local pwd$, ok = StringRequest("PDF Viewer", "Please enter password!", "", #ALL, 0, True)
+						If Not ok
+							lstate = 1
+						Else
+							ExitOnError(False)
+							pdf.OpenDocument(1, f$, {Password = pwd$})
+							err = GetLastError()
+							ExitOnError(True)
+							If err = 0
+								lstate = 2
+							Else
+								If Not SystemRequest("PDF Viewer", "Wrong password! Do you want to try again?", "Yes|No", #REQICON_QUESTION) Then lstate = 1
+							EndIf		
+						EndIf	
+					Case #PDFERR_SUCCESS:
+						lstate = 2
+					Default:
+						SystemRequest("PDF Viewer", FilePart(f$) .. " could not be opened!", "OK", #REQICON_ERROR)
+						lstate = 1
+					EndSwitch
+			
+				Until lstate <> 0
+			
+				If lstate = 1 Then Break
+			EndIf
+								
+			; query number of pages in PDF document
+			PDFTYPE = pdf.GetObjectType()
+			pages = GetAttribute(PDFTYPE, 1, #PDFATTRPAGES)			
+
+			; reset transformation parameters
+			r = 0
+			s = 1
+			loadalpha = False
+			
+			; set up status bar		
+			If Not docloaded
+				FreeLayers(False)
+				TextOut(#RIGHT, #BOTTOM, "page 1/" .. pages, {Name = "status"})
+			EndIf				
+				
+			; show page and move status bar to the front	
+			p_ShowPage(1)
+			LayerToFront("status")
+			
+			; we're ready
+			docloaded = True
+			curpage = 1
+			
+		Case "PAGEDOWN":
+			If docloaded And curpage < pages
+				curpage = curpage + 1
+				p_ShowPage(curpage)
+			EndIf
+		Case "PAGEUP":
+			If docloaded And curpage > 1				
+				curpage = curpage - 1
+				p_ShowPage(curpage)
+			EndIf	
+		Case "UP":
+			If docloaded
+				s = s + 0.1
+				SetLayerStyle("page", {ScaleX = s, ScaleY = s})
+			EndIf	
+		Case "DOWN":
+			If docloaded
+				s = s - 0.1
+				SetLayerStyle("page", {ScaleX = s, ScaleY = s})	
+			EndIf	
+		Case "LEFT":
+			If docloaded
+				r = r - 1
+				RotateLayer("page", r)
+			EndIf	
+		Case "RIGHT":
+			If docloaded
+				r = r + 1
+				RotateLayer("page", r)									
+			EndIf	
+		Case "a"
+			If docloaded
+				loadalpha = Not loadalpha
+				p_ShowPage(curpage)
+			EndIf		
+		EndSwitch
+	EndSwitch					
+
+EndFunction				
+
+EscapeQuit(True)
+
+; let's use layers for convenience
+EnableLayers
+
+; show logo
+DisplayBrush(1, #CENTER, #CENTER - 180, {Hidden = True})
+
+; give us a font
+SetFont(#SANS, 36)
+SetFontStyle(#ANTIALIAS)
+SetFontColor(#BLACK)
+
+; show help text
+TextOut(#CENTER, #CENTER + 100, "- Written by Andreas Falkenhahn -\n\n" ..
+	"This is a demonstration of the Polybios plugin\n\n" ..
+	"Controls:\n\n" ..
+	"F5 - load new document\n" ..
+	"Page up/down - browse through pages\n" ..
+	"Cursor up/down - scale page\n" ..
+	"Cursor left/right - rotate page\n" ..
+	"a - toggle transparency flag", {Align = #CENTER, Hidden = True})
+
+; scroll in logo and help text
+ShowLayerFX(1, #SCROLLTOP)
+ShowLayerFX(2, #SCROLLBOTTOM)
+
+; set up event handlers
+InstallEventHandler({OnKeyDown = p_EventFunc})
+
+; and go!
+Repeat
+	WaitEvent
+Forever

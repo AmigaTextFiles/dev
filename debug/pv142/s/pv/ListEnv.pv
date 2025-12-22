@@ -1,0 +1,241 @@
+/*=======================================================*/
+/*																			*/
+/* List environment for PowerVisor		V1.0					*/
+/*																			*/
+/* © Jorrit Tyberghein  21 Jul 1992	V1.0						*/
+/*																			*/
+/*=======================================================*/
+
+/* Usage:
+	This script provides a specialized list environment so that you
+	can easily walk with the cursor in a specific list. Pressing <enter>
+	will give 'info' for the element under the cursor.
+
+	The best way to use this script is to attach it to the <f3> key
+	(or any other key, it is best to use the same key as is used on
+	the line with '{***}' below. You can change that line for any key you
+	want) with :
+
+		attach 'rx s:pv/listenv' co(f3) 0 e
+
+	If you press <f3> the following things will happen :
+		- the screen will be cleared and the current list is shown
+		- you can move the cursor with the up and down arrows (also
+		  combined with <right-alt> for greater speed, and combined
+		  with <right-shift> for maximum speed)
+		- pressing <f3> or <ctrl>+C will stop the script
+		- pressing <space> will cause a relist of the current list
+		- pressing <enter> will give 'info' for the element under
+		  the cursor
+
+	This script needs the 'co' and 'qu' functions and also the
+	's:pv/copylogwin' and 's:pv/getlogwin' ML-scripts to run.
+*/
+
+
+options results
+
+'sync'
+'unhide'
+
+/* Get the maximum number of columns and lines on the current logical window */
+'cols getlwin()'
+maxx = result-1
+'lines getlwin()'
+maxy = result-2
+
+/* Get the current cursor position on the current logical window so that we
+	can restore it later */
+'getx'
+oldxpos = result
+'gety'
+oldypos = result
+
+/* Allocate enough memory so that we can remember the contents off the current
+	logical window */
+'alloc n' (maxx+4)*(maxy+4)
+win = result
+if rc~=0 then
+	do
+		'async'
+		'print "Not enough memory!\n"'
+		exit
+	end
+
+/* The 's:pv/copylogwin' script copies the contents of the current logical
+	window to the previously allocated memory */
+'script s:pv/copylogwin' win
+
+/* 'oldy' is used to remember the previous position of the cursor so that
+	we can remove the inverse video cursor on that position */
+oldy = 0
+
+again:
+
+/* Clear the current logical window and show the current list */
+'cls'
+'locate 0 0'
+'list'
+
+/* We need to be able to get the arrow up and down keys. Because these are
+	not normal ascii keys, we can't use the PowerVisor 'key' function.
+	Therefore we use macros. But the arrow up and arrow down keys are already
+	defined as history keys. Therefore we must temporarily redefine the
+	up and down history keys with dummy values so that we can give our own
+	definitions. When this script is ready, it will restore the original
+	values. We use the 'pvcall' command to get to the pointer of the table
+	containing the definitions for the standard keys */
+'assign _upc=*({pv 36}+58+16).w'
+'assign _upq=*({pv 36}+58+18).w'
+'assign _doc=*({pv 36}+58+20).w'
+'assign _doq=*({pv 36}+58+22).w'
+'prefs key 4 0 0'
+'prefs key 5 0 0'
+
+/* Make all macros (up, down, rshift-up, rshift-down, ralt-up, ralt-down,
+	f3, ctrl-c, enter and return) */
+"attach '_stop=1' co(f3) 0 a"			/* {***} */
+at0 = result
+"attach '_stop=1' 51 qu(ctrl) a"		/* ctrl-c */
+at1 = result
+"attach '_y=_y+1' co(down) 0 a"
+at2 = result
+"attach '_y=_y-1' co(up) 0 a"
+at3 = result
+"attach '_y="maxy"' co(down) qu(rshift) a"
+at4 = result
+"attach '_y=0' co(up) qu(rshift) a"
+at5 = result
+"attach '_y=_y+7' co(down) qu(ralt) a"
+at6 = result
+"attach '_y=_y-7' co(up) qu(ralt) a"
+at7 = result
+"attach '{_enter=1;_stop=1}' co(ret) 0 a"
+at8 = result
+"attach '{_enter=1;_stop=1}' co(enter) 0 a"
+at9 = result
+"attach '_relist=1' 64 0 a"
+at10 = result
+
+/* _y is the current y position of the cursor. It must be a PowerVisor
+	variable since the macros must be able to modify this variable */
+'assign _y='oldy
+
+/* If some macro sets _stop to 1, we stop the main loop */
+'assign _stop=0'
+
+/* _enter will be set by a macro when the user pressed <enter> or <return> */
+'assign _enter=0'
+
+/* If this variable is set to true by a macro, the main loop will relist the
+	current list */
+'assign _relist=0'
+
+'locate 0' oldy
+
+/* Reverse video the current line */
+'print \03'
+
+/* Main loop */
+do forever
+	'void _y'
+	y = result
+
+	/* If new position is different from old position we move the cursor */
+	if oldy~=y then
+		do
+			/* Check that cursor is between bounds */
+			if y<0 then
+				do
+					y=0
+					'assign _y='0
+				end
+			else if y>maxy then
+				do
+					y=maxy
+					'assign _y='maxy
+				end
+
+			/* Remove the old cursor */
+			'locate 0' oldy
+			'print \01'
+
+			/* Set the new cursor */
+			'locate 0' y
+			'print \03'
+
+			oldy = y
+		end
+
+	'void _stop'
+	if result==1 then leave
+
+	'void _relist'
+	if result==1 then
+		do
+			'cls'
+			'locate 0 0'
+			'list'
+
+			/* Reset the cursor */
+			'locate 0' y
+			'print \03'
+
+			'assign _relist=0'
+		end
+end
+
+/* Remove the cursor */
+'locate 0' oldy
+'print \01'
+
+/* Check if the user pressed <enter> or <return> */
+'void _enter'
+enter = result
+if enter==1 then
+	do
+		/* Get the current line */
+		'string getline()' maxx+1
+		line = result
+	end
+
+/* Restore all keys */
+'prefs key 4 _upc _upq'
+'prefs key 5 _doc _doq'
+'remvar stop'ti '_upc _upq _doc _doq _y _stop _enter _relist'
+'remattach 'at0
+'remattach 'at1
+'remattach 'at2
+'remattach 'at3
+'remattach 'at4
+'remattach 'at5
+'remattach 'at6
+'remattach 'at7
+'remattach 'at8
+'remattach 'at9
+'remattach 'at10
+
+/* Show information if needed */
+k = 0
+if enter==1 then
+	do
+		'cls'
+		parse var line ': ' hex ' '
+		'info' hex
+		'print "\n\02<space> put output on original screen, <l> relist, other key to quit"'
+		'key'
+		k = result
+	end
+
+if k = 108 then signal again
+
+/* Restore old contents of logical window and free memory */
+'script s:pv/getlogwin' win
+'free' win
+'locate' oldxpos oldypos
+'print " "'
+'locate' oldxpos oldypos
+if k==32 then 'info' hex
+
+'async'
+exit

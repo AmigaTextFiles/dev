@@ -1,0 +1,628 @@
+PROGRAM ShowPCX (input , output);
+
+{$I "Include:Exec/Exec.i" }
+{$I "Include:Graphics/Graphics.I" }
+{$I "Include:Hardware/IntBits.I" }
+{$I "Include:libraries/Dosextens.I" }
+{$I "Include:Intuition/intuition.i" }
+{$I "Include:Intuition/Intuitionbase.i" }
+{$I "Include:Utils/Parameters.I" }
+{$I "Include:Utils/StringLib.i" }
+{$I "INCLUDE:Graphics/Blitter.i" }
+{$I "Include:Graphics/GfxBase.i" }
+{$I "Include:Graphics/View.i" }
+{$I "Include:graphics/Pens.i" }
+{$I "Include:Graphics/rastport.i" }
+
+(*                            ShowPCX V1.0                              *)
+
+(*            ein Anzeigeprogramm für Bilder im PCX-Format              *)
+
+(*  Autor   :   Andreas Neumann     /   05.03.94                        *)
+
+(*  History :                                                           *)
+
+(*              [1.00]  -   erste Version, basierend auf einer kurzen   *)
+(*                          PCX-Dokumentation von Relax Productions im  *)
+(*                          C-F. Läuft problemlos mit V2.8 mit Palette  *)
+(*                          und V3.0-PCX-Bildern zusammen.              *)
+
+(*  ShowPCX © 1994 by Andreas Neumann                                   *)
+(*  ShowPCX ist freely distributable, es darf jedoch nur mit Erlaubnis  *)
+(*  des Autoren auf andere Disk-Serien übernommen werden.               *)
+
+(*  Bei Fragen  :   Andreas Neumann ; Auf dem Ruhbühl 151 ;             *)
+(*                  88090 Immenstaad ; Tel.: 07545 / 3483               *)
+
+
+CONST
+ gfxname : String = ("graphics.library");
+
+ CSI = CHR($9B);
+
+TYPE
+
+
+    PCXHEAD = RECORD
+                bytesperline,
+                paletteinfo,
+                horizres,
+                vertres,
+                winleft,
+                wintop,
+                winright,
+                winbottom   :   SHORT;
+                colormap    :   ARRAY [0..255] OF ARRAY [0..2] OF BYTE;
+                planes,
+                depth,
+                fileid,
+                bitsperpixel,
+                version,
+                encoding    :   BYTE;
+              END;
+
+
+        PCXHeadPtr  =   ^PCXHEAD;
+
+
+VAR
+    PCXInfo   : PCXHEAD;
+
+    PNuScreen : NewScreen;
+    PNuWindow : NewWindow;
+
+
+TYPE
+
+    PCXErrors = (pcxNoErr,pcxOutofmem,pcxOpenScreenfailed,
+                 pcxOpenWindowfailed,pcxopenfailed,pcxWrongVersion,
+                 pcxReadWriteFailed);
+
+VAR
+    PCXError : PCXErrors;
+
+CONST
+    { ReadPCX-Flags }
+
+    pfront    = $1;
+    pvisible  = $2;
+    pdontopen = $4;
+    pf_window = $8;
+
+    { PCXError-Strings }
+
+    PCXErrorStrings : ARRAY [0..6] OF String =
+                        ("No Error","Out of Memory","OpenScreen failed",
+                         "OpenWindow failed","Open Failed","Wrong Iff",
+                         "ReadWrite failed");
+
+
+
+VAR
+    dummyint,
+    emptymouse      :   INTEGER;
+    lname           :   STRING;
+    ShowPCXScreen   :   ScreenPtr;
+    awindow,
+    ShowPCXWindow   :   WindowPtr;
+    MyGfxBase       :   GfxBasePtr;
+    MyIntuitionBase :   IntuitionBasePtr;
+    IMes            :   IntuiMessagePtr;
+    WB              :   WBStartupPtr;
+
+{$A     XREF    _p%IntuitionBase    }
+
+
+PROCEDURE OffDisplay;
+
+BEGIN
+ {$A    move.w  #$100,$DFF096    }
+END;
+
+
+PROCEDURE OnDisplay;
+
+BEGIN
+{$A     move.w  #$8300,$DFF096   }
+END;
+
+
+PROCEDURE PointerOff (dummywin : WindowPtr);
+
+BEGIN
+ WHILE VBeamPos>200 DO ;
+ SetPointer (dummywin,Adr(emptymouse),0,0,0,0);
+END;
+
+
+PROCEDURE PointerOn (dummywin : WindowPtr);
+
+BEGIN
+ ClearPointer (dummywin);
+END;
+
+
+PROCEDURE DoStyle (stil , ffarbe : Byte);
+
+BEGIN
+ WRITE (CSI,stil,";3",ffarbe,"m");
+END;
+
+FUNCTION Hoch (basis : INTEGER; exp : INTEGER) : INTEGER;
+
+VAR h1 : INTEGER;
+    h2 : INTEGER;
+
+BEGIN
+ h1:=1;
+ IF exp>0 THEN
+  FOR h2:=1 TO exp DO
+   h1:=h1*basis;
+ Hoch:=h1;
+END;
+
+
+FUNCTION GetIBase : IntuitionBasePtr;
+
+BEGIN
+{$A     move.l  _p%IntuitionBase,d0
+}
+END;
+
+FUNCTION IsAGA (gb : GfxBasePtr) : BOOLEAN;
+
+BEGIN
+ IF (gb^.ChipRevBits0 AND %100)=%100 THEN
+  IsAGA:=TRUE
+ ELSE
+  IsAGA:=FALSE;
+END;
+
+
+PROCEDURE MySetRGB (vp : ViewPortPtr ; nr , r , g , b : BYTE ; gb : GfxBasePtr ; display : BOOLEAN);
+
+VAR sptr    :   ^Short;
+
+BEGIN
+ sptr:=vp^.ColorMap^.ColorTable;
+ sptr:=Address(Integer(sptr)+(nr*SIZEOF(SHORT)));
+ sptr^:=((r shr 4)*$100)+((g shr 4)*$10)+(b shr 4);
+ IF IsAGA (gb) THEN
+ BEGIN
+  sptr:=vp^.ColorMap^.LowColorBits;
+  sptr:=Address(Integer(sptr)+(nr*SIZEOF(SHORT)));
+  sptr^:=((r AND $F)*$100)+((g AND $F)*$10)+((b AND $F));
+ END;
+ IF display THEN
+ BEGIN
+  MakeVPort (gb^.ActiView,vp);
+  MrgCop (gb^.ActiView);
+ END;
+END;
+
+
+PROCEDURE BufSkip (VAR bufptr : Address ; bytes : INTEGER);
+
+BEGIN
+ bufptr:=Address(Integer(bufptr)+bytes);
+END;
+
+FUNCTION GetByte (VAR workptr : ^Byte) : BYTE;
+
+VAR b   :   BYTE;
+
+BEGIN
+ b:=workptr^;
+ BufSkip (workptr,SIZEOF(BYTE));
+ GetByte:=b;
+END;
+
+FUNCTION GetShort (VAR workptr : ^Short ; pclike : BOOLEAN) : SHORT;
+
+VAR
+    s   :   SHORT;
+    bptr1,
+    bptr2   :   ^Byte;
+
+BEGIN
+ s:=workptr^;
+ bptr1:=Address(workptr);
+ BufSkip (workptr,SIZEOF(BYTE));
+ bptr2:=Address(workptr);
+ BufSkip (workptr,SIZEOF(BYTE));
+ IF pclike THEN
+  s:=(bptr2^*$100)+bptr1^;
+ GetShort:=s;
+END;
+
+
+FUNCTION ReadPCX (name : String; Flags : INTEGER;
+                  VAR myScreen : ScreenPtr;
+                  VAR myWindow : WindowPtr) : BOOLEAN;
+
+VAR rp1,
+    rp2,
+    rp3,
+    rp4,
+    rp5,
+    rp6,
+    rp7,
+    rp8,
+    PCXLength,
+    RPos,
+    RLen    :   INTEGER;
+    PCXWork,
+    PCXBuffer   :   Address;
+    PCXHandle   : FileHandle;
+    PCXLock :   FileLock;
+    PCXFInfo    :   FileInfoBlockPtr;
+    pcxdone :   BOOLEAN;
+    rpbptr  :   ^Byte;
+
+PROCEDURE OpenPCXDisplay;
+
+VAR DummyRP : RastPortPtr;
+    os      : BYTE;
+    i       : INTEGER;
+    BitMaps : ARRAY [0..7] OF PLANEPTR;
+    BM      : BitMapPtr;
+
+BEGIN
+ WITH pNuScreen DO
+ BEGIN
+    width:=PCXInfo.winright-PCXInfo.winleft+1;
+    height:=PCXInfo.winbottom-PCXInfo.wintop+1;
+
+    leftEdge:=PCXInfo.winleft;
+    topEdge:=PCXInfo.wintop;
+
+    depth:=PCXInfo.depth;
+
+    viewModes:=0;
+    IF (width>400) AND ((depth<5) OR IsAga(GfxBase)) THEN ViewModes:=ViewModes OR HIRES;
+    IF height>300 THEN ViewModes:=ViewModes OR LACE;
+
+    detailPen:=0; blockPen:=0;
+    stype:=CUSTOMSCREEN_f+SCREENQUIET_f;
+    font:=NIL;
+    defaultTitle:=NIL;
+    gadgets:=NIL;
+    customBitMap:=NIL;
+    IF NOT ((pfront AND Flags)=pfront) THEN Inc(sType,SCREENBEHIND_f);
+ END;
+
+ IF (pdontopen AND Flags)=pdontopen THEN
+ BEGIN
+  pNuScreen.SType:=pNuScreen.SType OR CustomBitMap_F;
+  WITH pNuScreen DO
+  BEGIN
+   CustomBitMap:=AllocMem(SizeOf(BitMap),MEMF_PUBLIC+MEMF_CLEAR);
+   InitBitMap (CustomBitMap,depth,width,height);
+   i:=0;                  {^}
+   REPEAT
+    customBitMap^.planes[i]:=AllocRaster(width,height);
+    BitMaps[i]:=customBitMap^.planes[i];
+    IF BitMaps[i]=NIL THEN
+     PCXError:=pcxOutOfMem
+    ELSE
+     BltClear (BitMaps[i],RASSIZE(width,height),0);
+    Inc(i);
+   UNTIL (i=depth) OR (PCXError<>pcxNoErr);
+   IF PCXError<>pcxNoErr THEN
+   WHILE i>1 DO
+   BEGIN
+    Dec(i);
+    FreeRaster(BitMaps[i],width,height);
+   END;
+  END;
+ END
+ ELSE
+ BEGIN
+  myScreen:=OpenScreen (Adr(pNuScreen));
+  IF MyScreen=NIL THEN
+   PCXError:=pcxOpenScreenfailed
+  ELSE
+  BEGIN
+   DummyRP:=Adr(MyScreen^.SRastPort);
+   BM:=DummyRP^.BitMap;
+   FOR i:=0 TO pNuScreen.depth-1 DO
+    BitMaps[i]:=BM^.planes[i];
+   FOR i:=0 TO (Hoch(2,PCXInfo.depth)-1) DO
+    MySetRGB (Adr(MyScreen^.SViewPort),i,PCXInfo.colormap[i,0],PCXInfo.colormap[i,1],PCXInfo.colormap[i,2],GfxBase,i=(Hoch(2,PCXInfo.depth)-1));
+  END;
+ END;
+ WITH pNuWindow DO
+ BEGIN
+  leftEdge:=0; topEdge:=0;
+  width:=PCXInfo.winright-PCXInfo.winleft+1;
+  height:=PCXInfo.winbottom-PCXInfo.wintop+1;
+  detailPen:=1;
+  blockPen:=0;
+  idcmpFlags:=MOUSEBUTTONS_f;
+  flags:=BORDERLESS+NOCAREREFRESH+RMBTRAP+ACTIVATE;
+  firstGadget:=NIL;
+  checkMark:=NIL;
+  title:=NIL;
+  screen:=MyScreen;
+  bitMap:=NIL;
+  wtype:=CUSTOMSCREEN_F;
+ END;
+ IF ((pf_window AND FLAGS)=pf_window) AND (MyScreen<>NIL) THEN
+ BEGIN
+  MyWindow:=OpenWindow (Adr(pNuWindow));
+  If Mywindow=NIL THEN
+  begin
+   CloseScreen (MyScreen);
+   MyScreen:=NIL;
+   PCXError:=pcxOpenWindowFailed;
+  END;
+ END;
+ IF NOT ((pvisible AND Flags)=pvisible) THEN OffDisplay;
+END;
+
+
+PROCEDURE PaintPCX (x , y : SHORT ; c : BYTE);
+
+BEGIN
+ SetAPen (Adr(myscreen^.SRastPort),c);
+ WritePixel (Adr(myscreen^.SRastPort),x,y);
+END;
+
+BEGIN
+ PCXError:=pcxnoErr;
+ PCXHandle:=NIL;
+ MyScreen:=NIL;
+ MyWindow:=NIL;
+ RPos:=0; RLen:=0;
+ PCXBuffer:=NIL; PCXLength:=0;
+ PCXHandle:=DOSOpen (name,MODE_OLDFILE);
+ IF PCXHandle=NIL THEN
+ BEGIN
+  PCXError:=pcxReadWriteFailed;
+ END
+ ELSE
+ BEGIN
+  PCXLock:=Lock(name,MODE_OLDFILE);
+  IF PCXLock=NIL THEN
+  BEGIN
+   DOSClose(PCXHandle);
+   PCXError:=pcxReadWriteFailed;
+  END
+  ELSE
+  BEGIN
+   PCXFInfo:=AllocMem (Sizeof(FileInfoBlock),MEMF_CLEAR+MEMF_PUBLIC);
+   IF Examine (PCXLock , PCXFInfo)=TRUE THEN
+   BEGIN
+    PCXLength:=PCXFInfo^.fib_Size;
+   END;
+   FreeMem (PCXFInfo,SizeOf(FileInfoBlock));
+   UnLock (PCXLock);
+   PCXBuffer:=AllocMem (PCXLength,MEMF_CLEAR+MEMF_PUBLIC);
+   IF PCXBuffer=NIL THEN
+   BEGIN
+    DOSClose (PCXHandle);
+    PCXError:=pcxReadWriteFailed;
+   END
+   ELSE
+   BEGIN
+    IF DOSRead (PCXHandle,PCXBuffer,PCXLength)<>PCXLength THEN
+    BEGIN
+     DOSClose (PCXHandle);
+     FreeMem (PCXBuffer,PCXLength);
+     PCXBuffer:=NIL;
+     PCXError:=pcxReadWriteFailed;
+    END
+    ELSE
+    BEGIN
+     DOSClose (PCXHandle);
+     PCXWork:=PCXBuffer;
+    END;
+   END;
+  END;
+ END;
+ IF PCXBuffer<>NIL THEN
+ BEGIN
+  PCXInfo.fileID:=GetByte (PCXWork);
+  PCXInfo.version:=GetByte (PCXWork);
+  PCXInfo.encoding:=GetByte (PCXWork);
+  PCXInfo.bitsperpixel:=GetByte (PCXWork);
+  PCXInfo.winleft:=GetShort (PCXWork,TRUE);
+  PCXInfo.wintop:=GetShort (PCXWork,TRUE);
+  PCXInfo.winright:=GetShort (PCXWork,TRUE);
+  PCXInfo.winbottom:=GetShort (PCXWork,TRUE);
+  PCXInfo.horizres:=GetShort (PCXWork,TRUE);
+  PCXInfo.vertres:=GetShort (PCXWork,TRUE);
+  IF (PCXInfo.version=2) THEN
+  BEGIN
+   FOR rp1:=0 TO 15 DO
+    FOR rp2:=0 TO 2 DO
+     PCXInfo.colormap[rp1,rp2]:=GetByte(PCXWork);
+  END
+  ELSE
+   BufSkip (PCXWork,16*3);
+
+  BufSkip (PCXWork,1);
+  PCXInfo.planes:=GetByte (PCXWork);
+  IF PCXInfo.version<5 THEN
+   PCXInfo.depth:=4
+  ELSE
+   PCXInfo.depth:=8;
+  PCXInfo.bytesperline:=GetShort(PCXWork,TRUE);
+  PCXInfo.paletteinfo:=GetShort(PCXWork,TRUE);
+  IF (PCXInfo.version=5) THEN
+  BEGIN
+   PCXWork:=Address(Integer(PCXBuffer)+PCXLength-768);
+   FOR rp1:=0 TO 255 DO
+    FOR rp2:=0 TO 2 DO
+    BEGIN
+     PCXInfo.colormap[rp1,rp2]:=GetByte(PCXWork);
+    END;
+  END;
+  PCXWork:=PCXBuffer;
+  BufSkip (PCXWork,128); { der Header }
+  IF WB=NIL THEN WRITELN ('Zeige......',name);
+  OpenPCXDisplay;
+  IF PCXError=pcxNoErr THEN
+  BEGIN
+   rp1:=0;
+   WHILE (rp1<(PCXInfo.winbottom-PCXInfo.wintop+1)) AND (Integer(PCXWork)<(Integer(PCXBuffer)+PCXLength)) DO
+   BEGIN
+    FOR rp2:=1 TO PCXInfo.planes DO
+    BEGIN
+     rp3:=0;
+     rp7:=0;
+     pcxdone:=FALSE;
+     WHILE pcxdone=FALSE DO
+     BEGIN
+      CASE PCXInfo.encoding OF
+        0   :   BEGIN
+                    rp4:=GetByte(PCXWork);
+                    IF (PCXInfo.bitsperpixel=1) THEN
+                    BEGIN
+                     rpbptr:=Address(Integer(myscreen^.SBitMap.Planes[rp2-1])+(myscreen^.SBitMap.BytesPerRow*rp1)+rp3);
+                     rpbptr^:=rp4;
+                     Inc(rp3);
+                    END;
+                    IF (PCXInfo.bitsperpixel=8) THEN
+                    BEGIN
+                     PaintPCX (rp3,rp1,rp4);
+                     Inc(rp3);
+                    END;
+                    pcxdone:=(rp3>=PCXInfo.BytesPerLine);
+                END;
+        1   :   BEGIN
+                    rp4:=GetByte(PCXWork);
+                    IF (rp4 AND %11000000)=%11000000 THEN
+                    BEGIN
+                     {Count-Byte}
+                     rp5:=(rp4 AND %111111);
+                     rp4:=GetByte(PCXWork);
+                     IF (PCXInfo.bitsperpixel=1) THEN
+                     BEGIN
+                      WHILE rp5>0 DO
+                      BEGIN
+                       rpbptr:=Address(Integer(myscreen^.SBitMap.Planes[rp2-1])+(myscreen^.SBitMap.BytesPerRow*rp1)+rp3);
+                       rpbptr^:=rp4;
+                       Dec(rp5);
+                       Inc(rp3);
+                      END;
+                     END;
+                     IF (PCXInfo.bitsperpixel=8) THEN
+                     BEGIN
+                      SetApen (Adr(myscreen^.SRastPort),rp4);
+                      Move(Adr(myscreen^.SRastPort),rp3,rp1);
+                      IF rp5>0 THEN
+                       Draw(Adr(myscreen^.SRastPort),(rp3+rp5)-1,rp1);
+                      Inc (rp3,rp5);
+                     END;
+                    END
+                    ELSE
+                    BEGIN
+                     IF (PCXInfo.bitsperpixel=1) THEN
+                     BEGIN
+                      rpbptr:=Address(Integer(myscreen^.SBitMap.Planes[rp2-1])+(myscreen^.SBitMap.BytesPerRow*rp1)+rp3);
+                      rpbptr^:=rp4;
+                      Inc(rp3);
+                     END;
+                     IF (PCXInfo.bitsperpixel=8) THEN
+                     BEGIN
+                      PaintPCX (rp3,rp1,rp4);
+                      Inc(rp3);
+                     END;
+                    END;
+                    pcxdone:=(rp3>=PCXInfo.BytesPerLine);
+                END;
+        ELSE    ;
+      END;
+     END;
+    END;
+    Inc(rp1);
+   END;
+  END;
+  FreeMem (PCXBuffer,PCXLength);
+ END;
+ ReadPCX:=(PCXError=pcxNoErr);
+END;
+
+
+BEGIN
+ emptymouse:=0;
+ MyIntuitionBase:=GetIBase;
+ awindow:=MyIntuitionBase^.ActiveWindow;
+ lname:=AllocString(255);
+ WB:=GetStartupMsg;
+ IF WB<>NIL THEN
+ BEGIN
+  StrCpy (lname,WB^.sm_ArgList^[2].wa_Name);
+  IF CurrentDir (WB^.sm_ArgList^[2].wa_Lock)=NIL THEN ;
+ END
+ ELSE
+ BEGIN
+  WRITELN;
+  DoStyle (3,3);
+  WRITE (' SHOWPCX V1.00 ');
+  DoStyle (4,3);
+  WRITE ('© 1994 by Andreas "Wurzelsepp <:-)" Neumann');
+  DoStyle (0,3);
+  WRITELN(' of NEUDELSOFT');
+  DoStyle (0,1);
+  WRITELN ('                    written in PCQ 1.2d - the pure Stuff');
+  WRITELN;
+  GetParam(1,lname);
+ END;
+ IF ((StrEq (lname,"?")=TRUE) OR (StrEq (lname,"-h")=TRUE)) AND (WB=NIL) THEN
+ BEGIN
+  WRITELN (' Erklärung :');
+  WRITELN (' ShowPCX dient zum Ansehen von Bilder im PCX-Format. Dies ist das');
+  WRITELN (' gängige Format auf MS-DOSen.');
+  WRITELN (' Aufgerufen wird ShowPCX über das CLI.');
+  WRITELN (' Dazu gibt man ein : "ShowPCX Bildname" [Return]');
+  WRITELN (' "ShowPCX ?" oder "ShowPCX -h" zeigt diesen Hilfstext.');
+  WRITELN;
+ END
+ ELSE
+ BEGIN
+  GfxBase :=OpenLibrary(gfxname, 0);
+  MyGfxBase := GfxBase;
+
+  PointerOff (awindow);
+
+  IF ReadPCX (lname,pf_window+pvisible,ShowPCXScreen,ShowPCXWindow) THEN
+  BEGIN
+
+   ScreenToFront (ShowPCXScreen);
+
+   PointerOff (ShowPCXWindow);
+   ActivateWindow (ShowPCXWindow);
+
+   REPEAT
+
+    dummyint:=0;
+    WaitPort (ShowPCXWindow^.UserPort);
+    IMes:=Address(GetMsg(ShowPCXWindow^.UserPort));
+    IF IMes<>NIL THEN
+    BEGIN
+     dummyint:=IMes^.Code;
+     ReplyMsg (Address(IMes));
+    END;
+   UNTIL dummyint=SELECTUP;
+
+   PointerOn (ShowPCXWindow);
+   ScreenToBack (ShowPCXScreen);
+   CloseWindow (ShowPCXWindow);
+   CloseScreen (ShowPCXScreen);
+  END
+  ELSE
+  BEGIN
+   DisplayBeep(NIL);
+   IF WB=NIL THEN WRITELN (PCXErrorStrings[Integer(PCXError)]);
+  END;
+  CloseLibrary (GfxBase);
+ END;
+ IF awindow<>NIL THEN BEGIN ActivateWindow (awindow); PointerOn (awindow); END;
+ FreeString (lname);
+END.
+
+
+
+

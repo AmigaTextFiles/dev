@@ -1,0 +1,411 @@
+;========================================================================
+; This is an example program for the GLFW library
+;
+; Ported to Hollywood by Andreas Falkenhahn
+;
+; The program uses a "split window" view, rendering four views of the
+; same scene in one window (e.g. uesful for 3D modelling software). This
+; demo uses scissors to separete the four different rendering areas from
+; each other.
+;
+; (If the code seems a little bit strange here and there, it may be
+;  because I am not a friend of orthogonal projections)
+;========================================================================
+
+@VERSION 6,0
+
+@REQUIRE "glgalore"
+
+@DISPLAY {Width = 500, Height = 500, Sizeable = True, Title = "Split view demo"}
+
+;========================================================================
+; Draw a solid torus (use a display list for the model)
+;========================================================================
+
+Const #TORUS_MAJOR     = 1.5
+Const #TORUS_MINOR     = 0.5
+Const #TORUS_MAJOR_RES = 32
+Const #TORUS_MINOR_RES = 32
+
+Function p_DrawTorus()
+
+	If Not torus_list
+
+		; Start recording displaylist
+		torus_list = gl.GenLists(1)
+		gl.NewList(torus_list, #GL_COMPILE_AND_EXECUTE)
+
+		; Draw torus
+		twopi = 2.0 * #PI;
+		For Local i = 0 To #TORUS_MINOR_RES - 1
+
+			gl.Begin(#GL_QUAD_STRIP)
+	    
+			For Local j = 0 To #TORUS_MAJOR_RES
+
+				For Local k = 1 To 0 Step -1
+
+					Local s = (i + k) % #TORUS_MINOR_RES + 0.5
+					Local t = j % #TORUS_MAJOR_RES;
+
+					; Calculate point on surface
+					Local x = (#TORUS_MAJOR + #TORUS_MINOR * Cos(s * twopi / #TORUS_MINOR_RES)) * Cos(t * twopi / #TORUS_MAJOR_RES)
+					Local y = #TORUS_MINOR * Sin(s * twopi / #TORUS_MINOR_RES)
+					Local z = (#TORUS_MAJOR + #TORUS_MINOR * Cos(s * twopi / #TORUS_MINOR_RES)) * Sin(t * twopi / #TORUS_MAJOR_RES)
+
+					; Calculate surface normal
+					Local nx = x - #TORUS_MAJOR * Cos(t * twopi / #TORUS_MAJOR_RES)
+					Local ny = y
+					Local nz = z - #TORUS_MAJOR * Sin(t * twopi / #TORUS_MAJOR_RES)
+					Local scale = 1.0 / Sqrt(nx*nx + ny*ny + nz*nz)
+					nx = nx * scale
+					ny = ny * scale
+					nz = nz * scale
+
+					gl.Normal(nx, ny, nz)
+					gl.Vertex(x, y, z)
+				Next
+			Next
+
+			gl.End()
+		Next
+
+		; Stop recording displaylist
+		gl.EndList()
+
+	Else
+
+		; Playback displaylist
+		gl.CallList(torus_list)
+	EndIf
+
+EndFunction
+
+
+;========================================================================
+; Draw the scene (a rotating torus)
+;========================================================================
+
+Function p_DrawScene()
+
+	Local model_diffuse   = {1.0, 0.8, 0.8, 1.0}
+	Local model_specular  = {0.6, 0.6, 0.6, 1.0}
+	Local model_shininess = 20.0
+
+	gl.PushMatrix()
+
+	; Rotate the object
+	gl.Rotate(rot_x * 0.5, 1.0, 0.0, 0.0)
+	gl.Rotate(rot_y * 0.5, 0.0, 1.0, 0.0)
+	gl.Rotate(rot_z * 0.5, 0.0, 0.0, 1.0)
+
+	; Set model color (used for orthogonal views, lighting disabled)
+	gl.Color(model_diffuse)
+
+	; Set model material (used for perspective view, lighting enabled)
+	gl.Material(#GL_FRONT, #GL_DIFFUSE, model_diffuse)
+	gl.Material(#GL_FRONT, #GL_SPECULAR, model_specular)
+	gl.Material(#GL_FRONT, #GL_SHININESS, model_shininess)
+
+	; Draw torus
+	p_DrawTorus()
+
+	gl.PopMatrix()
+
+EndFunction
+
+
+;========================================================================
+; Draw a 2D grid (used for orthogonal views)
+;========================================================================
+
+Function p_DrawGrid(scale, steps)
+
+	gl.PushMatrix()
+
+	; Set background to some dark bluish grey
+	gl.ClearColor(0.05, 0.05, 0.2, 0.0)
+	gl.Clear(#GL_COLOR_BUFFER_BIT)
+
+	; Setup modelview matrix (flat XY view)
+	gl.LoadIdentity()
+	glu.LookAt(0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0)
+
+	; We don't want to update the Z-buffer
+	gl.DepthMask(#GL_FALSE)
+
+	; Set grid color
+	gl.Color(0.0, 0.5, 0.5)
+
+	gl.Begin(#GL_LINES)
+
+	; Horizontal lines
+	Local x = scale * 0.5 * (steps - 1)
+	Local y = -scale * 0.5 * (steps - 1)
+
+	For Local i = 0 To steps - 1
+		gl.Vertex(-x, y, 0.0)
+		gl.Vertex(x, y, 0.0)
+		y = y + scale
+	Next
+
+	; Vertical lines
+	x = -scale * 0.5 * (steps - 1)
+	y = scale * 0.5 * (steps - 1)
+
+	For Local i = 0 To steps - 1
+		gl.Vertex(x, -y, 0.0)
+		gl.Vertex(x, y, 0.0)
+		x = x + scale
+	Next
+
+	gl.End()
+
+	; Enable Z-buffer writing again
+	gl.DepthMask(#GL_TRUE)
+
+	gl.PopMatrix()
+
+EndFunction
+
+
+;========================================================================
+; Draw all views
+;========================================================================
+
+Function p_DrawAllViews()
+
+	Local light_position = {0.0, 8.0, 8.0, 1.0}
+	Local light_diffuse  = {1.0, 1.0, 1.0, 1.0}
+	Local light_specular = {1.0, 1.0, 1.0, 1.0}
+	Local light_ambient  = {0.2, 0.2, 0.3, 1.0}
+	Local aspect
+
+	; Calculate aspect of window
+	If height > 0
+		aspect = width / height
+	Else
+		aspect = 1.0
+	EndIf
+
+	; Clear screen
+	gl.ClearColor(0.0, 0.0, 0.0, 0.0)
+	gl.Clear(#GL_COLOR_BUFFER_BIT|#GL_DEPTH_BUFFER_BIT)
+
+	; Enable scissor test
+	gl.Enable(#GL_SCISSOR_TEST)
+
+	; Enable depth test
+	gl.Enable(#GL_DEPTH_TEST)
+	gl.DepthFunc(#GL_LEQUAL)
+
+	; ** ORTHOGONAL VIEWS **
+
+	; For orthogonal views, use wireframe rendering
+	gl.PolygonMode(#GL_FRONT_AND_BACK, #GL_LINE)
+
+	; Enable line anti-aliasing
+	gl.Enable(#GL_LINE_SMOOTH)
+	gl.Enable(#GL_BLEND)
+	gl.BlendFunc(#GL_SRC_ALPHA, #GL_ONE_MINUS_SRC_ALPHA)
+
+	; Setup orthogonal projection matrix
+	gl.MatrixMode(#GL_PROJECTION)
+	gl.LoadIdentity()
+	gl.Ortho(-3.0 * aspect, 3.0 * aspect, -3.0, 3.0, 1.0, 50.0)
+
+	; Upper left view (TOP VIEW)
+	gl.Viewport(0, height / 2, width / 2, height / 2)
+	gl.Scissor(0, height / 2, width / 2, height / 2)
+	gl.MatrixMode(#GL_MODELVIEW)
+	gl.LoadIdentity()
+	glu.LookAt(0.0, 10.0, 1e-3,   ; Eye-position (above)
+	      0.0, 0.0, 0.0,     ; View-point
+	      0.0, 1.0, 0.0)   ; Up-vector
+	p_DrawGrid(0.5, 12)
+	p_DrawScene()
+
+	; Lower left view (FRONT VIEW)
+	gl.Viewport(0, 0, width / 2, height / 2)
+	gl.Scissor(0, 0, width / 2, height / 2)
+	gl.MatrixMode(#GL_MODELVIEW)
+	gl.LoadIdentity()
+	glu.LookAt(0.0, 0.0, 10.0,    ; Eye-position (in front of)
+	      0.0, 0.0, 0.0,     ; View-point
+	      0.0, 1.0, 0.0)   ; Up-vector
+	p_DrawGrid(0.5, 12)
+	p_DrawScene()
+
+	; Lower right view (SIDE VIEW)
+	gl.Viewport(width / 2, 0, width / 2, height / 2)
+	gl.Scissor(width / 2, 0, width / 2, height / 2)
+	gl.MatrixMode(#GL_MODELVIEW)
+	gl.LoadIdentity()
+	glu.LookAt(10.0, 0.0, 0.0,    ; Eye-position (to the right)
+	      0.0, 0.0, 0.0,     ; View-point
+	      0.0, 1.0, 0.0)   ; Up-vector
+	p_DrawGrid(0.5, 12)
+	p_DrawScene()
+
+	; Disable line anti-aliasing
+	gl.Disable(#GL_LINE_SMOOTH)
+	gl.Disable(#GL_BLEND)
+
+	; ** PERSPECTIVE VIEW **
+
+	; For perspective view, use solid rendering
+	gl.PolygonMode(#GL_FRONT_AND_BACK, #GL_FILL)
+
+	; Enable face culling (faster rendering)
+	gl.Enable(#GL_CULL_FACE)
+	gl.CullFace(#GL_BACK)
+	gl.FrontFace(#GL_CW)
+
+	; Setup perspective projection matrix
+	gl.MatrixMode(#GL_PROJECTION)
+	gl.LoadIdentity()
+	glu.Perspective(65.0, aspect, 1.0, 50.0)
+
+	; Upper right view (PERSPECTIVE VIEW)
+	gl.Viewport(width / 2, height / 2, width / 2, height / 2)
+	gl.Scissor(width / 2, height / 2, width / 2, height / 2)
+	gl.MatrixMode(#GL_MODELVIEW)
+	gl.LoadIdentity()
+	glu.LookAt(3.0, 1.5, 3.0,     ; Eye-position
+	      0.0, 0.0, 0.0,     ; View-point
+	      0.0, 1.0, 0.0)   ; Up-vector
+
+	; Configure and enable light source 1
+	gl.Light(#GL_LIGHT1, #GL_POSITION, light_position)
+	gl.Light(#GL_LIGHT1, #GL_AMBIENT, light_ambient)
+	gl.Light(#GL_LIGHT1, #GL_DIFFUSE, light_diffuse)
+	gl.Light(#GL_LIGHT1, #GL_SPECULAR, light_specular)
+	gl.Enable(#GL_LIGHT1)
+	gl.Enable(#GL_LIGHTING)
+
+	; Draw scene
+	p_DrawScene()
+
+	; Disable lighting
+	gl.Disable(#GL_LIGHTING)
+
+	; Disable face culling
+	gl.Disable(#GL_CULL_FACE)
+
+	; Disable depth test
+	gl.Disable(#GL_DEPTH_TEST)
+
+	; Disable scissor test
+	gl.Disable(#GL_SCISSOR_TEST)
+
+	; Draw a border around the active view
+	If (active_view > 0) And (active_view <> 2)
+
+		gl.Viewport(0, 0, width, height)
+
+		gl.MatrixMode(#GL_PROJECTION)
+		gl.LoadIdentity()
+		gl.Ortho(0.0, 2.0, 0.0, 2.0, 0.0, 1.0)
+
+		gl.MatrixMode(#GL_MODELVIEW)
+		gl.LoadIdentity()
+		gl.Translate((active_view - 1) & 1, Int(1 - (active_view - 1) / 2), 0.0)
+
+		gl.Color(1.0, 1.0, 0.6)
+
+		gl.Begin(#GL_LINE_STRIP)
+		gl.Vertex(0, 0)
+		gl.Vertex(1, 0)
+		gl.Vertex(1, 1)
+		gl.Vertex(0, 1)
+		gl.Vertex(0, 0)
+		gl.End()
+	EndIf
+
+EndFunction
+
+;========================================================================
+; Mouse position callback function
+;========================================================================
+
+Function p_CursorPosFun(msg)
+
+	Local x, y = msg.x, msg.y
+	
+	; Depending on which view was selected, rotate around different axes
+    	Switch active_view
+ 	Case 1:
+		rot_x = rot_x + (y - ypos)
+	    	rot_z = rot_z + (x - xpos)
+	Case 3:
+	    	rot_x = rot_x + (y - ypos)
+	    	rot_y = rot_y + (x - xpos)
+	Case 4:
+	    	rot_y = rot_y + (x - xpos)
+	    	rot_z = rot_z + (y - ypos)
+	EndSwitch
+		    
+	; Remember cursor position
+    	xpos = x
+    	ypos = y
+
+EndFunction
+
+
+;========================================================================
+; Mouse button callback function
+;========================================================================
+
+Function p_MouseButtonFun(msg)
+
+	If msg.action = "OnMouseDown"
+		
+		; Detect which of the four views was clicked
+		active_view = 1
+		
+		If MouseX() >= width / 2 Then active_view = active_view + 1
+		If MouseY() >= height / 2 Then active_view = active_view + 2
+    
+    	Else
+    		
+		; Deselect any previously selected view
+		active_view = 0
+    	EndIf
+    	
+EndFunction
+
+Function p_Reshape(msg)
+	
+	width = msg.width
+	height = msg.height
+	
+EndFunction
+	
+EscapeQuit(True)
+
+InstallEventHandler({OnMouseMove = p_CursorPosFun,
+	OnMouseDown = p_MouseButtonFun,
+	OnMouseUp = p_MouseButtonFun,
+	SizeWindow = p_Reshape,
+	ModeSwitch = Function(msg) torus_list = 0 p_Reshape(msg) EndFunction})
+
+width = 500
+height = 500
+
+; Setup a hardware doublebuffer managed by GL Galore	
+BeginDoubleBuffer(True)
+
+Repeat
+
+	DisableLineHook()
+
+	p_DrawAllViews()
+
+	EnableLineHook()
+
+	; Swap buffers
+	Flip
+
+	CheckEvent
+Forever
+

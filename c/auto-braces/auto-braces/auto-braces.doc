@@ -1,0 +1,348 @@
+auto-braces inserts braces in C source, automatically.
+
+The basic idea: Read in a text file, and use indentation cues to know when
+to insert open/close braces.  The intention is to let you write C-like
+source code in a more readable, less error-prone fashion (no braces to
+distract/balance).
+
+This is a stable process.  That is, once the program has been run on a
+source file to produce an output file, running it on the output file to
+produce a tertiary file should result in the 2nd and 3rd files being
+identical.  (Excepting when generating #line directives! (hm...I think
+this is wrong, but am too lazy to test it tonight) )
+
+auto-braces needs enough contiguous RAM to read in the entire input file as
+a single block.
+
+An effort has been made to make the brace formatting direct, and easy to
+read (in fact, the effort has been to match my own style).  Further, blank
+lines are also handled more or less intelligently, so that such lines,
+inserted for clarity, should end up where you want them.  But, it's NOT a
+perfect match to my style, and is NOT programmable formatting.
+
+It is, more or less, a HACK.  That is, it does not really grok C syntax,
+and could behave more intelligently than it does, in several ways.
+
+I've passed versions of this to a couple of friends in the past; this is
+more or less the same, but `really released'.  (^&  Source is included,
+though you need my linked-lists function to compile it (as it currently
+stands) on any system.	(My lists are based on the Amiga Exec lists, but
+are a super-set and are portable...a few macros would let you use the
+Amiga OS list functions, though, for auto-braces.)
+
+I've modified the dcc (DICE front-end) to handle .bc files (`Before C'?
+`Braceless C'? -- `Bouncing Curlies'! (inside joke; hi, Frank) ) for
+shareware versions of DICE.  I have not yet put my mod's back in for the
+commercial (v3.0) DICE.  I think I kept the changes in an RCS archive the
+last time around, though, so I should be able to pull this off without too
+much trouble.  If you ever see a `.bc' file associated with my name, you
+probably need auto-braces for it.
+
+Basically auto-braces does this:
+    Opens the files
+
+    Allocates a buffer large enough for the input file & reads the whole
+    file in.
+
+    Makes a first pass to build a linked list of indent-levels, where each
+    node in the list is uniquely identified by the depth-of-indent element
+    it tracks.	The list is sorted.
+
+    Then it makes a second pass through the input data; at each line it
+    determines if it has to add, or remove, levels of indentation, and
+    whether `manual' braces have already been written by the programmer.
+    `Manual braces' can be found ONLY at the beginning or end of lines.
+    (In looking for manual-braces, this program is able to skip over ASCII
+    space, tab, newline, comma and semicolon characters, and is able to
+    locate both open- & close-braces at both ends.)  If there are no manual
+    braces, or if they are deemed inadequate, then the program will add
+    braces as needed.
+
+Options:
+ ** -t[ab-size] <tab-size n>	    default = 8
+	Set the tab-size for both input & output.
+
+ ** [-i[nput-file]] <input name>    default = NONE
+	Set the input file name (only one file per run).
+
+ ** -o[utput-file] <output name>    default = stdout
+	Set the output file name (only one file per run).
+
+ ** -g[enerate-line-directive]	    Produce `#line <n> "<file name>"'
+ ** -n[o-generate-line-directive]   No prod `#line <n> "<file name>"'
+	Turn on/off the generation of ANSI C `#line' directives, their
+	purpose being to tell a C compiler what source line will _really_
+	follow the directive.  The #line information is always correct; it
+	is not confused by lines ending in \, etc.
+
+	(EXCEPTION: If there were already #line directives in the file, as
+	 after YACC processing, this will cause confusion.)
+
+Specifics:
+    You _must_ make sure all lines (except those logically joined to the
+    preceeding line by a trailing \ on the preceeding line) begin at an
+    _actual_ desired indentation level.  E.g., if `real code' is indented
+    at intervals of 4 spaces, then the following comments are bad-form:
+	 /* ... */	<== Line at indent-level 1 -
+	/*		<== Line at indent-level 0 -
+	   ...		<== Line at indent-level 3 -
+	*/			<== indent-level 0
+	  ...			<== indent-level 2 -
+	/*			<== indent-level 0
+	 * ...			<== indent-level 1
+	 */			<== indent-level 1
+
+	^^^^
+	01234...
+
+    The carats indicate columns where indentation levels will be detected.
+    This will be bad if you then have code like so:
+	typedef struct struct_tag
+	    type_1 member_1;	<== indent-level 4 -
+	type_name;
+
+    It will get expanded to:
+	typedef struct struct_tag
+	{		<== Created indent-level 0
+	 {			<== indent-level 1
+	  {			<== indent-level 2
+	   {			<== indent-level 3
+	    type_1 member_1;
+	   }			<== 3
+	  }			<== 2
+	 }			<== 1
+	}			<== 0
+	type_name;		<== 0
+
+	^^^^
+	01234...
+
+    And the extra braces in a struct definition WILL cause problems.
+
+    Valid ways to write comments:
+	/*** this aligned at 0th char; GOOD! ***/
+	/* so is this; GOOD! */ <== 0
+				<== BLANK LINE; no indent-info retrieved
+	/*			<== 0
+	    ... 		<== 4
+	*/			<== 0
+				<== BLANK
+	/*			<== 0
+	* ...			<== 0
+	*/			<== 0
+
+	^   ^			<== 0,4,...
+	01234...
+
+    So, the above typedef will look like so:
+	typedef struct struct_tag
+	{			<== 0
+	    type_1 member_1;	<== 4
+	}			<== 0
+	type_name;
+
+    ...which is perfectly valid.
+
+
+    Another area to watch is in switch() statements:
+	switch (expression)     <== N
+	case CONST:		<== N
+	    break;		<== N + 4
+	default:		<== N
+	    break;		<== N + 4
+
+    ...which will become:
+	switch (expression)     <== N
+	case CONST:		<== N
+	{			<== N
+	    break;		<== N + 4
+	}			<== N
+	default:		<== N
+	{			<== N
+	    break;		<== N + 4
+	}			<== N
+
+    ...which is BAD.  Write it instead as:
+	switch (expression)     <== N
+	    case CONST: 	<== N + 4
+		break;		<== N + 8
+	    default:		<== N + 4
+		break;		<== N + 8
+
+    ...which will become:
+	switch (expression)     <== N
+	{			<== N
+	    case CONST: 	<== N + 4
+	    {			<== N + 4
+		break;		<== N + 8
+	    }			<== N + 4
+	    default:		<== N + 4
+	    {			<== N + 4
+		break;		<== N + 8
+	    }			<== N + 4
+	}			<== N
+
+    ...which is GOOD.
+
+
+    Additionally, watch out for embedded # directives in source (which must
+    begin in the leftmost column with at least some compilers). Instead,
+    use the #directives outside of the `real' source to define a single
+    macro that can be dropped inline.  E.g., with:
+	func (int a)            <== 0
+	    int b;		<== 4
+				<== BLANK
+	#ifdef DEBUG		<== 0...
+	    int DEBUG_int;
+	    DEBUG_int = DEBUG_CONST * a;
+	    fprintf (dbug_out, "%d\n", DEBUG_int);
+	#endif
+	    ...
+
+    ...you will get:
+	func (int a)
+	{
+	    int b;
+	}			<== OOPS, end of func()!
+				<== BLANK
+	#ifdef DEBUG
+	{			<== OOPS!  No function id!
+	    int DEBUG_int;
+	    DEBUG_int = DEBUG_CONST * a;
+	    fprintf (dbug_out, "%d\n", DEBUG_int);
+	}
+	#endif
+	{			<== OOPS!  No function id!
+	    ...
+	}
+
+
+    Instead you might use:
+	#ifdef DEBUG
+	#define DEBUG_PRINT(v)                      \
+	{					    \
+	    int DEBUG_int;			    \
+						    \
+	    DEBUG_int = DEBUG_CONST * v;	    \
+	    fprintf (dbug_out, "%d\n", DEBUG_int);  \
+	}
+
+	#else
+	#define DEBUG_PRINT(v)
+	#endif
+
+	func (int a)
+	    int b;
+
+	    DEBUG_PRINT (a);
+	    ...
+
+    ...note that the manual {braces} in DEBUG_PRINT are not strictly
+    necessary in this case, but because of the `\' line continuation
+    characters, auto-braces can't insert braces for you & having the braces
+    in there makes it more able to be inserted at arbitrary spots.
+    (DEBUG_PRINT() creates a local variable; ANSI C does not permit the
+    creation of variables within a set of braces, EXCEPT before any
+    executable statements.)
+
+    Auto-braces currently uses the trailing \ on lines to indicate that the
+    next line is logically joined with the current one, BTW, so it knows a
+    little about C preprocessing.  *grin*
+
+
+    See also the example of a stretched-out for()-loop below.
+
+
+NOTES:
+ ** { and } in C comments can readily confuse auto-braces; auto-braces do
+    not know to ignore comments.  Because of the way auto-braces parses
+    text, you must keep { and } `burried', or else fully-exposed &
+    balanced.  Alternatively, replace them with [ and ], which auto-braces
+    will ignore.
+
+ ** Not thoughtfully tested with `weird' input, such as:
+	main ()
+	    {int i;}	/*** valid C program ***/
+
+    (though the above IS handled correctly...)
+
+ ** This program does NOT understand C syntax.	To further complicate
+    matters, the program has undergone changes to permit it to process
+    already-correct (with braces) C source, and to make it stable so that
+    multiple consequetive runs on its consequetive output will produce
+    identical files on the 2nd and later generations.
+
+    What does all of that mean?
+
+    It means that THIS VERSION of the program will pick up on braces that
+    you embed in comments.  It also means that THIS VERSION might get
+    confused by statements of the form:
+	for
+	(
+	    variable_with_long_name = elaborate_init_expression;
+	    variable_with_long_name != elaborate_completion_expression;
+	    variable_with_long_name = elaborate_iteration_expression
+	)
+	    ;
+
+    It will see the indent-levels rising and will want to insert braces:
+	for
+	(
+	{			<== OOPS!  Inserted by auto-braces
+	    variable_with_...
+	    ...
+	}			<== OOPS!  Inserted by auto-braces
+	)
+	{			<== inserted
+	    ;
+	}			<== inserted
+
+    ...some of which would be incorrect.  There is a simple remedy.  This
+    program DOES understand the C convention that backslash at the absolute
+    end of a line means that the lines are effectively joined.	This
+    program does NOT join the lines, but does treat the multiple lines as,
+    in effect, one big line, and only applies braces according to the
+    indent level of the first line in the sequence.  E.g., to write the
+    above you could say:
+	for		\
+	(               \
+	    init;	\
+	    test;	\
+	    iterate	\
+	)  /*** NO \ on this line! ***/
+	    ;
+
+	for			    \
+	(                           \
+	    variable_with...	    \
+	    ... 		    \
+	)  /*** NO \ on this line! ***/
+	{				<== inserted
+	    ;
+	}				<== inserted
+
+    ...which is perfectly acceptable.
+
+    If, on the other hand, you had:
+	for			\
+	(                       \
+	    init;		\
+	    test;		\
+	    iterate		\
+	)  /*** \ on EOL ***/	\
+	    ...
+	    ...
+
+    ...auto-braces would see the first ... as `on the same line' as the `)'
+    and would expand it as:
+	for			\
+	(                       \
+	    ...;		\
+	    ...;		\
+	    ... 		\
+	)   /*** \ on EOL ***/	\
+	    ...;	<== OOPS!  Logically joined; no brace before
+	{		<== OOPS!  Brace now inserted because
+	    ... 	<== OOPS!  This line isolated from for()!
+	}		<== also inserted
+

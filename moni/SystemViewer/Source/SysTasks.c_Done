@@ -1,0 +1,1389 @@
+/****h *AmigaTalk/SysTasks.c *****************************************
+**
+** NAME
+**    SysTasks.c
+**
+** DESCRIPTION
+**    Display a list of all tasks & processes currently loaded into
+**    the OS.  Allow the user to signal, break, & view almost all
+**    important parameters of the task or process.
+**
+** FUNCTIONAL INTERFACE:
+**
+**    PUBLIC void RemovePortSafely( struct MsgPort *port );
+**
+**    PUBLIC int HandleTaskListView( void );
+**
+**  GUI Designed by : Jim Steichen
+**********************************************************************
+*/
+
+#include <stdio.h>
+#include <string.h>
+
+#include <exec/execbase.h>
+#include <exec/types.h>
+
+#include <dos/dosextens.h>
+
+#include <AmigaDOSErrs.h>
+
+#include <intuition/intuitionbase.h>
+#include <intuition/intuition.h>
+#include <intuition/classes.h>
+#include <intuition/classusr.h>
+#include <intuition/gadgetclass.h>
+
+#include <libraries/gadtools.h>
+
+#include <graphics/displayinfo.h>
+#include <graphics/gfxbase.h>
+
+#include <clib/exec_protos.h>
+#include <clib/intuition_protos.h>
+#include <clib/gadtools_protos.h>
+#include <clib/graphics_protos.h>
+#include <clib/utility_protos.h>
+#include <clib/diskfont_protos.h>
+
+#include "CPGM:GlobalObjects/CommonFuncs.h"
+
+#include "SysLists.h"
+
+#define XPOS       6
+#define MAX_HEIGHT 370
+#define MAXNODE    100
+
+PRIVATE void WriteTask( void *ptr );
+
+PRIVATE char ver[] = "$VER: SysTasks 1.0 (12/20/1999) by J.T. Steichen";
+
+PRIVATE struct Window *IWnd = NULL;
+
+PRIVATE UWORD ILeft   = 0;
+PRIVATE UWORD ITop    = 32;
+PRIVATE UWORD IWidth  = 640;
+PRIVATE UWORD IHeight = MAX_HEIGHT;
+
+PRIVATE UBYTE *IWTitle = "System Tasks & Processes Full Info:";
+
+PRIVATE struct Gadget *TaskGadgets[ T_CNT ];
+
+PRIVATE UBYTE *WTitle = "System Tasks & Processes Info:";
+
+// defined in SysLists.h:  PRIVATE struct Window *Wnd = NULL;
+
+PRIVATE UWORD StrYPos[32] = { 0, };
+
+PRIVATE struct MinList TskLVList;
+
+PRIVATE struct Node TskLVNode;
+PRIVATE struct Node TskLVNodes[ MAXNODE ] = { NULL, };
+
+PRIVATE UBYTE       NodeStrs[ MAXNODE * 80 ] = "";
+ 
+PRIVATE UWORD TaskGTypes[] = {
+
+   LISTVIEW_KIND, BUTTON_KIND,   BUTTON_KIND,
+   BUTTON_KIND,   BUTTON_KIND,   BUTTON_KIND,
+   BUTTON_KIND,   BUTTON_KIND,   BUTTON_KIND, TEXT_KIND
+};
+
+PRIVATE int TLVClicked(      int itemnum );
+PRIVATE int UpdateClicked(   int dummy   );
+PRIVATE int RemoveClicked(   int dummy   );
+PRIVATE int PriorityClicked( int dummy   );
+PRIVATE int CancelClicked(   int dummy   );
+PRIVATE int FreezeClicked(   int dummy   );
+PRIVATE int MoreClicked(     int dummy   );
+PRIVATE int SignalClicked(   int dummy   );
+PRIVATE int BreakClicked(    int dummy   );
+
+/* Since this is an array, the gadgets are in numerical order 
+** (by GadgetID number).
+*/
+
+PRIVATE struct NewGadget TaskNGad[] = {
+
+     2,   3, 627, 200,                 NULL, NULL, TaskLV, 
+   0,            NULL, (APTR) TLVClicked,
+   
+     4, 205,  71,  17, (UBYTE *) "_Update",  NULL, TUpdate, 
+   PLACETEXT_IN, NULL, (APTR) UpdateClicked,
+   
+    82, 205,  71,  17, (UBYTE *) "_More",    NULL, TMore, 
+   PLACETEXT_IN, NULL, (APTR) MoreClicked,
+   
+   554, 205,  72,  17, (UBYTE *) "_Cancel",  NULL, TCancel, 
+   PLACETEXT_IN, NULL, (APTR) CancelClicked,
+   
+   474, 205,  72,  17, (UBYTE *) "Freeze",   NULL, TFreeze, 
+   PLACETEXT_IN, NULL, (APTR) FreezeClicked,
+   
+   317, 205,  72,  17, (UBYTE *) "Remove",   NULL, TRemove, 
+   PLACETEXT_IN, NULL, (APTR) RemoveClicked,
+   
+   160, 205,  72,  17, (UBYTE *) "Signal",   NULL, TSignal, 
+   PLACETEXT_IN, NULL, (APTR) SignalClicked,
+   
+   238, 205,  72,  17, (UBYTE *) "_Break",   NULL, TBreak, 
+   PLACETEXT_IN, NULL, (APTR) BreakClicked,
+      
+   396, 205,  72,  17, (UBYTE *) "Priority", NULL, TPriority, 
+   PLACETEXT_IN, NULL, (APTR) PriorityClicked,
+   
+     5, 228, 620,  17,                 NULL, NULL, TSelection,
+              0, NULL, NULL
+};
+
+PRIVATE ULONG TaskGTags[] = {
+
+   GTLV_ShowSelected, NULL, (LAYOUTA_Spacing), 2, (TAG_DONE),
+
+   (GT_Underscore), '_', (TAG_DONE),
+   (GT_Underscore), '_', (GA_Disabled), TRUE, (TAG_DONE),
+   (GT_Underscore), '_', (TAG_DONE),
+
+   (GA_Disabled),  TRUE, (TAG_DONE),
+   (GA_Disabled),  TRUE, (TAG_DONE),
+   (GA_Disabled),  TRUE, (TAG_DONE),
+
+   (GT_Underscore), '_', (GA_Disabled), TRUE, (TAG_DONE),
+
+   (GA_Disabled),  TRUE, (TAG_DONE),
+
+   (GTTX_Border),  TRUE, TAG_DONE
+};
+
+// --------------------------------------------------------------------
+
+PRIVATE void WriteText( char *string, int xpos, int ypos, int color ) 
+{
+   struct RastPort  *rp = IWnd->RPort;
+   struct IntuiText  outtxt;
+
+   outtxt.FrontPen  = color;
+   outtxt.BackPen   = 0;
+   outtxt.DrawMode  = JAM1;
+   outtxt.LeftEdge  = 0;
+   outtxt.TopEdge   = 0;
+   outtxt.ITextFont = Font;
+   outtxt.NextText  = NULL;
+   outtxt.IText     = (UBYTE *) string;
+
+   PrintIText( rp, &outtxt, xpos, ypos );
+
+   return;
+}
+
+
+PRIVATE BOOL CheckWindow( struct Window *findwin )
+{
+  struct Window *win;
+  struct Screen *scr;
+  ULONG          lock = 0L;
+  BOOL           ret  = FALSE;
+
+  lock = LockIBase( NULL );
+
+  scr = IntuitionBase->FirstScreen;
+  
+  while ((scr != NULL) && (ret == FALSE))
+     {
+     win = scr->FirstWindow;
+     
+     while (win != NULL)
+        {
+        if (win == findwin)
+           {
+           ret = TRUE;
+           break;
+           }
+
+        win = win->NextWindow;
+        }
+
+     scr = scr->NextScreen;
+     }
+
+  UnlockIBase( lock );
+
+  return( ret );
+}
+
+PRIVATE void CloseIWindow( void )
+{
+   if (IWnd != NULL) 
+      {
+      CloseWindow( IWnd );
+      IWnd = NULL;
+      }
+
+   return;
+}
+
+PRIVATE int ICloseWindow( void )
+{
+   CloseIWindow();
+   return( (int) FALSE );
+}
+
+PRIVATE BOOL CheckBit( int flags, int bit )
+{
+   if ((flags & bit) == bit)
+      return( TRUE );
+   else
+      return( FALSE );
+}
+
+PRIVATE void DisplayStructure( void *ptr, int struct_type )
+{
+   switch (struct_type)
+      {
+      case 2: // Task structure:
+         WriteTask( ptr );
+         break;
+
+      case 3: // Process structure:
+         WriteTask( ptr );
+         break;
+      }
+
+   return;
+}
+
+PRIVATE int OpenIWindow( int numlines )
+{
+   UWORD wleft = ILeft, wtop = ITop, ww, wh;
+   int   i;
+   
+   ComputeFont( Scr, Font, &CFont, IWidth, IHeight );
+
+   IHeight = (numlines + 1) * (CFont.FontY + 3) + 2;
+
+   if (IHeight > MAX_HEIGHT)
+      IHeight = MAX_HEIGHT;
+
+   for (i = 0; i < 32; i++)
+      StrYPos[i] = 16 + i * (CFont.FontY + 3);
+         
+   ww = ComputeX( CFont.FontX, IWidth  );
+   wh = ComputeY( CFont.FontY, IHeight );
+
+   if ((wleft + ww + CFont.OffX + Scr->WBorRight) > Scr->Width) 
+      wleft = Scr->Width - ww;
+
+   if ((wtop + wh + CFont.OffY + Scr->WBorBottom) > Scr->Height) 
+      wtop = Scr->Height - wh;
+
+   if ( !(IWnd = OpenWindowTags( NULL,
+
+                   WA_Left,        wleft,
+                   WA_Top,         wtop,
+                   WA_Width,       ww + CFont.OffX + Scr->WBorRight,
+                   WA_Height,      wh + CFont.OffY + Scr->WBorBottom,
+
+                   WA_IDCMP,       BUTTONIDCMP | IDCMP_GADGETUP
+                     | IDCMP_REFRESHWINDOW | IDCMP_CLOSEWINDOW,
+
+                   WA_Flags,       WFLG_SMART_REFRESH | WFLG_CLOSEGADGET 
+                     | WFLG_ACTIVATE | WFLG_RMBTRAP,
+
+                   WA_Gadgets,     NULL,
+                   WA_Title,       IWTitle,
+                   WA_ScreenTitle, ScrTitle,
+                   TAG_DONE ))
+      )
+      return( -4 );
+
+   return( 0 );
+}
+
+PRIVATE int HandleInfoIDCMP( void )
+{
+   struct IntuiMessage	*m;
+   BOOL			running = TRUE;
+
+   while (running == TRUE)
+      {
+      if ((m = (struct IntuiMessag *) GetMsg( IWnd->UserPort )) == NULL)
+         {
+         (void) Wait( 1L << IWnd->UserPort->mp_SigBit );
+         continue;
+         }
+
+      CopyMem( (char *) m, (char *) &IMsg, 
+               (long) sizeof( struct IntuiMessage )
+             );
+
+      ReplyMsg( (struct Message *) m );
+
+      switch (IMsg.Class) 
+         {
+   	 case IDCMP_CLOSEWINDOW:
+   	    running = ICloseWindow();
+            break;
+         }
+      }
+
+   return( running );
+}
+
+PUBLIC int HandleWindowInfo( void *structptr, int whichdisplay )
+{
+   int rval = 0;
+   
+   switch (whichdisplay)
+      {
+      case 2: // Task data:
+         rval = OpenIWindow( 13 );
+         break;
+
+      case 3: // Process data:
+         rval = OpenIWindow( 28 );
+         break;
+      }
+   
+   if (rval < 0)
+      {
+      (void) Handle_Problem( "Couldn't open Information Window!", 
+                             "Allocation Problem:", NULL 
+                           );
+      return( -1 );
+      }
+
+   DisplayStructure( structptr, whichdisplay );
+      
+   (void) HandleInfoIDCMP();
+
+   return( 0 );
+}
+
+PRIVATE char ts[10], *taskstate = &ts[0];
+PRIVATE BOOL DispTaskFlag = TRUE;
+
+PRIVATE char *GetTaskState( struct Task *t )
+{
+   if (t == NULL)
+      return( "INVALID" );
+
+   switch (t->tc_State)
+      {
+      case TS_INVALID:
+         strcpy( taskstate, "INVALID" );  // Stack won't be right.
+         DispTaskFlag = FALSE;
+         break;
+         
+      case TS_ADDED:
+         strcpy( taskstate, "ADDED" );
+         DispTaskFlag = TRUE;
+         break;
+         
+      case TS_RUN:
+         strcpy( taskstate, "RUNNING" );
+         DispTaskFlag = TRUE;
+         break;
+         
+      case TS_READY:
+         strcpy( taskstate, "READY" );
+         DispTaskFlag = TRUE;
+         break;
+         
+      case TS_WAIT:
+         strcpy( taskstate, "WAITING" );
+         DispTaskFlag = TRUE;
+         break;
+         
+      case TS_EXCEPT:
+         strcpy( taskstate, "EXCEPTION" );
+         DispTaskFlag = TRUE;
+         break;
+         
+      case TS_REMOVED:
+         strcpy( taskstate, "REMOVED" );
+         DispTaskFlag = TRUE;
+         break;
+      }
+
+   return( taskstate );
+}
+
+PRIVATE void SetTaskFlags( struct Task *t, char *str )
+{
+   *str = '\0';
+
+   if (CheckBit( t->tc_Flags, TF_PROCTIME ) == TRUE)
+      strcpy( str, "TF_PROCTIME " );
+   
+   if (CheckBit( t->tc_Flags, TF_ETASK ) == TRUE)
+      strcat( str, "TF_ETASK " );
+
+   if (CheckBit( t->tc_Flags, TF_STACKCHK ) == TRUE)
+      strcat( str, "TF_STACKCHK " );
+
+   if (CheckBit( t->tc_Flags, TF_EXCEPT ) == TRUE)
+      strcat( str, "TF_EXCEPT " );
+
+   if (CheckBit( t->tc_Flags, TF_SWITCH ) == TRUE)
+      strcat( str, "TF_SWITCH " );
+
+   if (CheckBit( t->tc_Flags, TF_LAUNCH ) == TRUE)
+      strcat( str, "TF_LAUNCH" );
+
+   return;
+}
+
+PRIVATE char typ[10], *pgmtype = &typ[0];
+
+PRIVATE char *GetTask_Process( UBYTE type )
+{
+   if (type == NT_TASK)
+      strcpy( pgmtype, "TASK" );
+   else if (type == NT_PROCESS)
+      strcpy( pgmtype, "PROCESS" );
+   else   
+      strcpy( pgmtype, "TASK" );
+
+   return( pgmtype );
+}
+
+#define B2APTR( bptr ) ((bptr) << 2)
+
+#define XPOS 6
+
+PRIVATE void WriteTask( void *ptr )
+{
+   IMPORT UWORD StrYPos[];
+   
+   struct Task    *task    = (struct Task *) ptr;
+   struct Process *process = NULL;
+
+   char t[82], *title = &t[0];
+   char s[82], *str   = &s[0];
+
+   int  size = 0;
+   
+   if (task == NULL)
+      return; 
+
+   sprintf( title, "%10.10s: (%08LX) -> %-32.32s", 
+            GetTask_Process( task->tc_Node.ln_Type ),
+            task, task->tc_Node.ln_Name
+          );
+
+   SetWindowTitles( Wnd, title, (UBYTE *) 0xFFFFFFFF );
+
+   // Common (to Task & Process) data to display:
+   if ((task->tc_Node.ln_Type == NT_TASK) 
+       || (task->tc_Node.ln_Type == NT_PROCESS))
+      {
+      sprintf( str, "STATE: %s Priority: %4d", 
+               GetTaskState( task ),
+               task->tc_Node.ln_Pri 
+             );
+
+      WriteText( str, XPOS, StrYPos[0], 2 );
+
+      sprintf( str, "SigAlloc: %08LX SigWait : %08LX SigRecvd : %08LX SigExcept: %08LX", 
+               task->tc_SigAlloc, task->tc_SigWait, 
+               task->tc_SigRecvd, task->tc_SigExcept
+             );
+
+      WriteText( str, XPOS, StrYPos[1], 1 );
+
+      sprintf( str, "TrapData: %08LX TrapCode: %08LX TrapAlloc: %08LX TrapAble : %08LX",
+               task->tc_TrapData, task->tc_TrapCode, 
+               task->tc_TrapAlloc, task->tc_TrapAble
+             );
+
+      WriteText( str, XPOS, StrYPos[2], 1 );
+
+      sprintf( str, "Switch(): %08LX Launch(): %08LX UserData : %08LX", 
+               task->tc_Switch, task->tc_Launch, 
+               task->tc_UserData
+             );
+
+      WriteText( str, XPOS, StrYPos[3], 2 );
+
+      sprintf( str, "ExceptData: %08LX ExceptCode: %08LX", 
+               task->tc_ExceptData, task->tc_ExceptCode
+             );
+
+      WriteText( str, XPOS, StrYPos[5], 1 );
+
+      size = (int) task->tc_SPUpper - (int) task->tc_SPLower;
+
+      sprintf( str, "SPReg     : %08LX SPUpper   : %08LX SPLower: %08LX size: %d",
+               task->tc_SPReg, task->tc_SPUpper, 
+               task->tc_SPLower, size
+             );
+
+      WriteText( str, XPOS, StrYPos[6], 2 );
+
+      sprintf( str, "IDNestCnt: %-08d TDNestCnt: %3d",
+               task->tc_IDNestCnt, task->tc_TDNestCnt
+             );
+
+      WriteText( str, XPOS, StrYPos[8], 1 );
+
+      sprintf( str, "MemEntry : %08LX", task->tc_MemEntry.lh_Head );
+
+      WriteText( str, XPOS, StrYPos[9], 1 );
+
+      WriteText( "Flags:", XPOS, StrYPos[10], 3 );
+
+      SetTaskFlags( task, str );
+
+      WriteText( str, XPOS, StrYPos[11], 1 );
+
+      if (task->tc_Node.ln_Type == NT_TASK) 
+         WriteText( "Press Close Gadget when you're done!", 
+                    150, StrYPos[12], 2 
+                  ); 
+      }
+
+   // Process additions to display:
+   if (task->tc_Node.ln_Type == NT_PROCESS)
+      {
+      char   pn[256], *path = &pn[0];
+      UBYTE *ttl = NULL;
+            
+      process = (struct Process *) ptr;
+
+      WriteText( "Process Structure:", XPOS, StrYPos[12], 3 );  
+
+      if ((struct Window *) process->pr_WindowPtr != NULL)
+         ttl = ((struct Window *) process->pr_WindowPtr)->Title;
+      else
+         ttl = "*NO TITLE!*";
+
+      sprintf( str, "WindowPtr  : %08LX Title: %-40.40s", 
+               process->pr_WindowPtr, 
+               (strlen( ttl ) > 0) ? ttl : (UBYTE *) "*NO TITLE!*"
+             );
+
+      WriteText( str, XPOS, StrYPos[13], 2 );
+
+      if (process->pr_CurrentDir != NULL)
+         (void) NameFromLock( process->pr_CurrentDir, path, 255 );
+          
+      sprintf( str, "CurrentDir : %08LX Path : %-40.40s", 
+               B2APTR( process->pr_CurrentDir ),
+               (path == NULL) ? "*NO PATH*" : path
+             );
+
+      WriteText( str, XPOS, StrYPos[14], 2 );
+
+      sprintf( str, "MsgPort    : %08LX SegList       : %08LX", 
+               process->pr_MsgPort, B2APTR( process->pr_SegList )
+             );
+
+      WriteText( str, XPOS, StrYPos[15], 1 );
+
+      sprintf( str, "StackBase  : %08LX StackSize     : %d", 
+               B2APTR( process->pr_StackBase ), process->pr_StackSize
+             );
+
+      WriteText( str, XPOS, StrYPos[16], 1 );
+
+      sprintf( str, "CIS        : %08LX COS           : %08LX", 
+               B2APTR( process->pr_CIS ), B2APTR( process->pr_COS )
+             );
+
+      WriteText( str, XPOS, StrYPos[17], 1 );
+
+      sprintf( str, "ConsoleTask: %08LX FileSystemTask: %08LX", 
+               process->pr_ConsoleTask, 
+               process->pr_FileSystemTask
+             );
+
+      WriteText( str, XPOS, StrYPos[18], 1 );
+
+      sprintf( str, "PktWait    : %08LX ReturnAddr    : %08LX", 
+               process->pr_PktWait, 
+               process->pr_ReturnAddr
+             );
+
+      WriteText( str, XPOS, StrYPos[19], 1 );
+
+      sprintf( str, "Arguments -> %-60.60s", 
+               (process->pr_Arguments == NULL) ? (UBYTE *) "*NO ARGS!*" 
+                                               : process->pr_Arguments
+             );
+
+      WriteText( str, XPOS, StrYPos[20], 2 );
+
+      sprintf( str, "GlobVec    : %08LX CLI           : %08LX", 
+               process->pr_GlobVec, 
+               B2APTR( process->pr_CLI )
+             );
+
+      WriteText( str, XPOS, StrYPos[21], 1 );
+
+      // CLI additional information: 
+
+      if (process->pr_CLI != NULL)
+         {
+         struct CommandLineInterface *cli = NULL;
+         BOOL                         iflag = FALSE, bflag = FALSE;
+
+         cli = (struct CommandLineInterface *) (process->pr_CLI << 2);
+
+         WriteText( "CommandLineInterface structure:", 
+                    XPOS, StrYPos[22], 3
+                  );
+
+         sprintf( str, "CommandDir   : %08LX", 
+                  B2APTR( cli->cli_CommandDir )
+                );
+
+         WriteText( str, XPOS, StrYPos[23], 1 );
+
+         sprintf( str, "StandardInput: %08LX StandardOutput: %08LX", 
+                  B2APTR( cli->cli_StandardInput ),
+                  B2APTR( cli->cli_StandardOutput )
+                );
+
+         WriteText( str, XPOS, StrYPos[24], 1 );
+
+         sprintf( str, "CurrentInput : %08LX CurrentOutput : %08LX", 
+                  B2APTR( cli->cli_CurrentInput  ),
+                  B2APTR( cli->cli_CurrentOutput )
+                );
+
+         WriteText( str, XPOS, StrYPos[25], 1 );
+
+         if (cli->cli_Interactive != FALSE)
+            iflag = TRUE;
+            
+         if (cli->cli_Background != FALSE)
+            bflag = TRUE;
+            
+         sprintf( str, "Module       : %08LX %s %s", 
+                  B2APTR( cli->cli_Module ),
+                  (bflag == TRUE) ? "BACKGROUND" : "",
+                  (iflag == TRUE) ? "& INTERACTIVE" : ""
+                );
+
+         WriteText( str, XPOS, StrYPos[26], 1 );
+         }
+
+      WriteText( "Press Close Gadget when you're done!", 
+                 150, StrYPos[27], 2 
+               ); 
+      }
+
+   return;
+}
+
+PRIVATE int MakeTaskList( void )
+{
+   IMPORT struct ExecBase *SysBase;
+   
+   struct Task *readytasks = NULL;
+   struct Task *waitgtasks = NULL;
+   struct Task *crnttask   = NULL;
+   struct Node *ptr        = NULL;
+
+   char        *tskstate = NULL;
+   int          numitems = 0, i = 1;
+   int          up, down;
+        
+
+   Forbid();
+
+     crnttask = SysBase->ThisTask;
+
+     up   = (int) crnttask->tc_SPUpper;
+     down = (int) crnttask->tc_SPLower;
+
+     sprintf( &NodeStrs[ i++ * 80 ], 
+              "%08LX+ %4d %6u %08LX %-9.9s %-7.7s %-30.30s",
+              crnttask, 
+              crnttask->tc_Node.ln_Pri, 
+              up - down,
+              crnttask->tc_SigAlloc,
+              GetTaskState( crnttask ),
+              GetTask_Process( crnttask->tc_Node.ln_Type ),
+              crnttask->tc_Node.ln_Name
+            );
+     
+     numitems++;
+
+     ptr        = SysBase->TaskReady.lh_Head;
+     readytasks = (struct Task *) ptr;
+
+     while (ptr != NULL)
+        {
+        up   = (int) readytasks->tc_SPUpper;
+        down = (int) readytasks->tc_SPLower;
+
+        tskstate = GetTaskState( readytasks );
+
+        if (DispTaskFlag == TRUE)
+           sprintf( &NodeStrs[ i++ * 80 ], 
+                    "%08LX  %4d %6u %08LX %-9.9s %-7.7s %-30.30s",
+                    readytasks, 
+                    readytasks->tc_Node.ln_Pri, 
+                    up - down,
+                    readytasks->tc_SigAlloc,
+                    tskstate,
+                    GetTask_Process( readytasks->tc_Node.ln_Type ),
+                    readytasks->tc_Node.ln_Name
+                  );
+             
+        // point to next node in list:
+        ptr        = ptr->ln_Succ;
+        readytasks = (struct Task *) ptr;
+        numitems++;
+        }
+
+     ptr        = SysBase->TaskWait.lh_Head;
+     waitgtasks = (struct Task *) ptr;
+
+     while (ptr != NULL)
+        {
+        up   = (int) waitgtasks->tc_SPUpper;
+        down = (int) waitgtasks->tc_SPLower;
+
+        tskstate = GetTaskState( waitgtasks );
+
+        if (DispTaskFlag == TRUE)
+           sprintf( &NodeStrs[ i++ * 80 ], 
+                    "%08LX  %4d %6u %08LX %-9.9s %-7.7s %-30.30s",
+                    waitgtasks, 
+                    waitgtasks->tc_Node.ln_Pri, 
+                    up - down,
+                    waitgtasks->tc_SigAlloc,
+                    GetTaskState( waitgtasks ),
+                    GetTask_Process( waitgtasks->tc_Node.ln_Type ),
+                    waitgtasks->tc_Node.ln_Name
+                  );
+             
+        // point to next node in list:
+        ptr        = ptr->ln_Succ;
+        waitgtasks = (struct Task *) ptr;
+
+        numitems++;
+        }
+
+   Permit();
+
+   return( numitems );
+}
+
+PRIVATE ULONG TaskAddress = 0L;
+
+PRIVATE int TLVClicked( int itemnum )
+{
+   ULONG addr = 0L;
+   
+//#  ifdef DEBUG
+//   fprintf( stderr, "%-80.80s\n", TskLVNodes[ itemnum ].ln_Name );
+//#  endif
+
+   if (itemnum == 0)   
+      {
+      GT_SetGadgetAttrs( TaskGadgets[ TMore ], Wnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TFreeze ], Wnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TRemove ], Wnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TSignal ], Wnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TBreak ], Wnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TPriority ], Wnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TSelection ], Wnd, NULL,
+                         GTTX_Text, NULL,
+                         TAG_DONE
+                       );
+
+      return( (int) TRUE );
+      }
+   else
+      {
+      GT_SetGadgetAttrs( TaskGadgets[ TMore ], Wnd, NULL,
+                         GA_Disabled, FALSE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TFreeze ], Wnd, NULL,
+                         GA_Disabled, FALSE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TRemove ], Wnd, NULL,
+                         GA_Disabled, FALSE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TSignal ], Wnd, NULL,
+                         GA_Disabled, FALSE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TBreak ], Wnd, NULL,
+                         GA_Disabled, FALSE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TPriority ], Wnd, NULL,
+                         GA_Disabled, FALSE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( TaskGadgets[ TSelection ], Wnd, NULL,
+                         GTTX_Text, TskLVNodes[ itemnum ].ln_Name, 
+                         TAG_DONE
+                       );
+
+      // Now get address from the item:
+      (void) stch_l( TskLVNodes[ itemnum ].ln_Name, (long *) &addr );
+
+      TaskAddress = addr;
+      }
+
+   return( (int) TRUE );
+}
+
+PRIVATE int UpdateClicked( int dummy )
+{
+   int i;
+   
+   GT_SetGadgetAttrs( TaskGadgets[ TSelection ], Wnd, NULL,
+                      GTTX_Text, NULL,
+                      TAG_DONE
+                    );
+
+   for (i = 1; i <= MAXNODE; i++)
+       NodeStrs[ i * 80 ] = '\0'; // Kill old ListView strings.
+
+   // Make the list:
+   (void) MakeTaskList();
+
+   GT_RefreshWindow( Wnd, NULL );
+
+   return( (int) TRUE );
+}
+
+PRIVATE struct Window *FindTaskWindow( struct Task *task )
+{
+   struct Window *win, *taskwindow = NULL;
+   struct Screen *scr;
+   ULONG          lock = 0L;
+
+   lock = LockIBase( NULL );
+
+   scr = IntuitionBase->FirstScreen;
+   while ((scr != NULL) && (taskwindow == NULL))
+      {
+      win = scr->FirstWindow;
+     
+      while (win != NULL)
+         {
+         if ((win->UserPort != NULL) 
+              && (win->UserPort->mp_SigTask == task))
+            {
+            taskwindow = win;
+            break;
+            }
+
+         win = win->NextWindow;
+         }
+ 
+      scr = scr->NextScreen;
+      }
+
+   UnlockIBase( lock );
+
+   return( taskwindow );
+}
+
+PUBLIC BOOL IsMsgPort_Empty( struct MsgPort *p )
+{
+   BOOL rval = FALSE;
+
+   if (p == NULL)
+      return( TRUE );
+
+   if (p->mp_MsgList.lh_TailPred == (struct Node *) &(p->mp_MsgList))
+      rval = TRUE;
+   
+   return( rval );
+}
+     
+PUBLIC void RemovePortSafely( struct MsgPort *port )
+{
+   struct Node *MsgNode;
+
+   if (port == NULL)
+      return;
+
+   Forbid();
+
+     if (IsMsgPort_Empty( port ) == FALSE)
+        {
+        MsgNode = port->mp_MsgList.lh_Head;
+
+        while ((MsgNode = MsgNode->ln_Succ) != NULL)
+           Remove( (struct Node *) MsgNode );
+        }
+
+     if (port->mp_Node.ln_Name != NULL)
+        RemPort( port );
+
+     port->mp_SigTask         = (struct Task *) -1;
+     port->mp_MsgList.lh_Head = (struct Node *) -1;
+
+     DeletePort( port );
+
+  Permit();
+
+  return;
+}
+
+PRIVATE void CloseTheWindow( struct Window *wind )
+{
+   if (CheckWindow( wind ) == TRUE)
+      {
+      if ((wind->ReqCount != 0) && wind->FirstRequest)
+         {
+         while (wind->ReqCount != 0)
+            EndRequest( wind->FirstRequest, wind );
+         }
+
+      if (wind->DMRequest != NULL)
+         ClearDMRequest( wind );
+
+      if (wind->Pointer != NULL)
+         ClearPointer( wind );
+
+      if (wind->MenuStrip != NULL)
+         ClearMenuStrip( wind );
+
+      CloseWindow( wind );
+      }
+
+   return;
+}
+
+PRIVATE struct Window *TaskWindow( struct Task *task )
+{
+   return( FindTaskWindow( task ) );
+
+/* struct Window *rval = NULL;
+
+   Forbid();
+
+      if (task->tc_Node.ln_Type == NT_PROCESS)
+         {
+         struct Process *process = (struct Process *) task;
+
+         if ((struct Window *) process->pr_WindowPtr != NULL)
+            rval = ((struct Window *) process->pr_WindowPtr);
+         }
+
+   Permit();
+
+   return( rval );
+*/
+}
+
+PRIVATE struct MsgPort *TaskPort( struct Task *task )
+{
+   struct MsgPort *rval = NULL;
+   
+   Forbid();
+
+      if (task->tc_Node.ln_Type == NT_PROCESS)
+         {
+         struct Process *process = (struct Process *) task;
+
+         rval = &(process->pr_MsgPort);
+         }
+   
+   Permit();
+
+   return( rval );
+}
+
+PRIVATE void KillTask( struct Task *task )
+{
+   struct Window  *taskwin = NULL;
+   struct MsgPort *port    = NULL;
+
+   Forbid();
+     Disable();
+       Remove( (struct Node *) task );
+     Enable();
+
+     if ((taskwin = TaskWindow( task )) != NULL)
+        {
+        struct Screen *taskscr = NULL;
+        ULONG          lock    = LockIBase( NULL );
+
+        if ((taskwin->WScreen != NULL) 
+           && ((taskwin->WScreen->Flags & CUSTOMSCREEN) == CUSTOMSCREEN))
+           taskscr = taskwin->WScreen;
+ 
+        while (taskwin != NULL)
+           {
+           CloseTheWindow( taskwin );
+           taskwin = TaskWindow( task );
+           }
+
+        if (taskscr != NULL)
+           CloseScreen( taskscr );
+  
+        UnlockIBase (lock);
+        }
+
+     while (port = TaskPort( task ) != NULL)
+        RemovePortSafely( port );
+
+     Disable();
+       RemTask( task );
+     Enable();
+
+   Permit();
+
+   return;
+}
+
+PRIVATE int RemoveClicked( int dummy )
+{
+   char  m[80], *msg = &m[0];
+   int   answer = -1;
+   
+   sprintf( msg, "Are you SURE you want to Remove %08x?", TaskAddress );
+
+   answer = SanityCheck( msg );
+
+   if (answer >= 0)
+      KillTask( (struct Task *) TaskAddress );  // Send the remove command:
+
+   return( (int) TRUE );
+}
+
+PRIVATE int PriorityClicked( int dummy )
+{
+   char m[80], *msg = &m[0];
+   int  answer = -1;
+   
+   sprintf( msg, "Are you SURE you want to Re-Prioritize %08x?", 
+            TaskAddress 
+          );
+
+   answer = SanityCheck( msg );
+
+   if (answer >= 0)
+      {
+      struct Task *taddr = (struct Task *) TaskAddress;
+      struct Node *tnode = &(taddr->tc_Node);
+
+      ULONG OldPri = tnode->ln_Pri;
+
+      // re-prioritize the task:
+
+      if (ChangePriorityHandler( tnode->ln_Name,
+                                 tnode->ln_Type,
+                                 OldPri 
+                               ) < 0)
+         {
+         // Error condition:
+         }
+      }
+
+   return( (int) TRUE );
+}
+
+PRIVATE int FreezeClicked( int dummy )
+{
+   char  m[80], *msg = &m[0];
+   int   answer = -1;
+   
+   sprintf( msg, "Are you SURE you want to Freeze %08x?", TaskAddress );
+
+   answer = SanityCheck( msg );
+
+   if (answer >= 0)
+      {
+      // Send the freeze command:
+      }
+
+   return( (int) TRUE );
+}
+
+PRIVATE int MoreClicked( int dummy )
+{
+   if (((struct Task *) TaskAddress)->tc_Node.ln_Type == NT_PROCESS)
+      (void) HandleWindowInfo( (void *) TaskAddress, 3 );
+   else
+      (void) HandleWindowInfo( (void *) TaskAddress, 2 );
+
+   SetWindowTitles( Wnd, WTitle, (UBYTE *) 0xFFFFFFFF );   
+
+   return( (int) TRUE );
+}
+
+PRIVATE int SignalClicked( int dummy )
+{
+//   ULONG usersignals = 0L;
+   char  m[80], *msg = &m[0];
+   int   answer = -1;
+   
+   sprintf( msg, "Are you SURE you want to Signal %08x?", TaskAddress );
+
+   answer = SanityCheck( msg );
+
+   if (answer >= 0)
+      {
+      // get the signal number from the user via requester:
+//      usersignals = GetUserSignals( (struct Task *) TaskAddress );
+//      Signal( TaskAddress, usersignals );
+      }
+
+   return( (int) TRUE );
+}
+
+PRIVATE int BreakClicked( int dummy )
+{
+   char m[80], *msg = &m[0];
+   int  answer = -1;
+   
+   sprintf( msg, "Are you SURE you want to Break %08x?", TaskAddress );
+
+   answer = SanityCheck( msg );
+
+   if (answer >= 0)
+      {
+      // Send the Break command:
+      }
+
+   return( (int) TRUE );
+}
+
+// CLose stuff: CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+
+PRIVATE void CloseTaskWindow( void )
+{
+   if (Wnd)
+      {
+      CloseWindow( Wnd );
+      Wnd = NULL;
+      }
+
+   if (GList)
+      {
+      FreeGadgets( GList );
+      GList = NULL;
+      }
+
+   if (TFont)
+      {
+      CloseFont( TFont );
+      TFont = NULL;
+      }
+
+   return;
+}
+
+PRIVATE int TaskCloseWindow( void )
+{
+   CloseTaskWindow();
+   return( (int) FALSE );
+}
+
+PRIVATE int CancelClicked( int dummy )
+{
+   return( TaskCloseWindow() );
+}
+
+// CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC
+
+PRIVATE int OpenTaskWindow( void )
+{
+   struct NewGadget  ng = { 0, };
+   struct Gadget    *g  = NULL;
+   UWORD             lc = 0, tc = 0;
+   UWORD             wleft = WLeft, wtop = WTop, ww, wh;
+
+   ComputeFont( Scr, Font, &CFont, WWidth, WHeight );
+
+   ww = ComputeX( CFont.FontX, WWidth );
+   wh = ComputeY( CFont.FontY, WHeight );
+
+   if ((wleft + ww + CFont.OffX + Scr->WBorRight) > Scr->Width)
+      wleft = Scr->Width - ww;
+
+   if ((wtop + wh + CFont.OffY + Scr->WBorBottom) > Scr->Height)
+      wtop = Scr->Height - wh;
+
+   if ((TFont = OpenDiskFont( Font )) == NULL)
+      return( -5 );
+
+   if ((g = CreateContext( &GList )) == NULL)
+      return( -1 );
+
+   for (lc = 0, tc = 0; lc < T_CNT; lc++)
+      {
+      CopyMem( (char *) &TaskNGad[ lc ], (char *) &ng, 
+               (long) sizeof( struct NewGadget )
+             );
+
+      ng.ng_VisualInfo = VisualInfo;
+      ng.ng_TextAttr   = Font;
+      ng.ng_LeftEdge   = CFont.OffX + ComputeX( CFont.FontX,
+                                                ng.ng_LeftEdge
+                                              );
+
+      ng.ng_TopEdge    = CFont.OffY + ComputeY( CFont.FontY,
+                                                ng.ng_TopEdge
+                                              );
+
+      ng.ng_Width      = ComputeX( CFont.FontX, ng.ng_Width );
+      ng.ng_Height     = ComputeY( CFont.FontY, ng.ng_Height );
+
+      TaskGadgets[ lc] = 
+                    g  = CreateGadgetA( (ULONG) TaskGTypes[ lc ], 
+                           g, 
+                           &ng, 
+                           (struct TagItem *) &TaskGTags[ tc ] );
+
+      while (TaskGTags[tc])
+         tc += 2;
+
+      tc++;
+
+      if (g == NULL)
+         return( -2 );
+      }
+
+   if ( !(Wnd = OpenWindowTags( NULL,
+                         
+                  WA_Left,        wleft,
+                  WA_Top,         wtop,
+                  WA_Width,       ww + CFont.OffX + Scr->WBorRight,
+                  WA_Height,      wh + CFont.OffY + Scr->WBorBottom,
+
+                  WA_IDCMP,       LISTVIEWIDCMP | BUTTONIDCMP 
+                    | IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW,
+
+                  WA_Flags,       WFLG_DRAGBAR | WFLG_DEPTHGADGET 
+                    | WFLG_CLOSEGADGET | WFLG_SMART_REFRESH 
+                    | WFLG_ACTIVATE | WFLG_RMBTRAP,
+                  
+                  WA_Gadgets,     GList,
+                  WA_Title,       WTitle,
+                  TAG_DONE ))
+      )
+      return( -4 );
+
+   GT_RefreshWindow( Wnd, NULL );
+
+   return( 0 );
+}
+
+PRIVATE int HandleTaskIDCMP( void )
+{
+   struct IntuiMessage *m;
+   int                 (*func)( int );
+   BOOL                running = TRUE;
+
+   while (running == TRUE)
+      {
+      if ((m = GT_GetIMsg( Wnd->UserPort )) == NULL)
+         {
+         (void) Wait( 1L << Wnd->UserPort->mp_SigBit );
+         continue;
+         }
+
+      CopyMem( (char *) m, (char *) &IMsg, 
+               (long) sizeof( struct IntuiMessage )
+             );
+
+      GT_ReplyIMsg( m );
+
+      switch (IMsg.Class)
+         {
+         case IDCMP_REFRESHWINDOW:
+            GT_BeginRefresh( Wnd );
+            GT_EndRefresh( Wnd, TRUE );
+            break;
+
+         case IDCMP_CLOSEWINDOW:
+            running = TaskCloseWindow();
+            break;
+
+         case IDCMP_GADGETUP:
+         case IDCMP_GADGETDOWN:
+            func    = (void *) ((struct Gadget *) IMsg.IAddress)->UserData;
+            running = func( IMsg.Code );
+            break;
+         }
+      }
+
+   return( running );
+}
+
+PUBLIC int HandleTaskListView( void )
+{
+   int i = 0;
+   
+   TskLVNode.ln_Succ = (struct Node *) TskLVList.mlh_Tail;
+   TskLVNode.ln_Pred = (struct Node *) TskLVList.mlh_Head;
+   TskLVNode.ln_Type = 0;
+   TskLVNode.ln_Pri  = 100;
+   TskLVNode.ln_Name = "Address    Pri  Stack Signals  State     Type    Name";
+
+   TskLVNodes[0] = TskLVNode;
+
+   if (SetupSystemList( &OpenTaskWindow ) < 0)
+      {
+      fprintf( stderr, "Couldn't open a System ListViewer!\n" );
+      return( -1 );
+      }
+   
+   SetNotifyWindow( Wnd );
+
+   for (i = 1; i <= MAXNODE; i++)
+      {
+      TskLVNodes[i].ln_Name = &NodeStrs[ i * 80 ];
+      TskLVNodes[i].ln_Pri  = MAXNODE - i;
+      }
+
+   NewList( (struct List *) &TskLVList );      
+
+   for (i = 0; i < MAXNODE; i++)
+      Enqueue( (struct List *) &TskLVList, &TskLVNodes[ i ] );
+
+   // Make the list:
+   (void) MakeTaskList();   
+
+   ModifyListView( TaskGadgets[ TaskLV ], Wnd, 
+                   (struct List *) &TskLVList, NULL
+                 );
+
+   GT_RefreshWindow( Wnd, NULL );
+
+   (void) HandleTaskIDCMP();
+   
+   ShutdownSystemList();
+   return( 0 );
+}
+
+PUBLIC int main( void )
+{
+   return( HandleTaskListView() );
+}
+
+/* ------------------- END of SysTasks.c file! --------------------- */

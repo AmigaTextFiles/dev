@@ -1,0 +1,106 @@
+# Generated automatically from Makefile.in by configure.
+SHELL=/bin/sh
+.SUFFIXES:
+.SUFFIXES: .c .o
+
+all: tg
+
+CC=gcc
+YACC=bison -y
+LEX=flex
+CFLAGS=-g -Wall
+
+prefix=/usr/local
+exec_prefix=$(prefix)
+bindir=$(exec_prefix)/bin
+datadir=$(prefix)/share
+
+INSTALL=/bin/install -c
+INSTALL_DATA=${INSTALL} -m 644
+
+TGOBJ=tgmain.o y.tab.o lex.yy.o alloc.o generator.o atom.o crc.o txttab.o \
+ lintab.o errtab.o strbuf.o util.o eval.o omani.o oprint.o srctab.o stack.o \
+ output.o break.o func.o debug.o hash.o printf.o db.o istack.o frame.o use.o
+
+tg: $(TGOBJ)
+	$(CC) -g $(TGOBJ) -o tg
+
+y.tab.o: y.tab.c
+	$(CC) -c -g y.tab.c -o y.tab.o
+
+lex.yy.o: lex.yy.c
+	$(CC) -c -g lex.yy.c -o lex.yy.o
+	
+lex.yy.c: tg.l
+	$(LEX) tg.l
+
+tgmain.o: y.tab.h
+
+y.tab.h: tg.y
+	$(YACC) -d tg.y
+
+y.tab.c: tg.y
+	$(YACC) -d tg.y
+
+clean:
+	rm -f *.o tg y.output M*.bak core *.core
+
+maintainer-clean: clean
+	rm -f config.h config.status config.cache config.log lex.yy.? y.tab.? tags
+	rm -rf tg-* html/*
+
+       
+install: 
+	$(INSTALL) tg $(bindir)
+
+uninstall:
+	rm -f $(bindir)/tg
+	
+			   
+depend: 
+	makedepend -Y *.c 2> /dev/null
+
+TAGS: 
+	ctags *
+	
+# DO NOT DELETE THIS LINE (generated dependencies)
+
+alloc.o: sysdefs.h config.h
+atom.o: sysdefs.h config.h alloc.h crc.h list.h atom.h
+break.o: alloc.h generator.h structs.h txttab.h lintab.h sysdefs.h config.h
+crc.o: crc_table.h
+db.o: db.h
+debug.o: atom.h debug.h structs.h txttab.h lintab.h sysdefs.h config.h
+errtab.o: alloc.h sysdefs.h config.h atom.h lintab.h
+eval.o: atom.h db.h debug.h structs.h txttab.h lintab.h eval.h frame.h func.h
+eval.o: generator.h istack.h omani.h strbuf.h srctab.h sysdefs.h config.h
+eval.o: stack.h util.h version.h
+frame.o: frame.h omani.h
+func.o: alloc.h atom.h eval.h structs.h txttab.h lintab.h func.h generator.h
+func.o: hash.h output.h omani.h printf.h strbuf.h sysdefs.h config.h util.h
+generator.o: alloc.h atom.h break.h debug.h structs.h txttab.h lintab.h
+generator.o: eval.h generator.h omani.h output.h sysdefs.h config.h strbuf.h
+generator.o: use.h util.h
+hash.o: alloc.h hash.h list.h config.h sysdefs.h
+istack.o: alloc.h istack.h sysdefs.h config.h
+lex.yy.o: y.tab.h alloc.h sysdefs.h config.h txttab.h
+lintab.o: lintab.h alloc.h sysdefs.h config.h
+omani.o: alloc.h sysdefs.h config.h omani.h list.h
+oprint.o: atom.h omani.h sysdefs.h config.h
+output.o: alloc.h atom.h debug.h structs.h txttab.h lintab.h generator.h
+output.o: hash.h sysdefs.h config.h
+printf.o: alloc.h generator.h structs.h txttab.h lintab.h omani.h sysdefs.h
+printf.o: config.h
+srctab.o: srctab.h structs.h txttab.h lintab.h hash.h
+stack.o: alloc.h generator.h structs.h txttab.h lintab.h list.h config.h
+stack.o: stack.h sysdefs.h omani.h
+strbuf.o: alloc.h sysdefs.h config.h
+sysdefs.o: sysdefs.h config.h
+tgmain.o: alloc.h atom.h db.h y.tab.h sysdefs.h config.h generator.h
+tgmain.o: structs.h txttab.h lintab.h errtab.h srctab.h output.h use.h
+tgmain.o: version.h
+tstgen.o: sysdefs.h config.h
+txttab.o: alloc.h sysdefs.h config.h txttab.h
+use.o: generator.h structs.h txttab.h lintab.h use.h
+util.o: strbuf.h
+y.tab.o: alloc.h generator.h structs.h txttab.h lintab.h util.h

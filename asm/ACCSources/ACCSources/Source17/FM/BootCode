@@ -1,0 +1,204 @@
+*THIS IF ASSEMBLED TO RAM THEN USE BOOTWRITER RAM:'NAME OF PROGRAM'
+*WILL WRITE A BOOT SCROLLER TO DF0:
+*WATCH YOU DON'T EXCEED 1020 BYTES OR ELSE
+*SO TEXT IS LIMITED TO A FEW LINES
+
+POTGOR		equ	$dff016
+FindResident	equ	-96
+OldOpenLibrary	equ	-408
+
+Height		equ	256
+Width		equ	42
+Depth		equ	1
+
+ScreenSize	equ	Height*Width
+
+BobHeight		equ		8
+BobWidth		equ		1
+BobDepth		equ		1
+
+BobSize			equ		BobHeight*(BobWidth)
+
+	dc.b	'DOS',0			; DOS header
+	dc.l	$0			; space for checksum
+	dc.l	$00000370		; root block pointer
+	
+	lea	dosname(PC),A1		; our code starts here
+	jsr	FindResident(A6)
+	tst.l	D0
+	beq.s	dosfail			; this is all the standard
+	move.l	D0,A0			; code from a standard	
+	move.l	$16(A0),A0		; bootblock... 
+	moveq	#0,D0			; see article for info
+exit	movem.l a0-a6/d0-d7,-(sp)	; save registers
+	bsr 	Start			; call our routine
+	movem.l (sp)+,a0-a6/d0-d7	; restore registers
+	rts				; exit (to continue boot)
+ 
+dosfail	moveq	#-1,D0			
+	bra.s	exit			
+					
+ Start:
+
+; 68020/030 owners will need to boot in 68000 mode to use this
+; particular bootblock
+
+
+ 	move.l	4.w,a6			; EXEC library
+ 	lea 	gfxname(pc),a1		; point to 'graphics.library'
+ 	jsr 	OldOpenLibrary(a6)	; Open graphics library	
+ 	move.l 	d0,a6			; store address
+	move.l	#$60000,d2
+ 	lea 	zl0h(pc),a2		; copper list bitplanes
+ 	move.w	d2,4(a2)		; lo word
+ 	swap 	d2
+ 	move.w 	d2,(a2)			; hi word
+	swap	d2
+	add.l	#(120*Width)+42,d2
+	move.l	d2,Bob_base		; store address to start text
+	move.w	#(ScreenSize/8)-1,d1
+	move.l	#$60000,a0
+	move.l	#$0,d2
+Trans
+	move.l	d2,(a0)+
+	dbf	d1,Trans
+        lea	Text(pc),a1		; font gfx in a1
+	move.l	a1,Text_address
+
+ 	move.l 	$32(a6),d2		; get old copperlist
+ 	lea 	newcpr(pc),a0		; get our copperlist
+ 	move.l 	a0,$32(a6)		; and whack it in
+
+Loop
+	cmp.b	#255,$dff006
+	bne.s	Loop
+	bsr	Scroller
+	btst	#$6,$bfe001
+	bne.s	Loop
+getmeout
+ 	move.l 	d2,$32(a6)		; restore copperlist
+ 	rts  				; exit and boot disk
+Scroller
+	add.w	#1,Count		; do we need a char
+	cmp.w	#8,Count		; font is 8*8
+	beq	Char_Needed
+	bsr	Scroll
+	rts
+Char_Needed
+	move.w	#0,Count		; clear scroll count
+	moveq	#0,d0			; clear d0
+	move.l	Text_address,a0		; text chars in a0
+       	move.b	(a0)+,d0		; next char
+	cmp.b	#$ff,d0			; are we at the end
+	bne	Not_End			; yes
+	lea	Text(pc),a0		; the reload text
+Not_End
+	move.l	a0,Text_address		; store value
+        sub.b	#32,d0		     	; take off offset
+        mulu	#8,d0		   	; to find font gfx
+        lea	Font(pc),a1		; font gfx in a1
+        add.l	d0,a1	         	; add offset
+	move.l	Bob_base,a0		; address
+	move.w	#((BobSize)*BobDepth)-1,d0	; no of words
+Bob
+	move.b	(a1)+,(a0)+	
+	add.w	#(Width-(BobWidth)),a0	; add modula to get to next byte
+	dbra	d0,Bob
+	bsr	Scroll
+	rts
+Scroll
+	move.l	Bob_base,a0			; address
+	add.l	#(BobHeight-1)*(Width),a0	; get to last word 
+	move.w	#(BobHeight)-1,d1		; no of words down
+Move_2
+	move.w	#(Width/2)-1,d0			; no of words across
+Move
+	roxl.w	-(a0)				; rotate with transfer to z flag 
+	dbra	d0,Move				; 1st loop=no across
+	dbra	d1,Move_2			; 2nd loop=no down
+	rts
+
+newcpr:	dc.w 	$96,%1000001110000000,$100,%0001001000000000,$102,0
+	dc.w	$104,$0
+ 	dc.w 	$92,$30,$94,$d0,$8e,$2c81,$90,$2cc1
+ 	dc.w	$180,000,$182,$fff
+	dc.w	$e0
+zl0h: 	dc.w	0,$e2
+zl0l: 	dc.w	0
+
+	dc.w	$ffff,$fffe 		
+
+Text_address	dc.l	0
+Bob_base	dc.l	0
+Count	dc.w	0
+dosname	dc.b	'dos.library',0		
+gfxname dc.b	'graphics.library',0
+	even
+Text	     	
+	DC.B	" BOOTSCOLLER VERSION 1"
+	DC.B	"CODED BY F.M. ON 23-SEP-91."
+	DC.B	"YOU CAN'T FIT MUCH TEXT IN A BOOTBLOCK CAN YOU ?"
+	DC.B	"............... WRAP ............."
+	dc.b	$ff        
+	even
+
+Font	 DC.B      $00,$00,$00,$00,$00,$00,$00,$00      ;SPACE
+         DC.B      $18,$18,$18,$18,$00,$18,$18,$00	;!
+         DC.B      $6C,$6C,$00,$00,$00,$00,$00,$00	;"
+         DC.B      $1C,$36,$7C,$78,$7C,$3E,$1C,$00	;#
+         DC.B      $1C,$36,$1F,$0F,$1F,$3E,$1C,$00	;$
+         DC.B      $00,$00,$00,$00,$00,$00,$00,$00      ;%
+         DC.B      $00,$00,$00,$00,$00,$00,$00,$00	;&
+         DC.B      $0C,$0C,$18,$00,$00,$00,$00,$00	;'
+         DC.B      $18,$30,$30,$30,$30,$30,$18,$00	;(
+         DC.B      $18,$0C,$0C,$0C,$0C,$0C,$18,$00	;)
+         DC.B      $FF,$FF,$FF,$FF,$FF,$FF,$FF,$FF	;*
+         DC.B      $00,$18,$18,$7E,$7E,$18,$18,$00	;+
+         DC.B      $00,$00,$00,$00,$0C,$0C,$18,$00	;,
+         DC.B      $00,$00,$00,$7E,$7E,$00,$00,$00	;-
+         DC.B      $00,$00,$00,$00,$00,$18,$18,$00	;.
+         DC.B      $02,$06,$0C,$18,$30,$60,$C0,$00	;/
+         DC.B      $7C,$C6,$CE,$DE,$F6,$E6,$7C,$00	;0
+         DC.B      $38,$78,$18,$18,$18,$18,$7E,$00	;1
+         DC.B      $7C,$C6,$06,$7C,$C0,$C0,$FE,$00	;2
+         DC.B      $FC,$06,$06,$7C,$06,$06,$FC,$00	;3
+         DC.B      $1C,$3C,$6C,$CC,$FE,$0C,$0C,$00	;4
+         DC.B      $FE,$C0,$C0,$FC,$06,$06,$FC,$00	;5
+         DC.B      $7E,$C0,$C0,$FC,$C6,$C6,$7C,$00	;6
+         DC.B      $FE,$06,$06,$0C,$0C,$18,$18,$00	;7
+         DC.B      $7C,$C6,$C6,$7C,$C6,$C6,$7C,$00	;8
+         DC.B      $7C,$C6,$C6,$7E,$06,$06,$06,$00	;9
+         DC.B      $00,$18,$18,$00,$00,$18,$18,$00	;:
+         DC.B      $00,$18,$18,$00,$18,$18,$30,$00	;;
+         DC.B      $06,$1C,$70,$E0,$70,$1C,$06,$00	;<
+         DC.B      $00,$00,$00,$00,$00,$00,$00,$00	;=
+         DC.B      $60,$38,$0E,$07,$0E,$38,$60,$00	;>
+         DC.B      $7C,$C6,$C6,$0C,$18,$00,$18,$00	;?
+         DC.B      $00,$00,$00,$00,$00,$00,$00,$00	;@
+         DC.B      $7C,$C6,$C6,$FE,$C6,$C6,$C6,$00	;A
+         DC.B      $FC,$C6,$C6,$FC,$C6,$C6,$FC,$00	;B
+         DC.B      $7E,$C0,$C0,$C0,$C0,$C0,$7E,$00	;C
+         DC.B      $FC,$C6,$C6,$C6,$C6,$C6,$FC,$00	;D
+         DC.B      $7E,$C0,$C0,$FE,$C0,$C0,$7E,$00	;E
+         DC.B      $7E,$C0,$C0,$FE,$C0,$C0,$C0,$00	;F
+         DC.B      $7E,$C0,$C0,$DE,$C6,$C6,$7C,$00	;G
+         DC.B      $C6,$C6,$C6,$FE,$C6,$C6,$C6,$00	;H
+         DC.B      $7E,$18,$18,$18,$18,$18,$7E,$00	;I
+         DC.B      $FE,$06,$06,$C6,$C6,$C6,$7C,$00	;J
+         DC.B      $C6,$CC,$D8,$F0,$D8,$CC,$C6,$00	;K
+         DC.B      $C0,$C0,$C0,$C0,$C0,$C0,$FE,$00	;L
+         DC.B      $C6,$EE,$FE,$D6,$C6,$C6,$C6,$00	;M
+         DC.B      $E6,$F6,$DE,$CE,$C6,$C6,$C6,$00	;N
+         DC.B      $7C,$C6,$C6,$C6,$C6,$C6,$7C,$00	;O
+         DC.B      $FC,$C6,$C6,$FC,$C0,$C0,$C0,$00	;P
+         DC.B      $7C,$C6,$C6,$C6,$C6,$DA,$C6,$00	;Q
+         DC.B      $FC,$C6,$C6,$FE,$CC,$C6,$C6,$00	;R
+         DC.B      $7E,$C0,$C0,$7C,$06,$06,$FC,$00	;S
+         DC.B      $7E,$18,$18,$18,$18,$18,$18,$00	;T
+         DC.B      $C6,$C6,$C6,$C6,$C6,$C6,$7C,$00	;U
+         DC.B      $C6,$C6,$C6,$C6,$C6,$38,$38,$00	;V
+         DC.B      $C6,$C6,$C6,$D6,$FE,$EE,$C6,$00	;W
+         DC.B      $C6,$6C,$38,$10,$38,$6C,$C6,$00	;X
+         DC.B      $C6,$C6,$C6,$7E,$06,$06,$FC,$00	;Y
+         DC.B      $FE,$0E,$1C,$38,$70,$E0,$FE,$00	;Z
+

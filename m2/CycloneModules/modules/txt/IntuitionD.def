@@ -1,0 +1,2467 @@
+(**************************************************************************)
+(*                                                                        *)
+(* Definition Module IntuitionD.Def Marcel Timmermans.                    *)
+(* Date     : 19 Feb 1994                                                 *)
+(* Language : Modula-2                                                    *)
+(*                                                                        *)
+(**************************************************************************)
+
+(*$ Implementation- *)
+DEFINITION MODULE IntuitionD;
+
+FROM SYSTEM IMPORT ADDRESS,SHORTSET,BITSET,BYTE,LONGSET,CAST;
+
+FROM ExecD IMPORT
+ Interrupt,IOStdReq,Library,List,ListPtr,MemReqSet,Message,MinNode,
+ MsgPortPtr,SignalSemaphore,Node,TaskPtr;
+
+FROM GraphicsD IMPORT
+ jam2,BitMap,BitMapPtr,ClipRect,DBufInfoPtr,DrawModeSet,GfxBasePtr,
+ LayerInfo,LayerPtr,Point,RastPort,RastPortPtr,RegionPtr,
+ SimpleSpritePtr,TextAttr,TextAttrPtr,TextFontPtr,TmpRas,View,
+ ViewModeSet,ViewPort,ViewPortPtr,ViewPtr;
+
+FROM UtilityD IMPORT
+ TagItemPtr,tagUser,HookPtr,Hook;
+
+FROM InputEvent IMPORT
+ lButton,rButton,upPrefix,InputEvent,InputEventPtr,
+ Qualifiers,QualifierSet,mButton;
+
+FROM Timer IMPORT TimeVal;
+FROM KeyMapD IMPORT KeyMapPtr;
+
+CONST
+ intuitionName="intuition.library";
+
+(*
+ * All pointers are listed here (sorted), because many records have 
+ * references to all kind of pointers.
+ *)
+
+TYPE
+ BoolInfoPtr=POINTER TO BoolInfo;
+ BorderPtr=POINTER TO Border;
+ ColorSpecPtr=POINTER TO ColorSpec;
+ DrawInfoPtr=POINTER TO DrawInfo;
+ EasyStructPtr=POINTER TO EasyStruct;
+ ExtIntuiMessagePtr=POINTER TO ExtIntuiMessage;
+ ExtGadgetPtr=POINTER TO ExtGadget;
+ ExtNewScreenPtr=POINTER TO ExtNewScreen;
+ ExtNewWindowPtr=POINTER TO ExtNewWindow;
+ GadgetInfoPtr=POINTER TO GadgetInfo;
+ GadgetPtr=POINTER TO Gadget;
+ GpGoInactivePtr=POINTER TO GpGoInactive;
+ GpHitTestPtr=POINTER TO GpHitTest;
+ GpInputPtr=POINTER TO GpInput;
+ GpLayoutPtr=POINTER TO GpLayout;
+ GpRenderPtr=POINTER TO GpRender;
+ IBoxPtr=POINTER TO IBox;
+ IClassPtr=POINTER TO IClass;
+ ImagePtr=POINTER TO Image;
+ ImpDrawPtr=POINTER TO ImpDraw;
+ ImpErasePtr=POINTER TO ImpErase;
+ ImpFrameBoxPtr=POINTER TO ImpFrameBox;
+ ImpHitTestPtr=POINTER TO ImpHitTest;
+ IntuiMessagePtr=POINTER TO IntuiMessage;
+ IntuiTextPtr=POINTER TO IntuiText;
+ IntuitionBasePtr=POINTER TO IntuitionBase;
+ MenuItemPtr=POINTER TO MenuItem;
+ MenuPtr=POINTER TO Menu;
+ NewScreenPtr=POINTER TO NewScreen;
+ NewWindowPtr=POINTER TO NewWindow;
+ OpGetPtr=POINTER TO OpGet;
+ ObjectPtr=POINTER TO Object;
+ OpAddTailPtr=POINTER TO OpAddTail;
+ OpSetPtr=POINTER TO OpSet;
+ OpMemberPtr=POINTER TO OpMember;
+ OpUpdatePtr=POINTER TO OpUpdate;
+ PGXPtr=POINTER TO PGX;
+ PreferencesPtr=POINTER TO Preferences;
+ PropInfoPtr=POINTER TO PropInfo;
+ PubScreenNodePtr=POINTER TO PubScreenNode;
+ RememberPtr=POINTER TO Remember;
+ RequesterPtr=POINTER TO Requester;
+ ScreenBufferPtr=POINTER TO ScreenBuffer;
+ ScreenPtr=POINTER TO Screen;
+ StringExtendPtr=POINTER TO StringExtend;
+ StringInfoPtr=POINTER TO StringInfo;
+ TabletDataPtr=POINTER TO TabletData;
+ TabletHookDataPtr=POINTER TO TabletHookData;
+ WindowPtr=POINTER TO Window;
+
+(*- intuition.h -*)
+(* ======================================================================== *)
+(* === Menu =============================================================== *)
+(* ======================================================================== *)
+TYPE
+ Menu=RECORD
+  nextMenu:MenuPtr;         (* same level *)                  
+  leftEdge,topEdge:INTEGER; (* position of the select box *)
+  width,height:INTEGER;     (* dimensions of the select box *)      
+  flags:BITSET;             (* see flag definitions below *) 
+  menuName:ADDRESS;         (* text for this Menu Header *)   
+  firstItem:MenuItemPtr;
+  (* these mysteriously-named variables are for internal use only *)
+  jazzX,jazzY,beatX,beatY:INTEGER;
+ END;
+
+(* FLAGS SET BY THE APPLIPROG *)
+ MenuItemFlags=(
+  checkIt,itemText,commSeq,menuToggle,itemEnabled,mif5,
+  highComp,highBox,checked,mif9,mif10,mif11,isDrawn,
+  highItem,menuToggled,mif15
+ );
+ MenuItemFlagSet=SET OF MenuItemFlags;
+
+
+CONST
+ menuEnabled=0;
+ highImage=MenuItemFlagSet{};
+ highFlags=MenuItemFlagSet{highBox,highComp};
+ highNone=MenuItemFlagSet{highBox,highComp};
+
+TYPE
+(* ======================================================================== *)
+(* === MenuItem =========================================================== *)
+(* ======================================================================== *)
+ MenuItem=RECORD
+  nextItem:MenuItemPtr;     (* pointer to next in chained list *)
+  leftEdge,topEdge:INTEGER; (* position of the select box *)
+  width,height:INTEGER;     (* dimensions of the select box *)
+  flags:MenuItemFlagSet;    (* see the defines above *)          
+
+  mutualExclude:LONGSET;    (* set bits mean this item excludes that *)
+  itemFill:ADDRESS;         (* points to Image, IntuiText, or NULL *)
+
+  (* when this item is pointed to by the cursor and the items highlight
+   * mode HIGHIMAGE is selected, this alternate image will be displayed
+   *)
+  selectFill:ADDRESS;       (* points to Image, IntuiText, or NULL *)
+  command:CHAR;             (* only if appliprog sets the COMMSEQ flag *)
+  subItem:MenuItemPtr;      (* if non-zero, points to MenuItem for submenu *)
+
+  (* The NextSelect field represents the menu number of next selected
+   *	item (when user has drag-selected several items)
+   *)
+  nextSelect:CARDINAL;  
+ END;
+
+(* FLAGS SET BY THE APPLIPROG *)
+ RequesterFlags=(
+  pointRel,preDrawn,noisyReq,rf3,simpleReq,
+  (* New for V36		*)
+  useReqImage,noReqBackFill,rf7,rf8,rf9,rf10,rf11,
+  (* FLAGS SET BY INTUITION *)
+  reqOffWindow,reqActive,sysRequest,deferRefresh
+ );
+ RequesterFlagSet=SET OF RequesterFlags;
+
+ Requester=RECORD
+  olderRequest:RequesterPtr;
+  leftEdge,topEdge:INTEGER; (* dimensions of the entire box *)
+  width,height:INTEGER;     (* dimensions of the entire box *)
+  relLeft,relTop:INTEGER;   (* for Pointer relativity offsets *)
+  reqGadget:GadgetPtr;      (* pointer to a list of Gadgets *)
+  reqBorder:BorderPtr;      (* the box's border *)
+  reqText:IntuiTextPtr;     (* the box's text *)
+  flags:RequesterFlagSet;   (* see definitions above *)         
+  backFill:SHORTCARD;       (* pen number for back-plane fill before draws *)
+  reqLayer:LayerPtr;        (* Layer in place of clip rect	*)
+  reqPad1:ARRAY [0..31] OF BYTE;
+
+    (* If the BitMap plane pointers are non-zero, this tells the system
+     * that the image comes pre-drawn (if the appliprog wants to define
+     * its own box, in any shape or size it wants!);  this is OK by
+     * Intuition as long as there's a good correspondence between
+     * the image and the specified Gadgets
+     *)
+  imageBMap:BitMapPtr;  (* points to the BitMap of PREDRAWN imagery *)
+  rWindow:WindowPtr;    (* added.  points back to Window *)            
+  reqImage:ImagePtr;    (* new for V36: drawn if USEREQIMAGE set *)
+  reqPad2:ARRAY [0..31] OF BYTE;
+ END;
+
+ GadgetFlags=(
+  gadgHBox,gadgHImage,gadgImage,gRelBottom,gRelRight,
+  gRelWidth,gRelHeight,selected,gadgDisabled,
+  tabCycle,stringExtend,imageDisable,
+  labelString,labelImage,
+  relSpecial,gfExtended
+ );
+ GadgetFlagSet=SET OF GadgetFlags;
+
+TYPE
+ ActivationFlags=(
+  relVerify,gadgImmediate,endGadget,followMouse,
+  rightBorder,leftBorder,topBorder,bottomBorder,
+  toggleSelect,stringCenter,stringRight,longint,
+  altKeyMap,boolExtend,activeGadget,borderSniff
+ );
+ ActivationFlagSet=SET OF ActivationFlags;
+
+CONST
+ gadgHighbits=CAST(GadgetFlagSet,03H);
+ gadgHNone=GadgetFlagSet{gadgHBox,gadgHImage};
+ gadgHComp=GadgetFlagSet{};
+
+ gadgetType=CAST(BITSET,0FC00H);  (* all Gadget Global Type flags (padded) *)
+ sysGadget=8000H; (* 1 = Allocated by the system, 0 = by app. *)
+ scrGadget=4000H; (* 1 = ScreenGadget, 0 = WindowGadget *)
+ gzzGadget=2000H; (* 1 = for WFLG_GIMMEZEROZERO borders *)
+ reqGadget=1000H; (* 1 = this is a Requester Gadget *)          
+
+ sizing=0010H;
+ wDragging=0020H;
+ sDragging=0030H;
+ wUpFront=0040H;
+ sUpFront=0050H;
+ wDownBack=0060H;
+ sDownBack=0070H;
+ close=0080H;
+
+(* application gadgets *)
+ boolGadget=0001H;
+ gadget0002=0002H;
+ propGadget=0003H;
+ strGadget=0004H;
+ customGadget=0005H;
+
+(* This bit in GadgetType is reserved for undocumented internal use
+ * by the Gadget Toolkit, and cannot be used nor relied on by
+ * applications:	0x0100
+ *)
+
+(* New for V39.  Gadgets which have the GFLG_EXTENDED flag set are
+ * actually ExtGadgets, which have more flags.	The GMORE_xxx
+ * identifiers describe those flags:
+ *)
+ gMoreBounds=0;
+ gMoreGadgetHelp=1;
+ gMoreScrollRaster=2;
+
+TYPE
+(* ======================================================================== *)
+(* === Gadget ============================================================= *)
+(* ======================================================================== *)
+ Gadget=RECORD
+  nextGadget:GadgetPtr;     (* next gadget in the list *)
+  leftEdge,topEdge:INTEGER; (* "hit box" of gadget *)
+  width,height:INTEGER;     (* "hit box" of gadget *)    
+  flags:GadgetFlagSet;      (* see above for list of defines *)
+  activation:ActivationFlagSet; (* see above for list of defines *)
+  gadgetType:CARDINAL;
+
+  (* appliprog can specify that the Gadget be rendered as either as Border
+   * or an Image.  This variable points to which (or equals NULL if there's
+   * nothing to be rendered about this Gadget)
+   *)
+  gadgetRender:ADDRESS;
+
+  (* appliprog can specify "highlighted" imagery rather than algorithmic
+   * this can point to either Border or Image data
+   *)
+  selectRender:ADDRESS;
+  gadgetText:IntuiTextPtr;  (* text for this gadget *)
+
+    (* MutualExclude, never implemented, is now declared obsolete.
+     * There are published examples of implementing a more general
+     * and practical exclusion in your applications.
+     *
+     * Starting with V36, this field is used to point to a hook
+     * for a custom gadget.
+     *
+     * Programs using this field for their own processing will
+     * continue to work, as long as they don't try the
+     * trick with custom gadgets.
+     *)
+  CASE :INTEGER OF
+  |0: mutualExclude:LONGSET;
+  |1: hp:HookPtr;
+  END;
+  (* pointer to a structure of special data required by Proportional,
+   * String and Integer Gadgets
+   *)
+  specialInfo:ADDRESS;
+  gadgetID:INTEGER; (* user-definable ID field *)
+  userData:ADDRESS; (* ptr to general purpose User data (ignored by In) *)
+ END;
+
+ ExtGadget=RECORD
+  g:Gadget; (* This fields match struct Gadget exactly *)
+  (* These fields only exist under V39 and only if GFLG_EXTENDED is set *)
+  moreFlags:LONGSET;        (* see GMORE_ flags above *)
+  boundsLeftEdge:INTEGER;   (* Bounding extent for gadget, valid   *)
+  boundsTopEdge:INTEGER;    (* only if GMORE_BOUNDS is set.  The   *)
+  boundsWidth:INTEGER;      (* GFLG_RELxxx flags affect these      *)
+  boundsHeight:INTEGER;     (* coordinates as well.	       *)        
+ END;
+
+CONST
+(* set BoolInfo.Flags to this flag bit.
+ * in the future, additional bits might mean more stuff hanging
+ * off of BoolInfo.Reserved.
+ *)
+ boolMask=1H; (* extension is for masked gadget *)
+
+TYPE
+(* ======================================================================== *)
+(* === BoolInfo======================================================= *)
+(* ======================================================================== *)
+(* This is the special data needed by an Extended Boolean Gadget
+ * Typically this structure will be pointed to by the Gadget field SpecialInfo
+ *)
+ BoolInfo=RECORD
+  flags:BITSET; (* defined above *)
+  mask:ADDRESS;	(* bit mask for highlighting and selecting
+            		 * mask must follow the same rules as an Image
+                 * plane.  Its width and height are determined
+            		 * by the width and height of the gadget's
+            		 * select box. (i.e. Gadget.Width and .Height).
+            		 *)
+
+  reserved:LONGCARD; (* set to 0	*)
+ END;
+
+(* --- FLAG BITS ---------------------------------------------------------- *)
+(* NOTE: if you do not use an AUTOKNOB for a proportional gadget,
+ * you are currently limited to using a single Image of your own
+ * design: Intuition won't handle a linked list of images as
+ * a proportional gadget knob.
+ *)
+ PropInfoFlags=(
+  autoKnob,freeHoriz,freeVert,propBorderless,
+  propNewLook,pf5,pf6,pf7,
+  knobHit,pf9,pf10,pf11,pf12,pf13,pf14,pf15
+ );
+ PropInfoFlagSet=SET OF PropInfoFlags;
+
+CONST
+ knobVmin=4;
+ knobHmin=6;
+ maxBody=0FFFFH;
+ maxPot=0FFFFH;
+
+(* ======================================================================== *)
+(* === PropInfo =========================================================== *)
+(* ======================================================================== *)
+(* this is the special data required by the proportional Gadget
+ * typically, this data will be pointed to by the Gadget variable SpecialInfo
+ *)
+TYPE
+ PropInfo=RECORD
+  flags:PropInfoFlagSet;(* general purpose flag bits (see defines above) *)
+
+    (* You initialize the Pot variables before the Gadget is added to
+     * the system.  Then you can look here for the current settings
+     * any time, even while User is playing with this Gadget.  To
+     * adjust these after the Gadget is added to the System, use
+     * ModifyProp();  The Pots are the actual proportional settings,
+     * where a value of zero means zero and a value of MAXPOT means
+     * that the Gadget is set to its maximum setting.
+     *)
+
+  horizPot:CARDINAL; (* 16-bit FixedPoint horizontal quantity percentage *)
+  vertPot:CARDINAL;  (* 16-bit FixedPoint vertical quantity percentage *)  
+
+    (* the 16-bit FixedPoint Body variables describe what percentage of
+     * the entire body of stuff referred to by this Gadget is actually
+     * shown at one time.  This is used with the AUTOKNOB routines,
+     * to adjust the size of the AUTOKNOB according to how much of
+     * the data can be seen.  This is also used to decide how far
+     * to advance the Pots when User hits the Container of the Gadget.
+     * For instance, if you were controlling the display of a 5-line
+     * Window of text with this Gadget, and there was a total of 15
+     * lines that could be displayed, you would set the VertBody value to
+     *	   (MAXBODY / (TotalLines / DisplayLines)) = MAXBODY / 3.
+     * Therefore, the AUTOKNOB would fill 1/3 of the container, and
+     * if User hits the Cotainer outside of the knob, the pot would
+     * advance 1/3 (plus or minus) If there's no body to show, or
+     * the total amount of displayable info is less than the display area,
+     * set the Body variables to the MAX.  To adjust these after the
+     * Gadget is added to the System, use ModifyProp();
+     *)
+  horizBody:CARDINAL; (* horizontal Body *)
+  vertBody:CARDINAL;  (* vertical Body *)  
+
+    (* these are the variables that Intuition sets and maintains *)
+  cWidth:CARDINAL;  (* Container width (with any relativity absoluted) *)
+  cHeight:CARDINAL; (* Container height (with any relativity absoluted) *)
+  hPotRes,vPotRes:CARDINAL; (* pot increments *)
+  leftBorder:CARDINAL;  (* Container borders *)
+  topBorder:CARDINAL;   (* Container borders *)
+ END;
+
+(* ======================================================================== *)
+(* === StringInfo ========================================================= *)
+(* ======================================================================== *)
+(* this is the special data required by the string Gadget
+ * typically, this data will be pointed to by the Gadget variable SpecialInfo
+ *)
+TYPE
+ StringInfo=RECORD
+    (* you initialize these variables, and then Intuition maintains them *)
+  buffer:ADDRESS;     (* the buffer containing the start and final string *)
+  undoBuffer:ADDRESS; (* optional buffer for undoing current entry *)
+  bufferPos:INTEGER;  (* character position in Buffer *)
+  maxChars:INTEGER;   (* max number of chars in Buffer (including NULL) *)
+  dispPos:INTEGER;    (* Buffer position of first displayed character *)    
+
+    (* Intuition initializes and maintains these variables for you *)
+  undoPos:INTEGER;    (* character position in the undo buffer *)
+  numChars:INTEGER;   (* number of characters currently in Buffer *)
+  dispCount:INTEGER;  (* number of whole characters visible in Container *)
+  cLeft,cTop:INTEGER; (* topleft offset of the container *)                 
+
+    (* This unused field is changed to allow extended specification
+     * of string gadget parameters.  It is ignored unless the flag
+     * GACT_STRINGEXTEND is set in the Gadget's Activation field
+     * or the GFLG_STRINGEXTEND flag is set in the Gadget Flags field.
+     * (See GFLG_STRINGEXTEND for an important note)
+     *)
+    (* struct Layer *LayerPtr;	--- obsolete --- *)
+  extension:StringExtendPtr;
+
+ (* you can initialize this variable before the gadget is submitted to
+     * Intuition, and then examine it later to discover what integer
+     * the user has entered (if the user never plays with the gadget,
+     * the value will be unchanged from your initial setting)
+     *)
+     longInt:LONGINT;
+    (* If you want this Gadget to use your own Console keymapping, you
+     * set the GACT_ALTKEYMAP bit in the Activation flags of the Gadget,
+     * and then set this variable to point to your keymap.  If you don't
+     * set the GACT_ALTKEYMAP, you'll get the standard ASCII keymapping.
+     *)
+  altKeyMap:KeyMapPtr;
+ END;
+
+CONST
+ autoFrontPen=0;
+ autoBackPen=1;
+ autoDrawMode=jam2;
+ autoLeftEdge=6;
+ autoTopEdge=3;
+ autoITextFont=NIL;
+ autoNextText=NIL;
+
+(* ======================================================================== *)
+(* === IntuiText ========================================================== *)
+(* ======================================================================== *)
+(* IntuiText is a series of strings that start with a location
+ *  (always relative to the upper-left corner of something) and then the
+ *  text of the string.  The text is null-terminated.
+ *)
+TYPE
+ IntuiText=RECORD
+  frontPen,backPen:SHORTCARD; (* the pen numbers for the rendering *)
+  drawMode:DrawModeSet;       (* the mode for rendering the text *)
+  leftEdge:INTEGER;           (* relative start location for the text *)
+  topEdge:INTEGER;            (* relative start location for the text *)
+  iTextFont:TextAttrPtr;      (* if NULL, you accept the default *)
+  iText:ADDRESS;              (* pointer to null-terminated text *)
+  nextText:IntuiTextPtr;      (* pointer to another IntuiText to render *)
+ END;
+
+(* ======================================================================== *)
+(* === Border ============================================================= *)
+(* ======================================================================== *)
+(* Data type Border, used for drawing a series of lines which is intended for
+ *  use as a border drawing, but which may, in fact, be used to render any
+ *  arbitrary vector shape.
+ *  The routine DrawBorder sets up the RastPort with the appropriate
+ *  variables, then does a Move to the first coordinate, then does Draws
+ *  to the subsequent coordinates.
+ *  After all the Draws are done, if NextBorder is non-zero we call DrawBorder
+ *  on NextBorder
+ *)
+ Border=RECORD
+  leftEdge,topEdge:INTEGER;   (* initial offsets from the origin *)
+  frontPen,backPen:SHORTCARD; (* pens numbers for rendering *)
+  drawMode:DrawModeSet;       (* mode for rendering *)
+  count:SHORTCARD;            (* number of XY pairs *)
+  xy:ADDRESS;                 (* vector coordinate pairs rel to LeftTop *)
+  nextBorder:BorderPtr;       (* pointer to any other Border too *)       
+ END;
+
+(* ======================================================================== *)
+(* === Image ============================================================== *)
+(* ======================================================================== *)
+(* This is a brief image structure for very simple transfers of
+ * image data to a RastPort
+ *)
+ Image=RECORD
+  leftEdge:INTEGER; (* starting offset relative to some origin *)
+  topEdge:INTEGER;  (* starting offsets relative to some origin *)
+  width:INTEGER;    (* pixel size (though data is word-aligned) *)
+  height:INTEGER;
+  depth:INTEGER;
+  imageData:ADDRESS;  (* >= 0, for images you create		*)
+
+    (* the PlanePick and PlaneOnOff variables work much the same way as the
+     * equivalent GELS Bob variables.  It's a space-saving
+     * mechanism for image data.  Rather than defining the image data
+     * for every plane of the RastPort, you need define data only
+     * for the planes that are not entirely zero or one.  As you
+     * define your Imagery, you will often find that most of the planes
+     * ARE just as color selectors.  For instance, if you're designing
+     * a two-color Gadget to use colors one and three, and the Gadget
+     * will reside in a five-plane display, bit plane zero of your
+     * imagery would be all ones, bit plane one would have data that
+     * describes the imagery, and bit planes two through four would be
+     * all zeroes.  Using these flags avoids wasting all
+     * that memory in this way:  first, you specify which planes you
+     * want your data to appear in using the PlanePick variable.  For
+     * each bit set in the variable, the next "plane" of your image
+     * data is blitted to the display.	For each bit clear in this
+     * variable, the corresponding bit in PlaneOnOff is examined.
+     * If that bit is clear, a "plane" of zeroes will be used.
+     * If the bit is set, ones will go out instead.  So, for our example:
+     *	 Gadget.PlanePick = 0x02;
+     *	 Gadget.PlaneOnOff = 0x01;
+     * Note that this also allows for generic Gadgets, like the
+     * System Gadgets, which will work in any number of bit planes.
+     * Note also that if you want an Image that is only a filled
+     * rectangle, you can get this by setting PlanePick to zero
+     * (pick no planes of data) and set PlaneOnOff to describe the pen
+     * color of the rectangle.
+     *
+     * NOTE:  Intuition relies on PlanePick to know how many planes
+     * of data are found in ImageData.	There should be no more
+     * '1'-bits in PlanePick than there are planes in ImageData.
+     *)
+  planePick,planeOnOff:SHORTCARD;
+
+    (* if the NextImage variable is not NULL, Intuition presumes that
+     * it points to another Image structure with another Image to be
+     * rendered
+     *)
+  nextImage:ImagePtr;
+ END;
+
+(* --- IDCMP Classes ------------------------------------------------------ *)
+(* Please refer to the Autodoc for OpenWindow() and to the Rom Kernel
+ * Manual for full details on the IDCMP classes.
+ *)
+ IDCMPFlags=(
+  sizeVerify,newSize,refreshWindow,mouseButtons,
+  mouseMove,gadgetDown,gadgetUp,reqSet,menuPick,closeWindow,
+  rawKey,reqVerify,reqClear,menuVerify,newPrefs,diskInserted,
+  diskRemoved,wbenchMessage,activeWindow,inactiveWindow,
+  deltaMove,vanillaKey,intuiTicks,idcmpUpdate,
+  menuHelp,changeWindow,gadgetHelp,c27,c28,c29,c30,
+
+ (* the IDCMP Flags do not use this special bit, which is cleared when
+  * Intuition sends its special message to the Task, and set when Intuition
+  * gets its Message back from the Task.  Therefore, I can check here to
+  * find out fast whether or not this Message is available for me to send
+  *)
+  lonelyMessage
+ );
+ IDCMPFlagSet=SET OF IDCMPFlags;
+
+CONST
+(* --- IDCMP Codes -------------------------------------------------------- *)
+(* This group of codes is for the IDCMP_CHANGEWINDOW message *)
+ cwCodeMoveSize=0;  (* Window was moved and/or sized *)
+ cwCodeDepth=1;     (* Window was depth-arranged (new for V39) *)
+
+(* This group of codes is for the IDCMP_MENUVERIFY message *)
+ menuHot=1;         (* IntuiWants verification or MENUCANCEL    *)
+ menuCancel=2;      (* HOT Reply of this cancels Menu operation *)
+ menuWaiting=3;     (* Intuition simply wants a ReplyMsg() ASAP *)
+
+(* These are internal tokens to represent state of verification attempts
+ * shown here as a clue.
+ *)
+ okOk=menuHot;        (* guy didn't care			*)
+ okAbort=4;           (* window rendered question moot	*)
+ okCancel=menuCancel; (* window sent cancel reply		*)    
+
+(* This group of codes is for the IDCMP_WBENCHMESSAGE messages *)
+ wbenchOpen=1;
+ wbenchClose=2;
+
+ selectUp=lButton+upPrefix;
+ selectDown=lButton;
+ menuUp=rButton+upPrefix;
+ menuDown=rButton;
+ middleDown=mButton;
+ middleUp=mButton+upPrefix;
+
+ checkWidth=19;
+ commWidth=27;
+ lowCheckWidth=13;
+ lowCommWidth=16;
+
+ menuNull=0FFFFH;
+ noMenu=1FH;
+ noItem=3FH;
+ noSub=1FH;
+
+ keyCodeQ=10H;
+ keyCodeZ=31H;
+ keyCodeX=32H;
+ keyCodeV=34H;
+ keyCodeB=35H;
+ keyCodeN=36H;
+ keyCodeM=37H;
+ keyCodeLess=38H;
+ keyCodeGreater=39H;
+
+ cursorUp=4CH;
+ cursorDown=4DH;
+ cursorRight=4EH;
+ cursorLeft=4FH;
+
+ deadendAlert=80000000H;
+ recoveryAlert=0;
+
+ altLeft=QualifierSet{lAlt};
+ altRight=QualifierSet{rAlt};
+ amigaLeft=QualifierSet{lCommand};
+ amigaRight=QualifierSet{rCommand};
+ amigaKeys=amigaLeft+amigaRight;
+
+
+(* ======================================================================== *)
+(* === IntuiMessage ======================================================= *)
+(* ======================================================================== *)
+TYPE
+ IntuiMessage=RECORD
+  execMessage:Message;
+  (* the Class bits correspond directly with the IDCMP Flags, except for the
+   * special bit IDCMP_LONELYMESSAGE (defined above)
+   *)
+  class:IDCMPFlagSet;
+  code:CARDINAL; (* the Code field is for special values like MENU number *)
+
+  (* the Qualifier field is a copy of the current InputEvent's Qualifier *)
+  qualifier:QualifierSet;
+
+  (* IAddress contains particular addresses for Intuition functions, like
+   * the pointer to the Gadget or the Screen
+   *)
+  iAddress:ADDRESS;
+
+  (* when getting mouse movement reports, any event you get will have the
+   * the mouse coordinates in these variables.  the coordinates are relative
+   * to the upper-left corner of your Window (WFLG_GIMMEZEROZERO
+   * notwithstanding).  If IDCMP_DELTAMOVE is set, these values will
+   * be deltas from the last reported position.
+   *)
+  mouseX,mouseY:INTEGER;
+
+  (* the time values are copies of the current system clock time.  Micros
+   * are in units of microseconds, Seconds in seconds.
+   *)
+  seconds,micros:LONGCARD;
+
+  (* the IDCMPWindow variable will always have the address of the Window of
+   * this IDCMP
+   *)
+  idcmpWindow:WindowPtr;
+  specialLink:IntuiMessagePtr; (* system-use variable *)
+ END;
+
+(* New for V39:
+ * All IntuiMessages are now slightly extended.  The ExtIntuiMessage
+ * structure has an additional field for tablet data, which is usually
+ * NULL.  If a tablet driver which is sending IESUBCLASS_NEWTABLET
+ * events is installed in the system, windows with the WA_TabletMessages
+ * property set will find that eim_TabletData points to the TabletData
+ * structure.  Applications must first check that this field is non-NULL;
+ * it will be NULL for certain kinds of message, including mouse activity
+ * generated from other than the tablet (i.e. the keyboard equivalents
+ * or the mouse itself).
+ *
+ * NEVER EVER examine any extended fields when running under pre-V39!
+ *
+ * NOTE: This structure is subject to grow in the future.  Making
+ * assumptions about its size is A BAD IDEA.
+ *)
+ ExtIntuiMessage=RECORD
+  i:IntuiMessage;
+  tabletData:TabletDataPtr;
+ END;
+
+ (* A data structure common in V36 Intuition processing	*)
+ IBox=RECORD
+  left:INTEGER;
+  top:INTEGER;
+  width:INTEGER;
+  height:INTEGER;
+ END;
+
+TYPE
+ WindowFlags=(
+  windowSizing,windowDrag,windowDepth,windowClose,
+  sizeBRight,sizeBBottom,simpleRefresh,superBitMap,
+  backDrop,reportMouse,gimmeZeroZero,borderless,
+  activate,windowActive,inRequest,menuState,
+  rmbTrap,noCareRefresh,nwExtended,wf19,
+  wf20,newLookMenus,wf22,wf23,
+  windowRefresh,wbenchWindow,windowTicked,visitor,
+  zoomed,hasZoom,wf30,wf31
+ );
+ WindowFlagSet=SET OF WindowFlags;
+
+(* --- FLAGS SET BY INTUITION --------------------------------------------- *)
+(* The SCREENTYPE bits are reserved for describing various Screen types
+ * available under Intuition.
+ *)
+ ScreenFlags=(
+  wbenchScreen,publicScreen,sf2,sf3,
+  showTitle,beeping,customBitMap,screenBehind,
+  screenQuiet,screenHires,penShared,sf11,
+  nsExtended,sf13,autoScroll,sf15
+ );
+ ScreenFlagSet=SET OF ScreenFlags;
+
+CONST
+ defaultMouseQueue=5;
+ smartRefresh=WindowFlagSet{};
+ otherRefresh=WindowFlagSet{simpleRefresh,superBitMap};
+
+(* ======================================================================== *)
+(* === Window ============================================================= *)
+(* ======================================================================== *)
+TYPE
+ Window=RECORD
+  nextWindow:WindowPtr; (* for the linked list in a screen *)
+  leftEdge,topEdge:INTEGER;   (* screen dimensions of window *)
+  width,height:INTEGER;       (* screen dimensions of window *)
+  mouseY,mouseX:INTEGER;      (* relative to upper-left of window *)
+  minWidth,minHeight:INTEGER; (* minimum sizes *)
+  maxWidth,maxHeight:INTEGER; (* maximum sizes *)
+  flags:WindowFlagSet;        (* see above for defines *)
+  menuStrip:MenuPtr;          (* the strip of Menu headers *)
+  title:ADDRESS;              (* the title text for this window *)
+  firstRequest:RequesterPtr;  (* all active Requesters *)
+  dmRequest:RequesterPtr;     (* double-click Requester *)
+  reqCount:INTEGER;           (* count of reqs blocking Window *)
+  wScreen:ScreenPtr;          (* this Window's Screen *)
+  rPort:RastPortPtr;          (* this Window's very own RastPort *)    
+
+  (* the border variables describe the window border.  If you specify
+   * WFLG_GIMMEZEROZERO when you open the window, then the upper-left of
+   * the ClipRect for this window will be upper-left of the BitMap (with
+   * correct offsets when in SuperBitMap mode; you MUST select
+   * WFLG_GIMMEZEROZERO when using SuperBitMap).  If you don't specify
+   * ZeroZero, then you save memory (no allocation of RastPort, Layer,
+   * ClipRect and associated Bitmaps), but you also must offset all your
+   * writes by BorderTop, BorderLeft and do your own mini-clipping to
+   * prevent writing over the system gadgets
+   *)
+  borderLeft,borderTop,borderRight,borderBottom:SHORTINT;
+  borderRPort:RastPortPtr;
+
+  (* You supply a linked-list of Gadgets for your Window.
+   * This list DOES NOT include system gadgets.  You get the standard
+   * window system gadgets by setting flag-bits in the variable Flags (see
+   * the bit definitions above)
+   *)
+  firstGadget:GadgetPtr;
+
+  parent,descendant:WindowPtr;(* these are for opening/closing the windows *)
+
+  (* sprite data information for your own Pointer
+   * set these AFTER you Open the Window by calling SetPointer()
+   *)
+  pointer:ADDRESS;    (* sprite data *)
+  ptrHeight:SHORTINT; (* sprite height (not including sprite padding) *)
+  ptrWidth:[0..16];   (* sprite width (must be less than or equal to 16) *)
+
+  xOffset,yOffset:SHORTINT; (* sprite offsets *)
+
+    (* the IDCMP Flags and User's and Intuition's Message Ports *)
+  idcmpFlags:IDCMPFlagSet; (* User-selected flags *)
+  userPort,windowPort:MsgPortPtr;
+  messageKey:IntuiMessagePtr;
+
+  detailPen,blockPen:SHORTCARD; (* for bar/border/gadget rendering *)
+
+  (* the CheckMark is a pointer to the imagery that will be used when
+   * rendering MenuItems of this Window that want to be checkmarked
+   * if this is equal to NULL, you'll get the default imagery
+   *)
+  checkMark:ImagePtr;
+  screenTitle:ADDRESS; (* if non-null, Screen title when Window is active *)
+
+  (* These variables have the mouse coordinates relative to the
+   * inner-Window of WFLG_GIMMEZEROZERO Windows.  This is compared with the
+   * MouseX and MouseY variables, which contain the mouse coordinates
+   * relative to the upper-left corner of the Window, WFLG_GIMMEZEROZERO
+   * notwithstanding
+   *)
+  gzzMouseX:INTEGER;
+  gzzMouseY:INTEGER;
+
+  (* these variables contain the width and height of the inner-Window of
+   * WFLG_GIMMEZEROZERO Windows
+   *)
+  gzzWidth:INTEGER;
+  gzzHeight:INTEGER;
+  extData:ADDRESS;
+  userData:ADDRESS; (* general-purpose pointer to User data extension *)
+
+  (** 11/18/85: this pointer keeps a duplicate of what
+   * Window.RPort->Layer is _supposed_ to be pointing at
+   *)
+  wLayer:LayerPtr;
+
+  (* NEW 1.2: need to keep track of the font that
+   * OpenWindow opened, in case user SetFont's into RastPort
+   *)
+  iFont:TextFontPtr;
+  
+  (* (V36) another flag word (the Flags field is used up).
+   * At present, all flag values are system private.
+   * Until further notice, you may not change nor use this field.
+   *)
+  moreFlags:LONGSET;
+  (**** Data beyond this point are Intuition Private.  DO NOT USE ****)
+ END;
+
+
+(* ======================================================================== *)
+(* === NewWindow ========================================================== *)
+(* ======================================================================== *)
+(*
+ * Note that the new extension fields have been removed.  Use ExtNewWindow
+ * structure below to make use of these fields
+ *)
+ NewWindow=RECORD
+  leftEdge,topEdge:INTEGER;   (* screen dimensions of window *)
+  width,height:INTEGER;       (* screen dimensions of window *)
+  detailPen,blockPen:SHORTINT;(* for bar/border/gadget rendering *)
+  idcmpFlags:IDCMPFlagSet;    (* User-selected IDCMP flags *)
+  flags:WindowFlagSet;        (* see Window struct for defines *)  
+
+  (* You supply a linked-list of Gadgets for your Window.
+   *	This list DOES NOT include system Gadgets.  You get the standard
+   *	system Window Gadgets by setting flag-bits in the variable Flags (see
+   *	the bit definitions under the Window structure definition)
+   *)
+  firstGadget:GadgetPtr;
+
+  (* the CheckMark is a pointer to the imagery that will be used when
+   * rendering MenuItems of this Window that want to be checkmarked
+   * if this is equal to NULL, you'll get the default imagery
+   *)
+  checkMark:ImagePtr;
+
+  title:ADDRESS;  (* the title text for this window *)
+
+  (* the Screen pointer is used only if you've defined a CUSTOMSCREEN and
+   * want this Window to open in it.	If so, you pass the address of the
+   * Custom Screen structure in this variable.  Otherwise, this variable
+   * is ignored and doesn't have to be initialized.
+   *)
+  screen:ScreenPtr;
+
+  (* WFLG_SUPER_BITMAP Window?  If so, put the address of your BitMap
+   * structure in this variable.  If not, this variable is ignored and
+   * doesn't have to be initialized
+   *)
+  bitMap:BitMapPtr;
+
+  (* the values describe the minimum and maximum sizes of your Windows.
+   * these matter only if you've chosen the WFLG_SIZEGADGET option,
+   * which means that you want to let the User to change the size of
+   * this Window.  You describe the minimum and maximum sizes that the
+   * Window can grow by setting these variables.  You can initialize
+   * any one these to zero, which will mean that you want to duplicate
+   * the setting for that dimension (if MinWidth == 0, MinWidth will be
+   * set to the opening Width of the Window).
+   * You can change these settings later using SetWindowLimits().
+   * If you haven't asked for a SIZING Gadget, you don't have to
+   * initialize any of these variables.
+   *)
+  minWidth,minHeight:INTEGER; (* minimums *)
+  maxWidth,maxHeight:INTEGER; (* maximums *)
+
+  (* the type variable describes the Screen in which you want this Window to
+   * open.  The type value can either be CUSTOMSCREEN or one of the
+   * system standard Screen Types such as WBENCHSCREEN.  See the
+   * type definitions under the Screen structure.
+   *)
+  type:ScreenFlagSet;
+ END;
+
+(* The following structure is the future NewWindow.  Compatibility
+ * issues require that the size of NewWindow not change.
+ * Data in the common part (NewWindow) indicates the the extension
+ * fields are being used.
+ * NOTE WELL: This structure may be subject to future extension.
+ * Writing code depending on its size is not allowed.
+ *)
+ ExtNewWindow=RECORD
+  nw:NewWindow;
+  (* ------------------------------------------------------- *
+   * extensions for V36
+   * if the NewWindow Flag value WFLG_NW_EXTENDED is set, then
+   * this field is assumed to point to an array ( or chain of arrays)
+   * of TagItem structures.  See also ExtNewScreen for another
+   * use of TagItems to pass optional data.
+   *
+   * see below for tag values and the corresponding data.
+   *)
+  extension:TagItemPtr;
+ END;
+
+(*
+ * The TagItem ID's (ti_Tag values) for OpenWindowTagList() follow.
+ * They are values in a TagItem array passed as extension/replacement
+ * values for the data in NewWindow.  OpenWindowTagList() can actually
+ * work well with a NULL NewWindow pointer.
+ *)
+ WaTags=(waDummy:=tagUser+99,
+        waLeft,
+        waTop,
+        waWidth,
+        waHeight,
+        waDetailPen,
+        waBlockPen,
+        waIDCMP,
+        waFlags,
+        waGadgets,
+        waCheckMark,
+        waTitle,
+        waScreenTitle,
+        waCustomScreen,
+        waSuperBitMap,
+        waMinWidth,
+        waMinHeight,
+        waMaxWidth,
+        waMaxHeight,
+        waInnerWidth,
+        waInnerHeight,
+        waPubScreenName,
+        waPubScreen,
+        waPubScreenFallBack,
+        waWindowName,
+        waColors,
+        waZoom,
+        waMouseQueue,
+        waBackFill,
+        waRptQueue,
+        waSizeGadget,
+        waDragBar,
+        waDepthGadget,
+        waCloseGadget,
+        waBackdrop,
+        waReportMouse,
+        waNoCareRefresh,
+        waBorderless,
+        waActivate,
+        waRMBTrap,
+        waWBenchWindow,
+        waSimpleRefresh,
+        waSmartRefresh,
+        waSizeBRight,
+        waSizeBBottom,
+        waAutoAdjust,
+        waGimmeZeroZero,
+        waMenuHelp,
+        waNewLookMenus,
+        waAmigaKey,
+        waNotifyDepth,
+        waObsolete33H,
+        waPointer,
+        waBusyPointer,
+        waPointerDelay,
+        waTabletMessages,
+        waHelpGroup,
+        waHelpGroupWindow
+       );
+
+CONST
+ hcGadgetHelp=LONGSET{0}; (* f. HelpControl() *)
+
+(**************************************************************************)
+(* == include screens.h ================================================= *)
+(**************************************************************************)
+
+(* ====================================================================== *)
+(* === DrawInfo ========================================================= *)
+(* ====================================================================== *)
+
+(* This is a packet of information for graphics rendering.  It originates
+ * with a Screen, and is gotten using GetScreenDrawInfo( screen );
+ *)
+
+(* You can use the Intuition version number to tell which fields are
+ * present in this structure.
+ *
+ * DRI_VERSION of 1 corresponds to V37 release.
+ * DRI_VERSION of 2 corresponds to V39, and includes three new pens
+ *	and the dri_CheckMark and dri_AmigaKey fields.
+ *
+ * Note that sometimes applications need to create their own DrawInfo
+ * structures, in which case the DRI_VERSION won't correspond exactly
+ * to the OS version!!!
+ *)
+
+CONST
+ driVersion37=1;
+ driVersion39=2;
+
+TYPE
+ DrawPens=(
+  detailPen,blockPen,textPen,shinePen,shadowPen,fillPen,
+  fillTextPen,backGroundPen,highLightTextPen,barDetailPen,
+  barBlockPen,barTrimPen
+ );
+
+CONST
+ numDriPens37=9;
+ numDriPens39=12;
+
+(*
+ Bitnummer für DrawInfo.flags
+*)
+ driNewLook=0;
+
+TYPE
+ DrawInfo=RECORD
+  version:CARDINAL; (* will be  DRI_VERSION			*)
+  numPens:CARDINAL; (* guaranteed to be >= 9		*)
+  pens:POINTER TO ARRAY DrawPens OF CARDINAL; (* pointer to pen array			*)
+
+  font:TextFontPtr; (* screen default font		*)
+  depth:CARDINAL;   (* (initial) depth of screen bitmap	*)
+  resolution:RECORD(* from DisplayInfo database for initial display mode	*)
+   x,y:CARDINAL;
+  END;
+  flags:LONGSET;
+(* New for V39: dri_CheckMark, dri_AmigaKey. *)
+  checkMark:ADDRESS;(* pointer to scaled checkmark image
+          					 * Will be NULL if DRI_VERSION < 2
+          					 *)
+  amigaKey:ADDRESS; (* pointer to scaled Amiga-key image
+					           * Will be NULL if DRI_VERSION < 2
+					           *)
+  reserved:ARRAY[0..4] OF LONGCARD; (* avoid recompilation ;^)	*)
+ END;
+
+CONST
+(* New for V39:  It is sometimes useful to specify that a pen value
+ * is to be the complement of color zero to three.  The "magic" numbers
+ * serve that purpose:
+ *)
+ penC3=0FEFCH;		(* Complement of color 3 *)
+ penC2=0FEFDH;		(* Complement of color 2 *)
+ penC1=0FEFEH;		(* Complement of color 1 *)
+ penC0=0FEFFH;		(* Complement of color 0 *)
+
+CONST
+ stdScreenHeight=-1;
+ stdScreenWidth=-1;
+
+ customScreen=ScreenFlagSet{wbenchScreen..sf3};
+
+(* ======================================================================== *)
+(* === Screen ============================================================= *)
+(* ======================================================================== *)
+
+(* VERY IMPORTANT NOTE ABOUT Screen->BitMap.  In the future, bitmaps
+ * will need to grow.  The embedded instance of a bitmap in the screen
+ * will no longer be large enough to hold the whole description of
+ * the bitmap.
+ *
+ * YOU ARE STRONGLY URGED to use Screen->RastPort.BitMap in place of
+ * &Screen->BitMap whenever and whereever possible.
+ *)
+TYPE
+ Screen=RECORD
+  nextScreen:ScreenPtr;     (* linked list of screens *)
+  firstWindow:WindowPtr;    (* linked list Screen's Windows *)
+  leftEdge,topEdge:INTEGER; (* parameters of the screen *)
+  width,height:INTEGER;     (* parameters of the screen *)
+  mouseY,mouseX:INTEGER;    (* position relative to upper-left *)
+  flags:ScreenFlagSet;      (* see definitions below *)
+  title:ADDRESS;            (* null-terminated Title text *)
+  defaultTitle:ADDRESS;     (* for Windows without ScreenTitle *)   
+
+  (* Bar sizes for this Screen and all Window's in this Screen *)
+  (* Note that BarHeight is one less than the actual menu bar
+   * height.	We're going to keep this in V36 for compatibility,
+   * although V36 artwork might use that extra pixel
+   *
+   * Also, the title bar height of a window is calculated from the
+   * screen's WBorTop field, plus the font height, plus one.
+   *)
+  barHeight,barVBorder,barHBorder,menuVBorder,menuHBorder:SHORTINT;
+  wBorTop,wBorLeft,wBorRight,wBorBottom:SHORTINT;
+  font:TextAttrPtr; (* this screen's default font	   *)
+
+    (* the display data structures for this Screen *)
+  viewPort:ViewPort;  (* describing the Screen's display *)
+  rastPort:RastPort;  (* describing Screen rendering	   *)
+  bitMap:BitMap;      (* SEE WARNING ABOVE!		   *)
+  layerInfo:LayerInfo;(* each screen gets a LayerInfo    *)
+
+  (* Only system gadgets may be attached to a screen.
+   *	You get the standard system Screen Gadgets automatically
+   *)
+  firstGadget:GadgetPtr;
+  detailPen,blockPen:SHORTCARD; (* for bar/border/gadget rendering *)
+
+  (* the following variable(s) are maintained by Intuition to support the
+   * DisplayBeep() color flashing technique
+   *)
+  saveColor0:CARDINAL;
+
+    (* This layer is for the Screen and Menu bars *)
+  barLayer:LayerPtr;
+  extData:ADDRESS;
+  userData:ADDRESS;(* general-purpose pointer to User data extension *)
+    (**** Data below this point are SYSTEM PRIVATE ****)
+ END;
+
+(* ======================================================================== *)
+(* === NewScreen ========================================================== *)
+(* ======================================================================== *)
+(* note: to use the Extended field, you must use the
+ * new ExtNewScreen structure, below
+ *)
+NewScreen=RECORD
+  leftEdge,topEdge,width,height,depth:INTEGER;
+
+  detailPen,blockPen:SHORTINT;  (* for bar/border/gadget rendering	*)
+  viewModes:ViewModeSet;        (* the Modes for the ViewPort (and View) *)
+  type:ScreenFlagSet;           (* the Screen type (see defines above)	*)
+  font:TextAttrPtr;             (* this Screen's default text attributes *)
+  defaultTitle:ADDRESS;         (* the default title for this Screen	*)
+  gadgets:GadgetPtr;            (* UNUSED:  Leave this NULL		*)           
+
+  (* if you are opening a CUSTOMSCREEN and already have a BitMap
+   * that you want used for your Screen, you set the flags CUSTOMBITMAP in
+   * the Type field and you set this variable to point to your BitMap
+   * structure.  The structure will be copied into your Screen structure,
+   * after which you may discard your own BitMap if you want
+   *)
+  customBitMap:BitMapPtr;
+ END;
+
+(*
+ * For compatibility reasons, we need a new structure for extending
+ * NewScreen.  Use this structure is you need to use the new Extension
+ * field.
+ *
+ * NOTE: V36-specific applications should use the
+ * OpenScreenTagList( newscreen, tags ) version of OpenScreen().
+ * Applications that want to be V34-compatible as well may safely use the
+ * ExtNewScreen structure.  Its tags will be ignored by V34 Intuition.
+ *
+ *)
+ ExtNewScreen=RECORD
+        ns:NewScreen;
+        extension:TagItemPtr
+       END;
+
+CONST
+ (* === Overscan Types ===	*)
+ oScanText=1;       (* entirely visible	*)
+ oScanStandard=2;   (* just past edges	*)
+ oScanMax=3;        (* as much as possible	*)
+ oScanVideo=4;      (* even more than is possible	*)
+
+
+(*
+ * Screen attribute tag ID's.  These are used in the ti_Tag field of
+ * TagItem arrays passed to OpenScreenTagList() (or in the
+ * ExtNewScreen.Extension field).
+ *)
+ TYPE
+ SaTags=(saDummy:=tagUser+32,
+        saLeft,
+        saTop,
+        saWidth,
+        saHeight,
+        saDepth,
+        saDetailPen,
+        saBlockPen,
+        saTitle,
+        saColors,
+        saErrorCode,
+        saFont,
+        saSysFont,
+        saType,
+        saBitMap,
+        saPubName,
+        saPubSig,
+        saPubTask,
+        saDisplayID,
+        saDClip,
+        saOverscan,
+        saObsolete1,
+        saShowTitle,
+        saBehind,
+        saQuiet,
+        saAutoScroll,
+        saPens,
+        saFullPalette,
+        saColorMapEntries,
+        saAttach,
+        saDraggable,
+        saExclusive,
+        saSharePens,
+        saBackFill,
+        saInterleaved,
+        saColors32,
+        saVideoControl,
+        saFrontChild,
+        saBackChild,
+        saLikeWorkbench,
+        saReserved
+       );
+
+CONST
+ osErrNoMonitor=1;    (* named monitor spec not available	*)
+ osErrNoChips=2;      (* you need newer custom chips		*)
+ osErrNoMem=3;        (* couldn't get normal memory		*)
+ osErrNoChipMem=4;    (* couldn't get chipmem			*)
+ osErrPubNotUnique=5; (* public screen name already used	*)
+ osErrUnknownMode=6;  (* don't recognize mode asked for	*)
+ osErrTooDeep=7;      (* Screen deeper than HW supports	*)
+ osErrAttachFail=8;   (* Failed to attach screens		*)
+ osErrNotAvailable=9; (* Mode not available for other reason	*)     
+
+(* === Public Shared Screen Node ===	*)
+
+(* This is the representative of a public shared screen.
+ * This is an internal data structure, but some functions may
+ * present a copy of it to the calling application.  In that case,
+ * be aware that the screen pointer of the structure can NOT be
+ * used safely, since there is no guarantee that the referenced
+ * screen will remain open and a valid data structure.
+ *
+ * Never change one of these.
+ *)
+TYPE
+ PubScreenNode=RECORD
+        node:Node;            (* ln_Name is screen name *)
+        screen:ScreenPtr;
+        flags:BITSET;         (* below		*)
+        size:INTEGER;         (* includes name buffer	*)
+        visitorCount:INTEGER; (* how many visitor windows *)
+        sigTask:TaskPtr;      (* who to signal when visitors gone *)
+        sigBit:SHORTCARD;     (* which signal	*)                      
+       END;
+
+CONST
+ psnPrivate=0;
+
+
+(* NOTE: Due to a bug in NextPubScreen(), make sure your buffer
+ * actually has MAXPUBSCREENNAME+1 characters in it!
+ *)
+ maxPubScreenName=139; (* names no longer, please	*)
+
+(* pub screen modes	*)
+(* minus 1 because of bitset *)
+ shanghaiBit=1-1;       (* put workbench windows on pub screen *)
+ popPubScreenBit=2-1;   (* pop pub screen to front when visitor opens *)
+ shanghai=BITSET{shanghaiBit};
+ popPubScreen=BITSET{popPubScreenBit};
+ 
+(* New for V39:  Intuition has new screen depth-arrangement and movement
+ * functions called ScreenDepth() and ScreenPosition() respectively.
+ * These functions permit the old behavior of ScreenToFront(),
+ * ScreenToBack(), and MoveScreen().  ScreenDepth() also allows
+ * independent depth control of attached screens.  ScreenPosition()
+ * optionally allows positioning screens even though they were opened
+ * {SA_Draggable,FALSE}.
+ *)
+
+(* For ScreenDepth(), specify one of SDEPTH_TOFRONT or SDEPTH_TOBACK,
+ * and optionally also SDEPTH_INFAMILY.
+ *
+ * NOTE: ONLY THE OWNER OF THE SCREEN should ever specify
+ * SDEPTH_INFAMILY.  Commodities, "input helper" programs,
+ * or any other program that did not open a screen should never
+ * use that flag.  (Note that this is a style-behavior
+ * requirement;  there is no technical requirement that the
+ * task calling this function need be the task which opened
+ * the screen).
+ *)
+ sDepthToFront  =LONGSET{}; (* Bring screen to front *)
+ sDepthToBack   =LONGSET{0};(* Send screen to back *)
+ sDepthInFamily =LONGSET{1};(* Move an attached screen with
+                             * respect to other screens of
+                             * its family
+                             *)                              
+
+(* For ScreenPosition(), specify one of SPOS_RELATIVE, SPOS_ABSOLUTE,
+ * or SPOS_MAKEVISIBLE to describe the kind of screen positioning you
+ * wish to perform:
+ *
+ * SPOS_RELATIVE: The x1 and y1 parameters to ScreenPosition() describe
+ *	the offset in coordinates you wish to move the screen by.
+ * SPOS_ABSOLUTE: The x1 and y1 parameters to ScreenPosition() describe
+ *	the absolute coordinates you wish to move the screen to.
+ * SPOS_MAKEVISIBLE: (x1,y1)-(x2,y2) describes a rectangle on the
+ *	screen which you would like autoscrolled into view.
+ *
+ * You may additionally set SPOS_FORCEDRAG along with any of the
+ * above.  Set this if you wish to reposition an {SA_Draggable,FALSE}
+ * screen that you opened.
+ *
+ * NOTE: ONLY THE OWNER OF THE SCREEN should ever specify
+ * SPOS_FORCEDRAG.  Commodities, "input helper" programs,
+ * or any other program that did not open a screen should never
+ * use that flag.
+ *)
+
+ sPosRelative   =LONGSET{}; (* Coordinates are relative *)
+ sPosAbsolute   =LONGSET{0};(* Coordinates are expressed as
+                  					 * absolutes, not relatives.
+                  					 *)
+ sPosMakeVisible=LONGSET{1};(* Coordinates describe a box on
+			                  		 * the screen you wish to be
+                  					 * made visible by autoscrolling
+                  					 *)
+
+ sPosForceDrag  =LONGSET{2}; (* Move non-draggable screen *)
+
+(* New for V39: Intuition supports double-buffering in screens,
+ * with friendly interaction with menus and certain gadgets.
+ * For each buffer, you need to get one of these structures
+ * from the AllocScreenBuffer() call.  Never allocate your
+ * own ScreenBuffer structures!
+ *
+ * The sb_DBufInfo field is for your use.  See the graphics.library
+ * AllocDBufInfo() autodoc for details.
+ *)
+TYPE
+  ScreenBuffer=RECORD
+   bitMap:BitMap;         (* BitMap of this buffer *)
+   dBufInfo:DBufInfoPtr;  (* DBufInfo for this buffer *)
+  END;
+
+(* These are the flags that may be passed to AllocScreenBuffer().
+ *)
+CONST
+  screenBitmap=1;
+  copyBitmap=2;
+
+TYPE
+ StringExtend = RECORD
+    (* display specifications   *)
+    font:TextFontPtr;                     (* must be an open Font (not TextAttr)  *)
+    pens,                                 (* color of text/background             *)
+    activePens:ARRAY [0..1] OF SHORTCARD; (* colors when gadget is active         *)
+
+    (* edit specifications      *)
+    initialModes:LONGSET;               (* inital mode flags, below             *)
+    editHook:HookPtr;                   (* if non-NULL, must supply WorkBuffer  *)
+    workBuffer:ADDRESS;                 (* must be as large as StringInfo.Buffer*)
+    reserved:ARRAY [0..3] OF LONGCARD;  (* set to 0                             *)
+ END;
+
+
+
+(**************************************************************************)
+(* == include preferences.h ============================================= *)
+(**************************************************************************)
+
+CONST
+
+(* these are the definitions for the printer configurations *)
+ filenameSize=30; (* Filename size *)
+ devnameSize=16;  (* Device-name size *)
+
+ pointerSize=(1+16+1)*2; (* Size of Pointer data buffer *)
+
+(* These defines are for the default font size.  These actually describe the
+ * height of the defaults fonts.  The default font type is the topaz
+ * font, which is a fixed width font that can be used in either
+ * eighty-column or sixty-column mode.	The Preferences structure reflects
+ * which is currently selected by the value found in the variable FontSize,
+ * which may have either of the values defined below.  These values actually
+ * are used to select the height of the default font.  By changing the
+ * height, the resolution of the font changes as well.
+ *)
+ topazEighty=8;
+ topazSixty=9;
+
+TYPE
+ BaudRate=(
+  baud110,baud300,baud1200,baud2400,baud4800,baud9600,baud19200,baudMidi,
+  br8,br9,br10,br11,br12,br13,vr14,br15
+ );
+
+ PrinterFlags=(
+  correctRed,correctGreen,correctBlue,centerImage,boundedDimensions,
+  absoluteDimensions,pixelDimensions,multiplyDimensions,integerScaling,
+  halftoneDithering,floydDithering,antiAlias,greyScale2
+ );
+ PrinterFlagSet=SET OF PrinterFlags;
+
+ PrinterType=(
+  customName,alphaP101,brother15XL,cbmMps1000,diab630,diabAdvD25,
+  diabC150,epson,epsonJX80,okimate20,qumeLP20,hpLaserjet,hpLaserjetPlus,
+  pt13,pt14,pt15
+ );
+
+ PrinterPort=(parallelPrinter,serialPrinter);
+
+ SerParShk=(
+  shakeRts,shakeNone,sps2,sps3,
+  parityEven,parityOdd,paritySpace,sps7
+ );
+ SerParShkSet=SET OF SerParShk;
+
+CONST
+ shakeXon=SerParShkSet{};
+ parityNone=SerParShkSet{};
+ parityMark=SerParShkSet{parityEven,parityOdd};
+
+(* Note:  Starting with V36, and continuing with each new version of
+ * Intuition, an increasing number of fields of struct Preferences
+ * are ignored by SetPrefs().  (Some fields are obeyed only at the
+ * initial SetPrefs(), which comes from the devs:system-configuration
+ * file).  Elements are generally superseded as new hardware or software
+ * features demand more information than fits in struct Preferences.
+ * Parts of struct Preferences must be ignored so that applications
+ * calling GetPrefs(), modifying some other part of struct Preferences,
+ * then calling SetPrefs(), don't end up truncating the extended
+ * data.
+ *
+ * Consult the autodocs for SetPrefs() for further information as
+ * to which fields are not always respected.
+ *)
+TYPE
+ Preferences=RECORD
+  fontHeight:SHORTCARD;   (* height for system default font  *)
+  printerPort:PrinterPort;(* printer port connection	   *)
+  baudRate:BaudRate;      (* baud rate for the serial port   *)
+
+    (* various timing rates *)
+  keyRptSpeed:TimeVal;  (* repeat speed for keyboard	   *)
+  keyRptDelay:TimeVal;  (* Delay before keys repeat	   *)
+  doubleClick:TimeVal;  (* Interval allowed between clicks *)
+
+    (* Intuition Pointer data *)
+  pointerMatrix:ARRAY [0..pointerSize-1] OF CARDINAL;
+  xOffset:SHORTINT;       (* X-Offset for active 'bit'	     *)
+  yOffset:SHORTINT;       (* Y-Offset for active 'bit'	     *)
+  color17:CARDINAL;	      (***********************************)
+  color18:CARDINAL;	      (* Colours for sprite pointer	     *)
+  color19:CARDINAL;	      (***********************************)
+  pointerTicks:CARDINAL;	(* Sensitivity of the pointer	     *)
+
+    (* Workbench Screen colors *)
+  color0:CARDINAL;    (***********************************)
+  color1:CARDINAL;    (*  Standard default colours	     *)
+  color2:CARDINAL;    (*   Used in the Workbench	       *)
+  color3:CARDINAL;    (***********************************)
+
+    (* positioning data for the Intuition View *)
+  viewXOffset:SHORTINT;         (* Offset for top lefthand corner *)
+  viewYOffset:SHORTINT;         (* X and Y dimensions		          *)
+  viewInitX,viewInitY:INTEGER;  (* View initial offset values	    *)  
+
+  enableCLI:BITSET; (* CLI availability switch *)
+
+  (* printer configurations *)
+  printerType:PrinterType;  (* printer type		   *)
+  printerFilename:ARRAY [0..filenameSize-1] OF CHAR; (* file for printer	   *)
+
+    (* print format and quality configurations *)
+  printPitch:CARDINAL;        (* print pitch			          *)
+  printQuality:CARDINAL;      (* print quality		          *)
+  printSpacing:CARDINAL;      (* number of lines per inch	  *)
+  printLeftMargin:CARDINAL;	  (* left margin in characters	*)
+  printRightMargin:CARDINAL;	(* right margin in characters	*)
+  printImage:CARDINAL;        (* positive or negative		    *)
+  printAspect:CARDINAL;       (* horizontal or vertical	    *)
+  printShade:CARDINAL;        (* b&w, half-tone, or color	  *)
+  printThreshold:INTEGER;     (* darkness ctrl for b/w dumps*)   
+
+    (* print paper descriptors *)
+  paperSize:CARDINAL;   (* paper size			   *)
+  paperLength:CARDINAL; (* paper length in number of lines *)
+  paperType:CARDINAL;   (* continuous or single sheet	   *)  
+
+  (* Serial device settings: These are six nibble-fields in three bytes *)
+  (* (these look a little strange so the defaults will map out to zero) *)
+  serRWBits:SHORTCARD;  (* upper nibble = (8-number of read bits)	*)
+			 (* lower nibble = (8-number of write bits)	*)
+  serStopBuf:SHORTCARD; (* upper nibble = (number of stop bits - 1)	*)
+			 (* lower nibble = (table value for BufSize)	*)
+  serParShk:SerParShkSet; (* upper nibble = (value for Parity setting)	*)
+			 (* lower nibble = (value for Handshake mode)	*)
+  laceWB:SHORTSET; (* if workbench is to be interlaced		*)
+
+  pad: ARRAY[0..11] OF SHORTINT;
+  prtDevName : ARRAY[0..devnameSize-1] OF CHAR; (* device used by printer.device
+                                              * (omit the ".device")
+                                              *)
+  defaultPrtUnit:SHORTINT;       (* default unit opened by printer.device *)
+  defaultSerUnit:SHORTINT;       (* default serial unit *)
+
+  rowSizeChange:SHORTINT;  (* affect NormalDisplayRows/Columns *)
+  columnSizeChange:SHORTINT;
+
+  printFlags:PrinterFlagSet;  (* user preference flags *)
+  printMaxWidth:CARDINAL;     (* max width of printed picture in 10ths/in *)
+  printMaxHeight:CARDINAL;    (* max height of printed picture in 10ths/in *)
+  printDensity:SHORTCARD;     (* print density *)
+  printXOffset:SHORTCARD;     (* offset of printed picture in 10ths/inch *)  
+
+  width:CARDINAL;             (* override default workbench width  *)
+  height:CARDINAL;            (* override default workbench height *)
+  depth:SHORTCARD;            (* override default workbench depth  *)
+  extSize:SHORTCARD;          (* extension information -- do not touch! *)
+                              (* extension size in blocks of 64 bytes *)   
+ END;
+
+CONST
+(* Workbench Interlace (use one bit) *)
+ lacewb=0;
+
+(* Enable_CLI	*)
+ screenDrag=14;
+ mouseAccel=15;
+
+(* PrinterPort *)
+(* see Above *)
+
+(* PaperType *)
+  fanfold=0;
+  single=080H;
+
+(* PrintPitch *)
+  pica=0000H;
+  elite=0400H;
+  fine=0800H;
+
+(* PrintQuality *)
+  draft=0000H;
+  letter=0100H;
+
+(* PrintSpacing *)
+  sixLPI=0000H;
+  eightLPI=0200H;
+
+(* Print Image *)
+  imagePositive=000H;
+  imageNegative=001H;
+
+(* PrintAspect *)
+  aspectHoriz=000H;
+  aspectVert=001H;
+
+(* PrintShade *)
+  shadeBW=000H;
+  shadeGreyScale=001H;
+  shadeColor=002H;
+
+(* PaperSize *)
+  usLetter=000H;
+  usLegal=010H;
+  nTractor=020H;
+  wTractor=030H;
+  custom=040H;
+
+  euroA0=050H;  (* European size A0: 841 x 1189 *)
+  euroA1=060H;  (* European size A1: 594 x 841 *)
+  euroA2=070H;  (* European size A2: 420 x 594 *)
+  euroA3=080H;  (* European size A3: 297 x 420 *)
+  euroA4=090H;  (* European size A4: 210 x 297 *)
+  euroA5=0A0H;  (* European size A5: 148 x 210 *)
+  euroA6=0B0H;  (* European size A6: 105 x 148 *)
+  euroA7=0C0H;  (* European size A7: 74 x 105  *)
+  euroA8=0D0H;  (* European size A8: 52 x 74   *)   
+
+(* Serial Input Buffer Sizes *)
+  buf512=0;
+  buf1024=1;
+  buf2048=2;
+  buf4096=3;
+  buf8000=4;
+  buf16000=5;
+ 
+(* Serial Bit Masks *)
+  readBits=0F0H;  (* for SerRWBits	*)
+  writeBits=0FH;
+ 
+  stopBits=0F0H;  (* for SerStopBuf	*)
+  bufSizeBits=0FH;
+ 
+  parityBits=0F0H; (* for SerParShk   *)
+  hShakeBits=00FH;
+
+CONST
+  correctRGBMask=PrinterFlagSet{correctRed..correctBlue};
+  dimensionsMask=PrinterFlagSet{boundedDimensions..multiplyDimensions};
+  ditheringMask=PrinterFlagSet{halftoneDithering,floydDithering};
+
+
+(* ======================================================================== *)
+(* === Remember =========================================================== *)
+(* ======================================================================== *)
+(* this structure is used for remembering what memory has been allocated to
+ * date by a given routine, so that a premature abort or systematic exit
+ * can deallocate memory cleanly, easily, and completely
+ *)
+TYPE
+ Remember=RECORD
+  nextRemember:RememberPtr;
+  rememberSize:LONGCARD;
+  memory:ADDRESS;
+ END;
+
+(* === Color Spec ====================================================== *)
+(* How to tell Intuition about RGB values for a color table entry.
+ * NOTE:  The way the structure was defined, the color value was
+ * right-justified within each UWORD.  This poses problems for
+ * extensibility to more bits-per-gun.	The SA_Colors32 tag to
+ * OpenScreenTags() provides an alternate way to specify colors
+ * with greater precision.
+ *)
+ ColorSpec=RECORD
+  colorIndex:INTEGER;   (* -1 terminates an array of ColorSpec	*)
+  red:CARDINAL;         (* only the _bottom_ 4 bits recognized *)
+  green:CARDINAL;       (* only the _bottom_ 4 bits recognized *)
+  blue:CARDINAL;        (* only the _bottom_ 4 bits recognized *) 
+ END;
+
+(* === Easy Requester Specification ======================================= *)
+(* see also autodocs for EasyRequest and BuildEasyRequest	*)
+(* NOTE: This structure may grow in size in the future		*)
+ EasyStruct=RECORD
+  structSize:LONGCARD;
+  flags:LONGSET;
+  title:ADDRESS;
+  textFormat:ADDRESS;
+  gadgetFormat:ADDRESS;
+ END;
+
+(* New for V39, Intuition supports the IESUBCLASS_NEWTABLET subclass
+ * of the IECLASS_NEWPOINTERPOS event.	The ie_EventAddress of such
+ * an event points to a TabletData structure (see below).
+ *
+ * The TabletData structure contains certain elements including a taglist.
+ * The taglist can be used for special tablet parameters.  A tablet driver
+ * should include only those tag-items the tablet supports.  An application
+ * can listen for any tag-items that interest it.  Note: an application
+ * must set the WA_TabletMessages attribute to TRUE to receive this
+ * extended information in its IntuiMessages.
+ *
+ * The definitions given here MUST be followed.  Pay careful attention
+ * to normalization and the interpretation of signs.
+ *
+ * TABLETA_TabletZ:  the current value of the tablet in the Z direction.
+ * This unsigned value should typically be in the natural units of the
+ * tablet.  You should also provide TABLETA_RangeZ.
+ *
+ * TABLETA_RangeZ:  the maximum value of the tablet in the Z direction.
+ * Normally specified along with TABLETA_TabletZ, this allows the
+ * application to scale the actual Z value across its range.
+ *
+ * TABLETA_AngleX:  the angle of rotation or tilt about the X-axis.  This
+ * number should be normalized to fill a signed long integer.  Positive
+ * values imply a clockwise rotation about the X-axis when viewing
+ * from +X towards the origin.
+ *
+ * TABLETA_AngleY:  the angle of rotation or tilt about the Y-axis.  This
+ * number should be normalized to fill a signed long integer.  Positive
+ * values imply a clockwise rotation about the Y-axis when viewing
+ * from +Y towards the origin.
+ *
+ * TABLETA_AngleZ:  the angle of rotation or tilt about the Z axis.  This
+ * number should be normalized to fill a signed long integer.  Positive
+ * values imply a clockwise rotation about the Z-axis when viewing
+ * from +Z towards the origin.
+ *
+ *	Note: a stylus that supports tilt should use the TABLETA_AngleX
+ *	and TABLETA_AngleY attributes.	Tilting the stylus so the tip
+ *	points towards increasing or decreasing X is actually a rotation
+ *	around the Y-axis.  Thus, if the stylus tip points towards
+ *	positive X, then that tilt is represented as a negative
+ *	TABLETA_AngleY.  Likewise, if the stylus tip points towards
+ *	positive Y, that tilt is represented by positive TABLETA_AngleX.
+ *
+ * TABLETA_Pressure:  the pressure reading of the stylus.  The pressure
+ * should be normalized to fill a signed long integer.	Typical devices
+ * won't generate negative pressure, but the possibility is not precluded.
+ * The pressure threshold which is considered to cause a button-click is
+ * expected to be set in a Preferences program supplied by the tablet
+ * vendor.  The tablet driver would send IECODE_LBUTTON-type events as
+ * the pressure crossed that threshold.
+ *
+ * TABLETA_ButtonBits:	ti_Data is a long integer whose bits are to
+ * be interpreted at the state of the first 32 buttons of the tablet.
+ *
+ * TABLETA_InProximity:  ti_Data is a boolean.	For tablets that support
+ * proximity, they should send the {TABLETA_InProximity,FALSE} tag item
+ * when the stylus is out of proximity.  One possible use we can forsee
+ * is a mouse-blanking commodity which keys off this to blank the
+ * mouse.  When this tag is absent, the stylus is assumed to be
+ * in proximity.
+ *)
+CONST
+  tabletaDummy=tagUser+3A000H;
+  tabletaTabletZ=tabletaDummy+1;
+  tabletaRangeZ=tabletaDummy+2;
+  tabletaAngleX=tabletaDummy+3;
+  tabletaAngleY=tabletaDummy+4;
+  tabletaAngleZ=tabletaDummy+5;
+  tabletaPressure=tabletaDummy+6;
+  tabletaButtonBits=tabletaDummy+7;
+  tabletaInProximity=tabletaDummy+8;
+
+(* If your window sets WA_TabletMessages to TRUE, then it will receive
+ * extended IntuiMessages (struct ExtIntuiMessage) whose eim_TabletData
+ * field points at a TabletData structure.  This structure contains
+ * additional information about the input event.
+ *)
+ TYPE
+  TabletData=RECORD
+   (* Sub-pixel position of tablet, in screen coordinates,
+    * scaled to fill a UWORD fraction:
+    *)
+   xFraction,yFraction:CARDINAL;
+
+   (* Current tablet coordinates along each axis: *)
+   tabletX,tabletY:LONGCARD;
+
+   (* Tablet range along each axis.  For example, if td_TabletX
+    * can take values 0-999, td_RangeX should be 1000.
+    *)
+   rangeX,rangeY:LONGCARD;
+   (* Pointer to tag-list of additional tablet attributes.
+    * See <intuition/intuition.h> for the tag values.
+    *)
+   tagList:ADDRESS;
+  END;
+
+(* If a tablet driver supplies a hook for td_CallBack, it will be
+ * invoked in the standard hook manner.  A0 will point to the Hook
+ * itself, A2 will point to the InputEvent that was sent, and
+ * A1 will point to a TabletHookData structure.  The InputEvent's
+ * ie_EventAddress field points at the IENewTablet structure that
+ * the driver supplied.
+ *
+ * Based on the thd_Screen, thd_Width, and thd_Height fields, the driver
+ * should scale the ient_TabletX and ient_TabletY fields and store the
+ * result in ient_ScaledX, ient_ScaledY, ient_ScaledXFraction, and
+ * ient_ScaledYFraction.
+ *
+ * The tablet hook must currently return NULL.	This is the only
+ * acceptable return-value under V39.
+ *)
+  TabletHookData=RECORD
+   (* Pointer to the active screen:
+    * Note: if there are no open screens, thd_Screen will be NULL.
+    * thd_Width and thd_Height will then describe an NTSC 640x400
+    * screen.	Please scale accordingly.
+    *)
+   screen:ScreenPtr;
+
+   (* The width and height (measured in pixels of the active screen)
+    * that your are to scale to:
+    *)
+   width:LONGCARD;
+   height:LONGCARD;
+
+   (* Non-zero if the screen or something about the screen
+    * changed since the last time you were invoked:
+    *)
+   screenChanged:LONGINT;
+  END;
+
+
+(*- cghooks -*)
+
+(*
+ * Package of information passed to custom and 'boopsi'
+ * gadget "hook" functions.  This structure is READ ONLY.
+ *)
+
+ GadgetInfo=RECORD
+  screen:ScreenPtr;
+  window:WindowPtr;           (* null for screen gadgets *)
+  requester:RequesterPtr;     (* null if not GTYP_REQGADGET *)
+  rastPort:RastPortPtr;
+  layer:LayerPtr;
+    (* copy of dimensions of screen/window/g00/req(/group)
+     * that gadget resides in.	Left/Top of this box is
+     * offset from window mouse coordinates to gadget coordinates
+     *		screen gadgets:			0,0 (from screen coords)
+     *	window gadgets (no g00):	0,0
+     *	GTYP_GZZGADGETs (borderlayer):		0,0
+     *	GZZ innerlayer gadget:		borderleft, bordertop
+     *	Requester gadgets:		reqleft, reqtop
+     *)
+  domain:IBox;
+    (* these are the pens for the window or screen	*)
+  detailPen:SHORTCARD;
+  blockPen:SHORTCARD;
+    (* the Detail and Block pens in gi_DrInfo->dri_Pens[] are
+     * for the screen.	Use the above for window-sensitive
+     * colors.
+     *)
+  drInfo:DrawInfoPtr;
+  reserved:ARRAY [0..5] OF LONGCARD;
+ END;
+
+(*** system private data structure for now ***)
+(* prop gadget extra info	*)
+ PGX=RECORD
+  container:IBox;
+  newKnob:IBox;
+ END;
+
+(*******************************************)
+(*** "White box" access to struct IClass ***)
+(*******************************************)
+
+ClassID=ADDRESS;
+
+(* This structure is READ-ONLY, and allocated only by Intuition *)
+IClass=RECORD
+ dispatcher:Hook;
+ reserved:LONGCARD;
+ super:IClassPtr;
+ id:ClassID;
+ instOffset:CARDINAL;
+ instSize:CARDINAL;
+ userData:LONGCARD;
+ subclassCount:LONGCARD;
+ objectCount:LONGCARD;
+ flags:LONGSET;
+END;
+
+(**************************************************)
+(*** "White box" access to struct _Object	***)
+(**************************************************)
+
+(*
+ * We have this, the instance data of the root class, PRECEDING
+ * the "object".  This is so that Gadget objects are Gadget pointers,
+ * and so on.  If this structure grows, it will always have o_Class
+ * at the end, so the macro OCLASS(o) will always have the same
+ * offset back from the pointer returned from NewObject().
+ *
+ * This data structure is subject to change.  Do not use the o_Node
+ * embedded structure.
+ *)
+ Object=RECORD
+  node:MinNode;
+  class:IClassPtr;
+ END;
+
+(*- classuser.h -*)
+(* you can use this type to point to a "generic" message,
+ * in the object-oriented programming parlance.  Based on
+ * the value of 'MethodID', you dispatch to processing
+ * for the various message types.  The meaningful parameter
+ * packet structure definitions are defined below.
+ *)
+
+ Msg=POINTER TO RECORD
+  methodID:LONGCARD;
+     (* method-specific data follows, some examples below *)
+ END;
+
+CONST
+
+(*
+ * Class id strings for Intuition classes.
+ * There's no real reason to use the uppercase constants
+ * over the lowercase strings, but this makes a good place
+ * to list the names of the built-in classes.
+ *)
+  rootClass="rootclass";             (* classusr.h   *)
+  imageClass="imageclass";            (* imageclass.h *)
+  frameIClass="frameiclass";
+  sysIClass="sysiclass";
+  fillRectClass="fillrectclass";
+  gadgetClass="gadgetclass";           (* gadgetclass.h *)
+  progGClass="propgclass";
+  strGClass="strgclass";
+  buttonGClass="buttongclass";
+  frButtonClass="frbuttonclass";
+  groupGClass="groupgclass";
+  icClass="icclass";               (* icclass.h    *)
+  modelClass="modelclass";
+
+  omDummy=0100H;      
+  omNEW=0101H;        (* 'object' parameter is "true class"	*)
+  omDISPOSE=0102H;    (* delete self (no parameters)		*)
+  omSET=0103H;        (* set attributes (in tag list)		*)
+  omGET=0104H;        (* return single attribute value	*)
+  omADDTAIL=0105H;    (* add self to a List (let root do it)	*)
+  omREMOVE=0106H;     (* remove self from list		*)
+  omNOTIFY=0107H;     (* send to self: notify dependents	*)
+  omUPDATE=0108H;     (* notification message from somebody	*)
+  omADDMEMBER=0109H;  (* used by various classes with lists	*)
+  omREMMEMBER=010AH;  (* used by various classes with lists	*)       
+
+(* Parameter "Messages" passed to methods	*)
+TYPE
+  OpSet=RECORD
+   methodID:LONGCARD;
+   attrList:TagItemPtr;
+   gInfo:GadgetInfoPtr;
+  END;
+
+  OpUpdate=RECORD
+   methodID:LONGCARD;
+   attrList:TagItemPtr; (* new attributes	*)
+   gInfo:GadgetInfoPtr; (* non-NULL when SetGadgetAttrs or
+              					 * notification resulting from gadget
+              					 * input occurs.
+              					 *)
+
+   flags:LONGSET;       (* defined below	*)
+  END;
+
+(* this flag means that the update message is being issued from
+ * something like an active gadget, a la GACT_FOLLOWMOUSE.  When
+ * the gadget goes inactive, it will issue a final update
+ * message with this bit cleared.  Examples of use are for
+ * GACT_FOLLOWMOUSE equivalents for propgadclass, and repeat strobes
+ * for buttons.
+ *)
+
+CONST
+  opufINTERIM=LONGSET{0};
+
+TYPE
+  OpGet=RECORD
+   methodID:LONGCARD;
+   attrID:LONGCARD;
+   storage:POINTER TO LONGCARD; (* may be other types, but "int"
+                      					 * types are all ULONG
+                      					 *)
+  END;
+
+(* OM_ADDTAIL	*)
+  OpAddTail=RECORD
+   methodID:LONGCARD;
+   list:ListPtr;
+  END;
+
+(* OM_ADDMEMBER, OM_REMMEMBER	*)
+  OpMember=RECORD
+   methodID:LONGCARD;
+   object:ObjectPtr;
+  END;
+
+  OpAddMember=OpMember;
+  OpAddMemberPtr=OpMemberPtr;
+
+(*- gadgetclass.h -*)
+(* Gadget Class attributes	*)
+GaTags=(gaDummy:=tagUser+030000H,
+        gaLeft,
+        gaRelRight,
+        gaTop,
+        gaRelBottom,
+        gaWidth,
+        gaRelWidth,
+        gaHeight,
+        gaRelHeight,
+        gaText,
+        gaImage,
+        gaBorder,
+        gaSelectRender,
+        gaHighlight,
+        gaDisabled,
+        gaGZZGadget,
+        gaID,
+        gaUserData,
+        gaSpecialInfo,
+        gaSelected,
+        gaEndGadget,
+        gaImmediate,
+        gaRelVerify,
+        gaFollowMouse,
+        gaRightBorder,
+        gaLeftBorder,
+        gaTopBorder,
+        gaBottomBorder,
+        gaToggleSelect,
+        gaSysGadget, (* internal use only, until further notice, please *)
+        gaSysGType,  (* bool, sets GTYP_SYSGADGET field in type	*)
+        gaPrevious,  
+      	(* previous gadget (or (struct Gadget) in linked list
+      	 * NOTE: This attribute CANNOT be used to link new gadgets
+      	 * into the gadget list of an open window or requester.
+      	 * You must use AddGList().
+   	     *)
+        gaNext,           (* not implemented *)
+        gaDrawInfo,
+      	(* some fancy gadgets need to see a DrawInfo
+      	 * when created or for layout
+      	 *)
+        gaIntuiText,  (* ti_Data is (struct IntuiText *)
+        gaLabelImage,
+        (* ti_Data is an image (object), used in place of
+      	 * GadgetText
+        *)
+        gaTabCycle,
+      	(* New for V37:
+      	 * Boolean indicates that this gadget is to participate in
+      	 * cycling activation with Tab or Shift-Tab.
+      	 *)
+        gaGadgetHelp,
+      	(* New for V39:
+      	 * Boolean indicates that this gadget sends gadget-help
+      	 *)
+        gaBounds,
+      	(* New for V39:
+      	 * ti_Data is a pointer to an IBox structure which is
+      	 * to be copied into the extended gadget's bounds.
+      	 *)
+        gaRelSpecial
+      	(* New for V39:
+      	 * Boolean indicates that this gadget has the "special relativity"
+      	 * property, which is useful for certain fancy relativity
+      	 * operations through the GM_LAYOUT method.
+      	 *)
+       );
+
+PgaTags=(pgaDummy:=tagUser+031000H,
+        pgaFreedom,
+        pgaBorderless,
+        pgaHorizPot,
+        pgaHorizBody,
+        pgaVertPot,
+        pgaVertBody,
+        pgaTotal,
+        pgaVisible,
+        pgaTop,
+        pgaNewLook   (* New for V37: *)
+       );
+
+StringaTags=(stringaDummy:=tagUser+032000H,
+        stringaMaxChars,
+ 
+(* Note:  There is a minor problem with Intuition when using boopsi integer
+ * gadgets (which are requested by using STRINGA_LongInt).  Such gadgets
+ * must not have a STRINGA_MaxChars to be bigger than 15.  Setting
+ * STRINGA_MaxChars for a boopsi integer gadget will cause a mismatched
+ * FreeMem() to occur.
+ *)
+
+        stringaBuffer,
+        stringaUndoBuffer,
+        stringaWorkBuffer,
+        stringaBufferPos,
+        stringaDispPos,
+        stringaAltKeyMap,
+        stringaFont,
+        stringaPens,
+        stringaActivePens,
+        stringaEditHook,
+        stringaEditModes,
+(* booleans *)
+        stringaReplaceMode,
+        stringaFixedFieldMode,
+        stringaNoFilterMode,
+        stringaJustification,
+	(* GACT_STRINGCENTER, GACT_STRINGLEFT, GACT_STRINGRIGHT *)
+        stringaLongVal,
+        stringaTextVal,
+        stringaExitHelp
+      	(* STRINGA_ExitHelp is new for V37, and ignored by V36.
+      	 * Set this if you want the gadget to exit when Help is
+      	 * pressed.  Look for a code of 0x5F, the rawkey code for Help
+      	 *)
+       );
+
+CONST
+ sgDefaultMaxChars=128;
+
+TYPE
+ LayoutaTags=(layoutaDummy:=tagUser+038000H,
+        layoutaLayoutObj,
+        layoutaSpacing,
+        layoutaOrientation
+       );
+
+CONST
+ lorientNone=0;
+ lorientHoriz=1;
+ lorientVert=2;
+
+ gmDummy=-1;        (* not used for anything		*)
+ gmHITTEST=0;       (* return GMR_GADGETHIT if you are clicked on
+				             * (whether or not you are disabled).
+                		 *)
+ gmRENDER=1;        (* draw yourself, in the appropriate state *)
+ gmGOACTIVE=2;      (* you are now going to be fed input	*)
+ gmHANDLEINPUT=3;   (* handle that input			*)
+ gmGOINACTIVE=4;    (* whether or not by choice, you are done  *)
+ gmHelpTest=5;      (* Will you send gadget help if the mouse is  
+            				 * at the specified coordinates?  See below
+            				 * for possible GMR_ values.
+            				 *)
+ gmLayout=6;        (* re-evaluate your size based on the GadgetInfo
+            				 * Domain.  Do NOT re-render yourself yet, you
+            				 * will be called when it is time...
+            				 *)
+
+
+TYPE
+(* Parameter "Messages" passed to gadget class methods	*)
+
+(* GM_HITTEST and GM_HELPTEST send this message.
+ * For GM_HITTEST, gpht_Mouse are coordinates relative to the gadget
+ * select box.	For GM_HELPTEST, the coordinates are relative to
+ * the gadget bounding box (which defaults to the select box).
+ *)
+ GpHitTest=RECORD
+        methodID:LONGCARD;
+        gInfo:GadgetInfoPtr;
+        mouse:Point;
+       END;
+
+(* For GM_HITTEST, return GMR_GADGETHIT if you were indeed hit,
+ * otherwise return zero.
+ *
+ * For GM_HELPTEST, return GMR_NOHELPHIT (zero) if you were not hit.
+ * Typically, return GMR_HELPHIT if you were hit.
+ * It is possible to pass a UWORD to the application via the Code field
+ * of the IDCMP_GADGETHELP message.  Return GMR_HELPCODE or'd with
+ * the UWORD-sized result you wish to return.
+ *
+ * GMR_HELPHIT yields a Code value of ((UWORD) ~0), which should
+ * mean "nothing particular" to the application.
+ *)
+CONST
+ gmrGadgetHit=000000004H; (* GM_HITTEST hit *)
+
+ gmrNoHelpHit=000000000H; (* GM_HELPTEST didn't hit *)
+ gmrHelpHit  =0FFFFFFFFH; (* GM_HELPTEST hit, return code = ~0 *)
+ gmrHelpCode =000010000H; (* GM_HELPTEST hit, return low word as code *)
+
+TYPE
+(* GM_RENDER	*)
+ GpRender=RECORD
+        methodID:LONGCARD;
+        gInfo:GadgetInfoPtr;  (* gadget context		*)
+        rPort:RastPortPtr;    (* all ready for use		*)
+        redraw:LONGINT;       (* might be a "highlight pass"	*)
+       END;
+
+CONST
+(* values of gpr_Redraw	*)
+ gRedrawUpdate=2;(* incremental update, e.g. prop slider	*)
+ gRedrawRedraw=1;(* redraw gadget	*)
+ gRedrawToggle=0;(* toggle highlight, if applicable	*)     
+
+TYPE
+(* GM_GOACTIVE, GM_HANDLEINPUT	*)
+ GpInput=RECORD
+        methodID:LONGCARD;
+        gInfo:GadgetInfoPtr;
+        iEvent:InputEventPtr;
+        termination:ADDRESS;
+        mouse:Point;
+        (* (V39) Pointer to TabletData structure, if this event originated
+         * from a tablet which sends IESUBCLASS_NEWTABLET events, or NULL if
+         * not.
+         *
+         * DO NOT ATTEMPT TO READ THIS FIELD UNDER INTUITION PRIOR TO V39!
+         * IT WILL BE INVALID!
+        *)
+        tabletData:TabletDataPtr;
+       END;
+
+CONST
+(* GM_HANDLEINPUT and GM_GOACTIVE  return code flags	*)
+(* return GMR_MEACTIVE (0) alone if you want more input.
+ * Otherwise, return ONE of GMR_NOREUSE and GMR_REUSE, and optionally
+ * GMR_VERIFY.
+ *)
+ gmrMeActive=0;
+ gmrNoReuse=1;
+ gmrReuse=2;
+ gmrVerify=3;
+(* New for V37:
+ * You can end activation with one of GMR_NEXTACTIVE and GMR_PREVACTIVE,
+ * which instructs Intuition to activate the next or previous gadget
+ * that has GFLG_TABCYCLE set.
+ *)
+ gmrNextActive=4;
+ gmrPrevActive=5;
+
+TYPE
+ GpGoInactive=RECORD
+        methodID:LONGCARD;
+        gInfo:GadgetInfoPtr;
+        abort:LONGCARD;
+       END;
+
+(* New for V39: Intuition sends GM_LAYOUT to any GREL_ gadget when
+ * the window opens, or when the gadget is activated, or when the
+ * window is sized.  Your gadget can set the GA_RelSpecial property
+ * to get GM_LAYOUT events without Intuition changing the interpretation
+ * of your gadget select box.
+ *)
+(* GM_LAYOUT *)
+ GpLayout=RECORD
+        methodID:LONGCARD;
+        gInfo:GadgetInfoPtr;
+        initial:LONGCARD; (* non-zero if this method was invoked
+                					 * during AddGList() or OpenWindow()
+                					 * time.  zero if this method was invoked
+                					 * during window resizing.
+                					 *)
+       END;
+
+(*- icclass.h -*)
+CONST
+  icmDummy=0401H;       (* used for nothing		*)
+  icmSETLOOP=0402H;     (* set/increment loop counter	*)
+  icmCLEARLOOP=0403H;   (* clear/decrement loop counter	*)
+  icmCHECKLOOP=0404H;   (* set/increment loop		*)
+
+(* no parameters for ICM_SETLOOP, ICM_CLEARLOOP, ICM_CHECKLOOP	*)
+
+(* interconnection attributes used by icclass, modelclass, and gadgetclass *)
+TYPE
+ IcaTags=(icaDummy:=tagUser+040000H,
+        icaTarget,	(* interconnection target		*)
+        icaMap, (* interconnection map tagitem list	*)
+        icspecialCode (* a "pseudo-attribute", see below.	*)
+ );
+
+CONST
+(* Normally, the value for ICA_TARGET is some object pointer,
+ * but if you specify the special value ICTARGET_IDCMP, notification
+ * will be send as an IDCMP_IDCMPUPDATE message to the appropriate window's
+ * IDCMP port.	See the definition of IDCMP_IDCMPUPDATE.
+ *
+ * When you specify ICTARGET_IDCMP for ICA_TARGET, the map you
+ * specify will be applied to derive the attribute list that is
+ * sent with the IDCMP_IDCMPUPDATE message.  If you specify a map list
+ * which results in the attribute tag id ICSPECIAL_CODE, the
+ * lower sixteen bits of the corresponding ti_Data value will
+ * be copied into the Code field of the IDCMP_IDCMPUPDATE IntuiMessage.
+ *)
+ icTargetIDCMP=-1;
+
+(*- imageclass.h -*)
+
+ customImageDepth=-1;
+(* if image.Depth is this, it's a new Image class object *)
+
+TYPE
+ IaTags=(iaDummy:=tagUser+020000H,
+        iaLeft,
+        iaTop,
+        iaWidth,
+        iaHeight,
+        iaFGPen,
+		    (* IA_FGPen also means "PlanePick"	*)
+        iaBGPen,
+		    (* IA_BGPen also means "PlaneOnOff"	*)
+        iaData,
+		    (* bitplanes, for classic image,
+		     * other image classes may use it for other things
+		     *)
+        iaLineWidth,
+        iaShadowPen,
+        iaHighlightPen,
+(**** "sysiclass" attributes			*****)
+        sysiaSize,
+        sysiaDepth,
+		    (* this is unused by Intuition.  SYSIA_DrawInfo
+		     * is used instead for V36
+		     *)
+        sysiaWhich,
+        iaPens,
+		    (* pointer to UWORD pens[],
+		     * ala DrawInfo.Pens, MUST be
+		     * terminated by ~0.  Some classes can
+		     * choose to have this, or SYSIA_DrawInfo,
+		     * or both.
+		     *)
+        iaResolution,
+		    (* packed uwords for x/y resolution into a longword
+		     * ala DrawInfo.Resolution
+		     *)
+
+(**** see class documentation to learn which	*****)
+(**** classes recognize these			*****)
+        iaAPattern,
+        iaAPatSize,
+        iaMode,
+        iaFont,
+        iaOutline,
+        iaRecessed,
+        iaDoubleEmboss,
+        iaEdgesOnly,
+        sysiaDrawInfo,
+(* New for V39: *)
+        sysiaReferenceFont,
+		    (* Font to use as reference for scaling
+		     * certain sysiclass images
+		     *)
+        iaSupportsDisable,
+		    (* By default, Intuition ghosts gadgets itself,
+		     * instead of relying on IDS_DISABLED or
+		     * IDS_SELECTEDDISABLED.  An imageclass that
+		     * supports these states should return this attribute
+		     * as TRUE.  You cannot set or clear this attribute,
+		     * however.
+		     *)
+        iaFrameType
+		    (* Starting with V39, FrameIClass recognizes
+		     * several standard types of frame.  Use one
+		     * of the FRAME_ specifiers below.	Defaults
+		     * to FRAME_DEFAULT.
+		     *)
+       );
+
+(** next attribute: (IA_Dummy + 0x1c)	**)
+(*************************************************)
+
+(* data values for SYSIA_Size	*)
+CONST
+ sysiaPens=iaPens;
+
+ sysisizeMedres=0;
+ sysisizeLowres=1;
+ sysisizeHires= 2;
+
+(*
+ * SYSIA_Which tag data values:
+ * Specifies which system gadget you want an image for.
+ * Some numbers correspond to internal Intuition #defines
+ *)
+ depthImage=00H;  (* Window depth gadget image *)
+ zoomImage=01H;   (* Window zoom gadget image *)
+ sizeImage=02H;   (* Window sizing gadget image *)
+ closeImage=03H;  (* Window close gadget image *)
+ sdepthImage=05H; (* Screen depth gadget image *)
+ leftImage=0AH;   (* Left-arrow gadget image *)
+ upImage=0BH;     (* Up-arrow gadget image *)
+ rightImage=0CH;  (* Right-arrow gadget image *)
+ downImage=0DH;   (* Down-arrow gadget image *)
+ checkImage=0EH;  (* GadTools checkbox image *)
+ mxImage=0FH;     (* GadTools mutual exclude "button" image *)
+(* New for V39: *)
+ menuCheck=10H;   (* Menu checkmark image *)
+ amigakey=11H;    (* Menu Amiga-key image *)
+
+(* Data values for IA_FrameType (recognized by FrameIClass)
+ *
+ * FRAME_DEFAULT:  The standard V37-type frame, which has
+ *	thin edges.
+ * FRAME_BUTTON:  Standard button gadget frames, having thicker
+ *	sides and nicely edged corners.
+ * FRAME_RIDGE:  A ridge such as used by standard string gadgets.
+ *	You can recess the ridge to get a groove image.
+ * FRAME_ICONDROPBOX: A broad ridge which is the standard imagery
+ *	for areas in AppWindows where icons may be dropped.
+ *)
+ frameDefault=0;
+ frameButton=1;
+ frameRidge=2;
+ frameIconDropBox=3;
+ 
+(* image message id's	*)
+ imDraw=202H;     (* draw yourself, with "state"		*)
+ imHitTest=203H;  (* return TRUE if click hits image	*)
+ imErase=204H;    (* erase yourself			*)
+ imMove=205H;     (* draw new and erase old, smoothly	*)
+
+ imDrawFrame=206H;  (* draw with specified dimensions	*)
+ imFrameBox=207H;   (* get recommended frame around some box*)
+ imHitFrame=208H;   (* hittest with dimensions		*)
+ imEraseFrame=209H; (* hittest with dimensions		*)           
+
+(* image draw states or styles, for IM_DRAW *)
+(* Note that they have no bitwise meanings (unfortunately) *)
+ idsNormal=0;
+ idsSelected=1;           (* for selected gadgets	    *)
+ idsDisabled=2;           (* for disabled gadgets	    *)
+ idsBusy=3;               (* for future functionality *)
+ idsIndeterminate=4;      (* for future functionality *)
+ idsInactiveNormal=5;     (* normal, in inactive window border *)
+ idsInactiveSelected=6;   (* selected, in inactive border *)
+ idsInactiveDisabled=7;   (* disabled, in inactive border *)
+ idsSelectedDisabled=8;   (* disabled and selected    *)           
+
+TYPE
+(* IM_FRAMEBOX	*)
+ ImpFrameBox=RECORD
+        methodID:LONGCARD;   
+        contentsBox:IBoxPtr;  (* input: relative box of contents *)
+        frameBox:IBoxPtr;     (* output: rel. box of encl frame  *)
+        drInfo:DrawInfoPtr;   (* NB: May be NULL *)                
+        frameFlags:LONGSET;
+       END;
+
+CONST
+ framefSpecify=LONGSET{0};  (* Make do with the dimensions of FrameBox
+                    				 * provided.
+                    				 *)
+
+TYPE
+(* IM_DRAW, IM_DRAWFRAME	*)
+ ImpDraw=RECORD
+        methodID:LONGCARD;
+        rPort:RastPortPtr;
+        offset:RECORD
+         x:INTEGER;
+         y:INTEGER;
+        END;
+        state:LONGCARD;
+        drInfo:DrawInfoPtr; (* NB: May be NULL *)
+        dimensions:RECORD (* these parameters only valid for IM_DRAWFRAME *)
+         width:INTEGER;
+         height:INTEGER;
+        END;
+       END;
+
+(* IM_ERASE, IM_ERASEFRAME	*)
+(* NOTE: This is a subset of impDraw	*)
+ ImpErase=RECORD
+        methodID:LONGCARD;
+        rPort:RastPortPtr;
+        offset:RECORD
+         x:INTEGER;
+         y:INTEGER;
+        END;
+        dimensions:RECORD
+         width:INTEGER;
+         height:INTEGER;
+        END;
+       END;
+
+(* IM_HITTEST, IM_HITFRAME	*)
+ ImpHitTest=RECORD
+        methodID:LONGCARD;
+        point:Point;
+        dimensions:RECORD
+         width:INTEGER;
+         height:INTEGER;
+        END;
+       END;
+
+(* IntuitionBase *)
+ IntuitionBase=RECORD
+  libNode:Library;
+  viewLord:View;
+  activeWindow:WindowPtr;
+  activeScreen:ScreenPtr;
+  firstScreen:ScreenPtr;
+  flags:LONGSET;
+  mouseY:INTEGER;
+  mouseX:INTEGER;
+  seconds:LONGCARD;
+  micros:LONGCARD;
+ END;
+
+END IntuitionD.

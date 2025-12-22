@@ -1,0 +1,20 @@
+OPT NATIVE
+MODULE 'target/utility/tagitem'
+{#include <gadgets/tapedeck.h>}
+NATIVE {GADGETS_TAPEDECK_H} CONST
+
+NATIVE {TDECK_Dummy}  	    CONST TDECK_DUMMY  	    = (TAG_USER    OR $5000000)
+NATIVE {TDECK_Mode}   	    CONST TDECK_MODE   	    = (TDECK_DUMMY + $1      )
+NATIVE {TDECK_Paused} 	    CONST TDECK_PAUSED 	    = (TDECK_DUMMY + $2      )
+NATIVE {TDECK_Tape}   	    CONST TDECK_TAPE   	    = (TDECK_DUMMY + $3      )
+NATIVE {TDECK_Frames} 	    CONST TDECK_FRAMES 	    = (TDECK_DUMMY + $B      )
+NATIVE {TDECK_CurrentFrame}  CONST TDECK_CURRENTFRAME  = (TDECK_DUMMY + $C	    )
+
+NATIVE {BUT_REWIND}  	    CONST BUT_REWIND  	    = 0
+NATIVE {BUT_PLAY}    	    CONST BUT_PLAY    	    = 1
+NATIVE {BUT_FORWARD} 	    CONST BUT_FORWARD 	    = 2
+NATIVE {BUT_STOP}    	    CONST BUT_STOP    	    = 3
+NATIVE {BUT_PAUSE}   	    CONST BUT_PAUSE   	    = 4
+NATIVE {BUT_BEGIN}   	    CONST BUT_BEGIN   	    = 5
+NATIVE {BUT_FRAME}   	    CONST BUT_FRAME   	    = 6
+NATIVE {BUT_END}     	    CONST BUT_END     	    = 7

@@ -1,0 +1,2259 @@
+WBStartup
+#TESTING=1 ; 1 for development, 0 for finished compile
+If ChipFree<350000
+  If FromCLI
+    NPrint " Failure : Not enough memory"
+    NPrint " Please free some and try again"
+    CNIF #TESTING=1
+      NPrint "Press mouse to end"
+      Repeat
+        VWait 10
+      Until Joyb(0)<>0
+    CEND
+  Else
+    WbToScreen 0
+    ShowScreen 0
+    Window 0,70,40,316,46,$100e,"HotShots by Chris Nash",0,1
+    NPrint ""
+    NPrint "      Failure : Not enough memory"
+    NPrint "    Please free some and try again"
+    Repeat
+      ev.l=WaitEvent
+    Until ev=$200
+  EndIf
+  End
+EndIf
+
+If NOT Exists("HSDaa")
+  If FromCLI
+    NPrint " I cannot find the HotShots data drawer!"
+    NPrint " You need to set the current directory"
+    NPrint " to the path which contains this drawer."
+    CNIF #TESTING=1
+      NPrint "Press mouse to end"
+      Repeat
+        VWait 10
+      Until Joyb(0)<>0
+    CEND
+  Else
+    WbToScreen 0
+    ShowScreen 0
+    Window 0,30,40,360,54,$100e,"HotShots by Chris Nash",0,1
+    NPrint ""
+    NPrint "  I cannot find the HotShots data drawer!"
+    NPrint "  You need to set the current directory"
+    NPrint "  to the path which contains this drawer."
+    Repeat
+      ev.l=WaitEvent
+    Until ev=$200
+  EndIf
+  End
+EndIf
+
+BLITZ
+
+NEWTYPE .spring
+  x.q : y     ; spring coordinate
+  f           ; spring frame for springing
+End NEWTYPE
+Dim top.spring(14)
+Restore topspring
+For ts=0 To 13
+  Read top(ts)\x
+  top(ts)\y=18
+  top(ts)\f=1
+Next ts
+NEWTYPE .character
+  x.q : y          ; player coordinates
+  xt : yt          ; top shape offset
+  tpoint           ; rotation frame number
+  tstill           ; top still shape
+  tshape           ; top shape number
+  tfirst           ; first shape of rotation
+  tlast            ; last shape of rotation
+
+  suck             ; suction state
+                   ; true or false
+  stuck            ; if ball is stuck to gun
+                   ; true or false
+
+  xb : yb          ; bottom shape offset
+  bstill           ; bottom still shape
+  bshape           ; bottom shape number
+  bfirstr          ; first shape of running right
+  blastr           ; last shape of running right
+  bfirstl          ; first shape of running left
+  blastl           ; last shape of running left
+
+  movspd           ; movement speed
+
+  char             ; character number
+  brain            ; whos in control
+                   ; true=human , false=computer
+End NEWTYPE
+NEWTYPE .position : x.q : y : End NEWTYPE
+NEWTYPE .type
+  joy.q           ; true=joystick, false=keyboard
+  left            ; keys used if control
+  right           ; is not a joystick
+  fire            ; ie $45 is escape
+End NEWTYPE
+Dim guy.character(2)
+Dim control.type(2)           ; player keys
+Dim gun.position(2,16)        ; gun offset
+Dim gridblock(2,7,7)
+Dim numblocks(2)
+NEWTYPE .player : score.l : water.q : stam.q : heat.q : End NEWTYPE
+Dim stats.player(2)
+Dim sou(10)    ; for the different samples
+Dim chan(4)    ; see if sound channel was recently used
+NEWTYPE .movers : x.q : y : xs : ys : xa : ya : f : End NEWTYPE
+Dim hotshot.movers(2)
+Dim fkey.movers(10)
+
+control(0)\left=$31
+control(0)\right=$32
+control(0)\fire=$64
+control(1)\left=$4f
+control(1)\right=$4e
+control(1)\fire=$65
+
+bx=148 : by=194
+bxs=0 : bys=0
+bison=False
+maxspeed=5
+blockbounce=maxspeed+3
+air=3
+pluny=187
+plunhit=23
+
+pause=$5f
+haspaused=False
+escape=$45
+chleft=$38
+chright=$39
+chup=$2a
+chdown=$3a
+
+CNIF #TESTING=0
+  SetErr
+    End
+  End SetErr
+CEND
+
+Function .q Angle{x1.q, y1.q, x2.q, y2.q}
+  deg.q=(ASin((x1-x2)/320)/Pi)*180
+
+  If y1<y2
+    deg=180-deg
+  Else
+    If x1<x2
+      deg=360-deg
+    EndIf
+  EndIf
+
+  Function Return deg
+End Function
+
+Gosub getoptions
+
+QAMIGA
+If logo
+  LoadAnim 0,"HSDaa/calm",0
+  LoadSound 0,"HSDaa/drum"
+  LoadSound 1,"HSDaa/orch"
+  InitPalette 2,8
+  FadePalette 0,2,0.4
+  FadePalette 2,0,1
+EndIf
+
+;Delay_(2000)
+BLITZ
+BitMap 4,320,256,4
+BitMap 5,320,256,4
+
+BlitzKeys On : BlitzRepeat 0,0
+Mouse On : MouseArea 0,0,320,256
+InitCopList 0,44,256,$4,8,16,-2
+DisplayBitMap 0,4
+CreateDisplay 0
+Use BitMap 4
+db=4
+
+.logo
+If logo
+  DisplayPalette 0,0
+  InitAnim 0,5
+  current=0 : animover=False
+  VWait 50
+  Repeat
+    DisplayBitMap 0,db
+    VWait
+    db=9-db
+    Use BitMap db
+    NextFrame 0
+    current+1
+    If current=7 : Sound 0,%1100,64,48 : VWait 10 : EndIf
+    If current=14 : Sound 0,%0011,48,64 : VWait 10 : EndIf
+    If current=19 : Sound 0,%1100,64,48 : VWait 10 : EndIf
+    If current=24 : Sound 0,%0011,48,64 : VWait 10 : EndIf
+    If current=29 : Sound 0,%1111 : animover=True : EndIf
+    If Joyb(0)>0 OR Joyb(1)>0 OR Inkey$<>"" Then Goto calmover
+  Until animover
+  VWait 30
+  For count=1 To 2.5 Step 0.25
+    FadePalette 2,0,count
+    DisplayPalette 0,0
+    If count=2 Then Sound 1,%1111
+    VWait
+  Next count
+  VWait 70
+  calmover:
+  pal=0 : Gosub fadeitout
+  Free Sound 0
+  Free Sound 1
+  Free Anim 0
+  Free Palette 2
+EndIf
+
+BitMap 1,320,256,1
+BitMap 2,320,256,1
+BitMap 0,320,256,4
+BitMap 7,320,256,4
+
+Buffer 0,1024 : Buffer 4,1024
+Buffer 1,2048 : Buffer 5,2048
+Buffer 3,8192 : Buffer 6,8192
+Buffer 2,1024 : Buffer 7,1024
+Queue 0,1
+
+QAMIGA
+LoadShapes 1,"HSDaa/objects"
+
+For count=33 To 80
+  Free Shape count
+Next count
+For count=100 To 120
+  Free Shape count
+Next count
+For count=135 To 155
+  Free Shape count
+Next count
+
+LoadSound 0,"HSDaa/bounce"
+LoadSound 1,"HSDaa/side&top"
+LoadSound 2,"HSDaa/plunger"
+LoadSound 3,"HSDaa/block"
+
+;Delay_(2000)
+BLITZ
+;CopyShape 326,231
+CopyShape 328,231
+CopyShape 327,232
+
+If title Then Gosub titlescreen
+Gosub optionscreen
+
+guy(0)\char=1
+guy(1)\char=2
+Gosub getguybits
+Dim tls(2)
+tls(0)=-1 : tls(1)=-1
+
+Gosub setfirstgame
+Gosub main
+Goto quit
+
+.main
+  Gosub setlevel
+  BitMap 3,320,256,1 : Cls 0
+  Gosub setblocks
+  DisplayBitMap 0,0
+  DisplayPalette 0,0
+  Gosub initrain
+  Repeat
+    tim=QWrap(tim+1,1,9)
+    time-1
+    If time<0 Then Goto quit
+    ;If time<0 : Stop : Goto quit : EndIf
+
+    If bison=False AND bfra=-1 Then bfra=0
+    If bfra<>-1
+      Gosub shootball
+      bfra+1
+    EndIf
+    For maincount=0 To 1
+      If guy(maincount)\brain=True
+        jo=1-maincount
+        If control(maincount)\joy=True Then Gosub readjoy Else Gosub readkey
+      EndIf
+      If guy(maincount)\brain=False AND (tim=1 OR tim=3 OR tim=5 OR tim=7) Then Gosub amigaintelligence
+      If tim=3 OR tim=4 OR tim=7 OR tim=8
+        USEPATH guy(maincount)
+        If \stuck=False AND \suck=True Then Gosub computesuck
+      EndIf
+      If guy(maincount)\stuck=True Then Gosub computestuck
+    Next maincount
+    If guy(0)\stuck=False AND guy(1)\stuck=False
+      If shootout=-1 Then Gosub computeobjects
+      If by>28 AND by<110 AND (bx<140 OR bx>180) Then Gosub blocks
+      If bison=True Then Gosub computeball
+    EndIf
+    Gosub sounds
+    Gosub computeguys
+    If magnet Then Gosub computemagnet
+    If tim=3 AND (tls(0)<>stats(0)\score OR tls(1)<>stats(1)\score)
+      Gosub drawscore
+      tls(0)=stats(0)\score
+      tls(1)=stats(1)\score
+    EndIf
+    Gosub television
+    Gosub blitall
+    If tim=1 OR tim=4 Then Gosub goodies
+    Gosub hitgoodies
+    If NOT RawStatus(pause) Then haspaused=False
+    If RawStatus(pause) AND haspaused=False
+      haspaused=True
+      Repeat : Until NOT RawStatus(pause)
+      Repeat : Until RawStatus(pause) OR RawStatus(escape)
+    EndIf
+    If RawStatus(escape) Then wannaquit=True
+  ;  MOVE.w -1,$dff180
+  Until wannaquit
+  For count=0 To 4
+    Free BitMap count
+  Next
+Return
+
+.quit
+  End
+Return
+
+.setlevel
+  QAMIGA
+  Select level
+    Case 1
+      LoadBitMap 1,"HSDaa/mainx"
+      LoadBitMap 2,"HSDaa/mainy"
+      LoadBitMap 0,"HSDaa/main",0
+      CopyBitMap 0,4
+  End Select
+  BLITZ
+Return
+
+.setfirstgame
+  stats(0)\score=0
+  stats(1)\score=0
+  stats(0)\water=0
+  stats(1)\water=0
+  stats(0)\stam=51
+  stats(1)\stam=51
+  stats(0)\heat=17
+  stats(1)\heat=17
+
+  tim=0 : db=0 : bdb=2
+  bfra=-1 : shootout=3
+  gogood=-1 : stopgood=-1
+  goodon=-1 : curgood=0
+  hitgood=False : goodcount=-1
+  time=4000
+  lasthad=-1
+  magx=160 : magy=70
+  magxs=0 : magys=0
+  magnet=False
+  ying=False
+  tv=0 : tvframe=384 : tvtime=-1
+  manwait=300 : lastman=1
+  wannaquit=False
+  level=1
+Return
+
+.television
+  ; tv:  0=whitenoise (qushhchhshh)
+  ;      1=get ready
+  ;      2=great shot
+  ;      3=dead in water
+  ;      4=player 1 wins
+  ;      5=player 2 wins
+  ;      6=extra time
+  ;      7=magnet
+  ;      8=score
+  ;      9=swap sides
+  ;     10=blank
+  ;     11=man
+
+  If tvtime<>-1
+    tvtime-1
+    If tvtime=0
+      tv=0
+      tvtime=-1
+      tvframe=391
+    EndIf
+  EndIf
+  If tv=0 Then manwait-1
+  If tv<>0 AND tv<>10 AND tv<>11 Then manwait=300
+  If manwait<0 : manwait=0 : tv=11 : tvtime=400 : lastman=1 : EndIf
+  If tv=11
+    Select lastman
+      Case 1
+        Select tvtime
+          Case 400 : tvframe=341
+          Case 350
+            Select QWrap(Int(Rnd(9)),0,8)
+              Case 0 : lastman=2
+              Case 1 : lastman=2  ; talk
+              Case 2 : lastman=2
+              Case 3 : lastman=3  ; look left
+              Case 4 : lastman=4  ; look right
+              Case 5 : lastman=5  ; look up
+              Case 6 : lastman=6  ; look down
+            End Select
+          Case 300 : tvtime=50
+          Case 10 : tv=0 : tvframe=389 : manwait=300
+        End Select
+      Case 2
+        Select tvtime
+          Case 340 : tvframe=342
+          Case 330 : tvframe=341
+          Case 320 : tvframe=342
+          Case 310 : tvframe=341
+          Case 290 : lastman=1
+        End Select
+      Case 3
+        Select tvtime
+          Case 300 : tvframe=343
+          Case 200 : tvframe=341 : lastman=1
+        End Select
+      Case 4
+        Select tvtime
+          Case 300 : tvframe=344
+          Case 200 : tvframe=341 : lastman=1
+        End Select
+      Case 5
+        Select tvtime
+          Case 300 : tvframe=345
+          Case 230 : tvframe=341 : lastman=1
+        End Select
+      Case 6
+        Select tvtime
+          Case 300 : tvframe=346
+          Case 150 : tvframe=341 : lastman=1
+        End Select
+    End Select
+  EndIf
+  If tv=0 Then tvframe=QWrap(tvframe+1,384,392)
+  If tim=1 OR tim=4
+    Select tv
+      Case 1  : tvframe=QWrap(tvframe+1,350,352)
+      Case 2  : tvframe=QWrap(tvframe+1,352,354)
+      Case 3  : tvframe=QWrap(tvframe+1,354,360)
+      Case 4  : tvframe=QWrap(tvframe+1,360,368)
+      Case 5  : tvframe=QWrap(tvframe+1,368,376)
+      Case 6  : tvframe=QWrap(tvframe+1,376,384)
+      Case 7  : tvframe=QWrap(tvframe+1,393,396)
+      Case 8  : tvframe=QWrap(tvframe+1,396,398)
+      Case 9  : tvframe=QWrap(tvframe+1,398,400)
+      Case 10 : tvframe=392
+    End Select
+  EndIf
+Return
+
+.goodies
+  If ((stats(0)\score+stats(1)\score)-(p1s+p2s)>3) AND gogood=-1 AND goodon=-1 AND hitgood=False Then gogood=0
+  If gogood<>-1
+    gogood+1
+    If gogood>3
+      gogood=-1
+      goodon=400
+      Repeat
+        curgood=Int(Rnd(8))
+      Until curgood=0 OR (curgood>3 AND curgood<7)
+    EndIf
+  EndIf
+  If goodon<>-1
+    goodon-4
+    If goodon<0
+      stopgood=3
+      goodon=-1
+    EndIf
+  EndIf
+  If stopgood<>-1
+    stopgood-1
+    If stopgood<0 Then stopgood=-1
+  EndIf
+  p1s=stats(0)\score
+  p2s=stats(1)\score
+Return
+
+.hitgoodies
+  Use BitMap db
+  If goodon<>-1 AND ShapesHit(231,bx,by,431+curgood,160,70)
+    goodon=-1
+    hitgood=True
+    goodcount=0
+  EndIf
+  If stopgood<>-1 AND ShapesHit(231,bx,by,410+stopgood,160,70)
+    stopgood=-1
+    hitgood=True
+    goodcount=0
+  EndIf
+  If hitgood=True
+    goodcount+1
+    Select curgood
+      Case 0   ; clock
+        If goodcount=1
+          time+750
+          tv=6 : tvtime=200
+          tvframe=376
+        EndIf
+        If goodcount>200
+          hitgood=False
+          goodcount=-1
+        EndIf
+      Case 4   ; magnet
+        If goodcount=1
+          magx=160 : magy=130
+          magxs=QWrap(Rnd(3),1.4,2.2) : magys=QWrap(Rnd(3),1.0,1.8)
+          magnet=True
+          tv=7 : tvtime=300
+          tvframe=393
+        EndIf
+        If goodcount>1500
+          hitgood=False
+          goodcount=-1
+          magnet=False
+        EndIf
+      Case 5   ; score
+        If goodcount=1 AND lasthad=-1
+          tv=10 : tvtime=150
+          tvframe=392
+        EndIf
+        If goodcount=1 AND lasthad>-1
+          stats(lasthad)\score+30
+          tv=8 : tvtime=300
+          tvframe=396
+        EndIf
+        If goodcount>200
+          hitgood=False
+          goodcount=-1
+        EndIf
+      Case 6   ; swap sides
+        If goodcount=1
+          ying=True
+          tv=9 : tvtime=300
+          tvframe=398
+        EndIf
+        If goodcount>800
+          hitgood=False
+          goodcount=-1
+          ying=False
+        EndIf
+    End Select
+  EndIf
+Return
+
+.computemagnet
+  If bx<magx Then bxs+0.25
+  If bx<magx-40 Then bxs-0.125
+  If bx>magx Then bxs-0.25
+  If bx>magx+40 Then bxs+0.125
+
+  If by<magy Then bys+0.25
+  If by<magy-30 Then bys-0.125
+  If by>magy Then bys-0.25
+  If by>magy+30 Then bys+0.125
+
+  Use BitMap 1
+  If BlitColl(249,magx,magy)
+    magxs=-magxs
+    magx+(magxs*2.5)
+  EndIf
+  magx+magxs
+
+  Use BitMap 2
+  If BlitColl(249,magx,magy)
+    magys=-magys
+    magy+(magys*1.66)
+  EndIf
+  If magy<100 AND magys<0 Then magys=-magys
+  magy+magys
+Return
+
+.amigaintelligence
+  If ying Then temp=1-maincount Else temp=maincount
+  USEPATH guy(temp)
+
+  If bx>bxoveride-10 AND bx<bxoveride+10 AND by>byoveride-20 AND by<byoveride+20
+    overidewait+1
+    If overidewait>200
+      giveoveride+10
+      If giveoveride>100 Then giveoveride=50
+    EndIf
+  Else
+    overidewait=0
+    giveoveride-1
+  EndIf
+  giveoveride-1 : If giveoveride<0 Then giveoveride=0
+  bxoveride=bx : byoveride=by
+
+  If \stuck=False
+    If \suck=True
+      If Int(Rnd(4))=1 Then \suck=False
+    Else
+      If Int(Rnd(4))=1 Then \suck=True
+    EndIf
+    If Sqr(((bx-\x)*(bx-\x))+((by-\y)*(by-\y)))<80 OR giveoveride<>0
+      degree=(Angle{\x,\y,bx,by}*360)+90
+      If degree>348.8 Then degree-360
+      degree=Int(degree/22.5)+1
+      If \tpoint<>degree
+        If \tpoint<=5 AND degree>=13 Then degree-17
+        If \tpoint>=13 AND degree<=5 Then degree+16
+        If degree>\tpoint
+          \tshape+1
+          \tpoint+1
+        EndIf
+        If degree<\tpoint
+          \tshape-1
+          \tpoint-1
+        EndIf
+      EndIf
+    EndIf
+  Else
+    lasthad=temp
+    If \tpoint>=13 OR \tpoint<=5
+      If Int(Rnd(9))=1 Then \suck=False
+      If Int(Rnd(4))=1 AND (\tpoint>=16 OR \tpoint<=2) Then \suck=False
+      If Int(Rnd(2))=1 AND stats(temp)\heat<2 Then \suck=False
+    EndIf
+    If \tpoint>=9 AND \tpoint<16
+      \tshape+1 : \tpoint+1
+    EndIf
+    If \tpoint<9 AND \tpoint>2
+      \tshape-1 : \tpoint-1
+    EndIf
+    If \tpoint=oldtpoint OR \tpoint=oldoldtpoint OR (\tpoint>9 AND Int(Rnd(8))=1)
+      \tshape+1 : \tpoint+1
+      Goto done
+    EndIf
+    If \tpoint=oldtpoint OR \tpoint=oldoldtpoint OR (\tpoint<=9 AND Int(Rnd(8))=1)
+      \tshape-1 : \tpoint-1
+    EndIf
+    done:
+  EndIf
+  oldoldtpoint=oldtpoint
+  oldtpoint=\tpoint
+  If \tshape>\tlast
+    \tshape=\tfirst
+    \tpoint=1
+  EndIf
+  If \tshape<\tfirst
+    \tshape=\tlast
+    \tpoint=16
+  EndIf
+  If \suck=False
+    \stuck=False
+    If Int(Rnd(2))=1
+      If bx>\x
+        \x+\movspd
+        If (\bshape=\bstill)OR(\bshape>=\bfirstl AND \bshape<=\blastl) Then \bshape=\blastr
+        \bshape+1
+        If \bshape>\blastr Then \bshape=\bfirstr
+      EndIf
+      If bx<\x
+        \x-\movspd
+        If (\bshape=\bstill)OR(\bshape>=\bfirstr AND \bshape<=\blastr) Then \bshape=\blastl
+        \bshape+1
+        If \bshape>\blastl Then \bshape=\bfirstl
+      EndIf
+    EndIf
+  Else
+    \bshape=\bstill
+  EndIf
+Return
+
+.shootball
+    ; 1 = left
+    ; 2 = right
+    ; 3 = top
+
+  Select shootout
+    Case 1
+      If bfra>=0 AND bfra<=10
+          bx=10 : by=199
+          bxs=0 : bys=0
+      EndIf
+      Select bfra
+        Case 11 : bx=10 : by=193
+        Case 12 : bx=10 : by=188
+        Case 13 : bx=10 : by=183
+        Case 14 : bx=10 : by=178
+        Case 15 : bx=10 : by=173
+          Use BitMap db
+          Blit 240,17,156
+          Use BitMap 4-db
+          Blit 240,17,156
+        Case 16 : bx=10 : by=168
+          Use BitMap db
+          Blit 241,17,156
+          Use BitMap 4-db
+          Blit 241,17,156
+        Case 17 : bx=10 : by=163
+          Use BitMap db
+          Blit 242,17,156
+          Use BitMap 4-db
+          Blit 242,17,156
+        Case 18 : bx=10 : by=158
+        Case 19 : bx=10 : by=153
+        Case 20 : bx=12 : by=149
+        Case 21 : bx=17 : by=144
+        Case 22 : bx=22 : by=139
+          bxs=5 : bys=-5
+          bison=True
+        Case 33
+          Use BitMap db
+          Blit 241,17,156
+          Use BitMap 4-db
+          Blit 241,17,156
+        Case 34
+          Use BitMap db
+          Blit 240,17,156
+          Use BitMap 4-db
+          Blit 240,17,156
+          bfra=-2 : shootout=-1
+      End Select
+    Case 2
+      Select bfra
+        Case 0
+          bx=309 : by=199
+          bxs=0 : bys=0
+        Case 11 : bx=309 : by=193
+        Case 12 : bx=309 : by=188
+        Case 13 : bx=309 : by=183
+        Case 14 : bx=309 : by=178
+        Case 15 : bx=309 : by=173
+          Use BitMap db
+          Blit 243,303,156
+          Use BitMap 4-db
+          Blit 243,303,156
+        Case 16 : bx=309 : by=168
+          Use BitMap db
+          Blit 244,303,156
+          Use BitMap 4-db
+          Blit 244,303,156
+        Case 17 : bx=309 : by=163
+          Use BitMap db
+          Blit 245,303,156
+          Use BitMap 4-db
+          Blit 245,303,156
+        Case 18 : bx=309 : by=158
+        Case 19 : bx=309 : by=153
+        Case 20 : bx=307 : by=149
+        Case 21 : bx=302 : by=144
+        Case 22 : bx=297 : by=139
+          bxs=-5 : bys=-5
+          bison=True
+        Case 33
+          Use BitMap db
+          Blit 244,303,156
+          Use BitMap 4-db
+          Blit 244,303,156
+        Case 34
+          Use BitMap db
+          Blit 243,303,156
+          Use BitMap 4-db
+          Blit 243,303,156
+          bfra=-2 : shootout=-1
+      End Select
+    Case 3
+      Select bfra
+        Case 0
+          bx=148 : by=194
+          bxs=0 : bys=0
+        Case 10
+          Use BitMap db
+          BlitMode CookieMode
+          Blit 246,160,14
+          Blit 247,160,11
+          Use BitMap 4-db
+          BlitMode CookieMode
+          Blit 246,160,14
+          Blit 247,160,11
+        Case 12
+          Use BitMap db
+          BlitMode EraseMode
+          Blit 246,160,14
+          BlitMode CookieMode
+          Blit 246,160,18
+          Blit 247,160,11
+          Use BitMap 4-db
+          BlitMode EraseMode
+          Blit 246,160,14
+          BlitMode CookieMode
+          Blit 246,160,18
+          Blit 247,160,11
+        Case 14
+          bx=159 : by=24
+          bxs=0 : bys=7
+          bison=True
+        Case 26
+          Use BitMap db
+          BlitMode EraseMode
+          Blit 246,160,18
+          BlitMode CookieMode
+          Blit 246,160,14
+          Blit 247,160,11
+          Use BitMap 4-db
+          BlitMode EraseMode
+          Blit 246,160,18
+          BlitMode CookieMode
+          Blit 246,160,14
+          Blit 247,160,11
+        Case 28
+          Use BitMap db
+          BlitMode EraseMode
+          Blit 246,160,14
+          BlitMode CookieMode
+          Blit 247,160,11
+          Use BitMap 4-db
+          BlitMode EraseMode
+          Blit 246,160,14
+          BlitMode CookieMode
+          Blit 247,160,11
+          bfra=-2 : shootout=-1
+      End Select
+  End Select
+Return
+
+.drawstats
+  USEPATH stats(0)
+;player ones strength
+  Boxf 53+\stam,215,104,221,10
+  Boxf 53,215,53+\stam,221,5
+;player ones gun overheat
+  Boxf 95,224,100,241-\heat,10
+  Boxf 95,241-\heat,100,241,6
+
+  USEPATH stats(1)
+;player twos strength
+  Boxf 215+\stam,215,266,221,10
+  Boxf 215,215,215+\stam,221,5
+;player twos gun overheat
+  Boxf 219,224,224,241-\heat,10
+  Boxf 219,241-\heat,224,241,6
+Return
+
+.drawscore
+  startx=-5
+  For sides=0 To 1
+    tstaties.l=stats(sides)\score
+    If tstaties>9999999 Then tstaties=-10000000+tstaties
+    flag=0 : stri$=Str$(tstaties)
+    retry:
+    If Len(stri$)<7
+      stri$="0"+stri$
+      Goto retry
+    EndIf
+    For scocount=1 To 7
+      startx+13
+      tempnum=Val(Mid$(stri$,scocount,1))
+      If tempnum=0 AND flag=0
+        Use BitMap db
+        Blit 340,startx,233
+        Use BitMap 4-db
+        Blit 340,startx,233
+      EndIf
+      If tempnum=0 AND (flag=1 OR scocount=7)
+        Use BitMap db
+        Blit 330,startx,233
+        Use BitMap 4-db
+        Blit 330,startx,233
+      EndIf
+      If tempnum>0
+        Use BitMap db
+        Blit 330+tempnum,startx,233
+        Use BitMap 4-db
+        Blit 330+tempnum,startx,233
+        flag=1
+      EndIf
+    Next scocount
+    startx=220
+  Next sides
+Return
+
+.blocks
+  If bx<160
+    t=0
+    xstart=Int((bx-24)/18)-1
+    xend=Int((bx-24)/18)+1
+    ystart=Int((by-45)/8)-1
+    yend=Int((by-45)/8)+1
+    ptemp=24
+  Else
+    t=1
+    xstart=Int((bx-188)/18)-1
+    xend=Int((bx-188)/18)+1
+    ystart=Int((by-45)/8)-1
+    yend=Int((by-45)/8)+1
+    ptemp=188
+  EndIf
+  If xstart<0 Then xstart=0 Else If xstart>6 Then xstart=6
+  If xend<0 Then xend=0 Else If xend>6 Then xend=6
+  If ystart<0 Then ystart=0 Else If ystart>6 Then ystart=6
+  If yend<0 Then yend=0 Else If yend>6 Then yend=6
+
+  If ying Then tempstat=1-t Else tempstat=t
+  For ytemp=ystart To yend
+  For xtemp=xstart To xend
+  If gridblock(t,xtemp,ytemp)<>0
+    If ShapesHit(232,bx,by,253,(xtemp*18)+ptemp,(ytemp*8)+45)
+      bys*-20
+      If bys>maxspeed Then bys=blockbounce
+      If bys<-maxspeed Then bys=-blockbounce
+      by+(bys/2)
+      stats(tempstat)\score+gridblock(t,xtemp,ytemp)
+      gridblock(t,xtemp,ytemp)=0 : numblocks(t)-1
+      BlitMode EraseMode
+      Use BitMap db
+      UnBuffer db
+      UnBuffer bdb
+      Blit 251,(xtemp*18)+ptemp,(ytemp*8)+45
+      BlitMode CookieMode
+      BBlit db,231,bx,by
+      If magnet Then BBlit db,248,magx,magy
+      If gogood<>-1 Then BBlit bdb,410+gogood,160,70
+      If goodon<>-1 Then BBlit bdb,431+curgood,160,70
+      If stopgood<>-1 Then BBlit bdb,410+stopgood,160,70
+      BlitMode EraseMode
+      Use BitMap 4-db
+      UnBuffer 4-db
+      UnBuffer 9-bdb
+      Blit 251,(xtemp*18)+ptemp,(ytemp*8)+45
+      BlitMode CookieMode
+      BBlit 4-db,231,bx,by
+      If magnet Then BBlit 4-db,248,magx,magy
+      If gogood<>-1 Then BBlit 9-bdb,410+gogood,160,70
+      If goodon<>-1 Then BBlit 9-bdb,431+curgood,160,70
+      If stopgood<>-1 Then BBlit 9-bdb,410+stopgood,160,70
+      sou(3)=True
+    EndIf
+    If ShapesHit(232,bx,by,252,(xtemp*18)+ptemp,(ytemp*8)+45)
+      bxs*-20
+      If bxs>maxspeed Then bxs=blockbounce
+      If bxs<-maxspeed Then bxs=-blockbounce
+      bx+(bxs/2)
+      stats(tempstat)\score+gridblock(t,xtemp,ytemp)
+      gridblock(t,xtemp,ytemp)=0 : numblocks(t)-1
+      BlitMode EraseMode
+      Use BitMap db
+      UnBuffer db
+      Blit 251,(xtemp*18)+ptemp,(ytemp*8)+45
+      Use BitMap 4-db
+      UnBuffer 4-db
+      Blit 251,(xtemp*18)+ptemp,(ytemp*8)+45
+      BlitMode CookieMode
+      sou(3)=True
+    EndIf
+  EndIf
+  Next xtemp
+  Next ytemp
+Return
+
+.setblocks
+  ptemp=24
+  For t=0 To 1 : col=7
+  For ytemp=0 To 6 : col-1
+  If col<1 Then col=1
+  For xtemp=0 To 6
+    Use BitMap db
+    Blit 223+col,(xtemp*18)+ptemp,(ytemp*8)+45
+    Use BitMap 4-db
+    Blit 223+col,(xtemp*18)+ptemp,(ytemp*8)+45
+    gridblock(t,xtemp,ytemp)=col
+  Next xtemp
+  Next ytemp
+  ptemp=188
+  Next t
+Return
+
+.sounds
+  For soucount=0 To 3
+    chan(3)=False
+  Next soucount
+  For snd=0 To 9
+    If sou(snd)=True
+      sou(snd)=False
+      temp=5
+      For co=0 To 3
+        If chan(co)=False AND temp=5 Then temp=co
+      Next co
+      If temp=5 Then temp=0
+      Select temp
+        Case 0 : temp=1
+        Case 1 : temp=2
+        Case 2 : temp=4
+        Case 3 : temp=8
+      End Select
+      Sound snd,temp
+    EndIf
+  Next snd
+Return
+
+.computestuck
+  USEPATH guy(maincount)
+  bx=\x+gun(maincount,\tpoint-1)\x
+  by=\y+gun(maincount,\tpoint-1)\y
+  Select \tpoint
+    Case 1  : bxs=0   : bys=-27
+    Case 2  : bxs=5   : bys=-25
+    Case 3  : bxs=8   : bys=-20
+    Case 4  : bxs=9   : bys=-8
+    Case 5  : bxs=10  : bys=0
+    Case 6  : bxs=7.5 : bys=2.5
+    Case 7  : bxs=5   : bys=5
+    Case 8  : bxs=2.5 : bys=7.5
+    Case 9  : bxs=0   : bys=10
+    Case 10 : bxs=-2.5: bys=7.5
+    Case 11 : bxs=-5  : bys=5
+    Case 12 : bxs=-7.5: bys=2.5
+    Case 13 : bxs=-10 : bys=0
+    Case 14 : bxs=-9  : bys=-8
+    Case 15 : bxs=-8  : bys=-20
+    Case 16 : bxs=-5  : bys=-25
+  End Select
+Return
+
+.computesuck
+  USEPATH guy(maincount)
+  Select \tpoint
+    Case 1
+      If by<\y
+        bys+0.1
+        If bx<\x-30 Then bxs+0.2
+        If bx>\x-30 AND bx<\x-10 Then bxs+0.4
+        If bx>\x-10 AND bx<\x Then bxs+0.8
+        If bx>\x AND bx<\x+10 Then bxs-0.8
+        If bx>\x+10 AND bx<\x+30 Then bxs-0.4
+        If bx>\x+30 Then bxs-0.2
+      EndIf
+      If by>\y
+        If bx<\x-30 Then bxs+0.1
+        If bx>\x-30 AND bx<\x-10 Then bxs+0.2
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+10 Then bxs-0.1
+        If bx>\x+10 AND bx<\x+30 Then bxs-0.2
+        If bx>\x+30 Then bxs-0.1
+      EndIf
+    Case 2
+      If by<\y
+        bys+0.1
+        If bx<\x-10 Then bxs+0.2
+        If bx>\x-10 AND bx<\x Then bxs+0.6
+        If bx>\x AND bx<\x+10 Then bxs-0.8
+        If bx>\x+10 AND bx<\x+30 Then bxs-0.4
+        If bx>\x+30 Then bxs-0.2
+      EndIf
+      If by>\y
+        If bx<\x-10 Then bxs+0.1
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+10 Then bxs-0.1
+        If bx>\x+10 AND bx<\x+30 Then bxs-0.2
+        If bx>\x+30 Then bxs-0.1
+      EndIf
+    Case 3
+      If by<\y
+        bys+0.1
+        If bx<\x-10 Then bxs+0.1
+        If bx>\x-10 AND bx<\x Then bxs+0.4
+        If bx>\x AND bx<\x+10 Then bxs-0.4
+        If bx>\x+10 AND bx<\x+30 Then bxs-0.6
+        If bx>\x+30 Then bxs-0.4
+      EndIf
+      If by>\y
+        If bx<\x-10 Then bxs+0.1
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+10 Then bxs-0.2
+        If bx>\x+10 AND bx<\x+30 Then bxs-0.2
+        If bx>\x+30 Then bxs-0.1
+      EndIf
+    Case 4
+      If by<\y
+        bys+0.1
+        If bx>\x-10 AND bx<\x Then bxs+0.2
+        If bx>\x AND bx<\x+20 Then bxs-0.4
+        If bx>\x+20 AND bx<\x+40 Then bxs-0.8
+        If bx>\x+40 Then bxs-0.6
+      EndIf
+      If by>\y
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+20 Then bxs-0.2
+        If bx>\x+20 AND bx<\x+40 Then bxs-0.4
+        If bx>\x+40 Then bxs-0.2
+      EndIf
+    Case 5
+      If by<\y
+        bys+0.1
+        If bx>\x-10 AND bx<\x Then bxs+0.2
+        If bx>\x AND bx<\x+20 Then bxs-0.4
+        If bx>\x+20 AND bx<\x+40 Then bxs-0.8
+        If bx>\x+40 Then bxs-0.6
+      EndIf
+      If by>\y
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+20 Then bxs-0.2
+        If bx>\x+20 AND bx<\x+40 Then bxs-0.4
+        If bx>\x+40 Then bxs-0.2
+      EndIf
+    Case 6
+      If by<\y
+        bys+0.1
+        If bx>\x-10 AND bx<\x Then bxs+0.2
+        If bx>\x AND bx<\x+20 Then bxs-0.4
+        If bx>\x+20 AND bx<\x+40 Then bxs-0.8
+        If bx>\x+40 Then bxs-0.6
+      EndIf
+      If by>\y
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+20 Then bxs-0.2
+        If bx>\x+20 AND bx<\x+40 Then bxs-0.4
+        If bx>\x+40 Then bxs-0.2
+      EndIf
+    Case 7
+      If by<\y
+        bys+0.1
+        If bx>\x-10 AND bx<\x Then bxs+0.2
+        If bx>\x AND bx<\x+20 Then bxs-0.4
+        If bx>\x+20 AND bx<\x+40 Then bxs-0.8
+        If bx>\x+40 Then bxs-0.6
+      EndIf
+      If by>\y
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+20 Then bxs-0.2
+        If bx>\x+20 AND bx<\x+40 Then bxs-0.4
+        If bx>\x+40 Then bxs-0.2
+      EndIf
+    Case 8
+      If by<\y
+        bys+0.1
+        If bx>\x-10 AND bx<\x Then bxs+0.2
+        If bx>\x AND bx<\x+10 Then bxs-0.4
+        If bx>\x+10 AND bx<\x+30 Then bxs-0.6
+        If bx>\x+30 Then bxs-0.4
+      EndIf
+      If by>\y
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+10 Then bxs-0.2
+        If bx>\x+10 AND bx<\x+30 Then bxs-0.2
+        If bx>\x+30 Then bxs-0.1
+      EndIf
+    Case 9
+      If by<\y
+        If bx<\x-30 Then bxs+0.2
+        If bx>\x-30 AND bx<\x-10 Then bxs+0.4
+        If bx>\x-10 AND bx<\x Then bxs+0.8
+        If bx>\x AND bx<\x+10 Then bxs-0.8
+        If bx>\x+10 AND bx<\x+30 Then bxs-0.4
+        If bx>\x+30 Then bxs-0.2
+      EndIf
+      If by>\y
+        If bx<\x-30 Then bxs+0.1
+        If bx>\x-30 AND bx<\x-10 Then bxs+0.2
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+10 Then bxs-0.1
+        If bx>\x+10 AND bx<\x+30 Then bxs-0.2
+        If bx>\x+30 Then bxs-0.1
+      EndIf
+    Case 10
+      If by<\y
+        bys+0.1
+        If bx<\x-30 Then bxs+0.4
+        If bx<\x-10 AND bx>\x-30 Then bxs+0.6
+        If bx<\x AND bx>\x-10 Then bxs+0.4
+        If bx<\x+10 AND bx>\x Then bxs-0.2
+      EndIf
+      If by>\y
+        If bx<\x-30 Then bxs+0.1
+        If bx<\x-10 AND bx>\x-30 Then bxs+0.2
+        If bx<\x AND bx>\x-10 Then bxs+0.2
+        If bx<\x+10 AND bx>\x Then bxs-0.1
+      EndIf
+    Case 11
+      If by<\y
+        bys+0.1
+        If bx<\x-40 Then bxs+0.6
+        If bx<\x-20 AND bx>\x-40 Then bxs+0.8
+        If bx<\x AND bx>\x-20 Then bxs+0.4
+        If bx<\x+10 AND bx>\x Then bxs-0.2
+      EndIf
+      If by>\y
+        If bx<\x-40 Then bxs+0.2
+        If bx<\x-20 AND bx>\x-40 Then bxs+0.4
+        If bx<\x AND bx>\x-20 Then bxs+0.2
+        If bx<\x+10 AND bx>\x Then bxs-0.1
+      EndIf
+    Case 12
+      If by<\y
+        bys+0.1
+        If bx<\x-40 Then bxs+0.6
+        If bx<\x-20 AND bx>\x-40 Then bxs+0.8
+        If bx<\x AND bx>\x-20 Then bxs+0.4
+        If bx<\x+10 AND bx>\x Then bxs-0.2
+      EndIf
+      If by>\y
+        If bx<\x-40 Then bxs+0.2
+        If bx<\x-20 AND bx>\x-40 Then bxs+0.4
+        If bx<\x AND bx>\x-20 Then bxs+0.2
+        If bx<\x+10 AND bx>\x Then bxs-0.1
+      EndIf
+    Case 13
+      If by<\y
+        bys+0.1
+        If bx<\x-40 Then bxs+0.6
+        If bx<\x-20 AND bx>\x-40 Then bxs+0.8
+        If bx<\x AND bx>\x-20 Then bxs+0.4
+        If bx<\x+10 AND bx>\x Then bxs-0.2
+      EndIf
+      If by>\y
+        If bx<\x-40 Then bxs+0.2
+        If bx<\x-20 AND bx>\x-40 Then bxs+0.4
+        If bx<\x AND bx>\x-20 Then bxs+0.2
+        If bx<\x+10 AND bx>\x Then bxs-0.1
+      EndIf
+    Case 14
+      If by<\y
+        bys+0.1
+        If bx<\x-40 Then bxs+0.6
+        If bx<\x-20 AND bx>\x-40 Then bxs+0.8
+        If bx<\x AND bx>\x-20 Then bxs+0.4
+        If bx<\x+10 AND bx>\x Then bxs-0.2
+      EndIf
+      If by>\y
+        If bx<\x-40 Then bxs+0.2
+        If bx<\x-20 AND bx>\x-40 Then bxs+0.4
+        If bx<\x AND bx>\x-20 Then bxs+0.2
+        If bx<\x+10 AND bx>\x Then bxs-0.1
+      EndIf
+    Case 15
+      If by<\y
+        bys+0.1
+        If bx<\x-30 Then bxs+0.4
+        If bx>\x-30 AND bx<\x-10 Then bxs+0.6
+        If bx>\x-10 AND bx<\x Then bxs+0.4
+        If bx>\x AND bx<\x+10 Then bxs-0.4
+        If bx>\x+10 Then bxs-0.2
+      EndIf
+      If by>\y
+        If bx<\x-30 Then bxs+0.1
+        If bx>\x+30 AND bx<\x-10 Then bxs+0.1
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+10 Then bxs-0.2
+        If bx>\x+10 Then bxs-0.2
+      EndIf
+    Case 16
+      If by<\y
+        bys+0.1
+        If bx<\x-30 Then bxs+0.2
+        If bx>\x-30 AND bx<\x-10 Then bxs+0.4
+        If bx>\x-10 AND bx<\x Then bxs+0.8
+        If bx>\x AND bx<\x+10 Then bxs-0.6
+        If bx>\x+10 Then bxs-0.2
+      EndIf
+      If by>\y
+        If bx<\x-30 Then bxs+0.1
+        If bx>\x-30 AND bx<\x-10 Then bxs+0.2
+        If bx>\x-10 AND bx<\x Then bxs+0.1
+        If bx>\x AND bx<\x+10 Then bxs-0.1
+        If bx>\x+10 Then bxs-0.1
+      EndIf
+  End Select
+  If bx>\x+gun(maincount,\tpoint-1)\x-10 AND bx<\x+gun(maincount,\tpoint)\x+10
+    If by>\y+gun(maincount,\tpoint-1)\y-10 AND by<\y+gun(maincount,\tpoint)\y+10
+      \stuck=True
+      bx=\x+gun(maincount,\tpoint-1)\x
+      by=\y+gun(maincount,\tpoint-1)\y
+    EndIf
+  EndIf
+Return
+
+.computeguys
+  USEPATH guy(0)
+  If \x<40
+    \x=40
+    \bshape=\bstill
+  EndIf
+  If \x>118
+    \x=118
+    \bshape=\bstill
+  EndIf
+  If ShapesHit(231,bx,by,\tshape,\x+\xt,\y+\yt)
+    tempx=0 : tempy=0
+    If Left$(Str$(bxs),1)="-" Then tempx=-bxs Else tempx=bxs
+    If Left$(Str$(bys),1)="-" Then tempy=-bys Else tempy=bys
+    If (tempx>2 OR tempy>2) AND \stuck=False Then stats(0)\stam-(tempx+tempy)/16
+    If stats(0)\stam<0 Then stats(0)\stam=0
+  EndIf
+  If ying Then temp=1 Else temp=0
+  If guy(0)\stuck=True Then stats(temp)\heat-0.5
+  If guy(0)\stuck=False Then stats(temp)\heat=17
+  If stats(temp)\heat<0
+    stats(temp)\stam-0.5
+    stats(temp)\heat=0
+  EndIf
+  If stats(temp)\stam<0.5 Then Goto quit
+  ;If stats(temp)\stam<0.5 : Stop : Goto quit : EndIf
+
+  USEPATH guy(1)
+  If \x<202
+    \x=202
+    \bshape=\bstill
+  EndIf
+  If \x>280
+    \x=280
+    \bshape=\bstill
+  EndIf
+  If ShapesHit(231,bx,by,\tshape,\x+\xt,\y+\yt)
+    If Left$(Str$(bxs),1)="-" Then tempx=-bxs Else tempx=bxs
+    If Left$(Str$(bys),1)="-" Then tempy=-bys Else tempy=bys
+    If (tempx>2 OR tempy>2) AND \stuck=Fals Then stats(1)\stam-(tempx+tempy)/8
+    If stats(1)\stam<0 Then stats(1)\stam=0
+  EndIf
+  If ying Then temp=0 Else temp=1
+  If guy(1)\stuck=True Then stats(temp)\heat-0.5
+  If guy(1)\stuck=False Then stats(temp)\heat=17
+  If stats(temp)\heat<0
+    stats(temp)\stam-0.5
+    stats(temp)\heat=0
+  EndIf
+  If stats(temp)\stam<0.5 Then Goto quit
+  ;If stats(temp)\stam<0.5 : Stop : Goto quit : EndIf
+Return
+
+.readkey
+  If ying Then temp=1-maincount Else temp=maincount
+  USEPATH guy(temp)
+
+  Select RawStatus(control(maincount)\fire)
+    Case 0
+      If \stuck=True Then lasthad=maincount
+      \suck=False : \stuck=False : none=True
+      If RawStatus(control(maincount)\right)
+        If tim=1 OR tim=2 OR tim=5 OR tim=6
+          \x+\movspd
+          If (\bshape=\bstill)OR(\bshape>=\bfirstl AND \bshape<=\blastl) Then \bshape=\blastr
+          \bshape+1
+          If \bshape>\blastr Then \bshape=\bfirstr
+        EndIf
+        none=False
+      EndIf
+      If RawStatus(control(maincount)\left)
+        If tim=1 OR tim=2 OR tim=5 OR tim=6
+          \x-\movspd
+          If (\bshape=\bstill)OR(\bshape>=\bfirstr AND \bshape<=\blastr) Then \bshape=\blastl
+          \bshape+1
+          If \bshape>\blastl Then \bshape=\bfirstl
+        EndIf
+        none=False
+      EndIf
+      If none Then \bshape=\bstill
+    Case -1
+      \suck=True
+      \bshape=\bstill
+      If tim=1 OR tim=2 OR tim=5 OR tim=6
+        If RawStatus(control(maincount)\right)
+          \tshape+1 : \tpoint+1
+          If \tshape>\tlast
+            \tshape=\tfirst
+            \tpoint=1
+          EndIf
+        EndIf
+        If RawStatus(control(maincount)\left)
+          \tshape-1 : \tpoint-1
+          If \tshape<\tfirst
+            \tshape=\tlast
+            \tpoint=16
+          EndIf
+        EndIf
+      EndIf
+  End Select
+Return
+
+.readjoy
+  If ying Then temp=1-maincount Else temp=maincount
+  USEPATH guy(temp)
+
+  Select Joyb(jo)
+    Case 0
+      If \stuck=True Then lasthad=maincount
+      \suck=False : \stuck=False
+      Select Joyx(jo)
+        Case 0 : \bshape=\bstill
+        Case 1
+          If tim=1 OR tim=3 OR tim=5 OR tim=7
+            \x+\movspd
+            If (\bshape=\bstill)OR(\bshape>=\bfirstl AND \bshape<=\blastl) Then \bshape=\blastr
+            \bshape+1
+            If \bshape>\blastr Then \bshape=\bfirstr
+          EndIf
+        Case -1
+          If tim=1 OR tim=3 OR tim=5 OR tim=7
+            \x-\movspd
+            If (\bshape=\bstill)OR(\bshape>=\bfirstr AND \bshape<=\blastr) Then \bshape=\blastl
+            \bshape+1
+            If \bshape>\blastl Then \bshape=\bfirstl
+          EndIf
+      End Select
+    Case 1
+      \suck=True
+      \bshape=\bstill
+      If tim=1 OR tim=3 OR tim=5 OR tim=7
+        Select Joyx(jo)
+          Case 1
+            \tshape+1 : \tpoint+1
+            If \tshape>\tlast
+              \tshape=\tfirst
+              \tpoint=1
+            EndIf
+          Case -1
+            \tshape-1 : \tpoint-1
+            If \tshape<\tfirst
+              \tshape=\tlast
+              \tpoint=16
+            EndIf
+        End Select
+      EndIf
+  End Select
+Return
+
+.getguybits
+  For c=0 To 1
+    USEPATH guy(c)
+    If \char=1 Then Restore guydata1
+    If \char=2 Then Restore guydata2
+    If \char=3 Then Restore guydata3
+    If \char=4 Then Restore guydata4
+    If \char=5 Then Restore guydata5
+
+    If c=0 Then \x=80 Else \x=240
+    \y=200
+
+    Read \xt,\yt
+    Read \tpoint,\tstill
+    Read \tshape,\tfirst,\tlast
+    Read \suck,\stuck
+
+    Read \xb,\yb
+    Read \bshape,\bstill
+    Read \bfirstr,\blastr
+    Read \bfirstl,\blastl
+    Read \movspd
+
+    For xy=0 To 15
+      Read gun(c,xy)\x,gun(c,xy)\y
+    Next xy
+  Next c
+Return
+
+.blitall
+  While VPos<255 : Wend
+;  VWait 10  ;  see it slower, for debugging
+  DisplayBitMap 0,db
+  db=4-db : bdb=9-bdb
+  Use BitMap db
+  Gosub drawstats
+
+  If tim=5 OR tim=6
+    For ts=0 To 13
+      USEPATH top(ts)
+      If \f>0
+        If \f=2 Then \y=18
+        Use BitMap db
+        Blit 233,\x,\y
+        \f-1
+      EndIf
+    Next ts
+  EndIf
+
+  UnBuffer db
+  UnBuffer db+1
+  UnBuffer bdb
+  For c=0 To 1
+    USEPATH guy(c)
+    BBlit db+1,\bshape,\x+\xb,\y+\yb
+    BBlit db+1,\tshape,\x+\xt,\y+\yt
+  Next c
+  BBlit db+1,237,160,pluny
+  If gogood<>-1 Then BBlit bdb,410+gogood,160,70
+  If goodon<>-1 Then BBlit bdb,431+curgood,160,70
+  If stopgood<>-1 Then BBlit bdb,410+stopgood,160,70
+  Blit tvframe,160,225
+  BBlit db,231,bx,by
+  If magnet Then BBlit db,248,magx,magy
+Return
+
+.computeobjects
+  Use BitMap 3
+  UnQueue 0
+  QBlit 0,232,bx,by
+  If by<30
+    For ts=0 To 13
+      If ShapesHit(232,bx,by,234,top(ts)\x,18)
+        top(ts)\y=19
+        top(ts)\f=3
+        If ts=0 Then bxs=6
+        If ts=6 Then bxs=-10
+        If ts=7 Then bxs=10
+        If ts=13 Then bxs=-6
+        bxs/2 : bx+bxs
+        bys=maxspeed : by+bys
+        sou(1)=True
+      EndIf
+    Next ts
+  EndIf
+  If pluny<>187 Then pluny+1
+  If by>175
+    If ShapesHit(232,bx,by,238,160,pluny)
+      pluny=184 : bys=-plunhit : by+bys
+      bxs+Rnd(0.4)-0.2 : bxs*Int(Rnd(2))-1
+      sou(2)=True
+    EndIf
+    If BlitColl(235,22,194) OR BlitColl(235,184,194)
+      bxs=Rnd(10)+2 : bys=-Rnd(12)-2
+      bx+bxs : by+bys
+      sou(1)=True
+    EndIf
+    If BlitColl(236,136,194) OR BlitColl(236,298,194)
+      bxs=-Rnd(10)-2 : bys=-Rnd(12)-2
+      bx+bxs : by+bys
+      sou(1)=True
+    EndIf
+  EndIf
+Return
+
+.computeball
+; the x ball follows:
+  Use BitMap 1
+  If BlitColl(232,bx,by)
+    bxs*-0.6
+    bx+(bxs*1.35)
+    If bxs<-0.3 OR bxs>0.3 Then sou(0)=True
+  EndIf
+  If BlitColl(232,bx,by) Then bxs+(bxs)
+
+  If cheat=True
+    If RawStatus(chleft) Then bxs-0.2
+    If RawStatus(chright) Then bxs+0.2
+  EndIf
+
+  bxs-(bxs/80)
+  bx+bxs
+  temp=bxs
+  If Left$(Str$(bxs),1)="-" Then temp=-temp
+  If temp<0.1 Then bxs=0
+
+  For aircount=0 To air
+    If bxs>maxspeed Then bxs-0.1
+    If bxs<-maxspeed Then bxs+0.1
+  Next aircount
+
+; the y ball follows
+  Use BitMap 2
+  If BlitColl(232,bx,by)
+    bys*-0.6
+    by+(bys*1.6677)
+    If bys<-0.5 OR bys>0.5 Then sou(0)=True
+  EndIf
+  If BlitColl(232,bx,by) Then bys+(bys)
+
+  If cheat=True
+    If RawStatus(chup) Then bys-0.8
+    If RawStatus(chdown) Then bys+0.4
+  EndIf
+
+  bys+0.1
+  If Left$(Str$(bys),1)<>"-" Then bys-((-bys)/20)
+  If Left$(Str$(bys),1)="-" Then bys+((-bys)/10)
+  by+bys
+
+  For aircount=0 To air
+    If bys>maxspeed Then bys-0.1
+    If bys<-maxspeed Then bys+0.1
+  Next aircount
+Return
+
+.getoptions
+  cheatamo=1+5
+  cheatcount=0
+  Dim cheater(cheatamo)
+  cheater(0)=cheatamo-1
+  cheater(1)=$33
+  cheater(2)=$25
+  cheater(3)=$12
+  cheater(4)=$20
+  cheater(5)=$14
+
+  cheat=False
+
+  title=True
+  logo=True
+
+  guy(0)\brain=True
+  control(0)\joy=True
+  guy(1)\brain=False
+  control(1)\joy=False
+
+  QAMIGA
+  If ReadFile(0,"HSDaa/optdat")
+    FileInput 0
+
+    Gosub readlen : logo=Val(lngth$)
+    Gosub readlen : title=Val(lngth$)
+    Gosub readlen : guy(0)\brain=Val(lngth$)
+    Gosub readlen : control(0)\joy=Val(lngth$)
+    Gosub readlen : guy(1)\brain=Val(lngth$)
+    Gosub readlen : control(1)\joy=Val(lngth$)
+    Gosub readlen : maxspeed=Val(lngth$)
+
+    DefaultOutput
+    CloseFile 0
+  EndIf
+  ;Delay_(2000)
+  BLITZ
+
+  Dim fon(10)
+
+  fkey(0)\x=32 : fkey(0)\y=31
+  fkey(0)\xs=0 : fkey(0)\ys=0
+  fkey(0)\xa=42 : fkey(0)\ya=36
+  fkey(0)\f=421
+  fon(0)=True
+
+  fkey(1)\x=286 : fkey(1)\y=31
+  fkey(1)\xs=0 : fkey(1)\ys=0
+  fkey(1)\xa=276 : fkey(1)\ya=36
+  fkey(1)\f=422
+  fon(1)=True
+
+  fkey(2)\x=42 : fkey(2)\y=122
+  fkey(2)\xs=0 : fkey(2)\ys=0
+  fkey(2)\xa=32 : fkey(2)\ya=117
+  fkey(2)\f=423
+  fon(2)=False
+
+  fkey(3)\x=266 : fkey(3)\y=122
+  fkey(3)\xs=0 : fkey(3)\ys=0
+  fkey(3)\xa=276 : fkey(3)\ya=117
+  fkey(3)\f=424
+  fon(3)=False
+
+  fkey(4)\x=174 : fkey(4)\y=182
+  fkey(4)\xs=0 : fkey(4)\ys=0
+  fkey(4)\xa=159 : fkey(4)\ya=177
+  fkey(4)\f=425
+  fon(4)=True
+
+  fkey(5)\x=132 : fkey(5)\y=245
+  fkey(5)\xs=0 : fkey(5)\ys=0
+  fkey(5)\xa=137 : fkey(5)\ya=240
+  fkey(5)\f=426
+  fon(5)=True
+
+  fkey(6)\x=186 : fkey(6)\y=235
+  fkey(6)\xs=0 : fkey(6)\ys=0
+  fkey(6)\xa=181 : fkey(6)\ya=240
+  fkey(6)\f=427
+  fon(6)=True
+
+  fkey(7)\x=160 : fkey(7)\y=128
+  fkey(7)\xs=0 : fkey(7)\ys=0
+  fkey(7)\xa=159 : fkey(7)\ya=127
+  fkey(7)\f=428
+  fon(7)=False
+
+  fkey(8)\x=12 : fkey(8)\y=209
+  fkey(8)\xs=0 : fkey(8)\ys=0
+  fkey(8)\xa=17 : fkey(8)\ya=205
+  fkey(8)\f=429
+  fon(8)=True
+
+  fkey(9)\x=307 : fkey(9)\y=209
+  fkey(9)\xs=0 : fkey(9)\ys=0
+  fkey(9)\xa=302 : fkey(9)\ya=205
+  fkey(9)\f=430
+  fon(9)=True
+Return
+
+.readlen
+  lngth$=""
+  place:
+  single$=Edit$(1)
+  If single$<>" "
+    lngth$+single$
+    Goto place
+  EndIf
+Return
+
+.optionscreen
+  QAMIGA
+  LoadBitMap 7,"HSDaa/option",3
+  LoadPalette 4,"HSDaa/optionpal"
+  ;Delay_(2000)
+  BLITZ
+  Use BitMap 7
+  DisplayBitMap 0,7
+  DisplayPalette 0,3
+  InitPalette 2,16
+  DisplayPalette 0,2
+
+  UnBuffer 3
+  If guy(0)\brain=False
+    Blit 401,91,58
+    Blit 404,92,114
+    Blit 416,39,166
+  Else
+    Blit 400,91,58
+    fon(2)=True
+    If control(0)\joy=True
+      Blit 402,92,114
+      Blit 416,39,166
+    Else
+      Blit 403,92,114
+      Blit 414,39,166
+    EndIf
+  EndIf
+  If guy(1)\brain=False
+    Blit 401,225,58
+    Blit 404,226,114
+    Blit 417,266,166
+  Else
+    Blit 400,225,58
+    fon(3)=True
+    If control(1)\joy=True
+      Blit 402,226,114
+      Blit 417,266,166
+    Else
+      Blit 403,226,114
+      Blit 415,266,166
+    EndIf
+  EndIf
+  If title=True Then Blit 408,99,240
+  If title=False Then Blit 407,99,240
+  If logo=True Then Blit 409,219,240
+  If logo=False Then Blit 407,219,240
+  If maxspeed=3 Then Blit 405,159,144
+  If maxspeed=5 Then Blit 418,159,144
+  If maxspeed=8 Then Blit 406,159,144
+
+  If cheat Then optpal=4 Else optpal=3
+  pal=optpal : Gosub fadeitin
+  DisplayPalette 0,optpal
+
+  timmy=0 : cheatcount=1
+  repdel=0 : repamo=10
+  Repeat
+    timmy=QWrap(timmy+1,1,5)
+    For fcount=0 To 9
+      USEPATH fkey(fcount)
+      If \x>\xa Then \xs-0.3
+      If \x<\xa Then \xs+0.3
+      If \y>\ya Then \ys-1
+      If \y<\ya Then \ys+1
+      \x+\xs : \y+\ys
+    Next fcount
+
+    If RawStatus(cheater(cheatcount))
+      If RawStatus(cheater(cheatamo-1))
+        jump=False : cheatcount=0
+        If cheat=True
+          cheat=False
+          pal=optpal : Gosub fadeitout
+          optpal=3
+          pal=optpal : Gosub fadeitin
+          jump=True
+        EndIf
+        If cheat=False AND jump=False
+          cheat=True
+          pal=optpal : Gosub fadeitout
+          optpal=4
+          pal=optpal : Gosub fadeitin
+        EndIf
+      EndIf
+      cheatcount+1
+    EndIf
+
+    repdel-1 : If repdel<0 Then repdel=0
+    If repdel=0
+    If RawStatus($50)
+      repdel=repamo : jump=False
+      If guy(0)\brain=True
+        guy(0)\brain=False
+        Blit 401,91,58
+        fon(2)=False
+        Blit 404,92,114
+        Blit 416,39,166
+        jump=True
+      EndIf
+      If guy(0)\brain=False AND jump=False
+        guy(0)\brain=True
+        Blit 400,91,58
+        fon(2)=True
+        If control(0)\joy=True
+          Blit 402,92,114
+          Blit 416,39,166
+        EndIf
+        If control(0)\joy=False
+          Blit 403,92,114
+          Blit 414,39,166
+        EndIf
+      EndIf
+    EndIf
+    If RawStatus($52) AND guy(0)\brain=True
+      repdel=repamo : jump=False
+      If control(0)\joy=True
+        control(0)\joy=False
+        Blit 403,92,114
+        Blit 414,39,166
+        jump=True
+      EndIf
+      If control(0)\joy=False AND jump=False
+        control(0)\joy=True
+        Blit 402,92,114
+        Blit 416,39,166
+      EndIf
+    EndIf
+    If RawStatus($51)
+      repdel=repamo : jump=False
+      If guy(1)\brain=True
+        guy(1)\brain=False
+        Blit 401,225,58
+        fon(3)=False
+        Blit 404,226,114
+        Blit 417,266,166
+        jump=True
+      EndIf
+      If guy(1)\brain=False AND jump=False
+        guy(1)\brain=True
+        Blit 400,225,58
+        fon(3)=True
+        If control(1)\joy=True
+          Blit 402,226,114
+          Blit 417,266,166
+        EndIf
+        If control(1)\joy=False
+          Blit 403,226,114
+          Blit 415,266,166
+        EndIf
+      EndIf
+    EndIf
+    If RawStatus($53) AND guy(1)\brain=True
+      repdel=repamo : jump=False
+      If control(1)\joy=True
+        control(1)\joy=False
+        Blit 403,226,114
+        Blit 415,266,166
+        jump=True
+      EndIf
+      If control(1)\joy=False AND jump=False
+        control(1)\joy=True
+        Blit 402,226,114
+        Blit 417,266,166
+      EndIf
+    EndIf
+    If RawStatus($55)
+      repdel=repamo : jump=False
+      If title=True
+        title=False
+        Blit 407,99,240
+        jump=True
+      EndIf
+      If title=False AND jump=False
+        title=True
+        Blit 408,99,240
+      EndIf
+    EndIf
+    If RawStatus($56)
+      repdel=repamo : jump=False
+      If logo=True
+        logo=False
+        Blit 407,219,240
+        jump=True
+      EndIf
+      If logo=False AND jump=False
+        logo=True
+        Blit 409,219,240
+      EndIf
+    EndIf
+    If RawStatus($54)
+      repdel=repamo : jump=False : jump2=False
+      If maxspeed=8
+        maxspeed=3
+        Blit 405,159,144
+        jump=True
+      EndIf
+      If maxspeed=3 AND jump=False
+        maxspeed=5
+        Blit 418,159,144
+        jump2=True
+      EndIf
+      If maxspeed=5 AND jump=False AND jump2=False
+        maxspeed=8
+        Blit 406,159,144
+      EndIf
+    EndIf
+    If RawStatus($58)
+      repdel=repamo
+      QAMIGA
+      If WriteFile(0,"HSDaa/optdat")
+        FileOutput 0
+        Print logo," "
+        Print title," "
+        Print guy(0)\brain," "
+        Print control(0)\joy," "
+        Print guy(1)\brain," "
+        Print control(1)\joy," "
+        Print maxspeed," "
+        DefaultOutput
+        CloseFile 0
+      EndIf
+      ;Delay_(2000)
+      BLITZ
+    EndIf
+    EndIf
+
+    VWait
+    UnBuffer 3
+    For fbcount=0 To 9
+      If fon(fbcount)
+        USEPATH fkey(fbcount)
+        BBlit 3,\f,\x,\y
+      EndIf
+    Next fbcount
+    If RawStatus($45) Then Goto quit
+    ;If RawStatus($45) : Stop : Goto quit : EndIf
+  Until RawStatus($59) OR Joyb(0)=1 OR Joyb(1)=1 OR RawStatus($40) OR RawStatus(control(0)\fire) OR RawStatus(control(1)\fire)
+
+  pal=optpal : Gosub fadeitout
+  UnBuffer 3
+  Free Palette 2
+  Free BitMap 7
+  Free Palette 4
+  blockbounce=maxspeed+3
+Return
+
+.titlescreen
+  QAMIGA
+  LoadBitMap 5,"HSDaa/title",1
+  CopyBitMap 5,6
+  LoadMedModule 0,"HSDaa/med"
+  ;Delay_(2000)
+  BLITZ
+  Use BitMap 5
+  DisplayBitMap 0,5
+  DisplayPalette 0,1
+  InitPalette 2,16
+  DisplayPalette 0,2
+
+  UnBuffer 3 : UnBuffer 6
+  USEPATH hotshot(0)
+  \x=210 : \y=115 : \xs=0 : \ys=0
+  \xa=230 : \ya=115 : \f=161
+  BBlit 3,\f,\x,\y
+  USEPATH hotshot(1)
+  \x=227 : \y=180 : \xs=0 : \ys=0
+  \xa=227 : \ya=200 : \f=166
+  BBlit 3,\f,\x,\y
+
+  pal=1 : Gosub fadeitin
+  DisplayPalette 0,1
+  StartMedModule 0
+
+  timmy=0
+  bm=5 : bf=3
+  medcount=64 : fadestart=False
+  SetMedVolume medcount
+  Repeat
+    timmy=QWrap(timmy+1,1,5)
+    For hotcount=0 To 1
+      USEPATH hotshot(hotcount)
+      If \x>\xa Then \xs-0.3
+      If \x<\xa Then \xs+0.3
+      If \y>\ya Then \ys-1
+      If \y<\ya Then \ys+1
+      \x+\xs : \y+\ys
+      If hotcount=0 AND timmy=1 Then \f=QWrap(\f+1,161,166)
+      If hotcount=1 AND timmy=2 Then \f=Int((Rnd(5)+1)+165)
+    Next hotcount
+    bm=11-bm : bf=9-bf
+    PlayMed
+    If VPos>200 Then VWait
+    DisplayBitMap 0,11-bm
+    Use BitMap bm
+    UnBuffer bf
+    For hotbcount=0 To 1
+      USEPATH hotshot(hotbcount)
+      BBlit bf,\f,\x,\y
+    Next hotbcount
+    If RawStatus($45) Then Goto quit
+    ;If RawStatus($45) : Stop : Goto quit : EndIf
+    If Joyb(0)=1 OR Joyb(1)=1 OR RawStatus($40) OR RawStatus(control(0)\fire) OR RawStatus(control(1)\fire) Then fadestart=True
+    If fadestart=True
+      medcount-1
+      SetMedVolume medcount
+    EndIf
+  Until medcount=2
+  StopMed
+
+  pal=1 : Gosub fadeitout
+  UnBuffer 3 : UnBuffer 6
+  Free Palette 2
+  Free BitMap 5
+  Free BitMap 6
+  Free MedModule 0
+Return
+
+fadeitin:
+  fadecount=0.1
+  Repeat
+    FadePalette pal,2,fadecount
+    DisplayPalette 0,2
+    VWait
+    fadecount+0.1
+  Until fadecount>1
+Return
+
+fadeitout:
+  fadecount=0.9
+  Repeat
+    FadePalette pal,2,fadecount
+    DisplayPalette 0,2
+    VWait
+    fadecount-0.1
+  Until fadecount<0
+Return
+
+.initrain
+  r=8 : b=9
+  For i=0 To 26
+    r=QLimit(r-0.7,0,8)
+    b=QLimit(b-0.3,0,9)
+    DisplayRGB 0,0,i*4+10,r,0,b
+  Next i
+Return
+
+topspring:
+  Data 24,42,60,78,96,114,132,188,206,224,242,260,278,296
+
+guydata1:
+  Data 0,-2         ; xt,yt        ; top shape offset
+  Data 1            ; tpoint       ; rotation frame number
+  Data 81           ; tstill       ; top still number
+  Data 1            ; tshape       ; top shape number
+  Data 1            ; tfirst       ; first shape of rotation
+  Data 16           ; tlast        ; last shape of rotation
+
+  Data 0            ; suck         ; suction state
+  Data 0            ; stuck        ; if ball is stuck on gun
+
+  Data 0,6          ; xb,yb        ; bottom shape offset
+  Data 156          ; bstill       ; bottom still number
+  Data 156          ; bshape       ; bottom shape number
+  Data 86           ; bfirstr      ; first shape of running right
+  Data 92           ; blastr       ; last shape of running right
+  Data 121          ; bfirstl      ; first shape of running left
+  Data 127          ; blastl       ; last shape of running left
+
+  Data 5            ; movspd       ; movement speed
+
+                                   ; gun x,y offset
+  Data 0,-17
+  Data 7,-15
+  Data 11,-12
+  Data 13,-6
+
+  Data 15,0
+  Data 12,4
+  Data 10,7
+  Data 6,10
+
+  Data 0,10
+  Data -6,10
+  Data -10,7
+  Data -12,4
+
+  Data -15,0
+  Data -13,-6
+  Data -11,-12
+  Data -7,-15
+
+guydata2:
+  Data 0,-2         ; xt,yt        ; top shape offset
+  Data 1            ; tpoint       ; rotation frame number
+  Data 82           ; tstill       ; top still number
+  Data 17           ; tshape       ; top shape number
+  Data 17           ; tfirst       ; first shape of rotation
+  Data 32           ; tlast        ; last shape of rotation
+
+  Data 0            ; suck         ; suction state
+  Data 0            ; stuck        ; if ball is stuck on gun
+
+  Data 0,6          ; xb,yb        ; bottom shape offset
+  Data 157          ; bstill       ; bottom still number
+  Data 157          ; bshape       ; bottom shape number
+  Data 93           ; bfirstr      ; first shape of running right
+  Data 99           ; blastr       ; last shape of running right
+  Data 128          ; bfirstl      ; first shape of running left
+  Data 134          ; blastl       ; last shape of running left
+
+  Data 5            ; movspd       ; movement speed
+
+                                   ; gun x,y offset
+  Data 0,-17
+  Data 7,-15
+  Data 11,-12
+  Data 13,-6
+
+  Data 15,0
+  Data 12,4
+  Data 10,7
+  Data 6,10
+
+  Data 0,10
+  Data -6,10
+  Data -10,7
+  Data -12,4
+
+  Data -15,0
+  Data -13,-6
+  Data -11,-12
+  Data -7,-15
+
+guydata3:
+  Data 0,-2         ; xt,yt        ; top shape offset
+  Data 1            ; tpoint       ; rotation frame number
+  Data 83           ; tstill       ; top still number
+  Data 33           ; tshape       ; top shape number
+  Data 33           ; tfirst       ; first shape of rotation
+  Data 48           ; tlast        ; last shape of rotation
+
+  Data 0            ; suck         ; suction state
+  Data 0            ; stuck        ; if ball is stuck on gun
+
+  Data 0,-7         ; xb,yb        ; bottom shape offset
+  Data 158          ; bstill       ; bottom still number
+  Data 158          ; bshape       ; bottom shape number
+  Data 100          ; bfirstr      ; first shape of running right
+  Data 106          ; blastr       ; last shape of running right
+  Data 135          ; bfirstl      ; first shape of running left
+  Data 141          ; blastl       ; last shape of running left
+
+  Data 5            ; movspd       ; movement speed
+
+                                   ; gun x,y offset
+  Data 0,-17
+  Data 7,-14
+  Data 9,-12
+  Data 11,-6
+
+  Data 12,0
+  Data 12,4
+  Data 9,8
+  Data 6,10
+
+  Data 0,10
+  Data -6,10
+  Data -9,8
+  Data -12,4
+
+  Data -12,0
+  Data -11,-6
+  Data -9,-12
+  Data -7,-14
+
+guydata4:
+  Data 0,-3         ; xt,yt        ; top shape offset
+  Data 1            ; tpoint       ; rotation frame number
+  Data 84           ; tstill       ; top still number
+  Data 49           ; tshape       ; top shape number
+  Data 49           ; tfirst       ; first shape of rotation
+  Data 64           ; tlast        ; last shape of rotation
+
+  Data 0            ; suck         ; suction state
+  Data 0            ; stuck        ; if ball is stuck on gun
+
+  Data 0,5          ; xb,yb        ; bottom shape offset
+  Data 159          ; bstill       ; bottom still number
+  Data 159          ; bshape       ; bottom shape number
+  Data 107          ; bfirstr      ; first shape of running right
+  Data 113          ; blastr       ; last shape of running right
+  Data 142          ; bfirstl      ; first shape of running left
+  Data 148          ; blastl       ; last shape of running left
+
+  Data 6            ; movspd       ; movement speed
+
+                                   ; gun x,y offset
+  Data 0,-14
+  Data 5,-13
+  Data 7,-10
+  Data 9,-7
+
+  Data 11,-3
+  Data 10,2
+  Data 7,4
+  Data 6,7
+
+  Data 0,10
+  Data -6,7
+  Data -7,4
+  Data -10,2
+
+  Data -11,-3
+  Data -9,-7
+  Data -7,-10
+  Data -5,-13
+
+guydata5:
+  Data 0,-8        ; xt,yt        ; top shape offset
+  Data 1            ; tpoint       ; rotation frame number
+  Data 85           ; tstill       ; top still number
+  Data 65           ; tshape       ; top shape number
+  Data 65           ; tfirst       ; first shape of rotation
+  Data 80           ; tlast        ; last shape of rotation
+
+  Data 0            ; suck         ; suction state
+  Data 0            ; stuck        ; if ball is stuck on gun
+
+  Data 0,5          ; xb,yb        ; bottom shape offset
+  Data 160          ; bstill       ; bottom still number
+  Data 160          ; bshape       ; bottom shape number
+  Data 114          ; bfirstr      ; first shape of running right
+  Data 120          ; blastr       ; last shape of running right
+  Data 149          ; bfirstl      ; first shape of running left
+  Data 155          ; blastl       ; last shape of running left
+
+  Data 4            ; movspd       ; movement speed
+
+                                   ; gun x,y offset
+  Data 0,-25
+  Data 8,-22
+  Data 13,-16
+  Data 15,-12
+
+  Data 19,-4
+  Data 18,1
+  Data 16,5
+  Data 8,8
+
+  Data 0,10
+  Data -8,8
+  Data -16,5
+  Data -18,1
+
+  Data -19,-4
+  Data -15,-12
+  Data -13,-16
+  Data -8,-22
+
+Data.s "$VER:HotShots V1.29 By Chris Nash of Calm C1999"
+Data.s "HotShots and HotShots related files are copyright by Chris Nash of Calm (caffeinated arcane living machine) in 1999"
+
+
+

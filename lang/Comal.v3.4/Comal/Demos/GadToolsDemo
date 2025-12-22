@@ -1,0 +1,513 @@
+// GadTools demo program
+//
+// NOTE: This program requires WorkBench 2.0 to run!
+
+USE System
+USE IntuitionWindow
+USE IntuitionScreen
+USE PortObjects
+USE IDCMP
+USE ExecLists
+USE TagItem
+USE IntuiText
+USE SystemCode
+USE GadToolsInclude
+USE GadToolsLibrary
+USE IntuitionLibrary
+USE GraphicsLibrary
+USE ExecLibrary
+
+// Gadget ID's
+DIM BUTTON_ID OF UBYTE
+DIM CYCLE_ID OF UBYTE
+DIM STRING_ID OF UBYTE
+DIM LIST_ID OF UBYTE
+DIM MX_ID OF UBYTE
+DIM SLIDER_ID OF UBYTE
+DIM CHECK_ID OF UBYTE
+DIM INTEGER_ID OF UBYTE
+DIM INCREMENT_ID OF UBYTE
+DIM PALETTE_ID OF UBYTE
+
+BUTTON_ID:=0
+CYCLE_ID:=1
+STRING_ID:=2
+LIST_ID:=3
+MX_ID:=4
+SLIDER_ID:=5
+CHECK_ID:=6
+INTEGER_ID:=7
+INCREMENT_ID:=8
+PALETTE_ID:=9
+
+// Other definitions
+DIM SLIDER_MIN OF UBYTE
+DIM SLIDER_MAX OF UBYTE
+
+SLIDER_MIN:=1
+SLIDER_MAX:=31
+
+// Variables
+DIM window OF POINTER TO Window
+DIM glist OF POINTER TO Gadget  // Gadget list pointer
+DIM list OF List
+DIM vi OF ULONG                 // VisualInfo pointer
+
+DIM intgad OF POINTER TO Gadget // Pointer to our integer gadget
+DIM value OF ULONG              // .. and the current value
+value:=42
+
+// We need a Tag array
+DIM taglist(0..7) OF TagItem
+
+// It's possible to use the default font with GadTools,
+// but extra computations must be made to get the size
+// and positions of the Gadgets right.
+// We'll want to use Topaz-80 for simplicity.
+
+DIM topaz80 OF TextAttr
+topaz80.ta_Name:=ADR("topaz.font")
+topaz80.ta_YSize:=8
+
+// Some data for our gadgets
+DIM day_labels(0..7) OF ULONG
+DIM DayName$(0..6) OF 9
+DayName$(0):="Sunday"
+DayName$(1):="Monday"
+DayName$(2):="Tuesday"
+DayName$(3):="Wednesday"
+DayName$(4):="Thursday"
+DayName$(5):="Friday"
+DayName$(6):="Saturday"
+FOR i:=0 TO 6 DO
+  day_labels(i):=ADR(DayName$(i))
+ENDFOR i
+
+DIM month_labels(0..12) OF ULONG
+DIM MonthName$(0..11) OF 9
+MonthName$(0):="January"
+MonthName$(1):="February"
+MonthName$(2):="March"
+MonthName$(3):="April"
+MonthName$(4):="May"
+MonthName$(5):="June"
+MonthName$(6):="July"
+MonthName$(7):="August"
+MonthName$(8):="September"
+MonthName$(9):="October"
+MonthName$(10):="November"
+MonthName$(11):="December"
+FOR i:=0 TO 11 DO
+  month_labels(i):=ADR(MonthName$(i))
+ENDFOR i
+
+DIM textbuffer(20) OF UBYTE   // For displaying Gadget event information
+
+// Now we are ready to start
+WriteInfo
+setup
+create_gadgets
+handle_input
+
+// ******* end of main program  **********
+
+PROC WriteInfo
+  PRINT
+  PRINT
+  PRINT
+  PRINT
+  PRINT "     GadTools Demo"
+  PRINT "     -------------"
+  PRINT "     This program demonstrates the new 'gadtools.library' of OS2."
+  PRINT
+  PRINT "     The program was originally written by Paul Miller for"
+  PRINT "     The AmigaWorld Tech Journal (volume 1 #3) and translated"
+  PRINT "     into Comal by Svend Daugaard Pedersen."
+  PRINT
+  PRINT "     This program is very close to the original C version."
+  PRINT "     See CITDemo for another more elegant implementation."
+  PRINT
+  PRINT AT 19,1: "  Press any key to start demo"
+  WHILE KEY$="" DO WAIT
+ENDPROC WriteInfo
+
+PROC abort(Text$)
+  closedown
+  END Text$
+ENDPROC abort
+
+PROC setup
+  LOCAL NewWindow OF NewWindow
+  NewWindow.LeftEdge:=50
+  NewWindow.TopEdge:=20
+  NewWindow.Width:=510
+  NewWindow.Height:=150
+  NewWindow.DetailPen:=$FF
+  NewWindow.BlockPen:=$FF
+  NewWindow.Title:=ADR("GadTools Demo")
+  NewWindow.Screen:=ComalStruc@.IO_Screen
+  NewWindow.IDCMPFlags:=LISTVIEWIDCMP BITOR SLIDERIDCMP BITOR CHECKBOXIDCMP BITOR MXIDCMP BITOR CLOSEWINDOW BITOR REFRESHWINDOW
+  NewWindow.Flags:=ACTIVATE BITOR WINDOWDRAG BITOR WINDOWDEPTH BITOR WINDOWCLOSE BITOR SIMPLE_REFRESH
+  NewWindow.Type:=CUSTOMSCREEN
+  
+  window:=OpenWindow(ADR(NewWindow))
+  taglist(0).ti_Tag:=TAG_DONE
+  vi:=GetVisualInfoA(window@.WScreen,ADR(taglist()))
+  IF vi=0 THEN
+    abort("Couldn't get default public screen's VisualInfo.")
+  ENDIF
+ENDPROC setup
+
+PROC closedown
+  LOCAL node OF POINTER TO Node
+
+  node:=RemTail(ADR(list))
+  WHILE node DO
+    DEALLOCATE(node)
+    node:=RemTail(ADR(list))
+  ENDWHILE
+  CloseWindow(window)
+  IF glist THEN FreeGadgets(glist)
+  IF vi THEN FreeVisualInfo(vi)
+ENDPROC closedown
+
+PROC create_gadgets
+  LOCAL top OF USHORT             // offset into Window under titlebar
+  LOCAL ng OF NewGadget           // for Gadget positioning
+  LOCAL gad OF POINTER TO Gadget  // our running Gadget pointer
+  LOCAL node OF POINTER TO Node   // for our LISTVIEW list allocation
+  LOCAL index OF LONG             // ditto
+
+  // let's determine the top Window border height
+  // (taking into account  whatever system font has
+  // been used to render the titlebar) so we can
+  // place the Gadgets properly within the Window.
+  // Overwriting of the titlebar is possible if
+  // you're not careful.
+  top:=window@.BorderTop+1
+
+  // this initial call is required when using the
+  // GadTool toolkit. It gives the toolkit a place
+  // to keep track of Gadget context information,
+  // and also forms a starting point to begin the
+  // Gadget creation with.
+  // Each Gadget creation call requires a pointer
+  // to the previous Gadget as one of its arguments,
+  // and this pointer is used for the first one.
+  // The Gadgets are automatically linked with this
+  // facility. Also, there is no need to check the
+  // returned Gadget pointer until it is actually
+  // used, such as if the Gadget data need be refe-
+  // renced, and of course before the Gadget list is
+  // added to a Window.
+
+  // We pass the ADDRESS of our Gadget list pointer,
+  // so the toolkit can allocate some memory there:
+  gad:=CreateContext(ADR(glist))
+
+  // Now we can fill out the NewGadget structure to
+  // describe where we want the Gadget to be placed.
+
+  // Create a centered read-only Gadget:
+  ng.ng_LeftEdge:=window@.Width/2
+  ng.ng_TopEdge:=top+4
+  ng.ng_Width:=0                       // this is computed automatically
+  ng.ng_Height:=8
+  ng.ng_GadgetText:=ADR("GadTools Toolkit Demo")
+  ng.ng_TextAttr:=ADR(topaz80)         // this is required!!
+  ng.ng_GadgetID:=0
+  ng.ng_Flags:=PLACETEXT_IN BITOR NG_HIGHLABEL
+  ng.ng_VisualInfo:=vi                 // this is required!!
+
+  // note the specified flags - see GadToolsInclude
+  // for additional flags and their descriptions.
+   
+  gad:=CreateGadgetA(TEXT_KIND,gad,ADR(ng),ADR(taglist()))
+
+  // The NewGadget stucture is not modified by any Gadget
+  // creation call, so you'll only need to change informa-
+  // tion that actually needs to be changed
+
+  ng.ng_LeftEdge:=10
+  ng.ng_TopEdge:=5+top
+  ng.ng_Width:=100
+  ng.ng_Height:=12
+  ng.ng_GadgetText:=ADR("QUIT DEMO")
+  ng.ng_GadgetID:=BUTTON_ID
+  ng.ng_Flags:=0
+  gad:=CreateGadgetA(BUTTON_KIND,gad,ADR(ng),ADR(taglist()))
+
+  // Prepare a List for the LISTVIEW Gadget below
+  index:=0
+  WHILE month_labels(index) DO
+    ALLOCATE(node)
+    IF node=0 THEN
+      abort("Couldn't allocate LISTVIEW List.")
+    ENDIF
+    node@.ln_Name:=month_labels(index)
+    index:+1
+    AddTail(ADR(list),node)
+  ENDWHILE
+
+  // We'll create a string Gadget to be attached to the LISTVIEW below
+  ng.ng_Width:=150
+  ng.ng_Height:=14
+  ng.ng_GadgetText:=0
+  ng.ng_GadgetID:=STRING_ID
+  taglist(0).ti_Tag:=GTST_MaxChars
+  taglist(0).ti_Data:=50
+  taglist(1).ti_Tag:=TAG_DONE
+  gad:=CreateGadgetA(STRING_KIND,gad,ADR(ng),ADR(taglist()))
+
+  // A LISTVIEW gadget - note that it works using an EXEC List
+  ng.ng_LeftEdge:=10
+  ng.ng_TopEdge:=40+top
+  ng.ng_Width:=150
+  ng.ng_Height:=57
+  ng.ng_GadgetText:=ADR("Months:")
+  ng.ng_GadgetID:=LIST_ID
+  ng.ng_Flags:=NG_HIGHLABEL BITOR PLACETEXT_ABOVE
+  taglist(0).ti_Tag:=GTLV_Labels
+  taglist(0).ti_Data:=ADR(list)
+  taglist(1).ti_Tag:=GTLV_Top
+  taglist(1).ti_Data:=1
+  taglist(2).ti_Tag:=GTLV_ShowSelected    // String Gadget
+  taglist(2).ti_Data:=gad
+  taglist(3).ti_Tag:=GTLV_Selected
+  taglist(3).ti_Data:=3
+  taglist(4).ti_Tag:=GTLV_ScrollWidth
+  taglist(4).ti_Data:=18
+  taglist(5).ti_Tag:=TAG_DONE
+  gad:=CreateGadgetA(LISTVIEW_KIND,gad,ADR(ng),ADR(taglist()))
+
+  // A cycle gadget:
+  ng.ng_LeftEdge:=50
+  ng.ng_TopEdge:=110+top
+  ng.ng_Width:=100
+  ng.ng_Height:=12
+  ng.ng_GadgetText:=ADR("Day:")
+  ng.ng_GadgetID:=CYCLE_ID
+  ng.ng_Flags:=NG_HIGHLABEL BITOR PLACETEXT_LEFT
+  taglist(0).ti_Tag:=GTCY_Labels
+  taglist(0).ti_Data:=ADR(day_labels())
+  taglist(1).ti_Tag:=GTCY_Active
+  taglist(1).ti_Data:=1
+  taglist(2).ti_Tag:=TAG_DONE
+  gad:=CreateGadgetA(CYCLE_KIND,gad,ADR(ng),ADR(taglist()))
+
+  // A set of mutually-exclusive Gadgets which performs the
+  // same function as the CYCLE Gadget above -- if you have
+  // 5 or less items to select from, the smaller CYCLE Gadget
+  // would be a better choice -- the user doesn't want to have
+  // to click through too many choices -- if you have room go
+  // with a MX Gadget -- it's more visual as to the choices
+  ng.ng_LeftEdge:=260
+  ng.ng_TopEdge:=25+top
+  ng.ng_GadgetID:=MX_ID
+  ng.ng_Flags:=PLACETEXT_LEFT
+  taglist(0).ti_Tag:=GTMX_Labels
+  taglist(0).ti_Data:=ADR(day_labels())
+  taglist(1).ti_Tag:=GTMX_Active
+  taglist(1).ti_Data:=5
+  taglist(2).ti_Tag:=GTMX_Spacing
+  taglist(2).ti_Data:=3
+  taglist(3).ti_Tag:=TAG_DONE
+  gad:=CreateGadgetA(MX_KIND,gad,ADR(ng),ADR(taglist()))
+
+  // Here we'll create a SLIDER with an automatic value display:
+  ng.ng_LeftEdge:=300
+  ng.ng_TopEdge:=120+top
+  ng.ng_Width:=180
+  ng.ng_Height:=12
+  ng.ng_GadgetText:=ADR("DAY:  ")
+  ng.ng_GadgetID:=SLIDER_ID
+  ng.ng_Flags:=PLACETEXT_LEFT
+  taglist(0).ti_Tag:=GTSL_Min
+  taglist(0).ti_Data:=SLIDER_MIN
+  taglist(1).ti_Tag:=GTSL_Max
+  taglist(1).ti_Data:=SLIDER_MAX
+  taglist(2).ti_Tag:=GTSL_Level
+  taglist(2).ti_Data:=1
+  taglist(3).ti_Tag:=GTSL_LevelFormat
+  taglist(3).ti_Data:=ADR("%2ld")
+  taglist(4).ti_Tag:=GTSL_MaxLevelLen
+  taglist(4).ti_Data:=2
+  taglist(5).ti_Tag:=TAG_USER+$30000+$16  // GA_RELVERIFY
+  taglist(5).ti_Data:=TRUE
+  taglist(6).ti_Tag:=TAG_DONE
+  gad:=CreateGadgetA(SLIDER_KIND,gad,ADR(ng),ADR(taglist()))
+
+  // A CHECKBOX
+  ng.ng_LeftEdge:=window@.Width-40
+  ng.ng_TopEdge:=10+top
+  ng.ng_GadgetID:=CHECK_ID
+  ng.ng_GadgetText:=ADR("Check Me")
+  ng.ng_Flags:=PLACETEXT_LEFT
+  taglist(0).ti_Tag:=TAG_DONE
+  gad:=CreateGadgetA(CHECKBOX_KIND,gad,ADR(ng),ADR(taglist()))
+
+  // An integer Gadget for cosmic significance
+  ng.ng_TopEdge:=30+top
+  ng.ng_LeftEdge:=window@.Width-50
+  ng.ng_Width:=40
+  ng.ng_Height:=14
+  ng.ng_GadgetText:=ADR("Cosmic Significance:")
+  ng.ng_Flags:=PLACETEXT_LEFT BITOR NG_HIGHLABEL
+  ng.ng_GadgetID:=INTEGER_ID
+  taglist(0).ti_Tag:=GTIN_Number
+  taglist(0).ti_Data:=value
+  taglist(1).ti_Tag:=GTIN_MaxChars
+  taglist(1).ti_Data:=4
+  taglist(2).ti_Tag:=TAG_DONE
+  gad:=CreateGadgetA(INTEGER_KIND,gad,ADR(ng),ADR(taglist()))
+  intgad:=gad
+
+  // And make a button to play with the integer Gadget with
+  ng.ng_LeftEdge:=window@.Width-110
+  ng.ng_TopEdge:=50+top
+  ng.ng_Width:=100
+  ng.ng_Height:=12
+  ng.ng_GadgetText:=ADR("INCREMENT")
+  ng.ng_GadgetID:=INCREMENT_ID
+  ng.ng_Flags:=0
+  taglist(0).ti_Tag:=TAG_DONE
+  gad:=CreateGadgetA(BUTTON_KIND,gad,ADR(ng),ADR(taglist()))
+
+  // Neat-o! make a ready-to-go palette selector Gadget
+  ng.ng_LeftEdge:=window@.Width-160
+  ng.ng_TopEdge:=80+top
+  ng.ng_Width:=150
+  ng.ng_Height:=30
+  ng.ng_GadgetText:=ADR("Our Colors")
+  ng.ng_GadgetID:=PALETTE_ID
+  ng.ng_Flags:=PLACETEXT_ABOVE BITOR NG_HIGHLABEL
+  taglist(0).ti_Tag:=GTPA_Depth
+  taglist(0).ti_Data:=window@.WScreen@.BitMap.Depth
+  taglist(1).ti_Tag:=GTPA_Color
+  taglist(1).ti_Data:=1
+  taglist(2).ti_Tag:=GTPA_IndicatorWidth
+  taglist(2).ti_Data:=20
+  taglist(3).ti_Tag:=TAG_DONE
+  gad:=CreateGadgetA(PALETTE_KIND,gad,ADR(ng),ADR(taglist()))
+
+  // Now we're ready to add the Gadget list.
+  // Quit if the final Gadget pointer is NULL - this
+  // means that one of the Gadget allocations failed.
+  // If it exists, add it to the window and refresh,
+  // then add the new GT_RefreshWindow() call.
+
+  IF gad=0 THEN
+    abort("Couldn't allocate the Gadget list.")
+  ENDIF
+
+  AddGList(window,glist,$FFFF,$FFFF,0)
+  RefreshGList(glist,window,0,$FFFF)
+  GT_RefreshWindow(window,0)
+ENDPROC create_gadgets
+
+PROC handle_input
+  LOCAL message OF POINTER TO IntuiMessage
+  LOCAL gadget OF POINTER TO Gadget
+  LOCAL class OF ULONG
+  LOCAL code OF USHORT
+
+  LOOP
+    window@.UserPort@.Wait
+
+    // Use the new GadTools GT_GetIMsg() function
+    // to get input events:
+    message:=GT_GetIMsg(window@.UserPort)
+    WHILE message DO
+      class:=message@.Class
+      code:=message@.Code
+
+      // We'll assume it's a Gadget, but no harm is
+      // done if it isn't
+      gadget:=message@.IAddress
+
+      // Use the GT_ReplyIMsg() function to reply to the message
+      GT_ReplyIMsg(message)
+
+      CASE class OF
+      WHEN CLOSEWINDOW
+        abort("Done.")
+      WHEN GADGETUP
+        handle_gadgetup(gadget@,code)
+      WHEN GADGETDOWN
+        handle_gadgetdown(gadget@,code)
+      WHEN REFRESHWINDOW
+        // When using a window of type SIMPLE_REFRESH,
+        // use this input event and GadTools-compatible
+        // refreshing code.
+        GT_BeginRefresh(window)
+        GT_EndRefresh(window,TRUE)
+      OTHERWISE
+        // No action
+      ENDCASE
+      message:=GT_GetIMsg(window@.UserPort)
+    ENDWHILE
+  ENDLOOP
+ENDPROC handle_input
+
+PROC handle_gadgetup(REF gadget OF Gadget,code OF USHORT)
+  LOCAL BytePtr OF POINTER TO UBYTE
+  LOCAL StringInfo OF POINTER TO StringInfo
+
+  CASE gadget.GadgetID OF
+  WHEN BUTTON_ID
+    abort("QUIT.")
+  WHEN CYCLE_ID
+    PRINT "CYCLE GADGET: item=",DayName$(code)
+  WHEN STRING_ID
+    PRINT "LISTVIEW STRING GADGET: string=",
+    StringInfo:=gadget.SpecialInfo
+    BytePtr:=StringInfo@.Buffer
+    WHILE BytePtr@<>0 DO
+      PRINT CHR$(BytePtr@),
+      BytePtr:=BytePtr+1
+    ENDWHILE
+    PRINT
+  WHEN LIST_ID
+    PRINT "LISTVIEW GADGET: item=",MonthName$(code)
+  WHEN SLIDER_ID
+    PRINT "SLIDER GADGET: ",code
+  WHEN CHECK_ID
+    PRINT "CHECKBOX GADGET: state=",
+    IF (gadget.Flags BITAND $0080) THEN
+      PRINT "ON"
+    ELSE
+      PRINT "OFF"
+    ENDIF
+  WHEN INTEGER_ID
+    PRINT "INTEGER GADGET: value=",
+    StringInfo:=gadget.SpecialInfo
+    PRINT StringInfo@.LongInt
+  WHEN INCREMENT_ID
+      // here we use a Tag-based Gadget attributes
+      // modifying function -- just pass the appropriate
+      // Tags you want modified
+    value:+1
+    taglist(0).ti_Tag:=GTIN_Number
+    taglist(0).ti_Data:=value
+    taglist(1).ti_Tag:=TAG_DONE
+    GT_SetGadgetAttrsA(intgad,window,0,ADR(taglist()))
+    PRINT "INCREMENT INTEGER: value=",
+    StringInfo:=intgad@.SpecialInfo
+    PRINT StringInfo@.LongInt
+  WHEN PALETTE_ID
+    PRINT "PALETTE GADGET: color=",code
+  OTHERWISE
+      // No action
+  ENDCASE
+ENDPROC handle_gadgetup
+
+PROC handle_gadgetdown(REF gadget OF Gadget,code OF USHORT)
+  CASE gadget.GadgetID OF
+  WHEN MX_ID
+    // Seems this requires a GADGETDOWN event
+    PRINT "MX (MUTUAL EXCLUDE) GADGET: item=",DayName$(code)
+  OTHERWISE
+      // No action
+  ENDCASE
+ENDPROC handle_gadgetdown
+

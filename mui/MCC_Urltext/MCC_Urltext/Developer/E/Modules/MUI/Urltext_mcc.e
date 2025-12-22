@@ -1,0 +1,32 @@
+OPT MODULE
+OPT PREPROCESS
+OPT EXPORT
+
+#define MUIC_Urltext       'Urltext.mcc'
+#define UrltextObject      Mui_NewObjectA(MUIC_Urltext,[TAG_IGNORE,0
+
+/* Attributes - Scheme is: [ISGN] */
+CONST MUIA_Urltext_Url            =$FEC900D0 /* [I.GN] (STRPTR) */
+CONST MUIA_Urltext_Text           =$FEC900D1 /* [I.G.] (STRPTR) */
+CONST MUIA_Urltext_Active         =$FEC900D2 /* [..G.] (BOOL)   */
+CONST MUIA_Urltext_Visited        =$FEC900D3 /* [..GN] (BOOL)   */
+CONST MUIA_Urltext_Underline      =$FEC900D4 /* [I...] (BOOL)   */
+CONST MUIA_Urltext_FallBack       =$FEC900D5 /* [I...] (BOOL)   */
+CONST MUIA_Urltext_DoVisitedPen   =$FEC900D6 /* [I...] (BOOL)   */
+CONST MUIA_Urltext_SetMax         =$FEC900D7 /* [I...] (BOOL)   */
+CONST MUIA_Urltext_DoOpenURL      =$FEC900D8 /* [I...] (BOOL)   */
+CONST MUIA_Urltext_NoMenu         =$FEC900D9 /* [I...] (BOOL)   */
+CONST MUIA_Urltext_NoOpenURLPrefs =$FEC900DC /* [I...] (BOOL)   */
+#define MUIM_Urltext_OpenURL        0xFEC900C9 /* struct MUIP_Urltext_OpenURL */
+#define MUIM_Urltext_Copy           0xFEC900CA /* struct MUIP_Urltext_Copy    */
+OBJECT muiP_Urltext_OpenURL
+ methodID :LONG
+ flags    :LONG  /* PRIVATE, leave 0 */
+ENDOBJECT
+
+OBJECT muiP_Urltext_Copy
+ methodID :LONG
+ unit     :LONG
+ENDOBJECT
+
+

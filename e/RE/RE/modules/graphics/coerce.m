@@ -1,0 +1,12 @@
+#ifndef GRAPHICS_COERCE_H
+#define GRAPHICS_COERCE_H
+
+
+
+#define PRESERVE_COLORS 1
+
+#define AVOID_FLICKER 2
+
+#define IGNORE_MCOMPAT 4
+#define BIDTAG_COERCE 1	
+#endif

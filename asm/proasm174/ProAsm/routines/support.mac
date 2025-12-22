@@ -1,0 +1,515 @@
+
+;---;  Support Macros  ;-------------------------------------------------------
+*
+*	****	SUPPORT MACROS    ****
+*
+*	Author		Daniel Weber
+*	Version		1.22
+*	Last Revision	11.10.93
+*	Identifier	smc_defined
+*       Prefix		smc_	(Support Macros)
+*				 ¯       ¯ ¯
+*	Macros		print_		- smart print routine
+*			printtext_ 	- print a zero ended text
+*			printit_	- small interface for smc_PrintText
+*			printsubroutine_- smc_PrintText: (A0: text)
+*			clrEOF		- clear End Of Line (uses the print mac)
+*			DoRawFmt	- format a text
+*			PrintRaw	- format a text, then print it
+*			CheckBreak	- check for ^C/^D/^E/^F
+*			GetDosErr	- get Dos error text...
+*			smc_doserrors	- list of all Dos error texts
+*			OpenLib		- opens a library
+*			CloseLib	- close lib...
+*
+;------------------------------------------------------------------------------
+
+;------------------
+	IFND	smc_defined
+smc_defined	=1
+
+
+;------------------------------------------------------------------------------
+*
+* print_
+*
+* <text to be printed>,<DosBase>,<handle>
+*
+* default: <DosBase = DosBase(pc)>
+*
+* the <DosBase> and the <handle> may only be added the first time
+* you use this macro. if no outputhandle is defined, the routine will use
+* the dos output() function everytime to get the right handle.
+*
+* examples:	Print	"hallo welt",dosbasis(a5)
+*		Print	<"hallo welt",$a,"wie gehts?",$a>,,outuphandle(pc)
+*
+;------------------------------------------------------------------------------
+
+print_		MACRO
+		opt	sto,o+,q+,ow-		;self optimising...
+		IFD	smc_Print
+		jsr	smc_Print
+		dc.b	\1,0
+		even
+		ELSE
+		bsr	..smc_Print\#
+		dc.b	\1,0
+		even
+		bra	..smc_afterPrint\#
+
+..smc_Print\#:
+smc_Print	EQU	..smc_Print\#
+
+		IFD	smc_PrintText
+		movem.l d0-a6,-(a7)
+		move.l  60(a7),a0		;take text pointer
+		jsr	smc_PrintText		
+..countloop\#:	tst.b   (a0)+			;search end of string
+		bne.s   ..countloop\#
+		move.l  a0,d1
+		ELSE
+		movem.l d0-a6,-(a7)
+		move.l  60(a7),d2		;take text pointer
+		move.l  d2,a3
+..countloop\#:	tst.b   (a3)+			;search end of string
+		bne.s   ..countloop\#
+		move.l  a3,d3
+		subq.l  #1,d3
+		sub.l   d2,d3			;length
+		beq.s   ..nothingtowrite\#
+		IFC	'\2',''
+		move.l  DosBase(pc),a6
+		ELSE
+		move.l  \2,a6
+		ENDC
+		IFC	'\3',''
+		jsr	-60(a6)			;output()
+		move.l	d0,d1
+		beq.s	..nothingtowrite\#
+		ELSE
+		move.l  \3,d1
+		ENDC
+		jsr     -48(a6)			;write()
+..nothingtowrite\#:
+		move.l  a3,d1
+		ENDC
+		addq.l  #1,d1
+		and.b   #$fe,d1
+		move.l  d1,60(a7)		;new return address
+		movem.l (a7)+,d0-a6
+		rts
+..smc_afterPrint\#:
+		ENDC
+		opt	rcl
+		ENDM
+
+
+;------------------------------------------------------------------------------
+*
+* Clear EndOfLine
+*
+;------------------------------------------------------------------------------
+
+clrEOF:		MACRO
+		print	<$9b,$4b>
+		ENDM
+
+
+;------------------------------------------------------------------------------
+*
+* printtext_
+*
+* <textpointer>,<DosBase>,<handle>[,bra]
+*
+* default: <textpointer = a0>,<DosBase = DosBase(pc)>
+*
+* the <DosBase> and the <handle> may only be added the first time
+* you use this macro. if no outputhandle is defined, the routine will use
+* the dos output() function everytime to get the right handle.
+* the optional 'bra' parameter indicates the macro that the user want to
+* use the printtext routine via bra.
+*
+* example:	printtext_	,dosybasy(a1),handely(a4)  ;define base/handle
+*		printtext_				   ;simply print text
+*
+;------------------------------------------------------------------------------
+
+printtext_	MACRO
+		opt	sto,o+,q+,ow-		;self optimising...
+		IFD	smc_PrintText
+		IFNC	'\1',''
+		lea	\1,a0
+		ENDC
+		IFNC	'\4','bra'
+		jsr	smc_PrintText
+		ELSE
+		jmp	smc_PrintText
+		ENDC
+		ELSE
+		IFNC	'\1',''
+		lea	\1,a0
+		ENDC
+		IFNC	'\4','bra'
+		bsr.s   smc_PrintText
+		bra	smc_afterPrintText\#
+		ELSE
+;		bra.s   smc_PrintText	;not needed, print code follows...
+		ENDC
+
+		printsubroutine_ \2,\3
+smc_afterPrintText\#:	EQU	*
+		ENDC
+		opt	rcl
+		ENDM
+
+
+;------------------------------------------------------------------------------
+*
+* printit_ <kind>
+*
+* A0: text to be printed
+*
+* <kind is either 'bra', 'jm', 'bsr', 'jsr' (default: 'jsr')>
+*
+* This macro is just a small interface for the printtext_/printsubroutine_
+* macros.
+*
+;------------------------------------------------------------------------------
+
+printit_	MACRO
+		opt	sto
+		opt	o+,ow-
+		IFC	'\1','bra'
+		bra	smc_PrintText
+		ENDC
+		IFC	'\1','jmp'
+		jmp	smc_PrintText
+		ENDC
+		IFC	'\1','bsr'
+		bsr	smc_PrintText
+		ENDC
+		IFC	'\1','jsr'
+		jsr	smc_PrintText
+		ENDC
+		IFC	'\1',''
+		jsr	smc_PrintText
+		ENDC
+		ENDM
+
+
+;------------------------------------------------------------------------------
+*
+* Print Subroutine...
+*
+* <DosBase>,<outputhd>
+*
+* default: <DosBase(pc)>,<jsr _LVOOutput(DosBase)>
+*
+* A0: text to print
+*
+* (for details see the PrintText macro)
+*
+;------------------------------------------------------------------------------
+
+printsubroutine_	MACRO
+
+smc_PrintText:	EQU	*
+		movem.l d0-a6,-(a7)		;a0: textpointer
+		move.l  a0,d2
+.countloop\#:	tst.b   (a0)+			;search end of string
+		bne.s   .countloop\#
+		move.l  a0,d3
+		subq.l  #1,d3
+		sub.l   d2,d3			;length
+		beq.s   .nothingtowrite\#
+		IFC	'\1',''
+		move.l  DosBase(pc),a6
+		ELSE
+		move.l  \1,a6
+		ENDC
+		IFC	'\2',''
+		jsr	-60(a6)			;output()
+		move.l	d0,d1
+		beq.s	.nothingtowrite\#
+		ELSE
+		move.l  \2,d1
+		ENDC
+		jsr     -48(a6)			;write()
+.nothingtowrite\#:
+		movem.l (a7)+,d0-a6
+		rts
+		ENDM
+
+
+;------------------------------------------------------------------------------
+*
+* DoRawFmt
+*
+* <unformated text>,<rawlist>,<targetbuffer>
+*
+* => d0: length of string
+* => a0: target buffer
+*
+;------------------------------------------------------------------------------
+
+DoRawFmt:	MACRO
+		opt	sto,o+,q+,ow-
+		IFD	smc_DoRawFmt
+		move.l	\1,a0			;unformated text
+		move.l	\2,a1			;rawlist
+		move.l	\3,a3			;target buffer
+		jsr	smc_DoRawFmt
+		ELSE
+		move.l	\1,a0			;unformated text
+		move.l	\2,a1			;rawlist
+		move.l	\3,a3			;target buffer
+		pea	smc_afterDoRawFmt(pc)
+
+smc_DoRawFmt:	movem.l	d1-d7/a2/a4-a6,-(a7)
+		move.l	a3,d3
+		lea	.setin(pc),a2
+		move.l	4.w,a6
+		jsr	-522(a6)		;RawDoFmt()
+		move.l	d3,a0
+		move.l	d3,a2
+.loop:		tst.b	(a2)+
+		bne.s	.loop
+		sub.l	d3,a2
+		move.l	a2,d0			;length
+		movem.l	(a7)+,d1-d7/a2/a4-a6
+		rts
+
+.setin:		move.b	d0,(a3)+
+		rts
+smc_afterDoRawFmt:
+		ENDC
+		opt	rcl
+		ENDM
+
+
+;------------------------------------------------------------------------------
+*
+* PrintRaw
+*
+* <unformated text>,<rawlist>,<targetbuffer>,<DosBase>,<outputhd>
+*
+* default: <DosBase = DosBase(pc)>
+*
+* (see the Print/PrintText macro for information)
+* 
+;------------------------------------------------------------------------------
+
+PrintRaw:	MACRO
+		DoRawFmt	\1,\2,\3
+		PrintText	,\4,\5
+		ENDM
+
+
+;------------------------------------------------------------------------------
+*
+* CheckBreak
+*
+* <kind of break: c/d/e/f>
+*
+* default:	<c>
+*
+* => d0:16: 0: no break  -: break occured
+*
+;------------------------------------------------------------------------------
+
+CheckBreak:	MACRO
+		movem.l	d1-a6,-(a7)
+		move.l	4.w,a6
+		move.l	276(a6),a1		;*thistask
+		moveq	#0,d0
+		jsr	-324(a6)		;signal()
+		IFC	'\1',''
+		and.l	#$1000,d0
+		ENDC
+		IFC	'\1','c'
+		and.l	#$1000,d0
+		ENDC
+		IFC	'\1','d'
+		and.l	#$2000,d0
+		ENDC
+		IFC	'\1','e'
+		and.l	#$4000,d0
+		ENDC
+		IFC	'\1','f'
+		and.l	#$8000,d0
+		ENDC
+		movem.l	(a7)+,d1-a6
+		ENDM
+
+
+;------------------------------------------------------------------------------
+*
+* GetDosErr()
+*
+* <error number>
+*
+* => d0: zero ended string or zero if no string was found
+*
+* default:	value already in d0
+*
+;------------------------------------------------------------------------------
+
+GetDosErr:	MACRO
+		IFNC	'\1',''
+		move.l	\1,d0
+		ENDC
+		move.l	a0,-(a7)		
+		lea	smc_errortexts(pc),a0
+.smc_tst\@:	cmp.b	(a0)+,d0
+		beq	smc_gde\@
+.smc_loop\@:	tst.b	(a0)+
+		bne.s	.smc_loop\@
+		tst.b	(a0)			;end reached?
+		bne.s	.smc_tst\@
+		moveq	#0,d0			;text not found...
+		bra	smc_out\@
+
+		IFND	smc_doserrortexts
+		smc_doserrors
+		endif
+
+smc_gde\@:	move.l	a0,d0
+smc_out\@:	move.l	(a7)+,a0
+		ENDM
+
+
+;------------------------------------------------------------------------------
+*
+* smc_doserrors
+*
+* list of dos error texts...
+*
+;------------------------------------------------------------------------------
+
+smc_doserrors:	MACRO
+smc_doserrortexts:
+		dc.b	103,"no free store",0
+		dc.b	105,"task table full",0
+		dc.b	114,"bad template",0
+		dc.b	115,"bad number",0
+		dc.b	116,"required argument missing",0
+		dc.b	117,"key needs argument",0
+		dc.b	118,"too many arguments",0
+		dc.b	119,"unmatched quotes",0
+		dc.b	120,"line too long",0
+		dc.b	121,"file not object",0
+		dc.b	122,"invalid resident library",0
+		dc.b	201,"no default directory",0
+		dc.b	202,"object in use",0
+		dc.b	203,"object exists",0
+		dc.b	204,"directory not found",0
+		dc.b	205,"object not found",0
+		dc.b	206,"bad stream name",0
+		dc.b	207,"object too large",0
+		dc.b	209,"action not known",0
+		dc.b	210,"invalid component name",0
+		dc.b	211,"invalid lock",0
+		dc.b	212,"object not of required type",0
+		dc.b	213,"disk not validated",0
+		dc.b	214,"disk write protected",0
+		dc.b	215,"rename across devices",0
+		dc.b	216,"directory not empty",0
+		dc.b	217,"too many levels",0
+		dc.b	218,"device not mounted",0
+		dc.b	219,"seek error",0
+		dc.b	220,"comment too big",0
+		dc.b	221,"disk full",0
+		dc.b	222,"delete protected",0
+		dc.b	223,"file is write protected",0
+		dc.b	224,"file is read protected",0
+		dc.b	225,"not a DOS disk",0
+		dc.b	226,"no disk in drive",0
+		dc.b	232,"no more entries",0
+		dc.b	233,"object is soft link",0	;added for 1.4
+		dc.b	234,"object linked",0		;"
+		dc.b	235,"bad hunk",0		;"
+		dc.b	236,"not implemented",0		;"
+		dc.b	240,"record not locked",0	;"
+		dc.b	241,"lock collision",0		;"
+		dc.b	242,"lock timeout",0		;"
+		dc.b	243,"unlock error",0		;"
+		dc.b	0				;end of list
+		even
+		ENDM
+
+
+;------------------------------------------------------------------------------
+*
+* OpenLib	- Library Help Macro
+* CloseLib
+*
+* OpenLib	<library>,<base>,<version>
+* Default	<>,d0,#0
+*
+* CloseLib	<base>
+*
+;------------------------------------------------------------------------------
+
+OpenLib:	MACRO
+		OPT	sto,o+,ow-,q+
+		IFC	'\1','dos'
+		lea	\dosname(pc),a1
+		ELSE
+		IFC	'\1','intuition'
+		lea	\intname(pc),a1
+		ELSE
+		IFC	'\1','graphics'
+		lea	\gfxname(pc),a1
+		ELSE
+		FAIL	library not supported
+		ENDC
+		ENDC
+		ENDC
+		IFC	'\3',''
+		moveq	#0,d0
+		ELSE
+		move.l	#\3,d0
+		ENDC
+		IFD	smc_OpenLib
+		jsr	smc_OpenLib
+		ELSE
+		pea	smc_OpenLibEnd(pc)
+smc_OpenLib:	movem.l	d1-a6,-(a7)
+		move.l	4.w,a6
+		jsr	-552(a6)		;OpenLibrary()
+		movem.l	d1-a6,-(a7)
+		rts
+smc_OpenLibEnd:
+		ENDC
+		IFNC	'\2',''
+		move.l	d0,\2
+		ENDC
+		ENDM
+
+
+;------------------------------------------------
+CloseLib:	MACRO
+		IFC	'\1',''
+		FAIL	CloseLib: no base given
+		ENDC
+		IFD	smc_CloseLib
+		jsr	smc_CloseLib
+		ELSE
+		move.l	\1,a1
+		pea	smc_CloseLibEnd(pc)
+smc_CloseLib:	movem.l	d0-a6,-(a7)
+		move.l	4.w,a6
+		jsr	-414(a6)		;CloseLibrary()
+		movem.l	(a7)+,d0-a6
+		rts
+smc_CloseLibEnd:
+		ENDC
+		ENDM
+
+;------------------------------------------------------------------------------
+
+	endif
+
+ end
+

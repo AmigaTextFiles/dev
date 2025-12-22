@@ -1,0 +1,15 @@
+#include <exec/types.h>
+#include <exec/exec.h>
+#include <devices/serial.h>
+#include <devices/inputevent.h>
+#include <graphics/gfxbase.h>
+#include <intuition/intuition.h>
+#include <libraries/dosextens.h>
+#include <libraries/arpbase.h>
+#include <libraries/intuisup.h>
+#include <functions.h>
+#include <ctype.h>
+#include <fcntl.h>
+#include <stdio.h>
+#include <string.h>
+#include <stddef.h>

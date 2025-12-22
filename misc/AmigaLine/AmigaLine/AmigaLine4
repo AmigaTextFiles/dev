@@ -1,0 +1,174 @@
+			Technical Note #4
+	      Stack, how to determine size at run time
+
+SUMMARY
+
+$ 4/0 Stack, how to determine size at run time
+$ release
+$ 26-Dec-87 Bryce Nesbitt / BDI
+$ stack, Workbench, CLI, process, startup
+
+    It should be straightforward to determine the size of the stack your
+program is running on.	Sadly it is not.  This note should clear the
+confusion.
+
+----------------------------------------------------------------------------
+
+	If your program needs more than the 4000 byte default stack, it has
+    some work to do.  It will need to check if the stack is large enough
+    for it's needs and take one of two actions if it is not:
+
+    1.	Abort with an error requester.
+    2.	Allocate enough space and (using assembly language) point the stack
+	pointer to it.
+
+
+LANGUAGES
+
+	Some languages will provide a global that you can look at to
+    determine the size of the current stack.  This is cleanest option, if
+    it is available to you.
+
+	If there is any chance at all that user input may cause your
+    program to use more stack than normal, leave the stack checking option
+    of your compiler enabled.  Recursive functions are particularly
+    notorious stack blowers.
+
+
+WORKBENCH
+
+	When stared from the Workbench tool, your stack size might have
+    come from one of three places:
+
+    1.	The stack field of a Project icon.
+    2.	The stack field in your Tool's icon.
+    3.	The Workbench's default stack size.
+
+	The icon that started you tool decides the stack size.	If the
+    stack field is blank, then the default of ~4000 bytes is used.  The
+    size is recorded in the normal task structures.
+
+       If the user sets the stack size to an odd number then the Workbench
+    tool will crash, so don't worry about that situation.
+
+
+CLI
+
+	When your code is started up it does NOT get a new process
+    invocation; as "CLI 3" your code is literally the same process that
+    runs CLI task 3.
+
+	When the CLI starts up a program it allocates a brand new stack.
+    This is *not* the same stack the CLI itself uses.  The size of this
+    stack is *not* recorded in the normal "task" structure; it must be
+    extracted from the top of the stack at startup or from the
+    "cli_DefaultStack" field.
+
+
+;-------------- ASSEMBLY EXAMPLE -----------
+;
+; 25-Jan-87  Bryce Nesbitt
+;
+; A complete startup module for assembly language programs.  Works from
+; Workbench or CLI.
+;
+	NOLIST
+	INCLUDE "exec/types.i"
+	INCLUDE "libraries/dosextens.i"
+	LIST
+jsrlib	MACRO
+	xref _LVO\1
+	jsr  _LVO\1(a6)
+	ENDM
+;
+; On startup (A7) contains a return address,
+; 4(A7) contains the size of the stack in bytes
+;
+		move.l	4(a7),d7            ;--Get CLI stack size--
+		move.l	4,a6		    ;Get exec library pointer
+		suba.l	a1,a1		    ;Put zero in A1
+		jsrlib	FindTask	    ;Find this task
+		move.l	d0,a5
+		moveq	#0,d0		    ;Set zero for later
+		move.l	pr_CLI(a5),d1       ;Check CLI/Workbench flag
+		bne.s	fromCLI
+
+		move.l	pr_StackSize(a5),d7 ;--Get Workbench stack size--
+		lea.l	pr_MsgPort(a5),a0   ;Wait for the message
+		jsrlib	WaitPort	    ; the Workbench will send
+		lea.l	pr_MsgPort(a5),a0
+		jsrlib	GetMsg
+
+fromCLI 	move.l	d0,-(a7)            ;Save the message, or zero
+******************************************  A5-This task D7-Stack size
+
+		;...your code here...
+
+******************************************  D7-MUST contain result code
+ExitToDOS:	move.l	(a7)+,d2
+		beq.s	notWorkbench
+
+		jsrlib	Forbid	    ;Required so we won't be unloaded by
+		move.l	d2,a1	    ; the Workbench too soon.
+		jsrlib	ReplyMsg    ;Reply to the Workbench message
+
+notWorkbench	move.l	d7,d0	    ;Return result code:
+		rts		    ; 0 = ok	   10 = error
+		END		    ; 5 = warning  20 = severe failure
+
+
+----------------- C EXAMPLE ----------------
+*/
+/*
+ * stack_test.c  27-Oct-87.  Bryce Nesbitt
+ *
+ */
+#include "exec/types.h"
+#include "exec/tasks.h"
+#include "libraries/dosextens.h"
+#include "stdio.h"
+struct Process *FindTask();
+
+void main()
+{
+register struct Process     *Process;
+register FILE		    *Handle;
+struct CommandLineInterface *CLI;
+
+    if (!(Handle=fopen("con:0/11/250/128/Stack Window","a")))
+	exit(20);       /* "a" is used so the window won't flicker */
+
+    Process=FindTask(0L);
+
+    if (CLI=(struct CommandLineInterface *)(Process->pr_CLI<<2))
+	{
+	if (CLI->cli_Background)
+	    fprintf(Handle,"Background");
+	else
+	    fprintf(Handle,"Foreground");
+	fprintf(Handle," CLI #%ld\n",Process->pr_TaskNum);
+
+	fprintf(Handle,"Actual stack is: %ld\n\n",
+	       CLI->cli_DefaultStack<<2);
+	}
+    else
+	{
+	fprintf(Handle,"This is not a CLI process\n");
+	fprintf(Handle,"Actual stack is %ld\n\n",Process->pr_StackSize);
+	}
+
+    /* Other useless information (we already know the stack size) */
+    fprintf(Handle,"pr_StackSize     %ld\n",Process->pr_StackSize);
+    fprintf(Handle,"pr_StackBase     $%lx\n\n",Process->pr_StackBase<<2);
+    fprintf(Handle,"tc_SPLower       $%lx\n",Process->pr_Task.tc_SPLower);
+    fprintf(Handle,"tc_SPUpper       $%lx\n",Process->pr_Task.tc_SPUpper);
+    fprintf(Handle,"Upper-Lower      %ld\n\n",
+	   (long)Process->pr_Task.tc_SPUpper-
+	   (long)Process->pr_Task.tc_SPLower);
+    fprintf(Handle,"tc_SPReg         $%lx\n",Process->pr_Task.tc_SPReg);
+
+    Delay(80L);     /* Be quick :-).  BTW: *Never* Delay(0L);! */
+    fprintf(Handle,"\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n");
+		    /* Dramatic exit :-) */
+    fclose(Handle);
+}

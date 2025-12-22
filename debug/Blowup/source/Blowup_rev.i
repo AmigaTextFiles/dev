@@ -1,0 +1,14 @@
+VERSION		EQU	1
+REVISION	EQU	7
+DATE	MACRO
+		dc.b	'27.6.99'
+	ENDM
+VERS	MACRO
+		dc.b	'Blowup 1.7'
+	ENDM
+VSTRING	MACRO
+		dc.b	'Blowup 1.7 (27.6.99)',13,10,0
+	ENDM
+VERSTAG	MACRO
+		dc.b	0,'$VER: Blowup 1.7 (27.6.99)',0
+	ENDM

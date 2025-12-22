@@ -1,0 +1,1946 @@
+DEFINITION FOR LIBRARY MODULE Dos ;
+
+FROM SYSTEM	IMPORT ADDRESS, BADDRESS, SHORTSET, LONGSET, STRING, LONGWORD ;
+
+FROM Exec	IMPORT Library, Message, MessagePtr, MsgPort, MsgPortPtr, Task,
+		       TaskPtr, MinList, LibraryPtr, MinNode, MinNodePtr,
+		       SignalSemaphore, Node, NodePtr ;
+
+FROM Utility	IMPORT HookPtr, TagItemPtr, TAG_USER ;
+
+
+TYPE
+  DevInfoPtr		  = BCPL POINTER TO DevInfo	;
+  FileHandlePtr		  = BCPL POINTER TO FileHandle	;
+  DosInfoPtr 		  = BCPL POINTER TO DosInfo	;
+  DeviceListPtr 	  = BCPL POINTER TO DeviceList	;
+  DosListPtr 		  = BCPL POINTER TO DosList	;
+  FileLockPtr 		  = BCPL POINTER TO FileLock	;
+  DosEnvecPtr 		  = BCPL POINTER TO DosEnvec	;
+  FileSysStartupMsgPtr    = BCPL POINTER TO FileSysStartupMsg    ;
+  CommandLineInterfacePtr = BCPL POINTER TO CommandLineInterface ;
+
+  DateStampPtr 		  = POINTER TO DateStampRec	;
+  FileInfoBlockPtr 	  = POINTER TO FileInfoBlock	;
+  InfoDataPtr 		  = POINTER TO InfoData		;
+  ProcessPtr 		  = POINTER TO Process		;
+  DosPacketPtr 		  = POINTER TO DosPacket	;
+  StandardPacketPtr 	  = POINTER TO StandardPacket	;
+  ErrorStringPtr 	  = POINTER TO ErrorString	;
+  DosLibraryPtr 	  = POINTER TO DosLibrary	;
+  RootNodePtr 		  = POINTER TO RootNode		;
+  CliProcListPtr 	  = POINTER TO CliProcList	;
+  AssignListPtr 	  = POINTER TO AssignList	;
+  DevProcPtr 		  = POINTER TO DevProc		;
+  DateTimePtr 		  = POINTER TO DateTime		;
+  AnchorPathPtr 	  = POINTER TO AnchorPath	;
+  AChainPtr 		  = POINTER TO AChain		;
+  ExAllDataPtr 		  = POINTER TO ExAllData	;
+  ExAllControlPtr 	  = POINTER TO ExAllControl	;
+  DeviceNodePtr 	  = POINTER TO DeviceNode	;
+  NotifyMessagePtr 	  = POINTER TO NotifyMessage	;
+  NotifyRequestPtr 	  = POINTER TO NotifyRequest	;
+  CSourcePtr 		  = POINTER TO CSource		;
+  RDArgsPtr 		  = POINTER TO RDArgs		;
+  RecordLockPtr 	  = POINTER TO RecordLock	;
+  LocalVarPtr 		  = POINTER TO LocalVar		;
+  SegmentPtr 		  = POINTER TO Segment		;
+
+CONST
+  DOSNAME = "dos.library" ;
+
+(* Predefined Amiga DOS global constants *)
+
+CONST
+  DOSTRUE  = -1 ;
+  DOSFALSE =  0 ;
+
+(* Mode parameter to Open() *)
+
+CONST
+  MODE_OLDFILE = 1005 ;  (* Open existing file read/write	  *)
+  			 (* positioned at beginning of file. 	  *)
+
+  MODE_NEWFILE = 1006 ;  (* Open freshly created file (delete     *)
+			 (* old file) read/write, exclusive lock. *)
+
+  MODE_READWRITE = 1004 ;(* Open old file w/shared lock,   *)
+			 (* creates file if doesn't exist. *)
+
+(* Relative position to Seek() *)
+
+  OFFSET_BEGINNING = -1 ; (* relative to Begining Of File      *)
+  OFFSET_CURRENT   =  0	; (* relative to Current file position *)
+  OFFSET_END	   =  1	; (* relative to End Of File	       *)
+
+  OFFSET_BEGINING  = OFFSET_BEGINNING ; (* ancient compatibility *)
+
+  BITSPERBYTE	   = 8  ;
+  BYTESPERLONG	   = 4  ;
+  BITSPERLONG	   = 32 ;
+  MAXINT	   = 07FFFFFFFH ;
+  MININT	   = 080000000H ;
+
+(* Passed as type to Lock() *)
+  SHARED_LOCK	   = -2	; (* File is readable by others   *)
+  ACCESS_READ	   = -2	; (* Synonym			  *)
+  EXCLUSIVE_LOCK   = -1	; (* No other access allowed	  *)
+  ACCESS_WRITE	   = -1	; (* Synonym			  *)
+
+TYPE
+  DateStampRec = RECORD   (* name clash with function DateStamp *)
+    ds_Days   : LONGINT ; (* Number of days since Jan. 1, 1978  *)
+    ds_Minute : LONGINT ; (* Number of minutes past midnight    *)
+    ds_Tick   : LONGINT ; (* Number of ticks past minute        *)
+  END ; (* DateStamp *)
+
+CONST
+  TICKS_PER_SECOND = 50 ; (* Number of ticks in one second     *)
+
+TYPE
+(* Returned by Examine() and ExNext(), must be on a 4 byte boundary *)
+  FileInfoBlock = RECORD
+    fib_DiskKey      : LONGINT ;
+    fib_DirEntryType : LONGINT ;  (* Type of Directory. If < 0, then a plain *)
+    				  (* file. If > 0 a directory		     *)
+    fib_FileName     : ARRAY [0..107] OF CHAR ;
+    				  (* Null terminated.Max 30 chars used for now*)
+    fib_Protection   : LONGSET ;  (* bit mask of protection, rwxd are 3-0.    *)
+    fib_EntryType    : LONGINT ;
+    fib_Size	     : LONGINT ;  (* Number of bytes in file  *)
+    fib_NumBlocks    : LONGINT ;  (* Number of blocks in file *)
+    fib_Date	     : DateStampRec; (* Date file last changed   *)
+    fib_Comment	     : ARRAY [0..79] OF CHAR ;
+    			          (*0C terminated comment associated with file*)
+
+    (* Note: the following fields are not supported by all filesystems.	 *)
+    (* They should be initialized to 0 sending an ACTION_EXAMINE packet. *)
+    (* When Examine() is called, these are set to 0 for you.		 *)
+    (* AllocDosObject() also initializes them to 0.			 *)
+
+    fib_OwnerUID     : CARDINAL ;		(* owner's UID *)
+    fib_OwnerGID     : CARDINAL ;		(* owner's GID *)
+
+    fib_Reserved     : ARRAY [0..31] OF CHAR ;
+  END ; (* FileInfoBlock *)
+
+(* FIB stands for FileInfoBlock *)
+
+(* FIBB are bit definitions, FIBF are field definitions			  *)
+(* Regular RWED bits are 0 == allowed.					  *)
+(* NOTE: GRP and OTR RWED permissions are 0 == not allowed!		  *)
+(* Group and Other permissions are not directly handled by the filesystem *)
+
+CONST
+  FIBB_OTR_READ	   = 15 ; (* Other: file is readable		    *)
+  FIBB_OTR_WRITE   = 14 ; (* Other: file is writable		    *)
+  FIBB_OTR_EXECUTE = 13 ; (* Other: file is executable		    *)
+  FIBB_OTR_DELETE  = 12 ; (* Other: prevent file from being deleted *)
+  FIBB_GRP_READ	   = 11 ; (* Group: file is readable		    *)
+  FIBB_GRP_WRITE   = 10 ; (* Group: file is writable		    *)
+  FIBB_GRP_EXECUTE =  9 ; (* Group: file is executable		    *)
+  FIBB_GRP_DELETE  =  8 ; (* Group: prevent file from being deleted *)
+
+  FIBB_SCRIPT      = 6 ; (* program is a script (execute) file      *)
+  FIBB_PURE        = 5 ; (* program is reentrant and rexecutable    *)
+  FIBB_ARCHIVE     = 4 ; (* cleared whenever file is changed        *)
+  FIBB_READ        = 3 ; (* ignored by old filesystem		    *)
+  FIBB_WRITE       = 2 ; (* ignored by old filesystem		    *)
+  FIBB_EXECUTE     = 1 ; (* ignored by system, used by Shell        *)
+  FIBB_DELETE      = 0 ; (* prevent file from being deleted         *)
+
+  FIBF_OTR_READ	   = {FIBB_OTR_READ}    ;
+  FIBF_OTR_WRITE   = {FIBB_OTR_WRITE}   ;
+  FIBF_OTR_EXECUTE = {FIBB_OTR_EXECUTE} ;
+  FIBF_OTR_DELETE  = {FIBB_OTR_DELETE}  ;
+  FIBF_GRP_READ	   = {FIBB_GRP_READ}    ;
+  FIBF_GRP_WRITE   = {FIBB_GRP_WRITE}   ;
+  FIBF_GRP_EXECUTE = {FIBB_GRP_EXECUTE} ;
+  FIBF_GRP_DELETE  = {FIBB_GRP_DELETE}  ;
+
+  FIBF_SCRIPT      = {FIBB_SCRIPT}  ;
+  FIBF_PURE        = {FIBB_PURE}    ;
+  FIBF_ARCHIVE     = {FIBB_ARCHIVE} ;
+  FIBF_READ        = {FIBB_READ}    ;
+  FIBF_WRITE       = {FIBB_WRITE}   ;
+  FIBF_EXECUTE     = {FIBB_EXECUTE} ;
+  FIBF_DELETE      = {FIBB_DELETE}  ;
+
+(* Standard maximum length for an error string from fault.  However, most *)
+(* error strings should be kept under 60 characters if possible.  Don't   *)
+(* forget space for the header you pass in.				  *)
+  FAULT_MAX = 82 ;
+
+(* BCPL strings have a length in the first byte and then the characters.  *)
+(* For example:	 s[0]=3 s[1]=S s[2]=Y s[3]=S				  *)
+
+TYPE
+  BSTRING = BCPL POINTER TO ARRAY OF CHAR ;
+
+(* returned by Info(), must be on a 4 byte boundary *)
+TYPE
+  InfoData = RECORD
+    id_NumSoftErrors : LONGINT ; (* number of soft errors on disk       *)
+    id_UnitNumber    : LONGINT ; (* Which unit disk is (was) mounted on *)
+    id_DiskState     : LONGINT ; (* See defines below 		*)
+    id_NumBlocks     : LONGINT ; (* Number of blocks on disk    *)
+    id_NumBlocksUsed : LONGINT ; (* Number of block in use      *)
+    id_BytesPerBlock : LONGINT ;
+    id_DiskType	     : LONGINT ; (* Disk Type code	        *)
+    id_VolumeNode    : DeviceListPtr ;
+    				 (* BCPL pointer to volume node *)
+    id_InUse	     : LONGINT ; (* Flag, zero if not in use    *)
+  END ; (* InfoData *)
+
+(* ID stands for InfoData *)
+(* Disk states *)
+CONST
+  ID_WRITE_PROTECTED = 80 ; (* Disk is write protected 		 *)
+  ID_VALIDATING	     = 81 ; (* Disk is currently being validated *)
+  ID_VALIDATED	     = 82 ; (* Disk is consistent and writeable  *)
+
+(* Disk types *)
+(* ID_INTER_* use international case comparison routines for hashing *)
+(* Any other new filesystems should also, if possible.		     *)
+
+  ID_NO_DISK_PRESENT  = -1 ;
+  ID_UNREADABLE_DISK  = 042414400H ; (* 'BAD\0' *)
+  ID_DOS_DISK	      = 0444F5300H ; (* 'DOS\0' *)
+  ID_FFS_DISK	      = 0444F5301H ; (* 'DOS\1' *)
+  ID_INTER_DOS_DISK   = 0444F5302H ; (* 'DOS\2' *)
+  ID_INTER_FFS_DISK   = 0444F5303H ; (* 'DOS\3' *)
+  ID_FASTDIR_DOS_DISK = 0444F5304H ; (* 'DOS\4' *)
+  ID_FASTDIR_FFS_DISK = 0444F5305H ; (* 'DOS\5' *)
+  ID_NOT_REALLY_DOS   = 04E444F53H ; (* 'NDOS'  *)
+  ID_KICKSTART_DISK   = 04B49434BH ; (* 'KICK'  *)
+  ID_MSDOS_DISK	      = 04D534400H ; (* 'MSD\0' *)
+
+(* Errors from IoErr(), etc. *)
+  ERROR_NO_FREE_STORE		  = 103 ;
+  ERROR_TASK_TABLE_FULL		  = 105 ;
+  ERROR_BAD_TEMPLATE		  = 114 ;
+  ERROR_BAD_NUMBER		  = 115 ;
+  ERROR_REQUIRED_ARG_MISSING	  = 116 ;
+  ERROR_KEY_NEEDS_ARG		  = 117 ;
+  ERROR_TOO_MANY_ARGS		  = 118 ;
+  ERROR_UNMATCHED_QUOTES	  = 119 ;
+  ERROR_LINE_TOO_LONG		  = 120 ;
+  ERROR_FILE_NOT_OBJECT		  = 121 ;
+  ERROR_INVALID_RESIDENT_LIBRARY  = 122 ;
+  ERROR_NO_DEFAULT_DIR		  = 201 ;
+  ERROR_OBJECT_IN_USE		  = 202 ;
+  ERROR_OBJECT_EXISTS		  = 203 ;
+  ERROR_DIR_NOT_FOUND		  = 204 ;
+  ERROR_OBJECT_NOT_FOUND	  = 205 ;
+  ERROR_BAD_STREAM_NAME		  = 206 ;
+  ERROR_OBJECT_TOO_LARGE	  = 207 ;
+  ERROR_ACTION_NOT_KNOWN	  = 209 ;
+  ERROR_INVALID_COMPONENT_NAME	  = 210 ;
+  ERROR_INVALID_LOCK		  = 211 ;
+  ERROR_OBJECT_WRONG_TYPE	  = 212 ;
+  ERROR_DISK_NOT_VALIDATED	  = 213 ;
+  ERROR_DISK_WRITE_PROTECTED	  = 214 ;
+  ERROR_RENAME_ACROSS_DEVICES	  = 215 ;
+  ERROR_DIRECTORY_NOT_EMPTY	  = 216 ;
+  ERROR_TOO_MANY_LEVELS		  = 217 ;
+  ERROR_DEVICE_NOT_MOUNTED	  = 218 ;
+  ERROR_SEEK_ERROR		  = 219 ;
+  ERROR_COMMENT_TOO_BIG		  = 220 ;
+  ERROR_DISK_FULL		  = 221 ;
+  ERROR_DELETE_PROTECTED	  = 222 ;
+  ERROR_WRITE_PROTECTED		  = 223 ;
+  ERROR_READ_PROTECTED		  = 224 ;
+  ERROR_NOT_A_DOS_DISK		  = 225 ;
+  ERROR_NO_DISK			  = 226 ;
+  ERROR_NO_MORE_ENTRIES		  = 232 ;
+
+(* added for 1.4 *)
+
+  ERROR_IS_SOFT_LINK		  = 233 ;
+  ERROR_OBJECT_LINKED		  = 234 ;
+  ERROR_BAD_HUNK		  = 235 ;
+  ERROR_NOT_IMPLEMENTED		  = 236 ;
+  ERROR_RECORD_NOT_LOCKED	  = 240 ;
+  ERROR_LOCK_COLLISION		  = 241 ;
+  ERROR_LOCK_TIMEOUT		  = 242 ;
+  ERROR_UNLOCK_ERROR		  = 243 ;
+
+(* error codes 303-305 are defined in dosasl.h *)
+
+(* These are the return codes used by convention by AmigaDOS commands *)
+(* See FAILAT and IF for relvance to EXECUTE files		      *)
+  RETURN_OK    = 0  ; (* No problems, success	    *)
+  RETURN_WARN  = 5  ; (* A warning only		    *)
+  RETURN_ERROR = 10 ; (* Something wrong	    *)
+  RETURN_FAIL  = 20 ; (* Complete or severe failure *)
+
+(* Bit numbers that signal you that a user has issued a break *)
+  SIGBREAKB_CTRL_C = 12 ;
+  SIGBREAKB_CTRL_D = 13 ;
+  SIGBREAKB_CTRL_E = 14 ;
+  SIGBREAKB_CTRL_F = 15 ;
+
+(* Bit fields that signal you that a user has issued a break		      *)
+(* for example:IF SIGBREAKF_CTRL_C IN SetSignal({},{}) THEN cleanup_and_exit()*)
+  SIGBREAKF_CTRL_C = {SIGBREAKB_CTRL_C} ;
+  SIGBREAKF_CTRL_D = {SIGBREAKB_CTRL_D} ;
+  SIGBREAKF_CTRL_E = {SIGBREAKB_CTRL_E} ;
+  SIGBREAKF_CTRL_F = {SIGBREAKB_CTRL_F} ;
+
+(* Values returned by SameLock() *)
+  LOCK_DIFFERENT	= -1 ;
+  LOCK_SAME		=  0 ;
+  LOCK_SAME_VOLUME	=  1 ;	(* locks are on same volume *)
+  LOCK_SAME_HANDLER	= LOCK_SAME_VOLUME ;
+(* LOCK_SAME_HANDLER was a misleading name, def kept for src compatibility *)
+
+(* types for ChangeMode() *)
+  CHANGE_LOCK	= 0 ;
+  CHANGE_FH	= 1 ;
+
+(* Values for MakeLink() *)
+  LINK_HARD	= 0 ;
+  LINK_SOFT	= 1 ;  (* softlinks are not fully supported yet *)
+
+(* values returned by ReadItem *)
+  ITEM_EQUAL	= -2 ; (* "=" Symbol	     *)
+  ITEM_ERROR	= -1 ; (* error		     *)
+  ITEM_NOTHING	=  0 ; (* *N, ;, endstreamch *)
+  ITEM_UNQUOTED	=  1 ; (* unquoted item	     *)
+  ITEM_QUOTED	=  2 ; (* quoted item	     *)
+
+(* types for AllocDosObject/FreeDosObject *)
+  DOS_FILEHANDLE   = 0 ; (* few people should use this	    *)
+  DOS_EXALLCONTROL = 1 ; (* Must be used to allocate this!  *)
+  DOS_FIB	   = 2 ; (* useful			    *)
+  DOS_STDPKT	   = 3 ; (* for doing packet-level I/O	    *)
+  DOS_CLI	   = 4 ; (* for shell-writers, etc 	    *)
+  DOS_RDARGS	   = 5 ; (* for ReadArgs if you pass it in  *)
+
+(* All DOS processes have this structure				   *)
+(* Create and Device Proc returns pointer to the MsgPort in this structure *)
+(* dev_proc = ( struct Process * )(DeviceProc(..) - sizeof(struct Task));  *)
+
+TYPE
+  Process = RECORD
+    pr_Task	      : Task     ;
+    pr_MsgPort	      : MsgPort  ; (* This is BPTR address from DOS functions *)
+    pr_Pad	      : INTEGER  ; (* Remaining variables on 4 byte boundaries*)
+    pr_SegList	      : BADDRESS ; (* Array of seg lists used by this process *)
+    pr_StackSize      : LONGINT  ; (* Size of process stack in bytes	      *)
+    pr_GlobVec	      : ADDRESS  ; (* Global vector for this process (BCPL)   *)
+    pr_TaskNum	      : LONGINT  ; (* CLI task number of zero if not a CLI    *)
+    pr_StackBase      : BADDRESS ; (* Ptr to high memory end of process stack *)
+    pr_Result2	      : LONGINT  ; (* Value of secondary result from last call*)
+    pr_CurrentDir     : FileLockPtr ;
+    				   (* Lock associated with current directory  *)
+    pr_CIS,pr_COS     : FileHandlePtr ;
+    				   (* Current CLI Input/OutPut Streams	      *)
+    pr_ConsoleTask    : ADDRESS  ; (* Console handler process for curr. window*)
+    pr_FileSystemTask : ADDRESS  ; (* File handler process for current drive  *)
+    pr_CLI	      : CommandLineInterfacePtr ;
+    				   (* pointer to CommandLineInterface	      *)
+    pr_ReturnAddr     : ADDRESS  ; (* pointer to previous stack frame	      *)
+    pr_PktWait	      : ADDRESS  ; (* Function to be called when awaiting msg *)
+    pr_WindowPtr      : ADDRESS  ; (* Window for error printing		      *)
+
+    (* following definitions are new with 2.0 *)
+    pr_HomeDir        : FileLockPtr ;
+    				   (* Home directory of executing program     *)
+    pr_Flags          : LONGSET  ; (* flags telling dos about process	      *)
+    pr_ExitCode       : PROC     ; (* code to call on exit of program or NULL *)
+    pr_ExitData       : LONGINT  ; (* Passed as an argument to pr_ExitCode.   *)
+    pr_Arguments      : STRING   ; (* Arguments passed to the process at start*)
+    pr_LocalVars      : MinList  ; (* Local environment variables	      *)
+    pr_ShellPrivate   : LONGINT  ; (* for the use of the current shell	      *)
+    pr_CES	      : FileHandlePtr ;
+    				   (* Error stream - if NULL, use pr_COS      *)
+  END ;  (* Process *)
+
+(* Flags for pr_Flags *)
+
+CONST
+  PRB_FREESEGLIST =  0  ; PRF_FREESEGLIST = {0} ;
+  PRB_FREECURRDIR =  1  ; PRF_FREECURRDIR = {1} ;
+  PRB_FREECLI	  =  2  ; PRF_FREECLI	  = {2} ;
+  PRB_CLOSEINPUT  =  3  ; PRF_CLOSEINPUT  = {3} ;
+  PRB_CLOSEOUTPUT =  4  ; PRF_CLOSEOUTPUT = {4} ;
+  PRB_FREEARGS	  =  5  ; PRF_FREEARGS	  = {5} ;
+
+(* The long word address (BPTR) of this structure is returned by	*)
+(* Open() and other routines that return a file.  You need only worry	*)
+(* about this struct to do async io's via PutMsg() instead of		*)
+(* standard file system calls						*)
+
+TYPE
+  FileHandle = RECORD
+    fh_Link : MessagePtr ; (* EXEC message			  *)
+    fh_Port : MsgPortPtr ; (* Reply port for the packet		  *)
+    fh_Type : MsgPortPtr ; (* Port to do PutMsg() to		  *)
+			   (* Address is negative if a plain file *)
+    fh_Buf : LONGINT ;
+    fh_Pos : LONGINT ;
+    fh_End : LONGINT ;
+    CASE :INTEGER OF
+    |0:fh_Funcs : LONGINT
+    |1:fh_Func1 : LONGINT
+    END ;
+    fh_Func2 : LONGINT ;
+    fh_Func3 : LONGINT ;
+    CASE :INTEGER OF
+    |0:fh_Args : LONGINT
+    |1:fh_Arg1 : LONGINT
+    END ;
+    fh_Arg2 : LONGINT
+  END ; (* FileHandle *)
+
+(* This is the extension to EXEC Messages used by DOS *)
+
+TYPE
+  DosPacket = RECORD
+    dp_Link : MessagePtr ; (* EXEC message	           *)
+    dp_Port : MsgPortPtr ; (* Reply port for the packet    *)
+			   (* Must be filled in each send. *)
+    CASE :INTEGER OF
+    |0:
+      dp_Type : LONGINT ;	 (* See ACTION_... below and		      *)
+				 (* 'R' means Read, 'W' means Write to the    *)
+				 (* file system 			      *)
+      dp_Res1 : LONGINT ;	 (* For file system calls this is the result  *)
+				 (* that would have been returned by the      *)
+				 (* function, e.g. Write ('W') returns actual *)
+				 (* length written			      *)
+      dp_Res2 : LONGINT ;	 (* For file system calls this is what would  *)
+				 (* have been returned by IoErr()	      *)
+      dp_Arg1 : LONGINT ;
+    |1: (*  Device packets common equivalents *)
+      dp_Action  : LONGINT ;
+      dp_Status  : LONGINT ;
+      dp_Status2 : LONGINT ;
+      dp_BufAddr : LONGINT ;
+    END ;
+
+    dp_Arg2 : LONGINT ;
+    dp_Arg3 : LONGINT ;
+    dp_Arg4 : LONGINT ;
+    dp_Arg5 : LONGINT ;
+    dp_Arg6 : LONGINT ;
+    dp_Arg7 : LONGINT ;
+  END ; (* DosPacket *)
+
+(* A Packet does not require the Message to be before it in memory, but *)
+(* for convenience it is useful to associate the two.			*)
+(* Also see the function init_std_pkt for initializing this structure   *)
+
+  StandardPacket = RECORD
+    sp_Msg : Message   ;
+    sp_Pkt : DosPacket ;
+  END ; (* StandardPacket *)
+
+(* Packet types *)
+CONST
+  ACTION_NIL		= 0  ;
+  ACTION_STARTUP	= 0  ;
+  ACTION_GET_BLOCK	= 2  ;	(* OBSOLETE *)
+  ACTION_SET_MAP	= 4  ;
+  ACTION_DIE		= 5  ;
+  ACTION_EVENT		= 6  ;
+  ACTION_CURRENT_VOLUME	= 7  ;
+  ACTION_LOCATE_OBJECT	= 8  ;
+  ACTION_RENAME_DISK	= 9  ;
+  ACTION_WRITE		='W' ;
+  ACTION_READ		='R' ;
+  ACTION_FREE_LOCK	= 15 ;
+  ACTION_DELETE_OBJECT	= 16 ;
+  ACTION_RENAME_OBJECT	= 17 ;
+  ACTION_MORE_CACHE	= 18 ;
+  ACTION_COPY_DIR	= 19 ;
+  ACTION_WAIT_CHAR	= 20 ;
+  ACTION_SET_PROTECT	= 21 ;
+  ACTION_CREATE_DIR	= 22 ;
+  ACTION_EXAMINE_OBJECT	= 23 ;
+  ACTION_EXAMINE_NEXT	= 24 ;
+  ACTION_DISK_INFO	= 25 ;
+  ACTION_INFO		= 26 ;
+  ACTION_FLUSH		= 27 ;
+  ACTION_SET_COMMENT	= 28 ;
+  ACTION_PARENT		= 29 ;
+  ACTION_TIMER		= 30 ;
+  ACTION_INHIBIT	= 31 ;
+  ACTION_DISK_TYPE	= 32 ;
+  ACTION_DISK_CHANGE	= 33 ;
+  ACTION_SET_DATE	= 34 ;
+
+  ACTION_SCREEN_MODE	= 994  ;
+
+  ACTION_READ_RETURN	= 1001 ;
+  ACTION_WRITE_RETURN	= 1002 ;
+  ACTION_SEEK		= 1008 ;
+  ACTION_FINDUPDATE	= 1004 ;
+  ACTION_FINDINPUT	= 1005 ;
+  ACTION_FINDOUTPUT	= 1006 ;
+  ACTION_END		= 1007 ;
+  ACTION_SET_FILE_SIZE	= 1022 ; (* fast file system only in 1.3 *)
+  ACTION_WRITE_PROTECT	= 1023 ; (* fast file system only in 1.3 *)
+
+  (* new 2.0 packets *)
+
+  ACTION_SAME_LOCK	= 40   ;
+  ACTION_CHANGE_SIGNAL	= 995  ;
+  ACTION_FORMAT		= 1020 ;
+  ACTION_MAKE_LINK	= 1021 ;
+
+  ACTION_READ_LINK	= 1024 ;
+  ACTION_FH_FROM_LOCK	= 1026 ;
+  ACTION_IS_FILESYSTEM	= 1027 ;
+  ACTION_CHANGE_MODE	= 1028 ;
+
+  ACTION_COPY_DIR_FH	= 1030 ;
+  ACTION_PARENT_FH	= 1031 ;
+  ACTION_EXAMINE_ALL	= 1033 ;
+  ACTION_EXAMINE_FH	= 1034 ;
+
+  ACTION_LOCK_RECORD	= 2008 ;
+  ACTION_FREE_RECORD	= 2009 ;
+
+  ACTION_ADD_NOTIFY	= 4097 ;
+  ACTION_REMOVE_NOTIFY	= 4098 ;
+
+  (* Added in V39: *)
+
+  ACTION_EXAMINE_ALL_END = 1035 ;
+  ACTION_SET_OWNER	 = 1036 ;
+
+(* Tell a file system to serialize the current volume. This is typically     *)
+(* done by changing the creation date of the disk. This packet does not take *)
+(* any arguments.  NOTE: be prepared to handle failure of this packet for    *)
+(* V37 ROM filesystems.							     *)
+
+CONST
+  ACTION_SERIALIZE_DISK	= 4200 ;
+
+ (* A structure for holding error messages - stored as array with error == 0 *)
+ (* for the last entry.							     *)
+
+TYPE
+  ErrorString = RECORD
+    estr_Nums    : ADDRESS ;
+    estr_Strings : STRING  ;
+  END ;
+
+
+ (* DOS library node structure.						*)
+ (* This is the data at positive offsets from the library node.		*)
+ (* Negative offsets from the node is the jump table to DOS functions	*)
+ (* node = (struct DosLibrary * ) OpenLibrary( "dos.library" .. )	*)
+
+  DosLibrary = RECORD
+    dl_lib  : Library ;
+    dl_Root : RootNodePtr ; (* Pointer to RootNode, described below   *)
+    dl_GV   : ADDRESS ;	    (* Pointer to BCPL global vector	      *)
+    dl_A2   : LONGINT ;	    (* BCPL standard register values	      *)
+    dl_A5   : LONGINT ;
+    dl_A6   : LONGINT ;
+    dl_Errors  : ErrorStringPtr ;   (* PRIVATE pointer to array of error msgs *)
+    dl_TimeReq : ADDRESS ;	    (* PRIVATE pointer to timer request	      *)
+    dl_UtilityBase   : LibraryPtr ; (* PRIVATE ptr to utility library	      *)
+    dl_IntuitionBase : LibraryPtr ; (* PRIVATE ptr to intuition library	      *)
+  END ; (* DosLibrary *)
+
+TYPE
+  RootNode = RECORD
+    rn_TaskArray : BCPL POINTER TO RECORD
+    			  maxCLI : LONGINT ; (* [0] is max number of CLI's *)
+			  pids   : ARRAY [1..100000] OF MsgPortPtr ;
+			END ; (* [1] is APTR to process id of CLI 1	*)
+			      (* [n] is APTR to process id of CLI n     *)
+    rn_ConsoleSegment : BADDRESS  ; (* SegList for the CLI		      *)
+    rn_Time	      : DateStampRec;(* Current time			      *)
+    rn_RestartSeg     : BADDRESS  ; (* SegList for the disk validator process *)
+    rn_Info	      : DosInfoPtr; (* Pointer to the Info structure	      *)
+    rn_FileHandlerSegment : BADDRESS ; (* segment for a file handler	      *)
+    rn_CliList      : MinList ; (* new list of all CLI processes	      *)
+			        (* the first cpl_Array is also rn_TaskArray   *)
+    rn_BootProc     : MsgPortPtr ; (* private ptr to msgport of boot fs	      *)
+    rn_ShellSegment : BADDRESS   ; (* seglist for Shell (for NewShell)	      *)
+    rn_Flags	    : LONGSET    ; (* dos flags *)
+  END ;  (* RootNode *)
+
+CONST
+  RNB_WILDSTAR = 24 ; RNF_WILDSTAR = {24} ;
+
+  RNB_PRIVATE1 = 1 ;  RNF_PRIVATE1 = {1} ; (* private for dos *)
+
+(* ONLY to be allocated by DOS! *)
+
+TYPE
+  CliProcList = RECORD
+    cpl_Node  : MinNode ;
+    cpl_First : LONGINT ; (* number of first entry in array *)
+    cpl_Array : POINTER TO ARRAY OF MsgPortPtr ;
+			    (* [0] is max number of CLI's in this entry (n)   *)
+			    (* [1] is CPTR to process id of CLI cpl_First     *)
+			    (* [n] is CPTR to process id of CLI cpl_First+n-1 *)
+  END ;
+
+TYPE
+  DosInfo = RECORD
+    CASE :INTEGER OF
+    |0:di_McName  : BADDRESS ; (* PRIVATE: system resident module list	    *)
+    |1:di_ResList : BADDRESS ;
+    END ;
+    di_DevInfo    : DevInfoPtr;(* Device List				    *)
+    di_Devices    : BADDRESS ; (* Currently zero			    *)
+    di_Handlers   : BADDRESS ; (* Currently zero			    *)
+    di_NetHand    : ADDRESS  ; (* Network handler processid; currently zero *)
+    di_DevLock    : SignalSemaphore ; (* do NOT access directly! *)
+    di_EntryLock  : SignalSemaphore ; (* do NOT access directly! *)
+    di_DeleteLock : SignalSemaphore ; (* do NOT access directly! *)
+  END ;  (* DosInfo *)
+
+(* structure for the Dos resident list.  Do NOT allocate these, use	  *)
+(* AddSegment(), and heed the warnings in the autodocs!			  *)
+
+  Segment = RECORD
+    seg_Next : BADDRESS ;
+    seg_UC   : LONGINT  ;
+    seg_Seg  : BADDRESS ;
+    seg_Name : ARRAY [0..3] OF CHAR ;(* actually the first 4 ch's of BSTR name*)
+  END ;
+
+CONST
+  CMD_SYSTEM   = -1   ;
+  CMD_INTERNAL = -2   ;
+  CMD_DISABLED = -999 ;
+
+(* DOS Processes started from the CLI via RUN or NEWCLI have this additional *)
+(* set to data associated with them					     *)
+
+TYPE
+  CommandLineInterface = RECORD
+    cli_Result2		: LONGINT  ; (* Value of IoErr from last command      *)
+    cli_SetName		: BSTRING  ; (* Name of current directory	      *)
+    cli_CommandDir	: BADDRESS ; (* Head of the path locklist	      *)
+    cli_ReturnCode	: LONGINT  ; (* Return code from last command	      *)
+    cli_CommandName	: BSTRING  ; (* Name of current command		      *)
+    cli_FailLevel	: LONGINT  ; (* Fail level (set by FAILAT)	      *)
+    cli_Prompt		: BSTRING  ; (* Current prompt (set by PROMPT)	      *)
+    cli_StandardInput	: FileHandlePtr ;
+    				     (* Default (terminal) CLI input	      *)
+    cli_CurrentInput	: FileHandlePtr ;
+    				     (* Current CLI input		      *)
+    cli_CommandFile	: BSTRING  ; (* Name of EXECUTE command file	      *)
+    cli_Interactive	: LONGINT  ; (* Boolean; True if prompts required     *)
+    cli_Background	: LONGINT  ; (* Boolean; True if CLI created by RUN   *)
+    cli_CurrentOutput	: FileHandlePtr ;
+    				     (* Current CLI output		      *)
+    cli_DefaultStack	: LONGINT  ; (* Stack size to be obtained in longwords*)
+    cli_StandardOutput	: FileHandlePtr ;
+    				     (* Default (terminal) CLI output	      *)
+    cli_Module		: BADDRESS ; (* SegList of currently loaded command   *)
+  END ;  (* CommandLineInterface *)
+
+
+ (* This structure can take on different values depending on whether it is  *)
+ (* a device, an assigned directory, or a volume.  Below is the structure   *)
+ (* reflecting volumes only.  Following that is the structure representing  *)
+ (* only devices. Following that is the unioned structure representing all  *)
+ (* the values								    *)
+
+ (* structure representing a volume *)
+
+TYPE
+  DeviceList = RECORD
+    dl_Next	  : DeviceListPtr ; (* bptr to next device list	     *)
+    dl_Type	  : LONGINT       ; (* see DLT below		     *)
+    dl_Task	  : MsgPortPtr	  ; (* ptr to handler task	     *)
+    dl_Lock	  : FileLockPtr	  ; (* not for volumes		     *)
+    dl_VolumeDate : DateStampRec  ; (* creation date		     *)
+    dl_LockList   : FileLockPtr   ; (* outstanding locks	     *)
+    dl_DiskType   : LONGINT	  ; (* 'DOS', etc		     *)
+    dl_unused     : LONGINT	  ;
+    dl_Name       : BSTRING	  ; (* bptr to bcpl name	     *)
+  END ;
+
+(* device structure *)
+
+TYPE
+  DevInfo = RECORD
+    dvi_Next	  : DevInfoPtr	;
+    dvi_Type	  : LONGINT	;
+    dvi_Task	  : ADDRESS	;
+    dvi_Lock	  : FileLockPtr ;
+    dvi_Handler	  : BSTRING  ;
+    dvi_StackSize : LONGINT  ;
+    dvi_Priority  : LONGINT  ;
+    dvi_Startup	  : LONGINT  ;
+    dvi_SegList	  : BADDRESS ;
+    dvi_GlobVec   : BADDRESS ;
+    dvi_Name	  : BSTRING  ;
+  END ;
+
+(* combined structure for devices, assigned directories, volumes *)
+
+TYPE
+  DosList = RECORD
+    dol_Next : DosListPtr  ; (* bptr to next device on list *)
+    dol_Type : LONGINT     ; (* see DLT below		    *)
+    dol_Task : MsgPortPtr  ; (* ptr to handler task	    *)
+    dol_Lock : FileLockPtr ;
+    CASE :INTEGER OF
+    |0:
+    dol_misc :
+    RECORD
+      CASE :INTEGER OF
+      |0: dol_handler :
+       RECORD
+	 dol_Handler   : BSTRING  ; (* file name to load if seglist is null   *)
+	 dol_StackSize : LONGINT  ; (* stacksize to use when starting process *)
+	 dol_Priority  : LONGINT  ; (* task priority when starting process    *)
+	 dol_Startup   : LONGINT  ; (* startup msg:FileSysStartupMsg for disks*)
+	 dol_SegList   : BADDRESS ; (* already loaded code for new task	      *)
+	 dol_GlobVec   : BADDRESS ; (* BCPL global vector to use when starting*)
+				    (* a process. -1 indicates a C/Assembler  *)
+				    (* program.				      *)
+      END ;
+      |1: dol_volume :
+	RECORD
+	  dol_VolumeDate : DateStampRec ; (* creation date     *)
+	  dol_LockList   : FileLockPtr ;  (* outstanding locks *)
+	  dol_DiskType   : LONGINT ;	  (* 'DOS', etc	       *)
+        END ;
+      |2: dol_assign :
+	RECORD
+	  dol_AssignName : STRING ;  (* name for non-or-late-binding assign   *)
+	  dol_List : AssignListPtr ; (* for multi-directory assigns (regular) *)
+        END ;
+      END ;
+    END ;
+    |1:
+      CASE :INTEGER OF
+      |0:
+	dol_Handler   : BSTRING  ;
+	dol_StackSize : LONGINT  ;
+	dol_Priority  : LONGINT  ;
+	dol_Startup   : LONGINT  ;
+	dol_SegList   : BADDRESS ;
+	dol_GlobVec   : BADDRESS ;
+      |1:
+	dol_VolumeDate : DateStampRec;
+	dol_LockList   : FileLockPtr ;
+	dol_DiskType   : LONGINT     ;
+      |2:
+      	dol_AssignName : STRING  ;
+	dol_List : AssignListPtr ;
+      END ;
+    END ;
+    dol_Name : BSTRING ; (* bptr to bcpl name *)
+  END ;
+
+(* structure used for multi-directory assigns. AllocVec()ed. *)
+
+TYPE
+  AssignList = RECORD
+    al_Next : AssignListPtr ;
+    al_Lock : FileLockPtr ;
+  END ;
+
+(* definitions for dl_Type *)
+
+CONST
+  DLT_DEVICE	  = 0 ;
+  DLT_DIRECTORY	  = 1 ;	(* assign		 *)
+  DLT_VOLUME	  = 2 ;
+  DLT_LATE	  = 3 ;	(* late-binding assign   *)
+  DLT_NONBINDING  = 4 ;	(* non-binding assign    *)
+  DLT_PRIVATE	  = -1;	(* for internal use only *)
+
+(* structure return by GetDeviceProc() *)
+
+TYPE
+  DevProc = RECORD
+    dvp_Port    : MsgPortPtr ;
+    dvp_Lock    : FileLockPtr;
+    dvp_Flags   : LONGSET    ;
+    dvp_DevNode : LONGWORD   ;	(* DON'T TOUCH OR USE! *)
+  END ;
+
+(* definitions for dvp_Flags *)
+CONST
+  DVPB_UNLOCK	= 0 ; DVPF_UNLOCK	= {DVPB_UNLOCK} ;
+  DVPB_ASSIGN	= 1 ; DVPF_ASSIGN	= {DVPB_ASSIGN} ;
+
+(* Flags to be passed to LockDosList(), etc *)
+  LDB_DEVICES	= 2 ; LDF_DEVICES	= {LDB_DEVICES} ;
+  LDB_VOLUMES	= 3 ; LDF_VOLUMES	= {LDB_VOLUMES} ;
+  LDB_ASSIGNS	= 4 ; LDF_ASSIGNS	= {LDB_ASSIGNS} ;
+  LDB_ENTRY	= 5 ; LDF_ENTRY		= {LDB_ENTRY} ;
+  LDB_DELETE	= 6 ; LDF_DELETE	= {LDB_DELETE} ;
+
+(* you MUST specify one of LDF_READ or LDF_WRITE *)
+  LDB_READ	= 0 ; LDF_READ	= {LDB_READ} ;
+  LDB_WRITE	= 1 ; LDF_WRITE	= {LDB_WRITE} ;
+
+(* actually all but LDF_ENTRY (which is used for internal locking) *)
+  LDF_ALL	= (LDF_DEVICES+LDF_VOLUMES+LDF_ASSIGNS) ;
+
+(* a lock structure, as returned by Lock() or DupLock() *)
+
+TYPE
+  FileLock = RECORD
+    fl_Link   : FileLockPtr; (* bcpl pointer to next lock	 *)
+    fl_Key    : LONGINT    ; (* disk block number		 *)
+    fl_Access : LONGINT    ; (* exclusive or shared		 *)
+    fl_Task   : MsgPortPtr ; (* handler task's port		 *)
+    fl_Volume : DosListPtr ; (* bptr to DLT_VOLUME DosList entry *)
+  END ;
+
+(* error report types for ErrorReport() *)
+
+CONST
+  REPORT_STREAM	= 0 ; (* a stream	      *)
+  REPORT_TASK	= 1 ; (* a process - unused   *)
+  REPORT_LOCK	= 2 ; (* a lock		      *)
+  REPORT_VOLUME	= 3 ; (* a volume node	      *)
+  REPORT_INSERT	= 4 ; (* please insert volume *)
+
+(* Special error codes for ErrorReport() *)
+
+  ABORT_DISK_ERROR = 296 ; (* Read/write error	  *)
+  ABORT_BUSY	   = 288 ; (* You MUST replace... *)
+
+(* types for initial packets to shells from run/newcli/execute/system.	*)
+(* For shell-writers only						*)
+
+  RUN_EXECUTE	    = -1 ;
+  RUN_SYSTEM	    = -2 ;
+  RUN_SYSTEM_ASYNCH = -3 ;
+
+(* Types for fib_DirEntryType.	NOTE that both USERDIR and ROOT are	 *)
+(* directories, and that directory/file checks should use <0 and >=0.	 *)
+(* This is not necessarily exhaustive!	Some handlers may use other	 *)
+(* values as needed, though <0 and >=0 should remain as supported as	 *)
+(* possible.								 *)
+
+  ST_ROOT	=  1 ;
+  ST_USERDIR	=  2 ;
+  ST_SOFTLINK	=  3 ; (* looks like dir, but may point to a file! *)
+  ST_LINKDIR	=  4 ; (* hard link to dir			   *)
+  ST_FILE	= -3 ; (* must be negative for FIB!		   *)
+  ST_LINKFILE	= -4 ; (* hard link to file			   *)
+  ST_PIPEFILE	= -5 ; (* for pipes that support ExamineFH	   *)
+
+ (*	Data structures and equates used by the V1.4 DOS functions	*)
+ (* StrtoDate() and DatetoStr()						*)
+
+(* --------- String/Date structures etc ---------- *)
+
+TYPE
+  DateTime = RECORD
+    dat_Stamp   : DateStampRec ; (* DOS DateStamp			*)
+    dat_Format  : SHORTCARD    ; (* controls appearance of dat_StrDate  *)
+    dat_Flags   : SHORTSET     ; (* see BITDEF's below		        *)
+    dat_StrDay  : STRING       ; (* day of the week string		*)
+    dat_StrDate : STRING       ; (* date string				*)
+    dat_StrTime : STRING       ; (* time string				*)
+  END ;
+
+(* You need this much room for each of the DateTime strings: *)
+CONST
+  LEN_DATSTRING	= 16 ;
+
+(* flags for dat_Flags *)
+
+CONST
+  DTB_SUBST  = 0 ; DTF_SUBST  = {0} ; (* substitute Today, Tomorrow, etc.*)
+  DTB_FUTURE = 1 ; DTF_FUTURE = {1} ; (* day of the week is in future	 *)
+
+(* date format values *)
+
+CONST
+  FORMAT_DOS = 0 ; (* dd-mmm-yy *)
+  FORMAT_INT = 1 ; (* yy-mm-dd  *)
+  FORMAT_USA = 2 ; (* mm-dd-yy  *)
+  FORMAT_CDN = 3 ; (* dd-mm-yy  *)
+  FORMAT_MAX = FORMAT_CDN ;
+
+(*----------------------------------------------------------------------------*)
+(*-------------------------- PATTERN MATCHING --------------------------------*)
+(*----------------------------------------------------------------------------*)
+(* structure expected by MatchFirst, MatchNext.				      *)
+(* Allocate this structure and initialize it as follows:		      *)
+(*									      *)
+(* Set ap_BreakBits to the signal bits (CDEF) that you want to take a	      *)
+(* break on, or NULL, if you don't want to convenience the user.	      *)
+(*									      *)
+(* If you want to have the FULL PATH NAME of the files you found,	      *)
+(* allocate a buffer at the END of this structure, and put the size of	      *)
+(* it into ap_Strlen.  If you don't want the full path name, make sure	      *)
+(* you set ap_Strlen to zero.  In this case, the name of the file, and stats  *)
+(* are available in the ap_Info, as per usual.				      *)
+(*									      *)
+(* Then call MatchFirst() and then afterwards,MatchNext() with this structure.*)
+(* You should check the return value each time (see below) and take the	      *)
+(* appropriate action, ultimately calling MatchEnd() when there are	      *)
+(* no more files and you are done.  You can tell when you are done by	      *)
+(* checking for the normal AmigaDOS return code ERROR_NO_MORE_ENTRIES.	      *)
+
+TYPE
+  AnchorPath  = RECORD
+    CASE :INTEGER OF
+    |0:ap_Base	   : AChainPtr ; (* pointer to first anchor		      *)
+    |1:ap_First	   : AChainPtr ;
+    END ;
+    CASE :INTEGER OF
+    |0:ap_Last     : AChainPtr ; (* pointer to last anchor		      *)
+    |1:ap_Current  : AChainPtr ;
+    END ;
+    ap_BreakBits   : LONGINT   ; (* Bits we want to break on		      *)
+    ap_FoundBreak  : LONGINT   ; (* Bits we broke on.Also returns ERROR_BREAK *)
+    CASE :INTEGER OF
+    |0:ap_Flags    : SHORTSET  ; (* New use for extra word.		      *)
+       ap_Reserved : SHORTINT  ;
+       ap_Strlen   : CARDINAL  ; (* This is what ap_Length used to be	      *)
+    |1:ap_Length: LONGINT ;	 (* Old compatability for LONGWORD ap_Length  *)
+    END ;
+    ap_Info : FileInfoBlock ;
+    ap_Buf  : ARRAY [0..0] OF CHAR ;(* Buffer for path name,allocated by user*)
+	(* FIX! *)
+  END ;
+
+
+CONST
+  APB_DOWILD	   =  0  ; (* User option ALL				*)
+  APF_DOWILD	   = {0} ;
+
+  APB_ITSWILD	   =  1  ; (* Set by MatchFirst, used by MatchNext	*)
+  APF_ITSWILD	   = {1} ; (* Application can test APB_ITSWILD, too	*)
+			   (* (means that there's a wildcard		*)
+			   (* in the pattern after calling		*)
+			   (* MatchFirst).				*)
+
+  APB_DODIR	   =  2  ; (* Bit is SET if a DIR node should be	*)
+  APF_DODIR	   = {2} ; (* entered. Application can RESET this	*)
+			   (* bit after MatchFirst/MatchNext to AVOID	*)
+			   (* entering a dir.				*)
+
+  APB_DIDDIR	   =  3  ; (* Bit is SET for an "expired" dir node.	*)
+  APF_DIDDIR	   = {3} ;
+
+  APB_NOMEMERR	   =  4  ; (* Set on memory error			*)
+  APF_NOMEMERR	   = {4} ;
+
+  APB_DODOT	   =  5  ; (* If set, allow conversion of '.' to	*)
+  APF_DODOT 	   = {5} ; (* CurrentDir				*)
+
+  APB_DirChanged   =  6  ; (* ap_Current->an_Lock changed		*)
+  APF_DirChanged   = {6} ; (* since last MatchNext call			*)
+
+  APB_FollowHLinks =  7  ; (* follow hardlinks on DODIR - defaults 	*)
+  APF_FollowHLinks = {7} ; (* to not following hardlinks on a DODIR.	*)
+
+TYPE
+  AChain = RECORD
+    an_Child  : AChainPtr ;
+    an_Parent : AChainPtr ;
+    an_Lock   : FileLockPtr  ;
+    an_Info   : FileInfoBlock ;
+    an_Flags  : SHORTSET ;
+    an_String : ARRAY [0..0] OF CHAR ;	(* FIX!! *)
+  END ;
+
+CONST
+  DDB_PatternBit  = 0 ; DDF_PatternBit  = {0} ;
+  DDB_ExaminedBit = 1 ; DDF_ExaminedBit = {1} ;
+  DDB_Completed	  = 2 ; DDF_Completed   = {2} ;
+  DDB_AllBit	  = 3 ; DDF_AllBit      = {3} ;
+  DDB_Single	  = 4 ; DDF_Single	= {4} ;
+
+(* Constants used by wildcard routines, these are the pre-parsed tokens	    *)
+(* referred to by pattern match.  It is not necessary for you to do	    *)
+(* anything about these, MatchFirst() MatchNext() handle all these for you. *)
+
+  P_ANY		= 080H ; (* Token for '*' or '#?  *)
+  P_SINGLE	= 081H ; (* Token for '?' *)
+  P_ORSTART	= 082H ; (* Token for '(' *)
+  P_ORNEXT	= 083H ; (* Token for '|' *)
+  P_OREND	= 084H ; (* Token for ')' *)
+  P_NOT		= 085H ; (* Token for '~' *)
+  P_NOTEND	= 086H ; (* Token for	  *)
+  P_NOTCLASS	= 087H ; (* Token for '^' *)
+  P_CLASS	= 088H ; (* Token for '[]'*)
+  P_REPBEG	= 089H ; (* Token for '[' *)
+  P_REPEND	= 08AH ; (* Token for ']' *)
+  P_STOP	= 08BH ; (* token to force end of evaluation *)
+
+(* Values for an_Status, NOTE: These are the actual bit numbers *)
+
+  COMPLEX_BIT	= 1 ; (* Parsing complex pattern *)
+  EXAMINE_BIT	= 2 ; (* Searching directory     *)
+
+(* Returns from MatchFirst(), MatchNext()				*)
+(* You can also get dos error returns, such as ERROR_NO_MORE_ENTRIES,	*)
+(* these are in the dos.h file.						*)
+
+  ERROR_BUFFER_OVERFLOW	= 303 ;	(* User or internal buffer overflow *)
+  ERROR_BREAK		= 304 ;	(* A break character was received   *)
+  ERROR_NOT_EXECUTABLE	= 305 ;	(* A file has E bit cleared	    *)
+
+(* hunk types *)
+CONST
+  HUNK_UNIT	  = 999  ;
+  HUNK_NAME	  = 1000 ;
+  HUNK_CODE	  = 1001 ;
+  HUNK_DATA	  = 1002 ;
+  HUNK_BSS	  = 1003 ;
+  HUNK_RELOC32	  = 1004 ;
+  HUNK_ABSRELOC32 = HUNK_RELOC32 ;
+  HUNK_RELOC16	  = 1005 ;
+  HUNK_RELRELOC16 = HUNK_RELOC16 ;
+  HUNK_RELOC8	  = 1006 ;
+  HUNK_RELRELOC8  = HUNK_RELOC8 ;
+  HUNK_EXT	  = 1007 ;
+  HUNK_SYMBOL	  = 1008 ;
+  HUNK_DEBUG	  = 1009 ;
+  HUNK_END	  = 1010 ;
+  HUNK_HEADER	  = 1011 ;
+
+  HUNK_OVERLAY	  = 1013 ;
+  HUNK_BREAK	  = 1014 ;
+
+  HUNK_DREL32	  = 1015 ;
+  HUNK_DREL16	  = 1016 ;
+  HUNK_DREL8	  = 1017 ;
+
+  HUNK_LIB 	  = 1018 ;
+  HUNK_INDEX	  = 1019 ;
+
+(* Note: V37 LoadSeg uses 1015 (HUNK_DREL32) by mistake.  This will continue  *)
+(* to be supported in future versions, since HUNK_DREL32 is illegal in load   *)
+(* files anyways.  Future versions will support both 1015 and 1020, though    *)
+(* anything that should be usable under V37 should use 1015.		      *)
+
+  HUNK_RELOC32SHORT = 1020 ;
+
+(* see ext_xxx below. New for V39 (note that LoadSeg only handles RELRELOC32).*)
+  HUNK_RELRELOC32 = 1021 ;
+  HUNK_ABSRELOC16 = 1022 ;
+
+
+(* Any hunks that have the HUNKB_ADVISORY bit set will be ignored if they    *)
+(* aren't understood.  When ignored, they're treated like HUNK_DEBUG hunks.  *)
+(* NOTE: this handling of HUNKB_ADVISORY started as of V39 dos.library!  If  *)
+(* lading such executables is attempted under <V39 dos, it will fail with a  *)
+(* bad hunk type.							     *)
+
+  HUNKB_ADVISORY = 29 ; HUNKF_ADVISORY = {29} ;
+  HUNKB_CHIP     = 30 ; HUNKF_CHIP     = {30} ;
+  HUNKB_FAST     = 31 ; HUNKF_FAST     = {31} ;
+
+(* hunk_ext sub-types *)
+  EXT_SYMB 	= 0 ;	(* symbol table				*)
+  EXT_DEF	= 1 ;	(* relocatable definition		*)
+  EXT_ABS	= 2 ;	(* Absolute definition			*)
+  EXT_RES	= 3 ;	(* no longer supported			*)
+  EXT_REF32	= 129 ;	(* 32 bit absolute reference to symbol	*)
+  EXT_ABSREF32  = EXT_REF32 ;
+  EXT_COMMON	= 130 ;	(* 32 bit absolute reference to COMMON block	*)
+  EXT_ABSCOMMON	= EXT_COMMON ;
+  EXT_REF16	= 131 ;	(* 16 bit PC-relative reference to symbol	*)
+  EXT_RELREF16  = EXT_REF16 ;
+  EXT_REF8	= 132 ;	(*  8 bit PC-relative reference to symbol	*)
+  EXT_RELREF8   = EXT_REF8 ;
+  EXT_DEXT32	= 133 ;	(* 32 bit data relative reference *)
+  EXT_DEXT16	= 134 ;	(* 16 bit data relative reference *)
+  EXT_DEXT8	= 135 ;	(*  8 bit data relative reference *)
+
+(* These are to support some of the '020 and up modes that are rarely used *)
+  EXT_RELREF32	= 136 ;	(* 32 bit PC-relative reference to symbol	   *)
+  EXT_RELCOMMON	= 137 ;	(* 32 bit PC-relative reference to COMMON block    *)
+
+(* for completeness... All 680x0's support this *)
+  EXT_ABSREF16	= 138 ;	(* 16 bit absolute reference to symbol		*)
+
+(* this only exists on '020's and above, in the (d8,An,Xn) address mode *)
+  EXT_ABSREF8 	= 139 ;	(* 8 bit absolute reference to symbol		*)
+
+
+(*----------------------------------------------------------------------------*)
+(* definitions for the System() call *)
+
+CONST
+  SYS_Dummy		= (TAG_USER + 32) ;
+
+  SYS_Input		= (SYS_Dummy + 1) ;
+			(* specifies the input filehandle  *)
+
+  SYS_Output		= (SYS_Dummy + 2) ;
+			(* specifies the output filehandle *)
+
+  SYS_Asynch		= (SYS_Dummy + 3) ;
+			(* run asynch, close input/output on exit(!)	*)
+
+  SYS_UserShell		= (SYS_Dummy + 4) ;
+			(* send to user shell instead of boot shell	*)
+
+  SYS_CustomShell	= (SYS_Dummy + 5) ;
+			(* send to a specific shell (data is name)	*)
+(* SYS_Error, *)
+
+(*---------------------------------------------------------------------------*)
+(* definitions for the CreateNewProc() call				     *)
+(* you MUST specify one of NP_Seglist or NP_Entry.  All else is optional.    *)
+
+   NP_Dummy   		= (TAG_USER + 1000) ;
+
+   NP_Seglist 		= (NP_Dummy + 1) ;
+			(* seglist of code to run for the process  *)
+
+   NP_FreeSeglist 	= (NP_Dummy + 2) ;
+			(* free seglist on exit - only valid for   *)
+			(* for NP_Seglist.  Default is TRUE.	   *)
+
+   NP_Entry 		= (NP_Dummy + 3) ;
+			(* entry point to run - mutually exclusive *)
+			(* with NP_Seglist! *)
+
+   NP_Input 		= (NP_Dummy + 4) ;
+			(* filehandle - default is Open("NIL:"...) *)
+
+   NP_Output		= (NP_Dummy + 5) ;
+			(* filehandle - default is Open("NIL:"...) *)
+
+   NP_CloseInput	= (NP_Dummy + 6) ;
+			(* close input filehandle on exit	   *)
+			(* default TRUE				   *)
+
+   NP_CloseOutput	= (NP_Dummy + 7) ;
+			(* close output filehandle on exit	   *)
+			(* default TRUE				   *)
+
+   NP_Error		= (NP_Dummy + 8) ;
+			(* filehandle - default is Open("NIL:"...) *)
+
+   NP_CloseError	= (NP_Dummy + 9) ;
+			(* close error filehandle on exit	   *)
+			(* default TRUE				   *)
+
+   NP_CurrentDir	= (NP_Dummy + 10) ;
+			(* lock - default is parent's current dir  *)
+
+   NP_StackSize		= (NP_Dummy + 11) ;
+			(* stacksize for process - default 4000    *)
+
+   NP_Name		= (NP_Dummy + 12) ;
+			(* name for process - default "New Process"*)
+
+   NP_Priority		= (NP_Dummy + 13) ;
+			(* priority - default same as parent	   *)
+
+   NP_ConsoleTask	= (NP_Dummy + 14) ;
+			(* consoletask - default same as parent    *)
+
+   NP_WindowPtr		= (NP_Dummy + 15) ;
+			(* window ptr - default is same as parent  *)
+
+   NP_HomeDir		= (NP_Dummy + 16) ;
+			(* home directory - default curr home dir  *)
+
+   NP_CopyVars		= (NP_Dummy + 17) ;
+			(* boolean to copy local vars-default TRUE *)
+
+   NP_Cli		= (NP_Dummy + 18) ;
+			(* create cli structure - default FALSE    *)
+
+   NP_Path		= (NP_Dummy + 19) ;
+			(* path - default is copy of parents path  *)
+			(* only valid if a cli process!	   *)
+
+   NP_CommandName	= (NP_Dummy + 20) ;
+			(* commandname - valid only for CLI	   *)
+
+   NP_Arguments		= (NP_Dummy + 21) ;
+
+(* cstring of arguments - passed with str in a0, length in d0.	*)
+(* (copied and freed on exit.)	Default is 0-length NULL ptr.	*)
+(* NOTE: not operational until V37 - see BIX/TechNotes for	*)
+(* more info/workaround.  In V36, the registers were random.	*)
+(* You must NEVER use NP_Arguments with a NP_Input of NULL.	*)
+
+(* FIX! should this be only for cli's? *)
+
+   NP_NotifyOnDeath	= (NP_Dummy + 22) ;
+			(* notify parent on death - default FALSE  *)
+			(* Not functional yet. *)
+
+   NP_Synchronous	= (NP_Dummy + 23) ;
+			(* don't return until process finishes -   *)
+			(* default FALSE.			   *)
+			(* Not functional yet. *)
+
+   NP_ExitCode		= (NP_Dummy + 24) ;
+			(* code to be called on process exit	   *)
+
+   NP_ExitData		= (NP_Dummy + 25) ;
+			(* optional argument for NP_EndCode rtn -  *)
+			(* default NULL				   *)
+
+
+(*----------------------------------------------------------------------------*)
+(* tags for AllocDosObject *)
+
+  ADO_Dummy		= (TAG_USER + 2000) ;
+
+  ADO_FH_Mode		= (ADO_Dummy + 1) ;
+	(* for type DOS_FILEHANDLE only		       *)
+	(* sets up FH for mode specified.	       *)
+	(* This can make a big difference for buffered *)
+	(* files.				       *)
+
+	(* The following are for DOS_CLI *)
+	(* If you do not specify these, dos will use it's preferred values *)
+	(* which may change from release to release.  The BPTRs to these   *)
+	(* will be set up correctly for you.  Everything will be zero,	   *)
+	(* except cli_FailLevel (10) and cli_Background (DOSTRUE).	   *)
+	(* NOTE: you may also use these 4 tags with CreateNewProc.	   *)
+
+   ADO_DirLen		= (ADO_Dummy + 2) ;
+			(* size in bytes for current dir buffer    *)
+
+   ADO_CommNameLen	= (ADO_Dummy + 3) ;
+			(* size in bytes for command name buffer   *)
+
+   ADO_CommFileLen	= (ADO_Dummy + 4) ;
+			(* size in bytes for command file buffer   *)
+
+   ADO_PromptLen	= (ADO_Dummy + 5) ;
+			(* size in bytes for the prompt buffer	   *)
+
+(*----------------------------------------------------------------------------*)
+(* tags for NewLoadSeg			  				      *)
+(* no tags are defined yet for NewLoadSeg				      *)
+
+(* NOTE: V37 dos.library, when doing ExAll() emulation, and V37 filesystems  *)
+(* will return an error if passed ED_OWNER.  If you get ERROR_BAD_NUMBER,    *)
+(* retry with ED_COMMENT to get everything but owner info.  All filesystems  *)
+(* supporting ExAll() must support through ED_COMMENT, and must check Type   *)
+(* and return ERROR_BAD_NUMBER if they don't support the type.		     *)
+
+(* values that can be passed for what data you want from ExAll() *)
+(* each higher value includes those below it (numerically)	 *)
+(* you MUST chose one of these values *)
+
+CONST
+  ED_NAME	= 1 ;
+  ED_TYPE	= 2 ;
+  ED_SIZE	= 3 ;
+  ED_PROTECTION	= 4 ;
+  ED_DATE	= 5 ;
+  ED_COMMENT	= 6 ;
+  ED_OWNER	= 7 ;
+
+(* Structure in which exall results are returned in. Note that only the *)
+(* fields asked for will exist!						*)
+
+TYPE
+  ExAllData = RECORD
+    ed_Next : ExAllDataPtr ;
+    ed_Name : STRING  ;
+    ed_Type : LONGINT ;
+    ed_Size : LONGINT ;
+    ed_Prot : LONGINT ;
+    ed_Days : LONGINT ;
+    ed_Mins : LONGINT ;
+    ed_Ticks: LONGINT ;
+    ed_Comment  : STRING ;	(* strings will be after last used field *)
+    ed_OwnerUID : CARDINAL ;	(* new for V39				 *)
+    ed_OwnerGID : CARDINAL ;
+  END ;
+
+(*   Control structure passed to ExAll.  Unused fields MUST be initialized to *)
+(*   0, expecially eac_LastKey.						      *)
+(*									      *)
+(*   eac_MatchFunc is a hook (see utility.library documentation for usage)    *)
+(*   It should return true if the entry is to returned, false if it is to be  *)
+(*   ignored.								      *)
+(*									      *)
+(*   This structure MUST be allocated by AllocDosObject()!		      *)
+
+TYPE
+  ExAllControl = RECORD
+    eac_Entries     : LONGINT ;	(* number of entries returned in buffer       *)
+    eac_LastKey     : LONGINT ;	(* Don't touch inbetween linked ExAll calls!  *)
+    eac_MatchString : STRING  ; (* wildcard string for pattern match or NULL  *)
+    eac_MatchFunc   : HookPtr ; (* optional private wildcard function         *)
+  END ;
+
+(* The disk "environment" is a longword array that describes the	      *)
+(* disk geometry.  It is variable sized, with the length at the beginning.    *)
+(* Here are the constants for a standard geometry.			      *)
+
+  DosEnvec = RECORD
+    de_TableSize      : LONGINT ; (* Size of Environment vector		      *)
+    de_SizeBlock      : LONGINT ; (* in longwords: standard value is 128      *)
+    de_SecOrg	      : LONGINT ; (* not used; must be 0		      *)
+    de_Surfaces       : LONGINT ; (* # of heads (surfaces). drive specific    *)
+    de_SectorPerBlock : LONGINT ; (* not used; must be 1		      *)
+    de_BlocksPerTrack : LONGINT ; (* blocks per track. drive specific	      *)
+    de_Reserved	      : LONGINT ; (* DOS reserved blocks at start of partition*)
+    de_PreAlloc       : LONGINT ; (* DOS reserved blocks at end of partition  *)
+    de_Interleave     : LONGINT ; (* usually 0				      *)
+    de_LowCyl	      : LONGINT ; (* starting cylinder. typically 0	      *)
+    de_HighCyl        : LONGINT ; (* max cylinder. drive specific	      *)
+    de_NumBuffers     : LONGINT ; (* Initial # DOS of buffers.		      *)
+    de_BufMemType     : LONGINT ; (* type of mem to allocate for buffers      *)
+    de_MaxTransfer    : LONGINT ; (* Max number of bytes to transfer at a time*)
+    de_Mask	      : LONGINT ; (* Address Mask to block out certain memory *)
+    de_BootPri	      : LONGINT ; (* Boot priority for autoboot		      *)
+    de_DosType	      : LONGINT ; (* ASCII(HEX) string showing filesystem type*)
+			          (* 0X444F5300 is old filesystem,	      *)
+			          (* 0X444F5301 is fast file system	      *)
+    de_Baud	      : LONGINT ; (* Baud rate for serial handler	      *)
+    de_Control	      : LONGINT ; (* Control word for handler/filesystem      *)
+    de_BootBlocks     : LONGINT ; (* Number of blocks containing boot code    *)
+
+  END ;
+
+(* these are the offsets into the array					*)
+(* DE_TABLESIZE is set to the number of longwords in the table minus 1	*)
+
+CONST
+  DE_TABLESIZE	   = 0 ; (* minimum value is 11 (includes NumBuffers)	*)
+  DE_SIZEBLOCK	   = 1 ; (* in longwords: standard value is 128		*)
+  DE_SECORG	   = 2 ; (* not used; must be 0				*)
+  DE_NUMHEADS	   = 3 ; (* # of heads (surfaces). drive specific	*)
+  DE_SECSPERBLK	   = 4 ; (* not used; must be 1				*)
+  DE_BLKSPERTRACK  = 5 ; (* blocks per track. drive specific		*)
+  DE_RESERVEDBLKS  = 6 ; (* unavailable blocks at start.usually 2	*)
+  DE_PREFAC	   = 7 ; (* not used; must be 0				*)
+  DE_INTERLEAVE	   = 8 ; (* usually 0					*)
+  DE_LOWCYL	   = 9 ; (* starting cylinder. typically 0		*)
+  DE_UPPERCYL	   = 10; (* max cylinder.  drive specific		*)
+  DE_NUMBUFFERS	   = 11; (* starting # of buffers.  typically 5		*)
+  DE_MEMBUFTYPE	   = 12; (* type of mem to allocate for buffers.	*)
+  DE_BUFMEMTYPE	   = 12; (* same as above, better name
+			  * 1 is public, 3 is chip, 5 is fast		*)
+  DE_MAXTRANSFER   = 13; (* Max number bytes to transfer at a time	*)
+  DE_MASK	   = 14; (* Address Mask to block out certain memory	*)
+  DE_BOOTPRI	   = 15; (* Boot priority for autoboot			*)
+  DE_DOSTYPE	   = 16; (* ASCII (HEX) string showing filesystem type  *)
+			 (* 0X444F5300 is old filesystem		*)
+			 (* 0X444F5301 is fast file system		*)
+  DE_BAUD	   = 17; (* Baud rate for serial handler		*)
+  DE_CONTROL	   = 18; (* Control word for handler/filesystem		*)
+  DE_BOOTBLOCKS	   = 19; (* Number of blocks containing boot code	*)
+
+(* The file system startup message is linked into a device node's startup *)
+(* field.  It contains a pointer to the above environment, plus the	  *)
+(* information needed to do an exec OpenDevice().			  *)
+
+TYPE
+  FileSysStartupMsg = RECORD
+    fssm_Unit    : LONGINT     ; (* exec unit number for this device	      *)
+    fssm_Device  : BSTRING     ; (* null terminated bstring to the device name*)
+    fssm_Environ : DosEnvecPtr ; (* ptr to environment table (see above)      *)
+    fssm_Flags   : LONGSET     ; (* flags for OpenDevice()		      *)
+  END ;
+
+
+(* The include file "libraries/dosextens.h" has a DeviceList structure.	*)
+(* The "device list" can have one of three different things linked onto	*)
+(* it.	Dosextens defines the structure for a volume.  DLT_DIRECTORY	*)
+(* is for an assigned directory.  The following structure is for	*)
+(* a dos "device" (DLT_DEVICE).						*)
+
+TYPE
+  DeviceNode = RECORD
+    dn_Next : DeviceListPtr ;	(* singly linked list			      *)
+    dn_Type : LONGINT  ;	(* always 0 for dos "devices"		      *)
+    dn_Task : MsgPortPtr ;	(* standard dos "task" field.  If this is     *)
+				(* null when the node is accesses, a task     *)
+				(* will be started up			      *)
+    dn_Lock      : FileLockPtr;	(* not used for devices -- leave null	      *)
+    dn_Handler   : BSTRING  ;	(* filename to loadseg (if seglist is null)   *)
+    dn_StackSize : LONGINT  ;	(* stacksize to use when starting task	      *)
+    dn_Priority  : LONGINT  ;	(* task priority when starting task	      *)
+    dn_Startup   : FileSysStartupMsgPtr ;
+    				(* startup msg: FileSysStartupMsg for disks   *)
+    dn_SegList   : BADDRESS ;	(* code to run to start new task,if necessary *)
+				(* if null then dn_Handler will be loaded.    *)
+    dn_GlobalVec : BADDRESS ;	(* BCPL global vector to use when starting    *)
+				(* a task.  -1 means that dn_SegList is not   *)
+				(* for a bcpl program, so the dos won't	      *)
+				(* try and construct one.  0 tell the	      *)
+				(* dos that you obey BCPL linkage rules	      *)
+				(* and that it should construct a global      *)
+				(* vector for you.			      *)
+    dn_Name : BSTRING ;		(* the node name, e.g. '\3','D','F','3'	      *)
+  END ;
+
+(* use of Class and code is discouraged for the time being - we might want to
+   change things *)
+
+(* --- NotifyMessage Class ------------------------------------------------ *)
+
+CONST
+  NOTIFY_CLASS = 040000000H ;
+
+(* --- NotifyMessage Codes ------------------------------------------------ *)
+
+  NOTIFY_CODE = 01234H ;
+
+
+(* Sent to the application if SEND_MESSAGE is specified. *)
+
+TYPE
+  NotifyMessage = RECORD
+    nm_ExecMessage : Message  ;
+    nm_Class	   : LONGINT  ;
+    nm_Code	   : CARDINAL ;
+    nm_NReq	   : NotifyRequestPtr ;	(* don't modify the request!	      *)
+    nm_DoNotTouch  : LONGINT  ;		(* like it says!  For use by handlers *)
+    nm_DoNotTouch2 : LONGINT  ;		(* ditto			      *)
+  END ;
+
+(* Do not modify or reuse the notifyrequest while active.		    *)
+(* note: the first LONG of nr_Data has the length transfered		    *)
+
+TYPE
+  NotifyRequest = RECORD
+    nr_Name     : STRING  ;
+    nr_FullName : STRING  ;	(* set by dos - don't touch *)
+    nr_UserData : LONGINT ;	(* for applications use     *)
+    nr_Flags    : LONGSET ;
+
+    nr_stuff : RECORD
+      CASE :INTEGER OF
+      |0: nr_Msg  : RECORD
+	  nr_Port : MsgPortPtr ; (* for SEND_MESSAGE *)
+        END ;
+      |1: nr_Signal: RECORD
+          nr_Task      : TaskPtr   ; (* for SEND_SIGNAL *)
+	  nr_SignalNum : SHORTCARD ; (* for SEND_SIGNAL *)
+	  nr_pad,nr_pad2,nr_pad3 : CHAR ;
+        END ;
+      END ;
+    END ;
+    nr_Reserved : ARRAY [0..3] OF LONGINT ; (* leave 0 for now *)
+    (* internal use by handlers *)
+    nr_MsgCount : LONGINT    ; (* # of outstanding msgs	          *)
+    nr_Handler  : MsgPortPtr ; (* handler sent to (for EndNotify) *)
+  END ;
+
+(* --- NotifyRequest Flags ------------------------------------------------ *)
+
+CONST
+  NRB_SEND_MESSAGE	= 0 ;  NRF_SEND_MESSAGE	  = {0} ;
+  NRB_SEND_SIGNAL	= 1 ;  NRF_SEND_SIGNAL	  = {1} ;
+  NRB_WAIT_REPLY	= 3 ;  NRF_WAIT_REPLY	  = {3} ;
+  NRB_NOTIFY_INITIAL	= 4 ;  NRF_NOTIFY_INITIAL = {4} ;
+
+(* do NOT set or remove NRF_MAGIC!  Only for use by handlers! *)
+  NRB_MAGIC		= 31 ; NRF_MAGIC	  = {31} ;
+
+(* bit numbers *)
+
+(* Flags reserved for private use by the handler: *)
+
+  NR_HANDLER_FLAGS = {16..31} ;
+
+
+(*--------------------------------------------------------------------------
+ *
+ * The CSource data structure defines the input source for "ReadItem()"
+ * as well as the ReadArgs call.  It is a publicly defined structure
+ * which may be used by applications which use code that follows the
+ * conventions defined for access.
+ *
+ * When passed to the dos.library functions, the value passed as
+ * struct *CSource is defined as follows:
+ *	if ( CSource == 0)	Use buffered IO "ReadChar()" as data source
+ *	else			Use CSource for input character stream
+ *
+ * The following two pseudo-code routines define how the CSource structure
+ * is used:
+ *
+ * long CS_ReadChar( struct CSource *CSource )
+ *
+ *	if ( CSource == 0 )	return ReadChar();
+ *	if ( CSource->CurChr >= CSource->Length )	return ENDSTREAMCHAR;
+ *	return CSource->Buffer[ CSource->CurChr++ ];
+ *
+ *
+ * BOOL CS_UnReadChar( struct CSource *CSource )
+ *
+ *	if ( CSource == 0 )	return UnReadChar();
+ *	if ( CSource->CurChr <= 0 )	return FALSE;
+ *	CSource->CurChr--;
+ *	return TRUE;
+ *
+ *
+ * To initialize a struct CSource, you set CSource->CS_Buffer to
+ * a string which is used as the data source, and set CS_Length to
+ * the number of characters in the string.  Normally CS_CurChr should
+ * be initialized to ZERO, or left as it was from prior use as
+ * a CSource.
+ *
+ *---------------------------------------------------------------------*)
+
+TYPE
+  CSource = RECORD
+    CS_Buffer : POINTER TO ARRAY OF CHAR ;
+    CS_Length : LONGINT ;
+    CS_CurChr : LONGINT ;
+  END ;
+
+(*----------------------------------------------------------------------
+ *
+ * The RDArgs data structure is the input parameter passed to the DOS
+ * ReadArgs() function call.
+ *
+ * The RDA_Source structure is a CSource as defined above;
+ * if RDA_Source.CS_Buffer is non-null, RDA_Source is used as the input
+ * character stream to parse, else the input comes from the buffered STDIN
+ * calls ReadChar/UnReadChar.
+ *
+ * RDA_DAList is a private address which is used internally to track
+ * allocations which are freed by FreeArgs().  This MUST be initialized
+ * to NULL prior to the first call to ReadArgs().
+ *
+ * The RDA_Buffer and RDA_BufSiz fields allow the application to supply
+ * a fixed-size buffer in which to store the parsed data.  This allows
+ * the application to pre-allocate a buffer rather than requiring buffer
+ * space to be allocated.  If either RDA_Buffer or RDA_BufSiz is NULL,
+ * the application has not supplied a buffer.
+ *
+ * RDA_ExtHelp is a text string which will be displayed instead of the
+ * template string, if the user is prompted for input.
+ *
+ * RDA_Flags bits control how ReadArgs() works.  The flag bits are
+ * defined below.  Defaults are initialized to ZERO.
+ *
+ *---------------------------------------------------------------------*)
+
+TYPE
+  RDArgs = RECORD
+    RDA_Source  : CSource ; (* Select input source	      *)
+    RDA_DAList  : LONGINT ; (* PRIVATE.			      *)
+    RDA_Buffer  : STRING  ; (* Optional string parsing space. *)
+    RDA_BufSiz  : LONGINT ; (* Size of RDA_Buffer (0..n)      *)
+    RDA_ExtHelp : ADDRESS ; (* Optional extended help	      *)
+    RDA_Flags   : LONGSET ; (* Flags for any required control *)
+  END ;
+
+CONST
+  RDAB_STDIN	=  0  ;	(* Use "STDIN" rather than "COMMAND LINE"	*)
+  RDAF_STDIN	= {0} ;
+  RDAB_NOALLOC	=  1  ;	(* If set, do not allocate extra string space.	*)
+  RDAF_NOALLOC	= {1} ;
+  RDAB_NOPROMPT	=  2  ;	(* Disable reprompting for string input}.	*)
+  RDAF_NOPROMPT	= {2} ;
+
+(* Maximum number of template keywords which can be in a template passed *)
+(* to ReadArgs(). IMPLEMENTOR NOTE - must be a multiple of 4.		 *)
+
+
+CONST
+  MAX_TEMPLATE_ITEMS = 100 ;
+
+(* Maximum number of MULTIARG items returned by ReadArgs(), before	 *)
+(* an ERROR_LINE_TOO_LONG.  These two limitations are due to stack	 *)
+(* usage.  Applications should allow "a lot" of stack to use ReadArgs(). *)
+
+CONST
+  MAX_MULTIARGS	= 128 ;
+
+(* Modes for LockRecord/LockRecords() *)
+
+CONST
+  REC_EXCLUSIVE		= 0 ;
+  REC_EXCLUSIVE_IMMED	= 1 ;
+  REC_SHARED		= 2 ;
+  REC_SHARED_IMMED	= 3 ;
+
+(* struct to be passed to LockRecords()/UnLockRecords() *)
+
+TYPE
+  RecordLock = RECORD
+    rec_FH     : FileHandlePtr	; (* filehandle			 *)
+    rec_Offset : LONGINT	; (* offset in file		 *)
+    rec_Length : LONGINT	; (* length of file to be locked *)
+    rec_Mode   : LONGINT	; (* Type of lock		 *)
+  END ;
+
+
+(* the structure in the pr_LocalVars list				*)
+(* Do NOT allocate yourself, use SetVar()!!! This structure may grow in *)
+(* future releases!  The list should be left in alphabetical order, and *)
+(* may have multiple entries with the same name but different types.	*)
+
+TYPE
+  LocalVar = RECORD
+    lv_Node  : Node    ;
+    lv_Flags : BITSET  ;
+    lv_Value : ADDRESS ;
+    lv_Len   : LONGINT ;
+  END ;
+
+(* The lv_Flags bits are available to the application.	The unused	*)
+(* lv_Node.ln_Pri bits are reserved for system use.			*)
+
+(* bit definitions for lv_Node.ln_Type: *)
+CONST
+  LV_VAR     = 0 ; (* an variable *)
+  LV_ALIAS   = 1 ; (* an alias    *)
+(* to be added into type: *)
+  LVB_IGNORE =  7  ; (* ignore this entry on GetVar, etc *)
+  LVF_IGNORE = 128 ;
+
+(* definitions of flags passed to GetVar()/SetVar()/DeleteVar()		   *)
+(* bit defs to be OR'ed with the type:					   *)
+(* item will be treated as a single line of text unless BINARY_VAR is used *)
+
+CONST
+  GVB_GLOBAL_ONLY    =  8   ;
+  GVF_GLOBAL_ONLY    = {8}  ;
+  GVB_LOCAL_ONLY     =  9   ;
+  GVF_LOCAL_ONLY     = {9}  ;
+  GVB_BINARY_VAR     =  10  ;
+  GVF_BINARY_VAR     = {10} ; (* treat variable as binary*)
+  GVB_DONT_NULL_TERM =  11  ; (* only with GVF_BINARY_VAR *)
+  GVF_DONT_NULL_TERM = {11} ;
+
+(* this is only supported in >= V39 dos.  V37 dos ignores this. *)
+(* this causes SetVar to affect ENVARC: as well as ENV:.	*)
+  GVB_SAVE_VAR =  12  ;
+  GVF_SAVE_VAR = {12} ; (* only with GVF_GLOBAL_VAR *)
+
+VAR
+  DosBase : DosLibraryPtr ;
+    (* M2: This is deliberately not declared as DOSBase in order to allow *)
+    (* auto_init code to declare & open DOSBase, as required by the DICE  *)
+    (* startup code.							  *)
+
+PROCEDURE Open( name : STRING ; accessMode : LONGINT ) : FileHandlePtr ;
+PROCEDURE Close( file : FileHandlePtr ) : LONGINT ;
+PROCEDURE Read( file: FileHandlePtr ; buff: ADDRESS ; len: LONGINT ) : LONGINT ;
+PROCEDURE Write( file: FileHandlePtr ; buff: ADDRESS ; len: LONGINT ): LONGINT ;
+PROCEDURE Input( ) : FileHandlePtr ;
+PROCEDURE Output( ) : FileHandlePtr ;
+PROCEDURE Seek( file : FileHandlePtr ; position , offset : LONGINT ) : LONGINT ;
+PROCEDURE DeleteFile( name : STRING ) : LONGINT ;
+PROCEDURE Rename( oldName , newName : STRING ) : LONGINT ;
+PROCEDURE Lock( name : STRING ; type : LONGINT ) : FileLockPtr ;
+PROCEDURE UnLock( lock : FileLockPtr ) ;
+PROCEDURE DupLock( lock : FileLockPtr ) : FileLockPtr ;
+PROCEDURE Examine( lock : FileLockPtr ; VAR fibp : FileInfoBlock ) : LONGINT ;
+PROCEDURE ExNext( lock : FileLockPtr ; VAR fibp : FileInfoBlock ) : LONGINT ;
+PROCEDURE Info( lock : FileLockPtr ; VAR parameterBlock : InfoData ) : LONGINT ;
+PROCEDURE CreateDir( name : STRING ) : FileLockPtr ;
+PROCEDURE CurrentDir( lock : FileLockPtr ) : FileLockPtr ;
+PROCEDURE IoErr( ) : LONGINT ;
+
+PROCEDURE CreateProc( name	: STRING  ;
+		      pri	: LONGINT ;
+		      segList   : BADDRESS ;
+		      stackSize : LONGINT ) : MsgPortPtr ;
+
+PROCEDURE Exit( returnCode : LONGINT ) ;
+PROCEDURE LoadSeg( name : STRING ) : BADDRESS ;
+
+PROCEDURE UnLoadSeg( seglist : BADDRESS ) ;
+PROCEDURE DeviceProc( name : STRING ) : MsgPortPtr ;
+PROCEDURE SetComment( name , comment : STRING ) : LONGINT ;
+PROCEDURE SetProtection( name : STRING ; protect : LONGINT ) : LONGINT ;
+PROCEDURE DateStamp( VAR date : DateStampRec ) : DateStampPtr ;
+PROCEDURE Delay( timeout : LONGINT ) ;
+PROCEDURE WaitForChar( file : FileHandlePtr ; timeout : LONGINT ) : LONGINT ;
+PROCEDURE ParentDir( lock : FileLockPtr ) : FileLockPtr ;
+PROCEDURE IsInteractive( file : FileHandlePtr ) : LONGINT ;
+PROCEDURE Execute( string : STRING ; file , file2 : FileHandlePtr ) : LONGINT ;
+
+(* ---- functions in V36 or higher (Release 2.0) ---- *)
+     (*	DOS Object creation/deletion *)
+
+PROCEDURE AllocDosObject( type : LONGINT ; tags : TagItemPtr ) : ADDRESS ;
+PROCEDURE AllocDosObjectTagList( type : LONGINT ; tags: TagItemPtr ) : ADDRESS ;
+PROCEDURE AllocDosObjectTags( type: LONGINT ; tag1type: LONGINT ;..) : ADDRESS ;
+PROCEDURE FreeDosObject( type : LONGINT ; ptr : ADDRESS ) ;
+
+(* ---- Packet Level routines ---- *)
+
+PROCEDURE DoPkt ( port : MsgPortPtr ; action,a1,a2,a3,a4,a5 : LONGINT ):LONGINT;
+PROCEDURE DoPkt0( port : MsgPortPtr ; action : LONGINT ) : LONGINT ;
+PROCEDURE DoPkt1( port : MsgPortPtr ; action , arg1 : LONGINT ) : LONGINT ;
+PROCEDURE DoPkt2( port : MsgPortPtr ; action, arg1, arg2 : LONGINT ) : LONGINT ;
+PROCEDURE DoPkt3( port : MsgPortPtr ; action,a1,a2,a3 : LONGINT ) : LONGINT ;
+PROCEDURE DoPkt4( port : MsgPortPtr ; action,a1,a2,a3,a4: LONGINT ) : LONGINT ;
+
+PROCEDURE SendPkt( dp : DosPacketPtr ; port , replyport : MsgPortPtr ) ;
+
+PROCEDURE WaitPkt ( ) : DosPacketPtr ;
+PROCEDURE ReplyPkt( dp : DosPacketPtr ; res1 , res2 : LONGINT ) ;
+PROCEDURE AbortPkt( port : MsgPortPtr ; pkt : DosPacketPtr );
+
+(* ---- Record Locking ---- *)
+
+PROCEDURE LockRecord( fh : FileHandlePtr ;
+		      offset,length,mode,long,timeout : LONGINT ) : BOOLEAN ;
+PROCEDURE LockRecords ( recArray : RecordLockPtr ; timeout : LONGINT ) ;
+PROCEDURE UnLockRecord( fh : FileHandlePtr ; offset, len : LONGINT ) : BOOLEAN ;
+PROCEDURE UnLockRecords( recArray : RecordLockPtr ) : BOOLEAN ;
+
+(* ---- Buffered File I/O ---- *)
+
+PROCEDURE SelectInput( fh : FileHandlePtr ) : FileHandlePtr ;
+PROCEDURE SelectOutput( fh : FileHandlePtr ) : FileHandlePtr ;
+PROCEDURE FGetC( fh : FileHandlePtr ) : LONGINT ;
+PROCEDURE FPutC( fh : FileHandlePtr ; ch : LONGINT ) : LONGINT ;
+PROCEDURE UnGetC( fh : FileHandlePtr ; char : LONGINT ) : LONGINT ;
+
+PROCEDURE FRead( fh : FileHandlePtr ;
+		 block : ADDRESS ;
+		 len, num : LONGINT ) : LONGINT ;
+
+PROCEDURE FWrite( fh : FileHandlePtr ;
+		  block : ADDRESS ;
+		  len, num : LONGINT ): LONGINT ;
+
+PROCEDURE FGets( fh : FileHandlePtr ; buf : STRING ; blen : LONGINT ) : STRING ;
+PROCEDURE FPuts( fh : FileHandlePtr ; str : STRING ) : LONGINT ;
+PROCEDURE VFWritef( fh : FileHandlePtr ; format : STRING ; argarray : ADDRESS );
+PROCEDURE FWritef( fh : FileHandlePtr ; format : STRING ; .. ) ;
+
+PROCEDURE VFPrintf( fh : FileHandlePtr ;
+		    format : STRING ;
+		    argarray : ADDRESS ) : LONGINT ;
+
+PROCEDURE FPrintf( fh : FileHandlePtr ; format : STRING ; .. ) : LONGINT ;
+PROCEDURE Flush( fh : FileHandlePtr ) : LONGINT ;
+PROCEDURE SetVBuf( fh   : FileHandlePtr ;
+		   buff : ADDRESS ;
+		   type , size : LONGINT ) : LONGINT ;
+
+(* ---- DOS Object Management ---- *)
+
+PROCEDURE DupLockFromFH( fh : FileHandlePtr ) : FileLockPtr ;
+PROCEDURE OpenFromLock( lock : FileLockPtr ) : FileHandlePtr ;
+PROCEDURE ParentOfFH( fh : FileHandlePtr ) : FileLockPtr ;
+
+PROCEDURE ExamineFH( fh : FileHandlePtr ; VAR fib : FileInfoBlock ) : BOOLEAN ;
+PROCEDURE SetFileDate( name : STRING ; date : DateStampPtr ) : LONGINT ;
+
+PROCEDURE NameFromLock( lock   : FileLockPtr ;
+			buffer : STRING ;
+			len    : LONGINT ) : LONGINT ;
+
+PROCEDURE NameFromFH( fh     : FileHandlePtr ;
+		      buffer : STRING ;
+		      len    : LONGINT ) : LONGINT ;
+
+PROCEDURE SplitName( name      : STRING  ;
+		     seperator : LONGINT ;
+		     buffer    : STRING  ;
+		     oldpos    : LONGINT ;
+		     size      : LONGINT ) : INTEGER ;
+
+PROCEDURE SameLock( lock1 , lock2 : FileLockPtr ) : LONGINT ;
+
+PROCEDURE SetMode( fh : FileHandlePtr ; mode : LONGINT );
+
+PROCEDURE ExAll( lock : FileLockPtr  ;
+		 buff : ExAllDataPtr ;
+		 size , data : LONGINT ;
+		 control : ExAllControlPtr ) : LONGINT ;
+
+PROCEDURE ReadLink( port : MsgPortPtr ;
+		    lock : FileLockPtr ;
+		    path , buffer : STRING ;
+		    size : LONGINT ) : LONGINT ;
+
+PROCEDURE MakeLink( name : STRING ; dest , soft : LONGINT ) : LONGINT ;
+
+PROCEDURE ChangeMode ( type : LONGINT ;
+		       fh : FileHandlePtr ;
+		       newmode : LONGINT ) : LONGINT ;
+
+PROCEDURE SetFileSize( fh : FileHandlePtr ; pos , mode : LONGINT ) : LONGINT ;
+
+(* ----- Error Handling ---- *)
+
+PROCEDURE SetIoErr( result : LONGINT ) : LONGINT ;
+
+PROCEDURE Fault( code : LONGINT ;
+		 header , buffer : STRING ;
+		 len : LONGINT ) : BOOLEAN ;
+
+PROCEDURE PrintFault( code : LONGINT ; header : STRING ) : BOOLEAN ;
+PROCEDURE ErrorReport( code,type,arg1: LONGINT ; device: MsgPortPtr ): LONGINT ;
+
+(* ---- Process Management ---- *)
+
+PROCEDURE Cli( ) : CommandLineInterfacePtr ;
+
+PROCEDURE CreateNewProc( tags : TagItemPtr ) : ProcessPtr ;
+PROCEDURE CreateNewProcTagList( tags : TagItemPtr ) : ProcessPtr ;
+PROCEDURE CreateNewProcTags( tag1type : LONGINT ; .. ) : ProcessPtr ;
+
+PROCEDURE RunCommand( seg      : BADDRESS ;
+		      stack    : LONGINT  ;
+		      paramptr : STRING   ;
+		      paramlen : LONGINT ) : LONGINT ;
+
+PROCEDURE GetConsoleTask( ) : MsgPortPtr ;
+PROCEDURE SetConsoleTask( task : MsgPortPtr ) : MsgPortPtr ;
+PROCEDURE GetFileSysTask( ) : MsgPortPtr ;
+PROCEDURE SetFileSysTask( task : MsgPortPtr ) : MsgPortPtr ;
+
+PROCEDURE GetArgStr( ) : STRING ;
+PROCEDURE SetArgStr( string : STRING ) : BOOLEAN ;
+PROCEDURE FindCliProc( num : LONGINT ) : ProcessPtr ;
+
+PROCEDURE MaxCli( ) : LONGINT ;
+
+PROCEDURE SetCurrentDirName( name : STRING ) : BOOLEAN ;
+PROCEDURE GetCurrentDirName( buf : STRING ; len : LONGINT ) : BOOLEAN ;
+
+PROCEDURE SetProgramName( name : STRING ) : BOOLEAN ;
+PROCEDURE GetProgramName( buf : STRING ; len : LONGINT ) : BOOLEAN ;
+
+PROCEDURE SetPrompt( name : STRING ) : BOOLEAN ;
+PROCEDURE GetPrompt( buf : STRING ; len : LONGINT ) : BOOLEAN ;
+
+PROCEDURE SetProgramDir( lock : FileLockPtr ) : FileLockPtr ;
+PROCEDURE GetProgramDir( ) : FileLockPtr ;
+
+(* ---- Device List Management ---- *)
+
+PROCEDURE SystemTagList( command : STRING ; tags : TagItemPtr ) : LONGINT ;
+PROCEDURE System( command : STRING ; tags : TagItemPtr ) : LONGINT ;
+PROCEDURE SystemTags( command : STRING ; tag1type : LONGINT ; .. ) : LONGINT ;
+
+PROCEDURE AssignLock( name : STRING ; lock : FileLockPtr ) : LONGINT ;
+PROCEDURE AssignLate( name : STRING ; path : STRING ) : BOOLEAN ;
+PROCEDURE AssignPath( name : STRING ; path : STRING ) : BOOLEAN ;
+PROCEDURE AssignAdd ( name : STRING ; lock : FileLockPtr ) : BOOLEAN ;
+PROCEDURE RemAssignList( name : STRING ; lock : FileLockPtr ) : LONGINT ;
+
+PROCEDURE GetDeviceProc( name : STRING ; dp : DevProcPtr ) : DevProcPtr ;
+PROCEDURE FreeDeviceProc( dp : DevProcPtr ) ;
+
+PROCEDURE LockDosList( flags : LONGSET ) : DosListPtr ;
+PROCEDURE UnLockDosList( flags : LONGSET ) ;
+PROCEDURE AttemptLockDosList( flags : LONGSET ) : DosListPtr ;
+PROCEDURE RemDosEntry( dlist : DosListPtr ) : BOOLEAN ;
+PROCEDURE AddDosEntry( dlist : DosListPtr ) : LONGINT ;
+
+PROCEDURE FindDosEntry( dlist : DosListPtr ;
+			name  : STRING ;
+			flags : LONGSET ) : DosListPtr ;
+
+PROCEDURE NextDosEntry( dlist : DosListPtr ; flags : LONGSET ) : DosListPtr ;
+PROCEDURE MakeDosEntry( name : STRING ; type : LONGINT ) : DosListPtr ;
+PROCEDURE FreeDosEntry( dlist : DosListPtr ) ;
+PROCEDURE IsFileSystem( name : STRING ) : BOOLEAN ;
+
+(* ---- Handler Interface ---- *)
+
+PROCEDURE Format( filesystem,volumename: STRING ; dostype: LONGINT ): BOOLEAN ;
+PROCEDURE Relabel( drive , newname : STRING ) : LONGINT ;
+PROCEDURE Inhibit( name : STRING ; onoff : LONGINT ) ;
+PROCEDURE AddBuffers( name : STRING ; number : LONGINT ) : LONGINT ;
+
+(* ---- Date, Time Routines ---- *)
+
+PROCEDURE CompareDates( date1 , date2 : DateStampPtr ) : LONGINT ;
+PROCEDURE DateToStr( VAR datetime : DateTime ) : LONGINT ;
+PROCEDURE StrToDate( VAR datetime : DateTime ) : LONGINT ;
+
+(* ---- Image Management ---- *)
+
+PROCEDURE InternalLoadSeg( fh    : FileHandlePtr ;
+			   table : BADDRESS ;
+			   funcarray , stack : ADDRESS ) : BADDRESS ;
+
+PROCEDURE InternalUnLoadSeg( seglist : BADDRESS ; freefunc : PROC ) : BOOLEAN ;
+
+PROCEDURE NewLoadSeg( file : STRING ; tags : TagItemPtr ) : BADDRESS ;
+PROCEDURE NewLoadSegTagList( file : STRING ; tags : TagItemPtr ) : BADDRESS ;
+PROCEDURE NewLoadSegTags( file : STRING ; tag1type : LONGINT ; .. ) : BADDRESS ;
+
+PROCEDURE AddSegment( name: STRING ; seg: BADDRESS ; system: LONGINT ): LONGINT;
+
+PROCEDURE FindSegment( name   : STRING ;
+		       seg    : SegmentPtr ;
+		       system : LONGINT ) : SegmentPtr ;
+
+PROCEDURE RemSegment( seg : SegmentPtr ) : LONGINT ;
+
+(* ---- Command Support ---- *)
+
+PROCEDURE CheckSignal( mask : LONGSET ) : LONGSET ;
+
+PROCEDURE ReadArgs( arg_template : STRING  ;
+		    array	 : ADDRESS ;
+		    args	 : RDArgsPtr ) : RDArgsPtr ;
+
+PROCEDURE FindArg( keyword , arg_template : STRING ) : LONGINT ;
+
+PROCEDURE ReadItem( name     : STRING ;
+		    maxchars : LONGINT ;
+		    csource  : CSourcePtr ) : LONGINT ;
+
+PROCEDURE StrToLong( string : STRING ; VAR value : LONGINT ) : LONGINT ;
+PROCEDURE MatchFirst( pat: STRING ; anchor : AnchorPathPtr ) : LONGINT ;
+
+PROCEDURE MatchNext( anchor : AnchorPathPtr ) : LONGINT ;
+PROCEDURE MatchEnd( anchor : AnchorPathPtr );
+PROCEDURE ParsePattern( pat, buf : STRING ; buflen : LONGINT ) : LONGINT ;
+PROCEDURE MatchPattern( pat, str : BOOLEAN ) : BOOLEAN ;
+PROCEDURE FreeArgs( args : RDArgsPtr ) ;
+PROCEDURE FilePart( path : STRING ) : STRING ;
+PROCEDURE PathPart( path : STRING ) : STRING ;
+PROCEDURE AddPart( dirname,filename : STRING ; size : LONGINT ) : BOOLEAN ;
+
+(* ---- Notification ---- *)
+
+PROCEDURE StartNotify( notify : NotifyRequestPtr ) : BOOLEAN ;
+PROCEDURE EndNotify  ( notify : NotifyRequestPtr ) ;
+
+(* ---- Environment Variable functions ----- *)
+
+PROCEDURE SetVar( name,buffer:STRING ; size:LONGINT ; flags:LONGSET ) : BOOLEAN;
+PROCEDURE GetVar( name,buffer:STRING ; size:LONGINT ; flags:LONGSET ) : LONGINT;
+PROCEDURE DeleteVar( name : STRING ; flags : LONGSET ) : LONGINT ;
+PROCEDURE FindVar( name : STRING ; type : LONGINT ) : LocalVarPtr ;
+
+PROCEDURE CliInitNewcli( dp : DosPacketPtr ) : LONGINT ;
+PROCEDURE CliInitRun( dp : DosPacketPtr ) : LONGINT ;
+
+PROCEDURE WriteChars( buf : STRING ; buflen : LONGINT ) : LONGINT ;
+PROCEDURE PutStr( str : STRING ) : LONGINT ;
+PROCEDURE VPrintf( format : STRING ; argarray : ADDRESS ) : LONGINT ;
+PROCEDURE Printf( format : STRING ; .. ) : LONGINT ;
+
+(* these were unimplemented until dos 36.147 *)
+
+PROCEDURE ParsePatternNoCase( pat, buf : STRING ; buflen : LONGINT ) : LONGINT ;
+PROCEDURE MatchPatternNoCase( pat, str : STRING ) : BOOLEAN ;
+
+(* this was added for V37 dos, returned 0 before then. *)
+
+PROCEDURE SameDevice( lock1 , lock2 : FileLockPtr ) : BOOLEAN ;
+
+(* NOTE: the following entries did NOT exist before ks 36.303 (2.02)	*)
+(* If you are going to use them, open dos.library with version 37	*)
+
+(* These calls were added for V39 dos: *)
+
+PROCEDURE ExAllEnd( lock : FileLockPtr ;
+		    buffer : ADDRESS ;
+		    size , data : LONGINT ;
+		    control : ExAllControlPtr ) ;
+
+PROCEDURE SetOwner( name : STRING ; owner_info : LONGINT ) : BOOLEAN ;
+
+END Dos.

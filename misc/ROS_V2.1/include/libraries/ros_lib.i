@@ -1,0 +1,70 @@
+	IFND LIBRARIES_ROS_LIB_I
+LIBRARIES_ROS_LIB_I SET 1
+**
+**	$VER: ros_lib.i 2.0 (01.11.96)
+**	Includes Release 2.0
+**
+**	Library interface offsets for Assembler usage.
+**
+**	(C) Copyright 1995/96 by TIK/RETIRE
+**	    All Rights Reserved
+**
+
+
+	IFND    EXEC_LIBRARIES_I
+	include "exec/libraries.i"
+	ENDC
+
+
+	LIBINIT
+
+	LIBDEF	_LVOROSKillSystem
+	LIBDEF	_LVOROSAwakeSystem
+	LIBDEF	_LVOROSScreenToFront
+	LIBDEF	_LVOROSScreenToBack
+	LIBDEF	_LVOROSSysCall
+	LIBDEF	_LVOROSSysCallEnd
+	LIBDEF	_LVOROSSetCache
+	LIBDEF	_LVOROSSetExitHandler
+	LIBDEF	_LVOROSCPUClock
+	LIBDEF	_LVOROSCPUCheck
+	LIBDEF	_LVOROSChipsetCheck
+	LIBDEF	_LVOROSAllocMem
+	LIBDEF	_LVOROSFreeMem
+	LIBDEF	_LVOROSRequester
+	LIBDEF	_LVOROSEnableReq
+	LIBDEF	_LVOROSDisableReq
+	LIBDEF	_LVOROSAllocAudio
+	LIBDEF	_LVOROSFreeAudio
+	LIBDEF	_LVOROSSetDMA
+	LIBDEF	_LVOROSGetDMA
+	LIBDEF	_LVOROSSetInt
+	LIBDEF	_LVOROSGetInt
+	LIBDEF	_LVOROSSetIntVec
+	LIBDEF	_LVOROSSetCopper
+	LIBDEF	_LVOROSWaitVBlank
+	LIBDEF	_LVOROSAddTimerInt
+	LIBDEF	_LVOROSRemTimerInt
+	LIBDEF	_LVOROSSetTimerVec
+	LIBDEF	_LVOROSStartTimer
+	LIBDEF	_LVOROSStopTimer
+	LIBDEF	_LVOROSGetKey
+	LIBDEF	_LVOROSQueryKeys
+	LIBDEF	_LVOROSReadExe
+	LIBDEF	_LVOROSReadFile
+	LIBDEF	_LVOROSWriteFile
+	LIBDEF	_LVOROSDeleteFile
+*--- functions in V2 or higher ---
+	LIBDEF	_LVOROSDiskState
+	LIBDEF	_LVOROSDiskLoad
+	LIBDEF	_LVOROSSetJoyPortAttrs
+	LIBDEF	_LVOROSReadJoyPort
+
+
+CALLROS	MACRO
+	move.l	_ROSBase,a6
+	jsr	_LVO\1(a6)
+	ENDM
+
+
+	ENDC ; LIBRARIES_ROS_LIB_I

@@ -1,0 +1,28 @@
+MODULE 'intuition/intuition', 'graphics/view'
+
+PROC main()
+  DEF sptr=NIL, wptr=NIL, i
+  sptr:=OpenS(640,200,4,V_HIRES,'Schermo demo')
+  IF sptr
+    wptr:=OpenW(0,20,640,180,IDCMP_CLOSEWINDOW,
+                WFLG_CLOSEGADGET OR WFLG_ACTIVATE,
+                'Finestra per grafica demo',sptr,$F,NIL)
+    IF wptr
+      TextF(20,20,'Hello World')
+      FOR i:=0 TO 15  /* Disegna una linea e un box per ogni colore */
+        Line(20,30,620,30+(7*i),i)
+        Box(10+(40*i),140,30+(40*i),170,1)
+        Box(11+(40*i),141,29+(40*i),169,i)
+      ENDFOR
+      WHILE WaitIMessage(wptr)<>IDCMP_CLOSEWINDOW
+      ENDWHILE
+      WriteF('Programma terminato con successo\n')
+    ELSE
+      WriteF('Non posso aprire la window\n')
+    ENDIF
+  ELSE
+    WriteF('Non posso aprire lo schermo\n')
+  ENDIF
+  IF wptr THEN CloseW(wptr)
+  IF sptr THEN CloseS(sptr)
+ENDPROC

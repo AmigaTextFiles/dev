@@ -1,0 +1,175 @@
+
+; Listing14-10a.s	Verwendung der Routine player6.1a für ein unkomprimiertes Modul
+
+; die Routine P61_Music wird bei jedem vertical blank aufgerufen
+
+	SECTION	Usoplay61a,CODE
+
+;	Include	"DaWorkBench.s"	; entferne das; vor dem Speichern mit "WO"
+
+*****************************************************************************
+	include	"/Sources/startup2.s" ; speichern copperlist etc.
+*****************************************************************************
+
+			;5432109876543210
+DMASET	EQU	%1000001010000000	; nur copper DMA  
+
+WaitDisk	EQU	30				; 50-150 zur Rettung (je nach Fall)
+
+START:
+
+;ญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญ
+;ญ Call P61_Init to initialize the playroutine	ญ
+;ญ D0 --> Timer detection (for CIA-version)	ญ
+;ญ A0 --> Address to the module			ญ
+;ญ A1 --> Address to samples/0			ญ
+;ญ A2 --> Address to sample buffer		ญ
+;ญ D0 <-- 0 if succeeded			ญ
+;ญ A6 <-- $DFF000				ญ
+;ญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญ
+
+	movem.l	d0-d7/a0-a6,-(SP)
+	lea	P61_data,a0				; Adresse des Moduls in a0
+	lea	$dff000,a6				; wir merken uns $dff000 in a6!
+	sub.l	a1,a1				; die Sample sind nicht getrennt, wir setzen Null
+	sub.l	a2,a2				; keine samples -> modul unkomprimiert
+	bsr.w	P61_Init
+	movem.l	(SP)+,d0-d7/a0-a6
+
+	lea	$dff000,a5
+	MOVE.W	#DMASET,$96(a5)		; DMACON - nur copper aktivieren
+								; + bitplane und sprites (%1000001111000000)
+
+	move.w	#$e000,$9a(a5)		; INTENA - aktivieren Master und lev6
+	move.l	#COPPERLIST,$80(a5)	; Zeiger COP
+	move.w	d0,$88(a5)			; Start COP
+	move.w	#0,$1fc(a5)			; AGA deaktivieren
+	move.w	#$c00,$106(a5)		; AGA deaktivieren
+	move.w	#$11,$10c(a5)		; AGA deaktivieren
+
+mouse:
+	MOVE.L	#$1ff00,d1			; Bit zur Auswahl durch UND
+	MOVE.L	#$08000,d2			; warte auf Zeile $80
+Waity1:
+	MOVE.L	4(A5),D0			; VPOSR und VHPOSR - $dff004/$dff006
+	ANDI.L	D1,D0				; wไhle nur die Bits der vertikalen Pos.
+	CMPI.L	D2,D0				; warte auf Zeile $12c
+	BNE.S	Waity1
+Aspetta:
+	MOVE.L	4(A5),D0			; VPOSR und VHPOSR - $dff004/$dff006
+	ANDI.L	D1,D0				; wไhle nur die Bits der vertikalen Pos.
+	CMPI.L	D2,D0				; warte auf Zeile $12c
+	BEQ.S	Aspetta
+
+;ญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญ
+;ญ Call P61_Music every frame to play the music	ญ
+;ญ	  _NOT_ if CIA-version is used!		ญ
+;ญ A6 --> Customchip baseaddress ($DFF000)	ญ
+;ญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญ
+
+	move.w	#$f00,$180(a5)		; color0 rot -> für copper monitor
+
+	movem.l	d0-d7/a0-a6,-(SP)
+	lea	$dff000,a6				; wir merken uns $dff000 in a6!
+	bsr.w	P61_Music
+	movem.l	(SP)+,d0-d7/a0-a6
+
+	move.w	#$003,$180(a5)		; color0 schwarz
+
+	btst	#6,$bfe001			; linke Maustaste gedrückt?
+	bne.s	mouse
+
+;ญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญ
+;ญ Call P61_End to stop the music		ญ
+;ญ   A6 --> Customchip baseaddress ($DFF000)	ญ
+;ญ		Uses D0/D1/A0/A1/A3		ญ
+;ญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญญ
+
+	lea	$dff000,a6				; wir merken uns $dff000 in a6!
+	bsr.w	P61_End
+
+	rts
+
+
+*****************************************************************************
+*		 The Player 6.1A for Asm-One 1.09 and later 						*
+*****************************************************************************
+
+fade  = 0	; 0 = Normal, NO master volume control possible
+			; 1 = Use master volume (P61_Master)
+
+jump = 0	; 0 = do NOT include position jump code (P61_SetPosition)
+			; 1 = Include
+
+system = 0	; 0 = killer
+			; 1 = friendly
+
+CIA = 0		; 0 = CIA disabled
+			; 1 = CIA enabled
+
+exec = 1	; 0 = ExecBase destroyed
+			; 1 = ExecBase valid
+
+opt020 = 0	; 0 = MC680x0 code
+			; 1 = MC68020+ or better
+
+use = $2009559	; Usecode (Setze den von p61con angegebenen Wert zum Speichern
+				; für jedes Modul unterschiedlich!)
+
+*****************************************************************************
+	include	"/Sources/play.s"	; die wahre Routine!
+*****************************************************************************
+
+
+*****************************************************************************
+;	Copperlist
+*****************************************************************************
+
+	SECTION	COP,DATA_C
+
+COPPERLIST:
+	dc.w	$100,$200			; bplcon0 - no bitplanes
+	DC.W	$180,$003			; color0 schwarz
+	dc.W	$FFFF,$FFFE			; Ende copperlist
+
+*****************************************************************************
+;	Musikmodul in P61-Format konvertiert, unkomprimiert
+*****************************************************************************
+
+	Section	modulozzo,data_C
+
+; Modul von DreamFish. Original 42684, konvertiert 31628 (nicht gepackt!)
+
+P61_data:
+	incbin	"/Sources/P61.technochild"	; unkomprimiert, nur konvertiert.
+
+	end
+
+Ich erinnere Sie an die Schritte zum Spielen eines Moduls mit dieser Wiedergaberoutine:
+Als erstes müssen Sie das Modul mit dem entsprechenden Dienstprogramm P61CON in das
+P61-Format konvertieren, wobei die verschiedenen Optionen "delta", "pack samples" in 
+den Programmeinstellungen verbleiben, ... alle zurückgesetzt, au฿er "tempo".
+Auf diese Weise erhalten Sie das konvertierte Modul, das für die Wiedergabe dieser 
+Routine geeignet ist. Normalerweise wird bei der Konvertierung auch Platz gespart,
+aber es ist keine "Komprimierung", sondern eine Optimierung.
+Notieren Sie sich den Usecode, da Sie ihn im Listing unter dem equate "use"
+einfügen müssen.
+Dies wird verwendet, um Platz zu sparen: Es gibt an, welche Effekte aus dem Modul
+verwendet werden, um nicht verwendete nicht zu assemblieren.
+Fügen Sie zu diesem Zeitpunkt einfach das Modul in den Chip-RAM ein und rufen Sie
+die Routinen zur richtigen Zeit auf: P61_Init vor dem Spielen, wie wir es getan haben
+mt_init, P61_Music einmal zu jedem vertical blank (Warten mit dff004/6 oder
+setzen Sie es in den Interrupt $6c) und bevor Sie beenden P61_End.
+VERGESSEN SIE NICHT, DEN INTERRUPT-LEVEL 6 ZU AKTIVIEREN!!!! Manchmal werden die 
+Timings mit dem CIAB-Timer A Interrupt gemacht. Sie k๖nnen den CIAB-Timer A also
+nicht verwenden, wไhrend Sie diese Routine verwenden ... Um die Wahrheit zu sagen,
+kann die Verwendung des CIAB-Timers B ebenfalls Probleme verursachen... Also
+aufgepasst! Setzen Sie zusไtzlich zu den Bits 15, 14, 13 des $dff09a (intena)
+zusไtzlich Bits 5 oder 4 (VERTB und COPER) und verwenden Sie nicht den A/CIAB-Timer.
+Natürlich gibt es noch andere Details, wie zum Beispiel daran zu denken, die 
+richtigen Werte in die Register ($dff000 in a6 usw.) zu setzen und setzen Sie
+die equates "fade", "jump", "system", "cia", "exec", "opt020", "use" auf die
+richtige Weise. In dieser Hinsicht gibt es verschiedene Beispiele, bei denen die
+equates auf die verschiedenen Bedürfnisse gesetzt sind. Insbesondere in diesem
+Beispiel haben wir CIA = 0, weil wir jedes Mal P61_music aufrufen.
+

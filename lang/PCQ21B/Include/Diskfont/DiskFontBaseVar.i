@@ -1,0 +1,4 @@
+
+Var
+    DiskFontBase : Address;
+                                  

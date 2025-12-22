@@ -1,0 +1,7 @@
+IMPLEMENTATION MODULE Utility ;
+
+IMPORT M2Lib ;
+
+BEGIN UtilityBase := M2Lib.OpenLib( UTILITYNAME, VERSION )
+END Utility.
+

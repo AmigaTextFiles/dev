@@ -1,0 +1,230 @@
+/* Scheme In One Define.
+ 
+The garbage collector, the name and other parts of this program are
+
+ *                     COPYRIGHT (c) 1989 BY                              *
+ *      PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+
+Conversion  to  full scheme standard, characters, vectors, ports, complex &
+rational numbers, and other major enhancments by
+
+ *      Scaglione Ermanno, v. Pirinoli 16 IMPERIA P.M. 18100 ITALY        * 
+
+Permission  to use, copy, modify, distribute and sell this software and its
+documentation  for  any purpose and without fee is hereby granted, provided
+that  the  above  copyright  notice appear in all copies and that both that
+copyright   notice   and   this  permission  notice  appear  in  supporting
+documentation,  and that the name of Paradigm Associates Inc not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.
+
+PARADIGM  DISCLAIMS  ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL  IMPLIED  WARRANTIES  OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+PARADIGM  BE  LIABLE  FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <math.h>
+
+#include "siod.h"
+
+LISP symcons(char *pname, LISP vcell)
+{LISP z;
+ NEWCELL(z,tc_symbol);
+ PNAME(z) = pname;
+ (*z).storage_as.symbol.vcell = cons(vcell,NIL);
+ return(z);}
+
+LISP gensym(LISP arg)
+{LISP z;
+ char *p;
+ long flag;
+ static long counter = 0;
+ static char prefix[80] = "g";
+ if(NSTRINGP(arg) && NINTNUMP(arg) && NNULLP(arg))
+    err("arg to gensym must be a string or an integer",arg,ERR_GEN);
+ flag = no_interrupt(1);
+ if(STRINGP(arg))
+   {if(strlen(SNAME(arg))>79)
+      err("string too long to gensym",arg,ERR_GEN);
+    strcpy(prefix,SNAME(arg));}
+ else if(INTNUMP(arg)&&(INTNM(arg)>0))
+   counter = INTNM(arg);
+ sprintf(tkbuffer,"%s%d",prefix,counter);
+ z = strcons(strlen(tkbuffer)+1);
+ strcpy(SNAME(z),tkbuffer);
+ (*z).type=tc_symbol;
+ strcpy(PNAME(z),tkbuffer);
+ (*z).storage_as.symbol.vcell = cons(unbound_marker,NIL);
+ counter++;
+ no_interrupt(flag);
+ return(z);}
+
+LISP symbolp(LISP x)
+{if SYMBOLP(x) return(truth);
+ return(NIL);}
+
+LISP macrop(LISP x)
+{if TYPEP(x,tc_macro) return(truth);
+ return(NIL);}
+
+char *must_malloc(unsigned long size)
+{char *tmp;
+ tmp = (char *) malloc(size);
+ if (tmp == (char *)NULL)
+   {gc_for_newcell();
+    tmp = (char *) malloc(size);
+    if (tmp == (char *)NULL)
+        err("failed to allocate storage from system",NIL,ERR_GEN);}
+ return(tmp);}
+
+LISP gen_intern(char *name,long copyp)
+{LISP l,sym,sl;
+ char *cname;
+ long n,c,flag;
+ unsigned hash;
+ flag = no_interrupt(1);
+ hash = 0;
+ n = obarray_dim;
+ cname = name;
+ while(c = *cname++) hash = ((hash * 17) ^ c) % n;
+ sl = obarray[hash];
+ for(l=sl;CONSP(l);l=CDR(l))
+   if (strcmp(name,PNAME(CAR(l))) == 0)
+     {no_interrupt(flag);
+      return(CAR(l));}
+ if (copyp == 1)
+   {cname = must_malloc(strlen(name)+1);
+    strcpy(cname,name);}
+ else
+   cname = name;
+ sym = symcons(cname,unbound_marker);
+ obarray[hash] = cons(sym,sl);
+ no_interrupt(flag);
+ return(sym);}
+
+LISP cintern(char *name)
+{return(gen_intern(name,0));}
+
+LISP rintern(char *name)
+{return(gen_intern(name,1));}
+
+LISP proplookup(LISP name, LISP prop)
+{LISP frame,tmp;
+ for(frame = PROPL(name);NNULLP(frame);frame=cdr(frame))
+  {tmp = car(frame);
+   if(EQ(car(tmp),prop)) return(tmp);}   
+ return(NIL);}
+
+LISP putprop(LISP name, LISP val, LISP prop)
+{LISP tmp;
+ if (NSYMBOLP(name)) err("putprop",name,ERR_FIRST | ERR_NSYM);
+ if (NSYMBOLP(prop)) err("putprop",prop,ERR_THIRD | ERR_NSYM);
+ tmp = proplookup(name,prop);
+ if NULLP(tmp)
+   PROPL(name) = cons(cons(prop,val),PROPL(name));
+ else
+   CDR(tmp) = val;
+ return(PROPL(name));}
+
+LISP getprop(LISP name, LISP prop)
+{LISP tmp;
+ if (NSYMBOLP(name)) err("getprop",name,ERR_FIRST | ERR_NSYM);
+ if (NSYMBOLP(prop)) err("getprop",prop,ERR_SECOND | ERR_NSYM);
+ tmp = proplookup(name,prop);
+ if NNULLP(tmp)
+   tmp = cdr(tmp);
+ return(tmp);}
+
+LISP proplist(LISP name)
+{if (NSYMBOLP(name)) err("proplist",name,ERR_GEN_ARG | ERR_NSYM);
+ return(PROPL(name));}
+
+LISP remprop(LISP name, LISP prop)
+{LISP frame,tmp,ptr;
+ if (NSYMBOLP(name)) err("remprop",name,ERR_FIRST | ERR_NSYM);
+ if (NSYMBOLP(prop)) err("remprop",prop,ERR_SECOND | ERR_NSYM);
+ for(ptr = NIL,frame = PROPL(name);NNULLP(frame);ptr = frame,frame = cdr(frame))
+  {tmp = car(frame);
+   if(EQ(car(tmp),prop))
+    {if(NULLP(ptr))
+       PROPL(name) = cdr(frame);
+     else
+       CDR(ptr) =  cdr(frame);
+     return(PROPL(name));}}   
+ return(NIL);}
+
+LISP subrcons(long type, char *name, LISP (*f)())
+{LISP z;
+ NEWCELL(z,type);
+ (*z).storage_as.subr.name = name;
+ (*z).storage_as.subr.f = f;
+ return(z);}
+
+LISP closure(LISP env,LISP code)
+{LISP z;
+ NEWCELL(z,tc_closure);
+ DEFENV(z) = env;
+ CODE(z) = code;
+ return(z);}
+
+LISP fluidclosure(LISP env,LISP code)
+{LISP z;
+ NEWCELL(z,tc_fluidclosure);
+ DEFENV(z) = env;
+ CODE(z) = code;
+ return(z);}
+
+LISP rec_closure(LISP env,LISP code)
+{LISP z;
+ NEWCELL(z,tc_rec);
+ DEFENV(z) = env;
+ CODE(z) = code;
+ return(z);}
+
+LISP breakpoint(LISP form,LISP env)
+{LISP mes,irr;
+ FILE *out;
+ mes=leval(car(form),env);
+ irr=leval(car(cdr(form)),env);
+ out=get_cur_out();
+ fput_st(out,"BREAK-POINT entered:\n");
+ ldisplayf(mes,out);
+ fput_st(out,"\n");
+ lprin1f(irr,out);
+ fput_st(out,"\n");
+ setv(sym_errobj,irr);
+ setv(cintern("*cargs*"),form);
+ setv(cintern("*cenv*"),env);
+ setv(cintern("*lasterr*"),mes);
+ mes=apply_proc(VCELL(sym_inspect),NIL,NIL);
+ setv(cintern("*cargs*"),NIL);
+ setv(cintern("*cenv*"),NIL);
+ return(mes);}
+
+LISP asctosym(LISP arg)
+{char str[4]=" ";
+ if(NINTNUMP(arg))err("ascii->symbol",arg,ERR_GEN_ARG | ERR_NINT);
+ if((INTNM(arg)<0)||(INTNM(arg)>255))
+       err("ascii->symbol",arg,ERR_GEN_ARG | ERR_NINT);
+ str[0]=(char)INTNM(arg);
+ return(rintern(str));}
+
+LISP symtoasc(LISP arg)
+{if(NSYMBOLP(arg))err("symbol->ascii",arg,ERR_GEN_ARG | ERR_NSYM);
+ return(intcons((long)*PNAME(arg)));}
+
+LISP install(LISP proc,LISP code)
+{if(NTYPEP(proc,tc_closure) && NTYPEP(proc,tc_rec) && NTYPEP(proc,tc_fluidclosure))
+   err("set-procedure-code!",proc,ERR_FIRST | ERR_NPRO);
+ CODE(proc)=code;
+ return(proc);}
+

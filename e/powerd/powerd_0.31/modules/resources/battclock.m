@@ -1,0 +1,1 @@
+#define BATTCLOCKNAME 	'battclock.resource'

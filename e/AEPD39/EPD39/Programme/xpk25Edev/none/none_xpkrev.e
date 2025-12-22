@@ -1,0 +1,44 @@
+-> xpkrev module. Do not alter this file manually.
+
+OPT MODULE
+OPT EXPORT
+OPT PREPROCESS
+
+/*
+BUMP
+  NAME=NONE
+  VERSION=1
+  REVISION=0
+  INFO_VERSION=0
+  MODES_VERSION=0
+ENDBUMP
+*/
+
+CONST VERSION=1
+CONST REVISION=0
+CONST INFO_VERSION=0
+CONST MODES_VERSION=0
+
+CONST VERSION_DAY=17
+CONST VERSION_MONTH=1
+CONST VERSION_YEAR=96
+
+CONST LIB_ID="NONE"
+
+#define LIB_VERSION '1'
+#define LIB_REVISION '0'
+
+#define LIB_NAME 'NONE'
+#define LIB_FULL_NAME 'xpkNONE.library'
+#define LIB_DATE '1996-01-17'
+#define LIB_VERSTR '$VER: xpkNONE.library 1.0 (1996-01-17)'
+
+#define VERSION_STRING {version_string}
+#define VERSION_INFO {version_info}
+
+PROC dummy() IS NIL
+
+version_string:
+CHAR '$VER: '
+version_info:
+CHAR 'xpkNONE.library 1.0 (1996-01-17)',0

@@ -1,0 +1,33 @@
+-> emodules:other/nsm_extra.e
+-> original by Kjetil S Matheussen 1998
+-> converted by Claude Heiland-Allen 1999.05.16
+
+OPT MODULE
+OPT EXPORT
+
+MODULE 'other/nsm'
+
+ENUM MED_NOTE, MED_INUM, MED_CMDNUM, MED_CMDLVL
+
+PROC nsm_getcurrblockbase (octabase)  IS nsm_getblockbase(octabase, nsm_getcurrblock(octabase))
+PROC nsm_resultstringtrue (str)       IS (str[0] <> "0") OR  (str[1] <> 0)
+PROC nsm_resultstringfalse(str)       IS (str[0] =  "0") AND (str[1] =  0)
+PROC nsm_updateeditor     (blockbase) IS nsm_sendrexx(IF nsm_getlinehighlight(blockbase, 0) THEN 'ED_HIGHLIGHTLINE 0 ON' ELSE 'ED_HIGHLIGHTLINE 0 OFF')
+
+PROC nsm_getmed(part, blockbase, track, line, page)
+	SELECT part
+	CASE MED_NOTE;   RETURN nsm_getnote  (blockbase, track, line)
+	CASE MED_INUM;   RETURN nsm_getinum  (blockbase, track, line)
+	CASE MED_CMDNUM; RETURN nsm_getcmdnum(blockbase, track, line, page)
+	CASE MED_CMDLVL; RETURN nsm_getcmdlvl(blockbase, track, line, page)
+	ENDSELECT
+ENDPROC
+
+PROC nsm_setmed(part, blockbase, track, line, page, data)
+	SELECT part
+	CASE MED_NOTE;   RETURN nsm_setnote  (blockbase, track, line, data)
+	CASE MED_INUM;   RETURN nsm_setinum  (blockbase, track, line, data)
+	CASE MED_CMDNUM; RETURN nsm_setcmdnum(blockbase, track, line, page, data)
+	CASE MED_CMDLVL; RETURN nsm_setcmdlvl(blockbase, track, line, page, data)
+	ENDSELECT
+ENDPROC

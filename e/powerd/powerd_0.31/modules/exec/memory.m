@@ -1,0 +1,54 @@
+MODULE	'exec/nodes'
+
+OBJECT MemChunk
+	Next:PTR TO MemChunk,
+	Bytes:ULONG
+
+OBJECT MemHeader
+	Node:LN,
+	Attributes:UWORD,
+	First:PTR TO MemChunk,
+	Lower:APTR,
+	Upper:APTR,
+	Free:ULONG
+
+OBJECT MemEntry
+	Reqs:ULONG,
+	Addr:APTR,
+	Length:ULONG
+
+OBJECT MemList
+	Node:LN,
+	NumEntries:UWORD,
+	ME[1]:MemEntry
+
+CONST	MEMF_ANY=0,
+		MEMF_PUBLIC=1,
+		MEMF_CHIP=2,
+		MEMF_FAST=4,
+
+		MEMF_LOCAL=$100,
+		MEMF_24BITDMA=$200,
+		MEMF_KICK=$400,
+
+		MEMF_CLEAR=$10000,
+		MEMF_LARGEST=$20000,
+		MEMF_REVERSE=$40000,
+		MEMF_TOTAL=$80000,
+
+		MEMF_NO_EXPUNGE=$80000000
+
+CONST	MEM_BLOCKSIZE=8,
+		MEM_BLOCKMASK=MEM_BLOCKSIZE-1
+
+
+OBJECT MemHandlerData
+	RequestSize:ULONG,
+	RequestFlags:ULONG,
+	Flags:ULONG
+
+CONST	MEMHF_RECYCLE=(1<<0)
+
+CONST	MEM_DID_NOTHING=0,
+		MEM_ALL_DONE=-1,
+		MEM_TRY_AGAIN=1

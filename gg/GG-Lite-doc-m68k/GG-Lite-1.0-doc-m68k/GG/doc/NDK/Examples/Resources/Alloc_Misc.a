@@ -1,0 +1,113 @@
+*
+* Copyright (c) 1992 Commodore-Amiga, Inc.
+* 
+* This example is provided in electronic form by Commodore-Amiga, Inc. for 
+* use with the "Amiga ROM Kernel Reference Manual: Devices", 3rd Edition, 
+* published by Addison-Wesley (ISBN 0-201-56775-X).
+* 
+* The "Amiga ROM Kernel Reference Manual: Devices" contains additional 
+* information on the correct usage of the techniques and operating system 
+* functions presented in these examples.  The source and executable code 
+* of these examples may only be distributed in free electronic form, via 
+* bulletin board or as part of a fully non-commercial and freely 
+* redistributable diskette.  Both the source and executable code (including 
+* comments) must be included, without modification, in any copy.  This 
+* example may not be published in printed form or distributed with any
+* commercial product.  However, the programming techniques and support
+* routines set forth in these examples may be used in the development
+* of original executable software products for Commodore Amiga computers.
+* 
+* All other rights reserved.
+* 
+* This example is provided "as-is" and is subject to change; no
+* warranties are made.  All use is at your own risk. No liability or
+* responsibility is assumed.
+*
+******************************************************************************
+*
+* Alloc_Misc.a
+*
+* Assembly language fragment that grabs the two parts of the serial
+* resource (using misc.resource).  If it gets the resource, it will
+* wait for CTRL-C to be pressed before releasing.
+*
+* While we are waiting, the query_serial program should be run.  It will try
+* to open the serial device and if unsuccessful, will return the name of the
+* owner.  It will be us, Serial Port Hog!
+*
+* When a task has successfully obtained the serial resource, it "owns"
+* the hardware registers that control the serial port.  No other tasks
+* are allowed to interfere.
+*
+* Assemble with Adapt
+*     HX68 Alloc_Misc.a to Alloc_Misc.o
+*
+* Link
+*     Blink FROM Alloc_Misc.o TO Alloc_Misc LIB LIB:amiga.lib
+*
+*
+*               CSECT Alloc_Misc ; SAS/Lattice ASM command needs this
+*
+                INCDIR  "include:"
+                INCLUDE "exec/types.i"
+                INCLUDE "resources/misc.i"
+                INCLUDE "dos/dos.i"
+
+        xref    _AbsExecBase     ; We get this from outside...
+        xref    _LVOOpenResource ; We get this from outside...
+        xref    _LVOWait         ; We get this from outside...
+
+;
+; Open Exec and the misc.resource, check for success
+;
+                move.l  _AbsExecBase,a6         ;Prepare to use exec
+                lea.l   MiscName(pc),a1
+                jsr	_LVOOpenResource(a6)    ;Open "misc.resource"
+                move.l  d0,d7                   ;Stash resource base
+                bne.s   resource_ok
+                moveq   #RETURN_FAIL,d0
+                rts
+
+resource_ok     exg.l   d7,a6                   ;Put resource base in A6
+
+;
+; We now have a pointer to a resource.
+; Call one of the resource's library-like vectors.
+;
+                move.l  #MR_SERIALBITS,d0       ;We want these bits
+                lea.l   MyName(pc),a1           ;This is our name
+                jsr     MR_ALLOCMISCRESOURCE(a6)
+                tst.l   d0
+                bne.s   no_bits                 ;Someone else has it...
+                move.l  #MR_SERIALPORT,d0
+                lea.l   MyName(pc),a1
+                jsr     MR_ALLOCMISCRESOURCE(a6)
+                tst.l   d0
+                bne.s   no_port                 ;Someone else has it...
+
+;
+; We just stole the serial port registers; wait.
+; Nobody else can use the serial port, including the serial.device!
+;
+                exg.l   d7,a6                   ;use exec again
+                move.l  #SIGBREAKF_CTRL_C,d0
+                jsr	_LVOWait(a6)            ;Wait for CTRL-C
+                exg.l   d7,a6                   ;Get resource base back
+;
+; Free 'em up
+;
+                move.l  #MR_SERIALPORT,d0
+                jsr     MR_FREEMISCRESOURCE(a6)
+no_port
+                move.l  #MR_SERIALBITS,d0
+                jsr     MR_FREEMISCRESOURCE(a6)
+no_bits
+                moveq   #RETURN_FAIL,d0
+                rts
+;
+; Text area
+;
+MiscName        dc.b    'misc.resource',0
+MyName          dc.b    'Serial Port Hog',0
+                dc.w    0
+                END

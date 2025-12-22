@@ -1,0 +1,378 @@
+
+ \ ********************** ! ! ! VERY IMPORTANT ! ! ! *************************
+ \
+ \                        HELIOS SYSTEM REGISTER USAGE
+ \
+ \          DO NOT WANTONLY DESTROY THE VALUES IN A3,A4,A5,A7 and D7
+ \                     ( See below for usage details )
+ \
+ \                                  ALSO
+ \
+ \         D4,D5,D6   Are working registers used by the HeliOS System
+ \
+ \         It is vital that their HIGH WORDS = 0 on return to HeliOS
+ \         *********************************************************
+ \
+ \ ***************************************************************************
+
+ \ START OF ASSEMBLER
+
+     ASSEMBLER
+
+     OCTAL
+
+ \ ---------------------------------------------------------------------------
+
+ \ VARIABLES
+
+     30100 VARIABLE      SIZE
+     0     VARIABLE      INDEX-SIZE                     \  <>0 IF DI.L()
+     0     VARIABLE      EXTRA        0 , 0 ,
+
+ \ ---------------------------------------------------------------------------
+
+     : BYTE  10000 SIZE ! ;                    ( -- )
+     : WORD  30100 SIZE ! ;                    ( -- )
+     : LONG  24600 SIZE ! ;                    ( -- )
+     : LONG? SIZE @ 24600 = ;                  ( -- flag )
+     : SZ    CONSTANT DOES> @ SIZE @ AND OR ;  ( n1 -- n2 )
+     : -SZ1  LONG? IF  100 OR  THEN ;          ( n1 -- n2 )
+
+     00300 SZ SZ3
+     00400 SZ SZ4
+     04000 SZ SZ40
+     30000 SZ SZ300
+
+ \ ---------------------------------------------------------------------------
+
+ \ REGISTERS AND ADDRESSING MODES
+
+     : REGS          10 0 DO   DUP 1001 I * OR CONSTANT   LOOP DROP ;
+     : MODE          CONSTANT  DOES>   @ SWAP 7007 AND OR ;
+
+     0000 REGS       D0   D1   D2   D3   D4   D5   D6   D7
+     0110 REGS       A0   A1   A2   A3   A4   A5   A6   A7
+
+     0220 MODE       ()         ( adr reg ind )
+     0330 MODE       ()+        ( adr reg ind post-increment )
+     0440 MODE       -()        ( adr reg ind pre-decrement )
+     0550 MODE       D()        ( adr reg ind displaced )
+     0660 MODE       DI()       ( adr reg ind displaced indexed )
+
+     : DI.L()        7007 AND 0660 OR  INDEX-SIZE 1!  ;  \  long DI() mode
+
+     0770 CONSTANT   #()        ( immediate address )
+     1771 CONSTANT   L#()       ( immediate long address )
+     2772 CONSTANT   PCD()      ( PC relative displaced )
+     3773 CONSTANT   PCDI()     ( PC relative displaced indexed )
+     4774 CONSTANT   #          ( immediate data )
+
+ \ ---------------------------------------------------------------------------
+
+ \ FORTH SYSTEM REGISTER ASSIGNMENTS
+
+     A3 CONSTANT     FBP         ( Forth word-addressed memory base pointer )
+     A4 CONSTANT     FIP         ( Forth interpreter dictionary pointer )
+     A5 CONSTANT     FSP         ( Forth stack pointer )
+     A7 CONSTANT     FRS         ( Forth return stack pointer )
+     D7 CONSTANT     FUD         ( Forth user data pointer cache )
+
+ \ ---------------------------------------------------------------------------
+
+ \ FIELDS
+
+     : FIELD   CONSTANT  DOES> @ AND ;
+
+     7000   FIELD   RD
+     0007   FIELD   RS
+     0070   FIELD   MS
+     0077   FIELD   EAS
+     0377   FIELD   LOW
+
+     : DN?    DUP MS 0=   ;   ( ea -- ea flag )
+     : SRC    OVER EAS OR ;   ( ea instr -- ea instr )
+     : DST    SWAP RD  OR ;   ( ea instr -- ea instr )
+
+ \ ---------------------------------------------------------------------------
+
+ \ EXTENDED ADDRESSING
+
+     : DBL?  L#() OVER=  SWAP # =   LONG?  AND  OR  ;   ( mode -- flag )
+
+     : IDX?                                         ( {n} mode -- {m} mode )
+
+       DUP>R                       \ Store mode on R-stack
+       DUP #() AND                 \ Dup and mask
+       A0 DI() OVER=               \ Dup and flag A-reg ind displaced indexed
+       SWAP >R                     \ Store masked mode on R-stack
+       SWAP  PCDI() =              \ Flag PC rel ind displaced
+       OR                          \ Combine flags True -> Indexed
+       IF                          \ If indexed
+       DUP  RD 10 * SWAP MS
+         IF
+         100000 OR
+         THEN                      \ Adjust fields
+       R> A0 DI()  =               \ A-reg ind disp = DI.L() ?
+       INDEX-SIZE @ 0> AND
+         IF
+          4000 OR
+          R> 7667 AND >R           \ Adjust mode on Rstack
+          INDEX-SIZE 0!
+         THEN
+       SZ40 SWAP LOW OR
+       ELSE   R> DROP
+       THEN   R>   ;
+
+ \ ---------------------------------------------------------------------------
+
+   : ,MORE                                            ( ea -- )
+
+   DUP MS 0040 >  IF    IDX?  DBL?  IF  ,  THEN   ,
+                  ELSE  DROP
+                  THEN ;
+
+ \ ---------------------------------------------------------------------------
+
+ \ EXTENDED ADDRESSING EXTRAS
+
+   : EXTRA?                                       ( {n} mode -- mode )
+
+   DUP MS 0040 >   IF  >R  I            \ {n} mode --
+                       IDX?             \ {m} mode --
+                       DBL?             \ {m} flag --
+                       EXTRA 2+ SWAP    \ {m} extra2+ flag --
+                         IF    D! 2
+                         ELSE  !  1
+                         THEN
+                       EXTRA  ! R>      \ mode
+                   ELSE   EXTRA 0!      \ mode
+                   THEN  ;              \ mode
+
+
+   : ,EXTRA                                       ( -- )
+
+     EXTRA @   ?DUP  IF   EXTRA 2+ SWAP 1 =
+                          IF  @ ,
+                          ELSE  D@ D,
+                          THEN  EXTRA 6 ERASE
+                     THEN ;
+
+ \ ---------------------------------------------------------------------------
+
+ \ IMMEDIATE AND ADDRESS REGISTER SPECIFIC
+
+   : IMM   CONSTANT  DOES> @ >R EXTRA? EAS R> OR
+           SZ3 ,  LONG? IF , THEN ,  ,EXTRA ;                ( n ea -- )
+
+    0000     IMM      ORI
+    1000     IMM      ANDI
+    2000     IMM      SUBI
+    3000     IMM      ADDI
+    5000     IMM      EORI
+    6000     IMM      CMPI
+
+   : IMMSR   CONSTANT  DOES> @ SZ3 D, ;                      ( n -- )
+
+    001074   IMMSR    ANDI>SR
+    005074   IMMSR    EORI>SR
+    000074   IMMSR    ORI>SR
+
+   : IQ   CONSTANT DOES>  @ >R  EXTRA?
+                          EAS SWAP RS 1000 * OR
+                          R> OR SZ3 ,  ,EXTRA ;              ( n ea -- )
+
+    050000   IQ       ADDQ
+    050400   IQ       SUBQ
+
+   : IEAA   CONSTANT  DOES> @ DST SRC SZ4 , ,MORE ;          ( ea An -- )
+
+    150300   IEAA     ADDA
+    130300   IEAA     CMPA
+    040700   IEAA     LEA
+    110300   IEAA     SUBA
+
+ \ ---------------------------------------------------------------------------
+
+ \ SHIFTS, ROTATES, AND BIT MANIPULATION
+
+  : ISR   CONSTANT  DOES> @ >R DN?
+            IF  SWAP DN?
+                        IF  R> 40 OR >R
+                        ELSE DROP SWAP 1000 *
+                        THEN
+                RD SWAP RS OR R> OR 160000 OR SZ3 ,
+            ELSE      DUP EAS 300 OR I 400 AND OR R> 70 AND 100 * OR
+                      160000 OR ,  ,MORE
+            THEN ;                        ( Dm Dn -- ) ( m # Dn -- ) ( ea -- )
+
+    400      ISR      ASL
+    000      ISR      ASR
+    410      ISR      LSL
+    010      ISR      LSR
+    420      ISR      ROXL
+    020      ISR      ROXR
+    430      ISR      ROL
+    030      ISR      ROR
+
+   : IBIT   CONSTANT  DOES> @ >R  EXTRA?  DN?
+            IF     RD SRC 400
+            ELSE   DROP DUP EAS 4000
+            THEN   OR R> OR ,  ,EXTRA ,MORE ;     ( ea Dn -- ) ( ea n # -- )
+
+    000      IBIT     BTST
+    100      IBIT     BCHG
+    200      IBIT     BCLR
+    300      IBIT     BSET
+
+ \ ---------------------------------------------------------------------------
+
+  \ BRANCH, LOOP, AND SET CONDITIONALS
+
+  : SETCLASS   [compile] '  CFA  SWAP 0 DO I OVER EXECUTE LOOP DROP  ;
+
+  : IBRA     400 * 060000 OR CONSTANT                     ( label )
+             DOES>
+             @  SWAP HERE 2+ -
+             DUP ABS 200 <  IF   LOW OR ,
+                            ELSE SWAP D,
+                            THEN  ;
+
+   20 SETCLASS IBRA
+
+   BRA BSR BHI BLS BCC BCS BNE BEQ BVC BVS BPL BMI BGE BLT BGT BLE
+
+
+  : IDBR  400 * 050310 OR CONSTANT    ( label \ Dn - )
+          DOES>
+          @ SWAP RS OR ,  HERE - ,  ;
+
+   20 SETCLASS IDBR
+
+  DXIT DBRA DBHI DBLS DBCC DBCS DBNE DBEQ
+  DBVC DBVS DBPL DBMI DBGE DBLT DBGT DBLE
+
+  : ISET   400 * 050300 OR CONSTANT    ( ea -- )
+           DOES>
+           @ SRC ,  ,MORE  ;
+
+ 20 SETCLASS ISET
+
+  SET SNO SHI SLS SCC SCS SNE SEQ SVC SVS SPL SMI SGE SLT SGT SLE
+
+ \ ---------------------------------------------------------------------------
+
+ \ MOVES
+
+  : MOVE       EXTRA? 7700 AND SRC SZ300 , ,MORE ,EXTRA ;  ( ea ea -- )
+  : MOVEQ      RD SWAP LOW OR 070000 OR ,  ;               ( n Dn -- )
+  : MOVE>USP   RS 047140 OR ,  ;                           ( An -- )
+  : MOVE<USP   RS 047150 OR ,  ;                           ( A n -- )
+  : MOVEM>     EXTRA? EAS  044200 OR -SZ1 ,  ,  ,EXTRA ;   ( n ea -- )
+  : MOVEM<     EXTRA? EAS  046200 OR -SZ1 ,  ,  ,EXTRA ;   ( n ea -- )
+  : MOVEP      DN? IF     RD SWAP RS OR 410 OR
+                   ELSE   RS ROT  RD OR 610 OR
+                   THEN  -SZ1 D, ;             ( Dm d An -- ) ( d An Dm -- )
+  : LMOVE   7700 AND SWAP EAS OR 20000 OR ,  ;        ( long reg move )
+
+ \ ---------------------------------------------------------------------------
+
+ \ ODDS AND ENDS
+
+  : CMPM   RD SWAP RS OR 130410 OR SZ3 ,  ;                ( An@+ Am@+ -- )
+  : EXG   DN? IF   SWAP DN?
+                  IF   140500
+                  ELSE 140610
+                  THEN >R
+              ELSE SWAP DN?  IF   140610
+                             ELSE 140510
+                             THEN >R SWAP
+              THEN  RS DST R> OR ,  ;                       ( Rn Rm -- )
+
+  : EXT    RS 044200 OR -SZ1 ,  ;                           ( Dn -- )
+  : SWP    RS 044100 OR ,  ;                                ( Dn -- )
+  : STOP   47162 D, ;                                       ( n -- )
+  : TRAP   17 AND 47100 OR ,  ;                             ( n -- )
+  : LINK   RS 047120 OR D, ;                                ( n An -- )
+  : UNLK   RS 047130 OR ,  ;                                ( An -- )
+  : EOR    EXTRA? EAS DST SZ3 130400 OR ,  ,EXTRA ;         ( Dn ea -- )
+  : CMP    130000 DST SRC SZ3 ,  ,MORE ;                    ( ea Dn -- )
+
+ \ ---------------------------------------------------------------------------
+
+ \ ARITHMETIC AND LOGIC
+
+  : IBCD   CONSTANT  DOES> @ DST OVER RS OR SWAP MS
+           IF 10 OR   THEN ,  ;                        ( Dn Dm ) ( An@- Am@- )
+
+   140400    IBCD    ABCD            100400    IBCD    SBCD
+
+  : IDD   CONSTANT  DOES> @ DST OVER RS OR  SWAP
+           MS IF 10 OR THEN SZ3 ,  ;                   ( Dn Dm ) ( An@ - Am@- )
+
+        150400 IDD ADDX         110400 IDD SUBX
+
+  : IDEA   CONSTANT  DOES> @ >R DN?                    ( ea Dn ) ( Dn ea )
+           IF  RD SRC R> OR SZ3 ,  ,MORE
+           ELSE  EXTRA? EAS DST 400 OR R> OR SZ3 ,  ,EXTRA
+           THEN ;
+
+   150000 IDEA ADD         110000 IDEA SUB
+   140000 IDEA AND         100000 IDEA OR
+
+  : IEAD   CONSTANT  DOES> @ DST SRC  , ,MORE ;         ( ea Dn )
+
+   040600 IEAD CHK         100300 IEAD DIVU
+   100700 IEAD DIVS        140300 IEAD MULU
+   140700 IEAD MULS
+
+ \ ---------------------------------------------------------------------------
+
+ \ ARITHMETIC AND CONTROL
+
+ : IEA    CONSTANT  DOES> @ SRC ,  ,MORE ;               ( ea )
+
+ 047200 IEA JSR          047300 IEA JMP          042300 IEA MOVE>CCR
+ 040300 IEA MOVE<SR      043300 IEA MOVE>SR      044000 IEA NBCD
+ 044100 IEA PEA          045300 IEA TAS
+
+ : IEAS  CONSTANT  DOES> @ SRC SZ3 ,  ,MORE ;            ( ea )
+
+ 041000 IEAS CLR         043000 IEAS NOT
+ 042000 IEAS NEG         040000 IEAS NEGX
+ 045000 IEAS TST
+
+ : ICON    CONSTANT  DOES> @  ,  ;
+
+   47160 ICON RESET         47161 ICON NOP       47163 ICON RTE
+   47165 ICON RTS
+
+ \ ---------------------------------------------------------------------------
+
+ \ STRUCTURED CONDITIONALS ( +/- 256 BYTES )
+
+  HEX
+
+  : THEN    ?CONDITIONS  HERE  OVER - SWAP 1- C!  ;   ( addr f -- )
+  : IF      ,  HERE 1  ;
+  : ELSE    6000 IF  DSWAP THEN ;
+  : BEGIN   HERE 1 ;
+  : UNTIL   , ?CONDITIONS  HERE  -   HERE 1- C!  ;    ( addr f -- )
+  : AGAIN   6000 UNTIL ;
+  : WHILE   IF ;
+  : REPEAT  DSWAP AGAIN THEN ;
+  : DO      HERE SWAP ;                               ( Dn -- Label Dn )
+  : LOOP    DBRA ;                                    ( Label Dn -- )
+
+
+  6400 CONSTANT CARRY      6500 CONSTANT NOCARRY    6600 CONSTANT 0=
+  6700 CONSTANT 0<>        6800 CONSTANT OVERFLOW   6900 CONSTANT NOOVERFLOW
+  6A00 CONSTANT 0<         6B00 CONSTANT 0>=        6C00 CONSTANT <
+  6D00 CONSTANT >=         6E00 CONSTANT <=         6F00 CONSTANT >
+
+
+  DECIMAL
+
+  FORTH
+ \  END OF ASSEMBLER
+
+ \ ---------------------------------------------------------------------------

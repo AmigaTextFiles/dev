@@ -1,0 +1,219 @@
+.\" $Id: vis.3,v 0.0 1998/06/03 22:52:22 niels Exp $
+.TH vis 3 ""
+.
+.SH NAME
+
+\fBvis\fR - calculates the PVS (potential visible set) of a bsp-tree
+.
+.SH SYNOPSIS
+
+\fB#include <qtools.h>\fR
+\fB#include "vis.h"\fR
+
+\fBbool vis(__memBase, int level, char *prtBuf);\fR
+.
+.SH DESCRIPTION
+.
+
+1. What does \fBBSP\fR do?
+
+To understand \fBVIS\fR, first, you have to understand, what \fBBSP\fR does.
+\fBBSP\fR takes a .map file, and build a level data file (.bsp) from it.  A
+level data file consists of a all the information, that Quake needs to
+display a static level structure in Quake.  (There is an issue here,
+with the entities, but that is not important).
+
+When Quake needs to display a level, it draws texture mapped polygons.
+Drawing a single texture mapped polygon is easy, but drawing several,
+taking into account, their relative distance, and overlap, as seen
+from the viewer, is a little harder.  In general, it requires you to
+clip and sort a lot of polygons to do this.  The good news is, that
+this can be done (for the static part of a scene), as a preprossesing
+step, where one can build a socalled Binary Spaced Partition Tree.  (A
+BSP tree.  Sounds familiar?).
+
+Basically, a BSP tree exploit the fact, that if you split you world
+into convex 3D subspaces, a subspace can not block its own view.
+(Hard to crasp, remember, this is a \fBVIS\fR explanation, not a BSP
+explanation.  To find out more about BSP tree, check out the \fIBSP
+tree FAQ\fR).  We term each of these convex subspaces a \fIleaf\fR.
+The \fBBSP\fR program clips all planes in the all the brushes in the map
+file against eachother to generate this information.  The leafs will
+be generated from the \fIspace\fR between the brushes inside the
+level.  The tree part, comes from the way the leafs are related to the
+planes in the level.
+
+What is not clear from the above is, that not all sides of each leaf,
+has to block the view.  Since each leaf needs to be convex, some sides
+of the leaf may be \fIsee-through\fR.  Other sides of the leaf is
+blocking, and in general is part of one of the planes from one of the
+brushes.  The non-blocking sides of leafs, are called \fIportals\fR,
+because they are portals from one leaf to another.  Since portals are
+2D, and the leafs is convex, it follows, that portals are convex 2D
+polygons.
+
+Now, if a player is located in a leaf, Quake can use the information
+in the BSP tree to draw the entire level in the correct order
+(backwards to front), without having to clip or sort any polygons.
+This can be a slow process, especially if the level is big.  It is
+also clear, that in a big level, there will be a lot of things that
+will not have to be drawn, but will be, if Quake just draw all
+polygons backwards to front.  (Example:  in E1M1, there is no way, you
+can ever see the exit from the starting point.  With no \fBvis\fR
+information, however, Quake can not figure that out, and the polygons
+that makes up the exit, will be drawn, and then later drawn over.)
+
+2. What does \fBVIS\fR do?
+
+(Warning:  My explanation talks about flowing from leaf to leaf.  The
+implementation of \fBvis\fR, actually walks through portals.  It gets
+you to the same place, but I believe the leaf explanation is more
+intuitive.  If you are not going to study the source code, then ignore
+this warning).
+
+For each leaf, \fBvis\fR \fIflows\fR through all portals leaving that
+leaf recursivly.  For each portal it flows through, that portal is
+clipped against the portal most recently travelled through.  For each
+leaf visited, \fBvis\fR records that the source leaf can see this
+leaf.  When the next portal to pass is totally clipped away, \fBvis\fR
+stops the recursion on that branch.
+
+The sooner you can get \fBvis\fR to stop recursion, the quicker
+\fBvis\fR run, and all things equal, the faster your map will run.
+
+With the above, some things should be clear: 
+
+- You can not \fBVIS\fR a level that is not closed, because at least
+  one leaf can not be closed/made convex.
+
+- A unvissed level (generally) runs a lot slower then a vissed one. 
+
+- The time you need to \fBVIS\fR a level depends on the LEAF and
+  PORTAL count, not the brush count, or the BSP file size (the last one
+  depends rather heavily on the number/size of the textures you use).
+  Off course, most often there is a correlation between the number of
+  brushes and the number of leafs/portals - but it need not be.
+
+3. What are the options of \fBvis\fR, and what do they do?
+
+The options for the standard \fBvis\fR, is the following:
+
+-fast      : terminate after the first run (se below)
+-v         : dumb info while running
+-level 0-4 : how much portal clipping should be done in the second run 
+             (se below).
+             
+Various other \fBvis\fR'es have different options.             
+
+I have found, that \fBvis\fR sometimes performs worse with -level 1,
+then with -level 2.
+
+3. OK, so how do I figure out, how long it will take to \fBvis\fR my level?
+
+In general, you can't. 
+
+(At least one program, \fI\fBvis\fR-ts\fR, makes a go at it.
+Sometimes quite accurate but othertimes vildly inaccurate.  Get it
+from ftp.cdrom.com or mirrors).
+
+Here is a description of how the \fBvis\fR program runs.
+
+Roughly, \fBVIS\fR (the JC.  version) consists of two passes.  One
+quick passage, (which is the only one run, with -fast ), that
+trivially rejects some 'paths' between leafs, and one that performs a
+more thourogh test of paths'.
+
+The first run is at most (usually a lot less) O(p*p) + O(l*l), where p
+is the number of portals, and l is the number of leafs.  It is quite
+easy, btw, to improve this (under the usually true condition, that l
+&lt; p), to O(l*l)
+
+I have made an implementation of \fBvis\fR, that does this, and is
+available at \fIhttp://www.3dmatrix.com\fR.  Filename is yavis.exe.
+The performance gain when using the -fast option is roughly a factor
+4.  (The larger map, the better).  This implementation also uses the
+rvis optimization for -level runs - but only runs slightly faster then
+rvis with the -level options.
+
+The second run is a lot more time consuming.  This performs a Depth
+First Search on the graph, where each path between two leafs are
+examined for possible 'see-through the portals'.  You must not hang me
+up on this, but I think the running time of this is something like
+O(p*(#pl^#pl)*#lp*#ep^2), where p is the number of portals, #pl is the
+average number of portals leaving each leaf (usually between 2 and 4),
+#lp is the average length of a path between two leafs, (can be quite
+high...), and #ep is the average number of edges of each portal (this,
+I would estimate at 4, giving the axial aligned nature of most Quake
+maps).  I believe, but have not (nor do I intend to) proved, that the
+problem in general belongs to the NP hard class of problems.  (With
+the 'Travelling Salesman Problem' as a famous problem from this class)
+
+This means, that if you have, say 100 leafs in a level, and each leaf
+have exactly 2 portals, and all leafs are reachable from all other
+leafs, you are looking at a worst-case complexity in the order of
+100*2^99.  (Luckyli it is usually -much- less).  Since it takes
+approximatly 15.000.000.000 years (the estimated age of the universe)
+to count to 2^81 (if you can count to 5.000.000 in a second, that is)
+\fBvis\fR clearly has the potential to be a very very slow program
+indeed.
+
+Anyway, the above estimation, gives you a good estimate on what to
+reduce to obtain quicker \fBvis\fR times:
+
+- Reduce the number of portals leaving each leaf.  (Hard to tell
+  exactly how, but the less big open areas you have, the better.)
+
+- Reduce the length of paths between leafs.  (Instead of long tunnels,
+  that wind, make cormers 'block' the vision:  90 degrees or more
+  angles.)
+
+Oh, and if you think, that the factors above, can't possible mean that
+much, then compare with the rvis implementation.  It's upper bound
+(again, in my humble opinion), is something like
+O(p*(#pl^#pl)*#lp*#ep*log(#ep)).  Not much of a difference, but -huge-
+in running time.
+
+The Carmack implementation is not the smartest implementation of all
+possible, but it would require quite a deal of clever coding/math to
+speed it up significantly.  Reducing the complexity of one minor
+aspect of the problem (stabbing lines through portals), is the subject
+of a Phd by Seth Teller.
+
+From the above, it should be clear, why there is no easy way to tell
+how long \fBvis\fR will take.  You can make an upper bound, but is
+totally far off, giving you the age of the universe, for even small
+leaf/portal counts.  So it is really a bad problem.
+
+4. What are the numbers coming out of -v?
+
+When you run \fBvis\fR, say like this 
+\fI\fBvis\fR -v somemap\fR
+
+you will get a lot of lines with info like this:
+
+\fIportal: 899  mightsee: 113  cansee:  23\fR
+
+The first number is the current portal number (the \fBvis\fR
+implementation by J.Carmack counts portals, but conceptually, the leaf
+explanation is more straightforward IMHO, and the result is the same).
+
+The mightsee number, is the number associated with the current portal
+which \fBvis\fR calculated in the first quick run (the -fast option,
+which is always implicit).  It expresses how many portals could
+possible be seen, after the fast criterium.  In the second run,
+\fBvis\fR examines the portals with the lowest count first, hoping
+that the information from each portal can be reused, and therefore
+starting with the simpleste case.
+
+The cansee, is the number calculated from the second run, and
+expresses how many portals now are visible from the portal under
+consideration.
+.
+.SH RETURN VALUE
+.
+.SH NOTES
+.
+.SH SEE ALSO
+.
+.SH AUTHOR
+.

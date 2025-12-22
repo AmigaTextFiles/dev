@@ -1,0 +1,35 @@
+/* $Id: amiga_compiler.h,v 1.18 2005/11/18 16:19:50 obarthel Exp $ */
+/* NOTE: Only GCC PPC constants have been kept. */
+OPT NATIVE
+{#include <amiga_compiler.h>}
+NATIVE {AMIGA_COMPILER_H} CONST
+
+NATIVE {ASM} CONST
+
+NATIVE {INLINE} CONST
+
+NATIVE {FAR} CONST
+
+NATIVE {USED} CONST
+
+NATIVE {UNUSED} CONST
+
+NATIVE {USED_VAR} CONST
+
+/****************************************************************************/
+
+NATIVE {REG} CONST
+
+NATIVE {REGARGS} CONST
+
+NATIVE {STDARGS} CONST
+
+NATIVE {INTERRUPT} CONST
+
+NATIVE {SAVEDS} CONST
+
+NATIVE {APICALL} CONST
+
+NATIVE {VARARGS68K} CONST
+
+NATIVE {BREL_RESTORE} CONST

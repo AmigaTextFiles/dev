@@ -1,0 +1,84 @@
+
+; playCDR (c) 2010 Lorence Lombardo
+
+; 10 October 2010 beta
+
+; The use of 2 audio buffers in probably not necessary.
+
+If NumPars<1 Then End
+
+*port.MsgPort = CreateMsgPort_() : If *port=0 Then End
+
+INCLUDE "maestix.include.bb2"
+
+If maestix_InitLib{39}=0 Then NPrint " Couldn't open maestix.library" : End
+
+Dim matgs.TagItem(4), abuf.l(1)
+
+matgs(0)\ti_Tag = #TAG_IGNORE, #INPUT_SRC48K
+matgs(1)\ti_Tag = #MTAG_Output, #OUTPUT_FIFO
+matgs(2)\ti_Tag = #MTAG_Rate, #RATE_44100
+matgs(3)\ti_Tag = #TAG_DONE, -1
+
+pri.w=127 : f$=Par$(1) : l$=Chr$(10)
+
+abuf(0)=0 : abuf(1)=0 : nextbuf.b=0 : infile.l=0 : *mbase.MaestroBase=0
+
+!maestix_AllocMaestro {*mbase, 0}
+If *mbase=0 Then Goto exit
+
+!maestix_SetMaestro {*mbase, &matgs(0)\ti_Tag}
+
+infile=Open_(&f$,#MODE_OLDFILE)
+If infile=0 Then NPrint l$+" File not found...!!!"+l$ : Goto exit
+
+DEFTYPE .ExtDataMessage mess
+
+bufsize.l = 32768
+
+abuf(0) = AllocVec_(bufsize, #MEMF_PUBLIC)
+If abuf(0)=0 Then Goto exit
+
+abuf(1) = AllocVec_(bufsize, #MEMF_PUBLIC)
+If abuf(1)=0 Then Goto exit
+
+oldpri.w = SetTaskPri_(FindTask_(0),pri)
+
+mess\edmn_Message\mn_Length    = SizeOf .ExtDataMessage
+mess\edmn_Message\mn_ReplyPort = *port
+mess\edmn_Flags   = #EDMNB_DUAL
+
+Repeat
+
+   rl.l=Read_(infile, abuf(nextbuf), bufsize)
+   mess\edmn_BufPtr  = abuf(nextbuf)
+   nextbuf=1-nextbuf
+
+   If rl>0
+      mess\edmn_BufLen = rl
+      !maestix_TransmitData{*mbase,&mess}
+      WaitPort_(*port)
+      GetMsg_(*port)
+
+   EndIf
+
+Until rl<1 OR CtrlC<>0
+
+exit:
+
+If *port Then DeleteMsgPort_ *port
+
+If infile Then Close_(infile)
+
+If abuf(0) Then FreeVec_ abuf(0)
+
+If abuf(1) Then FreeVec_ abuf(1)
+
+If *mbase Then !maestix_FreeMaestro{*mbase}
+
+maestix_FreeLib {}
+
+End
+
+
+

@@ -1,0 +1,18 @@
+VERSION		EQU	3
+REVISION	EQU	5
+
+DATE	MACRO
+		dc.b '19.11.2007'
+		ENDM
+
+VERS	MACRO
+		dc.b 'Bump 3.5'
+		ENDM
+
+VSTRING	MACRO
+		dc.b 'Bump 3.5 (19.11.2007)',13,10,0
+		ENDM
+
+VERSTAG	MACRO
+		dc.b 0,'$VER: Bump 3.5 (19.11.2007)',0
+		ENDM

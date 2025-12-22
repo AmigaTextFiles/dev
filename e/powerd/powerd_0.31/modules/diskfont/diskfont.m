@@ -1,0 +1,60 @@
+MODULE	'exec/nodes',
+			'graphics/text'
+
+CONST	MAXFONTPATH=$100
+
+OBJECT FC
+	FileName[256]:CHAR,
+	YSize:UWORD,
+	Style:CHAR,
+	Flags:CHAR
+
+OBJECT TFC
+	Filename[254]:CHAR,
+	TagCount:UWORD,
+	YSize:UWORD,
+	Style:CHAR,
+	Flags:CHAR
+
+CONST	FCH_ID=$F00,
+		TFCH_ID=$F02,
+		OFCH_ID=$F03
+
+OBJECT FCH
+	FileID:UWORD,
+	NumEntries:UWORD
+
+CONST	DFH_ID=$F80,
+		MAXFONTNAME=$20
+
+OBJECT DiskFontHeader
+	DF:LN,
+	FileID:UWORD,
+	Revision:UWORD,
+	Segment:LONG,
+	Name[32]:CHAR,
+	TF:TextFont
+
+CONST	DFH_TAGLIST=18,
+		AFB_MEMORY=0,
+		AFF_MEMORY=1,
+		AFB_DISK=1,
+		AFF_DISK=2,
+		AFB_SCALED=2,
+		AFF_SCALED=4,
+		AFB_BITMAP=3,
+		AFF_BITMAP=8,
+		AFB_TAGGED=16,
+		AFF_TAGGED=$10000,
+		AFF_TTATTR=$10000
+
+OBJECT AF
+	Type:UWORD,
+	Attr:TextAttr
+
+OBJECT TAF
+	Type:UWORD,
+	Attr:TTextAttr
+
+OBJECT AFH
+	NumEntries:UWORD

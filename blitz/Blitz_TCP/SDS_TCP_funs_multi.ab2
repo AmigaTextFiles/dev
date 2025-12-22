@@ -1,0 +1,144 @@
+
+; SDS TCP functions by Lorence Lombardo.
+; Version 1.3  (C) 2009   26/1/09
+
+; multi socket version
+
+; eoff = End of File flag
+
+; In this version eoff will be "-1" and when an EOF has occured
+; the socket number will be returned.
+
+; socket numbers should be positive integer values starting at 0 up to 63.
+
+; Only use CloseTCP{} if you plan on quiting your program.
+
+
+; like OpenFile and Open_
+Function.b ConnectTCP{host$, port.w, blok.b, sok_num.b}
+   ret.b=-1
+   If TCPCreateSocket(sok_num, blok, #TCP_SOCK_Read|#TCP_SOCK_Write, 10, 0) = #TCP_SOCK_Ok
+      If TCPConnectSocket(sok_num, host$, port) = #TCP_CONN_CONNECTING
+         Repeat
+            Delay_ 1 : tcp_ev.l=TCPEvent : br=CtrlC
+            If tcp_ev>0
+               revent.l=TCPIsReadEvent(sok_num) : wevent.l=TCPIsWriteEvent(sok_num)
+               If revent<>0 OR wevent<>0
+                  If TCPSocketError(sok_num)<>0 Then ret=0
+               EndIf
+            EndIf
+            If br<>0 Then tcp_ev=1 : revent=1 : ret=0
+         Until tcp_ev>0 AND (revent<>0 OR wevent<>0)
+      Else
+         ret=0
+      EndIf
+   Else
+      ret=0
+   EndIf
+   Function Return ret
+End Function
+
+
+; like Inkey$() , but is asynchronous instead
+Function.s ReadTCP{sok_num.b}
+   SHARED eoff.b : eoff=-1 : ret$=""
+   If TCPEvent>0 AND TCPIsReadEvent(sok_num)
+      If TCPSocketError(sok_num)=0
+         ret$=TCPReadSocket$(sok_num) : If ret$="" Then eoff=sok_num
+      Else
+         eoff=sok_num
+      EndIf
+   EndIf
+   Function Return ret$
+End Function
+
+
+; like Inkey$() and is synchronous
+Function.s ReadTCPs{sok_num.b}
+   SHARED eoff.b : eoff=-1 : ret$=""
+   Repeat
+      If TCPEvent>0 AND TCPIsReadEvent(sok_num)
+         If TCPSocketError(sok_num)=0
+            ret$=TCPReadSocket$(sok_num) : If ret$="" Then eoff=sok_num
+         Else
+            eoff=sok_num
+         EndIf
+      Else
+         Delay_ 5 ; <----------------------+ this is only 1/10th adjust to your liking
+      EndIf                                ; This I found used very little CPU & the
+   Until ret$<>"" OR eoff=sok_num          ; time difference was insignificant when
+   Function Return ret$                    ; compared with 0 delay and 100% CPU usage.
+End Function
+
+
+; like NPrint
+Statement WriteTCP{sok_num.b, tex$}
+   TCPPrint sok_num, tex$+Chr$(10)
+End Statement
+
+
+; like CloseFile() and Close_
+Statement CloseTCP{}
+   For sok.b=0 To TCPHighest-1 : TCPRemoveSocket sok : Next sok
+   TCPClose : End
+End Statement
+
+
+; End of functions.
+
+; Functions demo begins here.
+
+; Lame TCP example by Lombi :)
+; This is just a lame example of using TCP fuctions.
+; Reading my regional weather forcast details.
+; Pretending to be a browser
+; Use from CLI
+
+l$=Chr$(10): cr$=Chr$(13): NPrint l$+" Lombi's lame TCP demo :)"
+
+If TCPOpen=0 Then NPrint l$+" TCP stack is not running...!!!"+l$ : End
+
+switch.b=On  ; <- switch for blocking mode. *****************************************
+
+mode$="on" : If switch=Off Then mode$="off"
+
+NPrint l$+" Testing with blocking mode "+mode$+"."
+
+Print l$+" Attempting connection to Bureau of Meteorology..."
+
+
+If ConnectTCP{"www.bom.gov.au",80,switch,0}
+
+   NPrint " ok..!!",l$,l$," Reading forcast..."+l$+l$
+
+   WriteTCP{0, "GET /cgi-bin/wrap_fwo.pl?IDV10450.txt HTTP/1.0"+cr$}
+   WriteTCP{0, "User-Agent: Mozilla/6.0; (Spoofed by Lombi's TCP example)"+cr$}
+   WriteTCP{0, "Accept: */*;q=1"+cr$}
+   WriteTCP{0, "Host: www.bom.gov.au"+cr$}
+   WriteTCP{0, "Pragma: no-cache"+cr$}
+   WriteTCP{0, "Referer: http://www.bom.gov.au/cgi-bin/wrap_fwo.pl?IDV10450.txt"+cr$}
+   WriteTCP{0, cr$}
+
+   args$=""
+   Repeat : rea$=ReadTCPs{0} : args$=args$+rea$ : br=CtrlC
+   Until Len(args$)>20 OR br<>0 OR eoff=0
+
+   If br<>0 Then NPrint " User Abort.1"+args$ : CloseTCP{}
+   If eoff=0 Then NPrint " Premature EOF...!!!" : CloseTCP{}
+   x=Instr(args$," 200 OK")
+   If x=0 Then NPrint args$+l$+"Unable to read weather details." : CloseTCP{}
+
+   Print args$: x=0
+   Repeat
+      rea$=ReadTCPs{0} : Print rea$ : br=CtrlC
+   Until eoff=0 OR br<>0
+
+   If br<>0 Then NPrint l$+" User Abort." Else NPrint l$+l$+" Read complete."
+   CloseTCP{}
+Else
+   NPrint l$+" Unable to connect." : TCPClose : End
+EndIf
+
+
+
+

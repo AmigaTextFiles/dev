@@ -1,0 +1,352 @@
+# Makefile fragment for amigados target.
+
+# We generate two additional things:
+#
+# libb/libgcc.a
+#	A base relative version of libgcc.a which is used when compiling and
+#	linking with the '-resident' option.
+#
+# libb/libm020/libgcc.a
+#	An accelerated base relative version of libgcc.a which is used when
+#	compiling and linking with the '-mc68020' & '-resident' options.
+#
+# libm020/libgcc.a
+#	An accelerated version of libgcc.a which is used when compiling and
+#	linking with the '-mc68020' option.
+#
+# xgccv
+#	A forking gcc instead of one calling ssytem(). This makes it less
+#	system conformant (can't ^C it when started from make), while providing
+#	increased functionality (-pipe option).
+
+# Use the vfork'ing version of gcc by default, so that the -pipe option can
+# get tested.  To use the regular version just do "make XGCC=gcc".  Note that
+# PIPE is defined in x-amigados, so if we are doing a native build, it will
+# be defined.  It can be overridden with "make PIPE=".
+
+XGCC = xgccv $(PIPE)
+GCC_FOR_TARGET = ./$(XGCC) -B./
+
+# Build residentable versions of the gcc executables by default.  Use
+# "make RESIDENT=" to build non-residentable versions.
+# Note:  This failed during bootstrapping of 2.5.5.
+
+#RESIDENT = -resident
+
+# The standard additional target flags for the compiler.
+
+T_CFLAGS = $(RESIDENT)
+
+# Allow the user to override the default target optimizations with gcc, or if
+# the target compiler is not gcc and doesn't understand -O<N>.
+
+T_OPTIMISE = -O2
+
+# Each compilation environment (Manx, Dice, GCC, SAS/C, etc) provides its
+# own equivalent of the UNIX /usr/include tree.  For gcc, the standard headers
+# are in /gnu/include and system specific headers are in /gnu/os-include.
+# Use these paths for fixincludes.
+
+SYSTEM_HEADER_DIR = /gnu/include
+OTHER_FIXINCLUDES_DIRS = /gnu/os-include
+
+# We don't need a libgcc1, it's all in ixemul.library
+
+LIBGCC1 = libgcc1.null
+
+# Flags to use when compiling the normal version of libgcc.a.
+# Don't compile with debugging, as long as there is no debugger.
+# Explicitly leave out the -resident compilation flag and don't use T_CFLAGS.
+
+LIBGCC2_CFLAGS = $(T_OPTIMIZE) $(INTERNAL_CFLAGS) $(X_CFLAGS) $(CFLAGS) \
+		  $(CROSS_GCC_CFLAGS)
+
+# Flags to use when compiling the base relative version of libgcc.a.
+# Don't compile with debugging, as long as there is no debugger.
+# Explicitly force -resident in the compilation flags and don't use T_CFLAGS.
+
+LIBBGCC2_CFLAGS = $(T_OPTIMIZE) $(INTERNAL_CFLAGS) $(X_CFLAGS) $(CFLAGS) \
+		  $(CROSS_GCC_CFLAGS) -resident
+
+# Flags to use when compiling the 68020 versions of libgcc.a.
+# Don't compile with debugging, as long as there is no debugger.
+# Explicitly force -mc68020 in the compilation flags and don't use T_CFLAGS.
+
+LIBM020GCC2_CFLAGS = $(T_OPTIMIZE) $(INTERNAL_CFLAGS) $(X_CFLAGS) $(CFLAGS) \
+		  $(CROSS_GCC_CFLAGS) -mc68020
+
+# Flags to use when compiling the base relative 68020 versions of libgcc.a.
+# Don't compile with debugging, as long as there is no debugger.
+# Explicitly force -mc68020 & -resident in the compilation flags and don't use
+# T_CFLAGS.
+
+LIBBM020GCC2_CFLAGS = $(LIBBGCC2_CFLAGS) -mc68020
+
+# Build the base relative library and accelerated libraries.
+# It is later copied into /gnu/lib/gcc-lib/amigados/<version>/libb/libgcc.a, whereas
+# libgcc.a is copied into /gnu/lib/gcc-lib/amigados/<version>/libgcc.a.
+# Accelerated libraries are copied into same directories, with an extra dir level
+# libm020, thus libb/libm020. It doesn't work very well to define one of the
+# EXTRA_* macros to contain libb/libgcc.a, particularly for doing "make stageN"
+# or "make install".
+
+GCC_PARTS=$(GCC_PASSES) libgcc.a libb/libgcc.a libm020/libgcc.a \
+		libb/libm020/libgcc.a $(EXTRA_PROGRAMS) $(USE_COLLECT2) $(EXTRA_PARTS)
+
+# Add install_libbgcc to normal define of INSTALL_LIBGCC.  Let install-gccv
+# hitch a ride on here as well.
+
+INSTALL_LIBGCC = install-libgcc install-libbgcc install-libm020gcc install-libbm020gcc install-gccv
+
+# This includes the knowledge that target amigados doesn't need libgcc1.a
+
+libb/libgcc.a: libgcc1.null libgcc2.c libgcc2.ready $(CONFIG_H) \
+   $(LIB2FUNCS_EXTRA) machmode.h longlong.h gbl-ctors.h config.status
+# Actually build it in tmplibbgcc.a, then rename at end,
+# so that libb/libgcc.a itself remains nonexistent if compilation is aborted.
+	-rm -f tmplibbgcc.a
+# -e causes any failing command to make this rule fail.
+# -e doesn't work in certain shells, so we test $$? as well.
+	set -e; \
+	for name in $(LIB2FUNCS); \
+	do \
+	  echo $${name}; \
+	  $(GCC_FOR_TARGET) $(LIBBGCC2_CFLAGS) $(INCLUDES) -c -DL$${name} \
+	      $(srcdir)/libgcc2.c -o $${name}.o; \
+	  if [ $$? -eq 0 ] ; then true; else exit 1; fi; \
+	  $(AR) $(AR_FLAGS) tmplibbgcc.a $${name}.o; \
+	  rm -f $${name}.o; \
+	done
+# Some shells crash when a loop has no items.
+# So make sure there is always at least one--`..'.
+# Then ignore it.
+# We don't use -e here because there are if statements
+# that should not make the command give up when the if condition is false.
+# Instead, we test for failure after each command where it matters.
+	-for file in .. $(LIB2FUNCS_EXTRA); \
+	do \
+	  if [ x$${file} != x.. ]; then \
+	    name=`echo $${file} | sed -e 's/[.]c$$//' -e 's/[.]asm$$//'`; \
+	    echo $${name}; \
+	    if [ $${name}.asm = $${file} ]; then \
+	      cp $${file} $${name}.s || exit 1; file=$${name}.s; \
+	    else true; fi; \
+	    $(GCC_FOR_TARGET) $(LIBBGCC2_CFLAGS) $(INCLUDES) -c $${file}; \
+	    if [ $$? -eq 0 ] ; then true; else exit 1; fi; \
+	    $(AR) $(AR_FLAGS) tmplibbgcc.a $${name}.o; \
+	    rm -f $${name}.[so]; \
+	  else true; \
+	  fi; \
+	done
+	-if $(RANLIB_TEST) ; then $(RANLIB) tmplibbgcc.a; else true; fi
+	-if [ -d libb ] ; then true ; else mkdir libb ; fi
+	mv tmplibbgcc.a libb/libgcc.a
+
+
+install-libbgcc: libb/libgcc.a install-dir
+	-if [ -d $(libsubdir)/libb ] ; then true ; else mkdir $(libsubdir)/libb ; fi
+	-if [ -f libb/libgcc.a ] ; then \
+	  rm -f $(libsubdir)/libb/libgcc.a; \
+	  $(INSTALL_DATA) libb/libgcc.a $(libsubdir)/libb/libgcc.a; \
+	  if $(RANLIB_TEST) ; then \
+	    (cd $(libsubdir)/libb; $(RANLIB) libgcc.a); else true; fi; \
+	  chmod a-x $(libsubdir)/libb/libgcc.a; \
+	else true; fi
+
+libm020/libgcc.a: libgcc1.null libgcc2.c libgcc2.ready $(CONFIG_H) \
+   $(LIB2FUNCS_EXTRA) machmode.h longlong.h gbl-ctors.h config.status
+# Actually build it in tmplibm020gcc.a, then rename at end,
+# so that libm020/libgcc.a itself remains nonexistent if compilation is aborted.
+	-rm -f tmplibm020gcc.a
+# -e causes any failing command to make this rule fail.
+# -e doesn't work in certain shells, so we test $$? as well.
+	set -e; \
+	for name in $(LIB2FUNCS); \
+	do \
+	  echo $${name}; \
+	  $(GCC_FOR_TARGET) $(LIBM020GCC2_CFLAGS) $(INCLUDES) -c -DL$${name} \
+	      $(srcdir)/libgcc2.c -o $${name}.o; \
+	  if [ $$? -eq 0 ] ; then true; else exit 1; fi; \
+	  $(AR) $(AR_FLAGS) tmplibm020gcc.a $${name}.o; \
+	  rm -f $${name}.o; \
+	done
+# Some shells crash when a loop has no items.
+# So make sure there is always at least one--`..'.
+# Then ignore it.
+# We don't use -e here because there are if statements
+# that should not make the command give up when the if condition is false.
+# Instead, we test for failure after each command where it matters.
+	-for file in .. $(LIB2FUNCS_EXTRA); \
+	do \
+	  if [ x$${file} != x.. ]; then \
+	    name=`echo $${file} | sed -e 's/[.]c$$//' -e 's/[.]asm$$//'`; \
+	    echo $${name}; \
+	    if [ $${name}.asm = $${file} ]; then \
+	      cp $${file} $${name}.s || exit 1; file=$${name}.s; \
+	    else true; fi; \
+	    $(GCC_FOR_TARGET) $(LIBBGCC2_CFLAGS) $(INCLUDES) -c $${file}; \
+	    if [ $$? -eq 0 ] ; then true; else exit 1; fi; \
+	    $(AR) $(AR_FLAGS) tmplibm020gcc.a $${name}.o; \
+	    rm -f $${name}.[so]; \
+	  else true; \
+	  fi; \
+	done
+	-if $(RANLIB_TEST) ; then $(RANLIB) tmplibm020gcc.a; else true; fi
+	-if [ -d libm020 ] ; then true ; else mkdir libm020 ; fi
+	mv tmplibm020gcc.a libm020/libgcc.a
+
+
+install-libm020gcc: libm020/libgcc.a install-dir
+	-if [ -d $(libsubdir)/libm020 ] ; then true ; else mkdir $(libsubdir)/libm020 ; fi
+	-if [ -f libm020/libgcc.a ] ; then \
+	  rm -f $(libsubdir)/libm020/libgcc.a; \
+	  $(INSTALL_DATA) libm020/libgcc.a $(libsubdir)/libm020/libgcc.a; \
+	  if $(RANLIB_TEST) ; then \
+	    (cd $(libsubdir)/libm020; $(RANLIB) libgcc.a); else true; fi; \
+	  chmod a-x $(libsubdir)/libm020/libgcc.a; \
+	else true; fi
+
+libb/libm020/libgcc.a: libgcc1.null libgcc2.c libgcc2.ready $(CONFIG_H) \
+   $(LIB2FUNCS_EXTRA) machmode.h longlong.h gbl-ctors.h config.status
+# Actually build it in tmplibbm020gcc.a, then rename at end,
+# so that libb/libm020/libgcc.a itself remains nonexistent if compilation is aborted.
+	-rm -f tmplibbm020gcc.a
+# -e causes any failing command to make this rule fail.
+# -e doesn't work in certain shells, so we test $$? as well.
+	set -e; \
+	for name in $(LIB2FUNCS); \
+	do \
+	  echo $${name}; \
+	  $(GCC_FOR_TARGET) $(LIBBM020GCC2_CFLAGS) $(INCLUDES) -c -DL$${name} \
+	      $(srcdir)/libgcc2.c -o $${name}.o; \
+	  if [ $$? -eq 0 ] ; then true; else exit 1; fi; \
+	  $(AR) $(AR_FLAGS) tmplibbm020gcc.a $${name}.o; \
+	  rm -f $${name}.o; \
+	done
+# Some shells crash when a loop has no items.
+# So make sure there is always at least one--`..'.
+# Then ignore it.
+# We don't use -e here because there are if statements
+# that should not make the command give up when the if condition is false.
+# Instead, we test for failure after each command where it matters.
+	-for file in .. $(LIB2FUNCS_EXTRA); \
+	do \
+	  if [ x$${file} != x.. ]; then \
+	    name=`echo $${file} | sed -e 's/[.]c$$//' -e 's/[.]asm$$//'`; \
+	    echo $${name}; \
+	    if [ $${name}.asm = $${file} ]; then \
+	      cp $${file} $${name}.s || exit 1; file=$${name}.s; \
+	    else true; fi; \
+	    $(GCC_FOR_TARGET) $(LIBBGCC2CFLAGS) $(INCLUDES) -c $${file}; \
+	    if [ $$? -eq 0 ] ; then true; else exit 1; fi; \
+	    $(AR) $(AR_FLAGS) tmplibbm020gcc.a $${name}.o; \
+	    rm -f $${name}.[so]; \
+	  else true; \
+	  fi; \
+	done
+	-if $(RANLIB_TEST) ; then $(RANLIB) tmplibbm020gcc.a; else true; fi
+	-if [ -d libb ] ; then true ; else mkdir libb ; fi
+	-if [ -d libb/libm020 ] ; then true ; else mkdir libb/libm020 ; fi
+	mv tmplibbm020gcc.a libb/libm020/libgcc.a
+
+
+install-libbm020gcc: libb/libm020/libgcc.a install-dir
+	-if [ -d $(libsubdir)/libb/libm020 ] ; then true ; else mkdir $(libsubdir)/libb/libm020 ; fi
+	-if [ -f libb/libm020/libgcc.a ] ; then \
+	  rm -f $(libsubdir)/libb/libm020/libgcc.a; \
+	  $(INSTALL_DATA) libb/libm020/libgcc.a $(libsubdir)/libb/libm020/libgcc.a; \
+	  if $(RANLIB_TEST) ; then \
+	    (cd $(libsubdir)/libb/libm020; $(RANLIB) libgcc.a); else true; fi; \
+	  chmod a-x $(libsubdir)/libb/libm020/libgcc.a; \
+	else true; fi
+
+# PhB:
+# toplev.o target need to define additional flags to handle stack
+# allocation in real main. As for now we hack building of toplev.o
+# defining MAYBE_USE_COLLECT2 flag, which is only used for toplev.o.
+# Then we define EXTRA_OBJS to amigasup.o.
+
+MAYBE_USE_COLLECT2= -Dmain=stkmain -Dexit=stkexit
+EXTRA_OBJS = amigasup.o
+
+# The default gcc (xgcc) is built without -DAMIGADOS_FORK_GCC. This gcc (xgccv)
+# is built with AMIGADOS_FORK_GCC defined, so that it can use '-pipe'.  We
+# don't want to define EXTRA_PASSES to xgccv because that will cause xgccv
+# to be installed in $(libsubdir), so instead we use the default GCC_PASSES
+# and add xgccv to it.
+
+GCC_PASSES = xgcc xgccv cc1 cpp $(EXTRA_PASSES)
+
+xgccv: xgccv.o version.o $(LIBDEPS)
+	$(CC) $(ALL_CFLAGS) $(LDFLAGS) -o xgccv xgccv.o version.o $(LIBS)
+
+xgccv.o: gcc.c $(CONFIG_H) config.status
+	$(CC) $(ALL_CFLAGS) $(ALL_CPPFLAGS) $(INCLUDES) \
+  -DSTANDARD_STARTFILE_PREFIX=\"$(libdir)/\" \
+  -DSTANDARD_EXEC_PREFIX=\"$(libdir)/gcc-lib/\" \
+  -DDEFAULT_TARGET_VERSION=\"$(version)\" \
+  -DDEFAULT_TARGET_MACHINE=\"$(target)\" \
+  -DTOOLDIR_BASE_PREFIX=\"$(exec_prefix)/\" \
+  -DAMIGADOS_FORK_GCC \
+  -c `echo $(srcdir)/gcc.c | sed 's,^\./,,'` -o xgccv.o
+
+install-gccv: xgccv
+	rm -f $(bindir)/gccv
+	$(INSTALL_PROGRAM) xgccv $(bindir)/gccv
+
+# When making one of the stage<N> dirs, we need to make subdirs for
+# additional libraries, and copy them there. base-relative libraries
+# and accelerated libraries are preserved through stages.
+
+EXTRA_STAGE1_TARGETS = stage1-libamiga
+EXTRA_STAGE2_TARGETS = stage2-libamiga
+EXTRA_STAGE3_TARGETS = stage3-libamiga
+EXTRA_STAGE4_TARGETW = stage4-libamiga
+
+stage1-libamiga:
+	-if [ -d stage1 ] ; then true ; else mkdir stage1 ; fi
+	-if [ -d stage1/libb ] ; then true ; else mkdir stage1/libb ; fi
+	-if [ -d stage1/libb/libm020 ] ; then true ; else mkdir stage1/libb/libm020 ; fi
+	-if [ -d stage1/libm020 ] ; then true ; else mkdir stage1/libm020 ; fi
+	-cp libb/libgcc.a stage1/libb/libgcc.a
+	-cp libb/libm020/libgcc.a stage1/libb/libm020/libgcc.a
+	-cp libm020/libgcc.a stage1/libm020/libgcc.a
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage1/libb/libgcc.i; else true; fi
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage1/libb/libm020/libgcc.a; else true; fi
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage1/libm020/libgcc.a; else true; fi
+
+stage2-libamiga:
+	-if [ -d stage2 ] ; then true ; else mkdir stage2 ; fi
+	-if [ -d stage2/libb ] ; then true ; else mkdir stage2/libb ; fi
+	-if [ -d stage2/libb/libm020 ] ; then true ; else mkdir stage2/libb/libm020 ; fi
+	-if [ -d stage2/libm020 ] ; then true ; else mkdir stage2/libm020 ; fi
+	-cp libb/libgcc.a stage2/libb/libgcc.a
+	-cp libb/libm020/libgcc.a stage2/libb/libm020/libgcc.a
+	-cp libm020/libgcc.a stage2/libm020/libgcc.a
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage2/libb/libgcc.a; else true; fi
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage2/libb/libm020/libgcc.a; else true; fi
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage2/libm020/libgcc.a; else true; fi
+
+stage3-libamiga:
+	-if [ -d stage3 ] ; then true ; else mkdir stage3 ; fi
+	-if [ -d stage3/libb ] ; then true ; else mkdir stage3/libb ; fi
+	-if [ -d stage3/libb/libm020 ] ; then true ; else mkdir stage3/libb/libm020 ; fi
+	-if [ -d stage3/libm020 ] ; then true ; else mkdir stage3/libm020 ; fi
+	-cp libb/libgcc.a stage3/libb/libgcc.a
+	-cp libb/libm020/libgcc.a stage3/libb/libm020/libgcc.a
+	-cp libm020/libgcc.a stage3/libm020/libgcc.a
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage3/libb/libgcc.a; else true; fi
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage3/libb/libm020/libgcc.a; else true; fi
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage3/libm020/libgcc.a; else true; fi
+
+stage4-libamiga:
+	-if [ -d stage4 ] ; then true ; else mkdir stage4 ; fi
+	-if [ -d stage4/libb ] ; then true ; else mkdir stage4/libb ; fi
+	-if [ -d stage4/libb/libm020 ] ; then true ; else mkdir stage4/libb/libm020 ; fi
+	-if [ -d stage4/libm020 ] ; then true ; else mkdir stage4/libm020 ; fi
+	-cp libb/libgcc.a stage4/libb/libgcc.a
+	-cp libb/libm020/libgcc.a stage4/libb/libm020/libgcc.a
+	-cp libm020/libgcc.a stage4/libm020/libgcc.a
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage4/libb/libgcc.a; else true; fi
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage4/libb/libm020/libgcc.a; else true; fi
+	-if $(RANLIB_TEST) ; then $(RANLIB) stage4/libm020/libgcc.a; else true; fi

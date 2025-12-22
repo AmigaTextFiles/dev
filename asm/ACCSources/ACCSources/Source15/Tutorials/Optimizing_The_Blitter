@@ -1,0 +1,255 @@
+
+
+		******************************************
+		**       SUPERCHARGING THE BLITTER      **
+		**		   By  Raistlin '91     **
+		******************************************
+
+PREFERENCE
+----------
+This article is aimed at the coder who loves using the blitter so much that
+he/she (no sexism here!) is running out of raster time.  The following tips
+are NOT mine but are techniques used by many coders (quite a few are from
+that Kreator of Anachy....An amazing coder if every there was one).
+
+
+
+BEING SENSIBLE
+--------------
+Or in other words make sure you are using programming the hardware directly
+(at this point Mark utters -'sod this article for a game of soldiers' or
+rather a game of Sindi for Mark (no offense!  just getting my own back)
+
+
+
+
+BLITTER NASTY
+-------------
+OK this first tip will be known by everyone (or should be) but I might as 
+well put it in for completeness.  By selecting bits 15(set bit) and 10 of
+DMACON you can  give the blitter priority over the CPU.  Please note however
+that in my expieriences this does little to enhance the blitters performance
+as it simply stops the CPU from stealing bus cycles while the blitter is
+running.  Perhaps Mike or Dave could tell us if it does out else?
+
+
+
+USING INLERLEAVED BITLANES
+--------------------------
+Now this is a real time killer!  It allows you to blit all bitplanes in one
+blitter operation and thus leaves the CPU free (no more blitter control
+loops).
+To use this technique requires you to save all bitmaps and bobs in interleaved
+format, which looks like this:-
+		line1 bitplane1
+		line1 bitplane2
+		line1 bitplane3
+		line1 bitplane4
+		line1 bitplane5
+		line2 bitplane1
+		line2 bitplane2
+		line2 bitplane3
+		line2 bitplane4
+		line2 bitplane5
+		line3 bitplane1
+		line3 bitplane2
+		...............
+		...............
+		line256 bitplane4
+		line256 bitplane5
+
+So as you can see all the lines of each bitplane come after each other, so 
+instead of the bitplanes comming one after the other its the individual
+lines of each bitplane that come after each other.
+so once your bob is in this format what next?  Well your bitplane modulos
+have to be set to 
+             Width of bitplane in bytes*number of bitplanes-1 
+(my first formula huraa!)
+so for a normal 320 wide bitplane with 5 bitplanes its
+
+		40*4=160	
+	....	...........
+	dc.w	bpl1mod,160
+	dc.w	bpl2mod,160
+	....	...........
+
+
+And when loading your bitplane pointers you have to add the length of each
+line instead of the length of each bitplane  i.e. for a normal screen use
+
+	move.l	#Screen,d0		; D0=Address of each screen
+	move.w	d0,bpl1l+2
+	swap	d0
+	move.w	d0,bpl1h+2
+	swap	d0
+	add.l	#40,d0			; Get to next bitplane
+	move.w	d0,bpl2l+2
+	..................
+	..................
+
+
+And then when setting up the blitter make the size:-
+		Height=Height*Number of bitplanes
+		Width =Width
+
+so for a 31pixel high 4word wide 5 bitplane bob use:-
+	move.w	(31*5*64)+4,bltsize(a5)
+
+And thats all there is to it.  There are two main advantages of using this
+technique:-
+a)The processor can be doing something else instead of waiting for the blitter
+  to finish before re-loading it for the next bitplane.
+b)You no loonger have to waist time re-loading the blitter reqgisters.
+
+*Note  -When using this technique at advanced levels your modulos can get
+        really screwed up, especially when using over scan & doing the cookie
+	cut technique!
+
+
+Fast Wiping
+-----------
+This is simple but efffective.  As well as making the blitter run faster it
+saves memory.  All it envolves is that when wiping a block of memory to zeros
+instead of copying a block of zeros to the destination you simply point
+the, D destination pointer to the area to wipe, and then when setting bltcon0
+only enable channel D (no miniterms) which has the effect of ALWAYS telling
+the blitter to blit 0s   i.e.
+
+	move.l	#Screen+4090,bltdpth(a5)	; Dest=Screen+offset
+	move.w	#$0,bltdmod(a5)
+	move.w	#%100000000,bltcon0(a5)		; Only D active, no miniterms
+	move.w	#(64*64)+2,bltsize(a5)		; Wipe area 64*32
+
+Simple eh?
+
+
+
+Fast Fill
+---------
+Exactly the same as before except you enable ALL miniterms which effectively
+ALWAYS tells the blitter to always blit a '1'  i.e.
+	move.l	#Screen+4090,bltdpth(a5)	; Dest=Screen+offset
+	move.w	#$0,bltdmod(a5)
+	move.w	#%111111111,bltcon0(a5)		; D activive & ALL miniterms
+	move.w	#(64*64)+2,bltsize(a5)		; Fill area 64*32
+
+These two examples are faster than their 'COPY' equivalent because you are 
+only enabling 1 channel.
+
+
+
+DOUBLE BUFFERING
+----------------
+This technique does not actually make the blitter faster (slower actually) 
+but is uselfull to know because it will eliminate all flicker when you just
+cannot get the blitter working fast enough (like in Sine-Scrollers or vector
+bob demos).  It invloves, first working out all the positions to blit the 
+bobs to, then blitting them independantly to a buffer area in memory & then
+using a straigh A-D copy of the whole buffer area to screen.  An example of
+this can be found in my sine-scroller (if its used on ACC15 as its pritty
+crap!).   So a small example:-
+
+; This section blits the bobs to the buffer
+	move.l	#Bob,bltapth(a5)	; A Source=Address of bob
+	move.l	#Mask,bltbpth(a5)	; B Source=Address of mask
+	move.l	#BakG,bltcpth(a5)	; C Source=Saved background data
+	move.l	#Buffer,bltdpth(a5)	; D Dest  =Buffer in memory
+	move.w	#$0,bltamod(a5)		; Clear ABC modulos
+	move.w	#$0,bltbmod(a5)
+	move.w	#$0,bltcmod(a5)
+	move.w	#16,bltdmod(a5)		; 20-4 (buffer is 20 bytes wide)
+	move.w	#$ffff,bltafwm(a5)	; No masks
+	move.w	#$ffff,bltalwm(a5)
+	move.w	#$0,bltcon1(a5)		; Clear
+	move.w	#%111111110010,bltcon0(a5) ; ABCD active, cookie miniterm
+	move.w	#(32*64)+2,bltsize(a5)	; 32*32
+	......  ........................
+	(REPEAT FOR 25 DIFFERENT BOBS)
+	......  ........................
+
+; This section copys the buffer to the screen
+	move.l	#Buffer,bltapth(a5)	; Source A=buffer
+	move.l	#Screen+4000,bltdpth(a5); Dest=Screen
+	move.w	#$0,bltamod(a5)
+	move.w	#20,bltdmod(a5)		; Buffer=20 bytes wide
+	move.w	#$ffff,bltafwm(a5)	; No masks
+	move.w	#$ffff,bltalwm(a5)
+	move.w	#$0,bltcon1(a5)		; Clear
+	move.w	#100111110000,bltcon0(a5) ; A-D blit
+	move.w	#(100*64)+10,bltsize(a5); 100*20
+	......  .......................
+***********
+; Variables
+***********
+Buffer	dcb.b	100*20,0		; Area for Buffer
+Screen	dcb.b	256*40,0		; Screen
+
+
+
+That was just an example.  I'm sorry if any of the blitter registers
+are set-up wrong but as I said earlier just look at my sine-scroller
+to see an example in action.
+
+
+
+GETTING THE CPU TO HELP
+-----------------------
+Pardon?  What the title means is that when the blitter is doing one
+hell of a lot of work & there is little for the CPU to do.  Why not get
+the CPU to do some of the work?  An example of this is a huge sine-scroller.
+Imagine a sine scroller that has a maximum height of 250 (nearly the entire
+screen).  Well the blitter has a hell of a lot of work clearing the scrollers
+window so if you start the blitter at the top left of the window & start the
+CPU at the bottom right of the window (working backwards) & makesure they 
+both overlap in the middle (although it will be nearer the bottom as the 
+blitter will work faster) then the window will be cleared alot faster!
+This can also be used for moving small bobs around (get the CPU to move the 
+small ones & leave the blitter to move the big uns) but always try to make 
+the CPU finish first so it can set-up the blitter again.
+
+
+THE BLITTER 'AINT ALWAYS BEST
+-----------------------------
+Before using the blitter think, 'Will the CPU get it done faster?'
+As an example, suppose you are doing VU meters and you wish to chop
+of the top line every frame to give the illusion its going down.  Theres
+no point clearing it with the blitter (even when using the D channel only
+blit).  Its much better to use:-
+		move.w	#$0000,(a0)	; A0=Address of word to clear
+
+than setting-up all the blitter reisters.  Its also eaiser to perform
+"pixel perfect blitting" with the processor.
+
+
+
+
+CLOSING NOTES
+-------------
+I hope that this little document could start a new section of in ACC called
+
+		"OPTIMISING THE CODE"
+or some stupid name, as I KNOW that all you readers have small tricks that
+will make code run faster by either a small or large amount.
+
+A final word on using the INTERLEAVED screen.  When using the cookie-cut
+routine on such a screen you will either have to make multiple masks or
+convert your bob to RAW NORMAL & use carefull modulo programing to use
+only 1 mask, this will obviously slow the routine down but will save memory
+& remember you can use the 1blit to copy the background data & use the 1 blit
+to restore the background data.  Its just the cookie-cut blit that will need
+the special attention.  (fairly hard to do  -took me about 1hour to perfect!)
+
+If you enjoyed (perish the thought!) or found this doc usefull then you may
+be interested to know that someone else has done a doc on "SUPERCHARGING
+THE 68000" The name of the coder is too long to remember (Mike Cross 
+mentioned his tutorial on ACC10 (I think!)
+
+
+For my final paragraph let me say that some of this code is hard to implement
+well, but its worth persevering to gain that extra speed that allows you
+to have an extra 3D filled vector running in full frame rate on the
+screen along with the other 3000 filled 3D vectors (all you have to do know 
+is learn how to do Solid 3D vectors!)
+
+
+				Raistlin........(dare to code harder)

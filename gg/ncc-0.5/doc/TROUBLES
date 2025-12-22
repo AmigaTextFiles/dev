@@ -1,0 +1,178 @@
+
+============================================================================
+socket.h troubles in GNU libc
+-----------------------------
+
+A terrible mistake is being commited in the GNU system.
+The libc header files, are "compiler dependant".
+Thousands of braindead hacks to make things at the same time:
+	portable, optimized and using any gcc extension they can think of.
+
+There is no way around. Either you don't define __GCC__ and
+half of the things are missing (go figure which), or you
+define __GCC__ and be prepared to come against a
+"transparent union" argument to getsockname().
+
+Do we have to rewrite a clean libc?
+
+For the good-hearted hacker, some additional work will have to
+be done. Please edit /usr/include/socket.h
+See the mess. This has nothing to do with programming, and it is
+the dreadful perfectionism some people who get excited about their system,
+get into and screw everything up. Find 'transparent union'
+and where it sais "#if  (!defined __GNUC__ || ..."
+make it "#if 1 || (!defined __GNUC__ || .."
+
+===========================================================================
+
+
+gcc silently accepts some things which are not 100% correct, but
+programmers do not notice because gcc does not complain.
+
+some of these things are adapted to ncc while some others
+correctly produce errors. Here is a list of rare troubles found in
+various open source programs tested.
+
+================================================================
+enumerators list may end in comma
+---------------------------------
+
+this is wrong by the C grammar.
+An example can be found in linux/include/linux/sunrpc/msg_prot.h
+
+however, ncc is adapted to accept this because we all do it
+some times.
+================================================================
+an expression with a cast is lvalue
+-----------------------------------
+
+i don't have the standard, but in k&r TCPL, it sais:
+	``an expression with a cast is not an lvalue''.
+
+gcc accepts: ((char*)FOO) += 2
+and so does ncc, for the shake of compatibility.
+================================================================
+multiple definitions of a function
+----------------------------------
+
+you can see that in linux/fs/locks.c
+
+in the preprocessed source,
+the functions locks_verify_area() and locks_verify_locked()
+are defined twice.
+
+Once as 'extern inline' and another once normally.
+this is redundant and produces an error in ncc.
+
+===============================================================
+__FUNCTION__ may not be concated
+--------------------------------
+
+the gcc extensions of function names as strings with
+__FUNCTION__ and __PRETTY_FUNCTION__ are supported by
+ncc but it is not possible to concate these values
+with strings.
+
+For example:
+	printf ("in " __FUNCTION__ "\n");
+
+is not supported because adjacent string literals are
+concatenated in lexical analysis, and __FUNCTION__
+is not known until after syntactical analysis.
+
+this can be found for example in linux/fs/file.c
+in function free_fd_array() and has to be changed
+in order to use ncc on file file.c, like this:
+
+	printf ("in %s\n", __FUNCTION__);
+=============================================================
+incomplete enum
+---------------
+
+gcc.info sais that this is a marvellous extension to the
+C language, but alas!  This is just the easy way out.
+
+Anyway, because gdb needs incomplete enum to be
+compiled, this is supported by ncc.
+=============================================================
+
+*************************************************************************
+=========================================================================
+Hacking Bind
+------------
+
+As if on purpose, the program bind could not be any more obfuscated.
+Anyway, our computer can do the job for us.
+
+./configure
+Run the following script:
+
+--------------------------------------
+#!/bin/sh
+for a in $(find . -name Makefile)
+do
+	cp $a TMP
+	cat TMP | sed 's/gcc/ncc -ncgcc -ncoo/' > $a
+done
+--------------------------------------
+
+Voila!
+=========================================================================
+
+*************************************************************************
+=========================================================================
+Hacking gcc (almost died from recursion)
+----------------------------------------
+
+Only with the -ncgcc option attempted.
+
+./configure
+and edit CC=gcc to CC=ncc -ncgcc -ncoo in the root Makefile.
+
+1)	In gcc/gansidcl.h, it sais:
+
+		#define inline __inline__
+
+	Comment this line away, we're supposed to do the oposite with
+	nognu macros.
+
+2)	In gcc/java/class.c
+
+	Inside function ident_subst, there is an array of non constant
+	size:	char buffer [i];
+
+	In fact it is:
+
+		#ifdef __GNUC__
+		char buffer [i];
+		#else
+		char *buffer = (char*) alloca (i);
+		#endif
+
+	ncc prefers alloca, so do it:
+
+		#if defined __GNUC__ && !defined __NCC__
+
+At some time something happens when it starts running itself as xgcc.
+=========================================================================
+
+TROUBLESHOOTING
+---------------
+			``every new program, reveals more bugs''
+
+Ok, so ncc (with -nccc for checks for invalid expressions), produces
+an error.
+
+- does gcc produce the same error ?
+  if yes, then see the makefile
+
+- see NCC.i which is the preprocessed output ncc uses
+  does it seem to be correct C ?
+  if yes then it is probably a bug of ncc
+
+- if no, then run another preprocessing with:
+	gcc -E ... > FOO.i
+  do: diff -u NCC.i FOO.i
+  the error may be a result of nognu macros
+
+- stay calm

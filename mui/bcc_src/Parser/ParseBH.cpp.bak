@@ -1,0 +1,363 @@
+#include "ParseBH.h"
+#include "MethodDef.h"
+#include "ClassDef.h"
+#include "Global.h"
+
+#include "VarDef.h"
+
+#include <string.h>
+
+short ParseBH::Start( void )
+{
+
+	IfDefBeg();
+	
+	ins_every.Insert( ofh );
+	ins_header.Insert( ofh );
+
+	while( 1 ) {
+	
+		GetToken();
+		if( !TokLen ) break;
+		
+		if( TokLen == 5 && !strncmp( "Class", Tok, 5 ) ) {
+			if( !DoClass() ) {
+				if( !ErrorBuf ) Error( 12 );
+				return 0;
+			}
+		} else 
+		if( TokLen == 7 && !strncmp( "include", Tok, 7 ) ) {
+			if( !DoHeader() ) {
+				if( !ErrorBuf ) Error( 12 );
+				return 0;
+			}
+		} else SetCType();
+
+	}
+
+	IfDefEnd();
+
+	return 1;
+
+}
+
+short ParseBH::DoClass( void )
+{
+ short BLevel;
+
+	StopCopy();
+
+	GetToken();
+	if( !TokLen ) return 0;
+		
+	if( strlen( sfname ) != TokLen || strncmp( sfname, Tok, strlen( sfname ) )  ) {
+		Error( 1 );
+		return 0;
+	}
+
+	ClassDef *cd;
+	
+	cd = new ClassDef( Tok, TokLen );
+
+	ClassList.AddTail( (Family*)cd );
+
+	classdef = cd;
+	cd->type = ctype;
+
+	BLevel = MBracket;
+
+	GetToken();
+	if( !TokLen ) return 0;
+
+	/* Super class */
+	if( chcmp( ':' ) ) {
+
+		GetToken();
+		if( !TokLen ) return 0;
+
+		if( TokLen == 7 && !strncmp( "private", Tok, 7 ) ) {
+
+			cd->superpriv = 1;
+
+			GetToken();
+			if( !TokLen ) return 0;
+
+		}
+
+		memcpy( cd->PSuper, Tok, min( TokLen, 30 ) );
+		cd->PSuper[ min( TokLen, 30 ) ] = 0;
+
+		GetToken();
+		if( !TokLen ) return 0;
+
+	} else {
+		switch( *cd->type ) {
+			case 'B':
+				strcpy( cd->PSuper, "\"rootclass\"" );
+				break;
+			default:
+				strcpy( cd->PSuper, "MUIC_Notify" );
+		}
+	}
+
+	if( !chcmp( '{' ) ) {
+		Error( 2 );
+		return 0;
+	}
+	
+	fprintf( ofh, "typedef struct {\n" ); 
+
+	StartCopy();
+
+	short nods = 0, crcont = 0;
+	char crClName[30];
+
+	short virt = 0;
+		
+	while( 1 ) {
+	
+		next:	
+		GetToken();
+		if( !TokLen ) return 0;
+
+		if( chcmp( '}' ) && MBracket == BLevel ) break;
+
+		SetCType();
+
+		/* Class references */
+		if( crcont == 1 ) {
+			if( !chcmp( '*' ) ) {
+				Error( 15 );
+				return 0;
+			}
+			crcont = 2;
+			goto next;
+		}
+		if( crcont == 2 ) {
+			if( TokType != ALN ) {
+				Error( 4 );
+				return 0;
+			}
+			cd->clref.Add( Tok, TokLen, crClName, 0 );
+			crcont = 3;
+			goto next;
+		}
+
+		if( !crcont && (TokLen == 5) && !strncmp( Tok, "Class", 5 ) ) {
+
+			StopCopy();
+
+			GetToken();
+			if( !TokLen ) return 0;
+
+			strcpy( crClName, ctype );
+			memcpy( crClName+3, Tok, TokLen );
+			crClName[TokLen+3] = 0;
+
+			crcont = 1;
+			fprintf( ofh, "Object" );
+			StartCopy();
+
+			goto next;
+
+		}
+		
+		/* shortcuts to data variables */
+		if( ( chcmp( ',' ) || chcmp( ';' ) || chcmp( ':' ) || chcmp( '[') ) && PrevTok[0] && (PrevType == ALN) && !nods ) {
+			char opbuf[60];
+			strcpy( opbuf, "(data->" );
+			strcpy( opbuf + 7, PrevTok );
+			strcpy( opbuf + strlen( opbuf ), ")" );
+			cd->rep.Add( PrevTok, 0, opbuf, 0 );
+
+		}
+		nods = 0;
+
+		/* Set Get Init variables */
+		if( chcmp( ':' ) && PrevTok[ 0 ] ) {
+			StopCopy();
+
+			char AttrName[30];
+			strcpy( AttrName, PrevTok );
+
+			GetToken();
+			if( !TokLen ) return 0;
+
+			if( TokType != ALN || TokLen > 3 ) {
+				Error( 9 );
+				return 0;
+			}
+
+			VarDef *vd = new VarDef( AttrName, Tok, TokLen, cd->GetTagVal() );
+			cd->Var.AddTail( (Family*)vd );
+
+			nods = 1;
+
+			StartCopy();
+
+			goto next;
+		}
+
+		/* Method definition */
+		if( TokLen == 6 && !strncmp( Tok, "Method", 6 ) ) {
+			StopCopy();
+
+			GetToken();
+			if( !TokLen ) return 0;
+
+			if( TokType != ALN ) {
+				Error( 4 );
+				return 0;
+			}			
+
+			MethodDef *md;
+			md = new MethodDef( Tok, TokLen );
+
+			md->virt = virt;
+
+			short CLevel = CBracket;
+			
+			GetToken();
+			if( !TokLen ) return 0;
+			
+			if( !chcmp( '(' ) ) {
+				Error( 5 );
+				return 0;
+			}
+			
+			while( 1 ) {
+
+				GetToken();
+				if( !TokLen ) return 0;
+				
+				if( chcmp( ')' ) && CBracket == CLevel ) break;
+		
+			}
+
+			GetToken();
+			if( !TokLen ) return 0;
+			
+			if( !chcmp( ';' ) ) {
+				Error( 3 );
+				return 0;
+			}
+			
+			cd->AddTail( (Family*)md );
+			
+			StartCopy();
+		} else {
+		/* Attribute definition */
+		if( TokLen == 9 && !strncmp( "Attribute", Tok, 9 ) ) {
+			StopCopy();
+
+			GetToken();
+			if( !TokLen ) return 0;
+
+			if( TokType != ALN ) {
+				Error( 4 );
+				return 0;
+			}			
+
+			GetToken();
+			if( !TokLen ) return 0;
+
+			VarDef *vd1;
+
+			if( chcmp( ':' ) ) {
+
+				char AttrName[30];
+				strcpy( AttrName, PrevTok );
+
+				GetToken();
+				if( !TokLen ) return 0;
+
+				if( TokType != ALN || TokLen > 3 ) {
+					Error( 9 );
+					return 0;
+				}
+
+				vd1 = new VarDef( AttrName, Tok, TokLen, cd->GetTagVal(), 0 );
+
+				vd1->virt = virt;
+
+				GetToken();
+				if( !TokLen ) return 0;
+
+			} else {
+				vd1 = new VarDef( PrevTok, "S", 1, cd->GetTagVal(), 0 );
+			}
+
+			cd->Var.AddTail( (Family*)vd1 );
+			
+			if( !chcmp( ';' ) ) {
+				Error( 3 );
+				return 0;
+			}
+			
+			StartCopy();
+
+		}
+		}
+
+		/* Virtual methods/attributes */
+		if( TokLen == 7 && !strncmp( "virtual", Tok, 7 ) ) {
+			StopCopy();
+			StartCopy();
+			virt = 1;
+			goto next;
+		}
+		virt = 0;
+
+		/* crcont */
+		if( crcont == 3 ) {
+			if( chcmp( ';' ) ) crcont = 0;
+			else {
+				if( chcmp( ',' ) ) crcont = 1;
+				else {
+					printf( "%s\n", Tok );
+					Error( 16 );
+					return 0;
+				}
+			}
+		}
+
+	}
+
+	StopCopy();
+
+	GetToken();
+	if( !TokLen ) return 0;
+		
+	if( TokLen != 1 || *Tok != ';' ) {	
+		Error( 3 );
+		return 0;
+	}
+	
+	fprintf( ofh, "} %sData;\n\n/* Method Tags */\n", sfname );
+	
+	FScan( MethodDef, child, cd ) {
+		fprintf( ofh, "#define %sM_%s_%s 0x%lx\n", cd->type, cd->Name, child->Name, child->GetTagVal() );
+	}
+
+	fprintf( ofh, "\n" );
+
+	FScan( VarDef, child1, &(cd->Var) ) {
+		fprintf( ofh, "#define %sA_%s_%s 0x%lx\n", cd->type, cd->Name, child1->Name, child1->GetTagVal() );
+	}
+
+	switch( *cd->type ) {
+		case 'B':
+			fprintf( ofh, "\nextern struct IClass *cl_%s;\n#define %sObject NewObject( cl_%s, NULL\n", cd->Name, cd->Name, cd->Name );
+			fprintf( ofh, "struct IClass *%s_Create( void );\n", cd->Name );
+			break;
+		default:
+			fprintf( ofh, "\nextern struct MUI_CustomClass *cl_%s;\n#define %sObject NewObject( cl_%s->mcc_Class, NULL\n", cd->Name, cd->Name, cd->Name );
+			fprintf( ofh, "struct MUI_CustomClass *%s_Create( void );\n", cd->Name );
+
+	}
+
+	StartCopy();
+		
+  	return 1;
+	
+}

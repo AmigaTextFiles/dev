@@ -1,0 +1,90 @@
+#ifndef _SOCKET_AMITCP_H
+#define _SOCKET_AMITCP_H
+//--------------------------------------------------------------------------//
+#define AMITCP_BASE_NAME SocketBase
+#include "inline/amitcp.h"
+//--------------------------------------------------------------------------//
+#define socket                 Socket
+#define bind                   Bind
+#define listen                 Listen
+#define accept                 Accept
+#define connect                Connect
+#define send                   Send
+#define sendto                 SendTo
+#define sendmsg                SendMsg
+#define recv                   Recv
+#define recvfrom               RecvFrom
+#define recvmsg                RecvMsg
+#define select                 Select
+#define shutdown               ShutDown
+#define setsockopt             SetSockOpt
+#define getsockopt             GetSockOpt
+#define getsockname            GetSockName
+#define getpeername            GetPeerName
+#define inet_addr              Inet_Addr
+#define inet_network           Inet_Network
+#define inet_ntoa              Inet_NtoA
+#define gethostbyname          GetHostByName
+#define gethostbyaddr          GetHostByAddr
+#define getnetbyname           GetNetByName
+#define getnetbyaddr           GetNetByAddr
+#define getservbyname          GetServByName
+#define getservbyport          GetServByPort
+#define getprotobyname         GetProtoByName
+#define getprotobynumber       GetProtoByNumber
+#define getdtablesize          GetDTableSize
+#define gethostname            GetHostName
+#define gethostid              GetHostId
+#define vsyslog                SyslogA
+#define syslog                 Syslog
+//--------------------------------------------------------------------------//
+#define Accept                 TCP_Accept
+#define Bind                   TCP_Bind
+#define CloseSocket            TCP_CloseSocket
+#define Connect                TCP_Connect
+#define Dup2Socket             TCP_Dup2Socket
+#define Errno                  TCP_Errno
+#define GetDTableSize          TCP_GetDTableSize
+#define GetHostByAddr          TCP_GetHostByAddr
+#define GetHostByName          TCP_GetHostByName
+#define GetHostId              TCP_GetHostId
+#define GetHostName            TCP_GetHostName
+#define GetNetByAddr           TCP_GetNetByAddr
+#define GetNetByName           TCP_GetNetByName
+#define GetPeerName            TCP_GetPeerName
+#define GetProtoByName         TCP_GetProtoByName
+#define GetProtoByNumber       TCP_GetProtoByNumber
+#define GetServByName          TCP_GetServByName
+#define GetServByPort          TCP_GetServByPort
+#define GetSockName            TCP_GetSockName
+#define GetSockOpt             TCP_GetSockOpt
+#define GetSocketEvents        TCP_GetSocketEvents
+#define Inet_Addr              TCP_Inet_Addr
+#define Inet_LnaOf             TCP_Inet_LnaOf
+#define Inet_MakeAddr          TCP_Inet_MakeAddr
+#define Inet_NetOf             TCP_Inet_NetOf
+#define Inet_Network           TCP_Inet_Network
+#define Inet_NtoA(x)           TCP_Inet_NtoA((x).s_addr)
+#define IoctlSocket            TCP_IoctlSocket
+#define Listen                 TCP_Listen
+#define ObtainSocket           TCP_ObtainSocket
+#define Recv                   TCP_Recv
+#define RecvFrom               TCP_RecvFrom
+#define RecvMsg                TCP_RecvMsg
+#define ReleaseCopyOfSocket    TCP_ReleaseCopyOfSocket
+#define ReleaseSocket          TCP_ReleaseSocket
+#define Send                   TCP_Send
+#define SendMsg                TCP_SendMsg
+#define SendTo                 TCP_SendTo
+#define SetErrnoPtr            TCP_SetErrnoPtr
+#define SetSockOpt             TCP_SetSockOpt
+#define SetSocketSignals       TCP_SetSocketSignals
+#define ShutDown               TCP_ShutDown
+#define Socket                 TCP_Socket
+#define SocketBaseTagList      TCP_SocketBaseTagList
+#define SocketBaseTags         TCP_SocketBaseTags
+#define SyslogA                TCP_SyslogA
+#define WaitSelect             TCP_WaitSelect
+#define Select(n,r,w,e,t)      TCP_WaitSelect(n,r,w,e,t,0)
+//--------------------------------------------------------------------------//
+#endif

@@ -1,0 +1,594 @@
+;
+; Collision Course Alpha
+;
+
+;Dc.b "$VER CCA 23/08/98 matthew@underused.u-net.com"
+
+NoCli
+WBStartup
+
+WbToScreen 0
+
+Gosub enoughmem
+
+DEFTYPE.Screen wbscrdata ; get wb info
+ok.b = GetScreenData_(&wbscrdata, SizeOf.Screen, #WBENCHSCREEN, 0)
+
+#BK_NAMES = 100 ;Background Name buffering
+Dim bk_files.s(#BK_NAMES)
+
+INCLUDE "league.bbh"
+
+info$ = "Just avoid the stuff for as long as you can."
+game$ = "Compiled 23/08/98|By Matthew Daniels|matthew@underused.u-net.com"
+
+#COMPILE = 1
+
+Dim done.b(#_DOLEN)
+
+For a.b = 0 To #_DOLEN
+    done(a) = False
+Next
+
+
+MaxLen path$=192       ; filerequest buffer
+MaxLen name$=192
+
+suc.l = GetIconObject("CCA")
+If suc = 0
+    ok.b = Request("CCA", "Unable to Check icon for Tooltypes|I`m going to Abort|Sorry :-(" , "Enough!")
+    ok.b = Request("CCA", "hint: Is cca.info in this directory", "I Said ENOUGH|oops")
+    End
+EndIf
+
+Select FindToolValue("LEVEL")
+    Case "HARD"
+        level.b = 1
+    Case "EASY"
+        level.b = 2
+    Default
+        level.b = 0         ; default level normal
+End Select
+
+last_level.b = -1   ; no last level(force reset)
+show_level.b = level; used by showscore
+
+Select FindToolValue("INPUT")
+    Case "JOY1"
+        plinp.b = 0
+    Case "KEYB"
+        plinp.b = -1
+    Default
+        plinp.b = 1 ;second joyport (0 mouse) (-1 keys)
+End Select
+
+PlyrNm$ = FindToolValue("ME")
+
+If PlyrNm$ = "" Then PlyrNm$ = "Nameless"
+
+If FindToolValue("NAMEREQ") = "0"
+    NmReq.b = False
+Else
+    NmReq.b = True
+EndIf
+
+path$ = "backs"
+
+back.s = ""            ; no back as default
+
+#CONTROL=7
+#LEVEL=6
+#RNDIMG=5
+#GETIMG=4
+#QUIT=2
+#BEGIN=3
+#IMG=1
+
+#wb=0
+#w0=1
+#wscr = 2
+#wnm  = 3
+
+#MOUSEMOVE=$10
+#INTUITICKS=$400000
+
+
+Gosub addevents     ;enable intuiticks and mousemoves events
+Gosub setupui       ;open user interface window
+Redraw #w0
+ShowScreen 0        ; setup screen
+Activate #w0
+
+Gosub randimg
+
+Repeat
+.main
+  ev.l=WaitEvent
+  If ev = $40 Then Gosub gadgevent
+  If ev = $100 Then Gosub menuevent
+Until ev=$200  ;close prog
+
+;ClrErr
+;SetErr | End SetErr
+End
+
+
+;*******************************************************************************************************************************
+.gadgevent
+
+
+    If EventWindow<>#w0 Then Return
+
+    ;Gadgets
+
+    gh.l = GadgetHit
+    If gh=#QUIT Then ev=$200
+
+    If gh=#BEGIN
+        Gosub startbit
+
+
+    EndIf
+
+    If gh=#RNDIMG
+        Gosub randimg
+    EndIf
+
+    If gh=#GETIMG OR gh=#IMG Then Gosub userimage1
+
+    If gh=#LEVEL
+        Select EventCode
+            Case 2
+                ;ok.b = Request("CCA","EASY","OK")
+                level = 2
+            Case 0
+                ;ok.b = Request("CCA","NORM","OK")
+                level = 0
+            Case 1
+                ;ok.b = Request("CCA","hard","OK")
+                level = 1
+        End Select
+    EndIf
+
+    If gh=#CONTROL
+        Select EventCode
+            Case 2
+                plinp = 0
+            Case 0
+                plinp = 1
+            Case 1
+                plinp = -1
+        End Select
+        ;ok.b = Request("cca", Str$(plinp), "Poo")
+    EndIf
+Return
+
+;*******************************************************************************************************************************
+.menuevent
+
+    Select MenuHit
+        Case 0
+            Select ItemHit
+                Case 0
+                    Gosub lock
+                    ok.b = Request("About CCA",info$ + "|" + game$,"OK")
+                    Gosub unlock
+                Case 1
+                    ev = $200
+                Case 2
+                    Gosub startbit
+            End Select
+        Case 1
+            Select ItemHit
+                Case 0
+                    Gosub lock
+                    show_level.b = 2
+                    Gosub showscore
+                    Gosub unlock
+                Case 1
+                    Gosub lock
+                    show_level.b = 0
+                    Gosub showscore
+                    Gosub unlock
+                Case 2
+                    Gosub lock
+                    show_level.b = 1
+                    Gosub showscore
+                    Gosub unlock
+                Case 3
+                    Gosub lock
+                    ok.b = Request("CCA Wipe Scores","Clear all high scores|Are you sure?","yes|no")
+                    If ok.b = 1 Then Gosub genscore
+                    Gosub unlock
+            End Select
+    End Select
+
+Return
+
+;*******************************************************************************************************************************
+.addevents:
+    AddIDCMP #MOUSEMOVE+#INTUITICKS
+Return
+
+;*******************************************************************************************************************************
+.lock
+    locknuma.l = RTLockWindow(#w0)
+;    locknumb.l = RTLockWindow(#wb)
+Return
+
+;*******************************************************************************************************************************
+.unlock
+    RTUnlockWindow #w0,locknuma
+;    RTUnlockWindow #wb,locknumb
+Return
+
+;*******************************************************************************************************************************
+.userimage1
+    If gh=#GETIMG
+        p$ = ASLFileRequest$("Select an iff/ilbm backdrop",path$,name$)
+    Else
+        p$ = GTGetString(#w0,#IMG)
+    EndIf
+
+    If ReadFile(0,p$) = True
+        If Lof(0) > 16
+            FileInput 0
+            pic$ = Inkey$(8)
+            pic$ = Inkey$(4)
+            If pic$ = "ILBM"
+                ILBMInfo p$
+                If (ILBMDepth < 5) AND (ILBMWidth <= 700) AND (ILBMHeight <= 288)
+                    back.s = p$
+                    image_set.b = True
+                    GTSetString #w0,#IMG,p$
+                Else
+                    GTSetString #w0,#IMG,"!incorrect size!"
+                End If
+            Else
+                GTSetString #w0,#IMG,"!not an ilbm?"
+            End If
+        Else
+            GTSetString #w0,#IMG,"!file no good!"
+        End If
+    Else
+        GTSetString #w0,#IMG,"!can't open file!"
+    End If
+
+    DefaultInput
+    CloseFile 0
+Return
+
+;*******************************************************************************************************************************
+.enoughmem
+
+;    If  ((AvailMem_(2) < 200000) AND (AvailMem_(4) < 100000) OR AvailMem_(0) < 300000)
+      ;                  !min chip                   !min fast                  !min total(if all chip)
+ ;     ; ooer not enough memory ! do something !
+ ;   ok.b = Request("Collision Course Alpha", "You Do not have enough free memory|Please Free some memory and try again", "<Ok>"
+ ;      End ;-))
+;    EndIf
+Return
+
+;*******************************************************************************************************************************
+.setupui:
+
+    MenuTitle 0,0,">---CCA---<"
+    MenuItem 0,0,0,0,"About        ","?"
+    MenuItem 0,0,0,1,"Quit         ","Q"
+    MenuItem 0,0,0,2,"Play         ","P"
+
+    MenuTitle 0,1,"High Scores"
+    MenuItem 0,0,1,0,"View Easy Table           ","e"
+    MenuItem 0,0,1,1,"View Normal Table         ","n"
+    MenuItem 0,0,1,2,"View Hard Table           ","h"
+    MenuItem 0,0,1,3,"Clear Table               ","X"
+
+;    ShowScreen 1
+;    Screen 0,0,0,640,256,6,-32768,"Collision Course Alpha",0,1
+;    ShowScreen 1
+;    Window #wb,0,11,640,245,$800|$100,"",1,2
+;    SetMenu 0
+ 
+
+;LoadFont 1, "FuturaB.font", 12
+;Use IntuiFont 1
+
+    GTButton #w0,#QUIT,90,6,80,12,"Quit",16
+    GTButton #w0,#BEGIN,5,6,80,12,"Play",16
+    Select plinp.b
+        Case 1: count.w = 0
+        Case -1: count.w = 1
+        Case 0: count.w = 2
+    End Select
+    GTCycle  #w0,#CONTROL,240 ,6, 60, 12,"Control", 1, "Joy2|Keys|Joy1", count.w
+    GTButton #w0,#RNDIMG,5,26,160,12,"Random Background",16
+    GTCycle  #w0,#LEVEL,225,26,80,12,"Level",1,"Normal|Hard|Easy", level.b
+    GTString #w0,#IMG,5,46,250,12,"",16,192,"backs/"
+    GTButton #w0,#GETIMG,255,46,50,12,"<GET",16
+
+;    Window #w0,20,20,320,80,$2|$4|$8,"config",1,2
+    DEFTYPE.l iflg,wflg
+    Dim zoomsize.w(4)
+    Dim winTag.TagItem(16)      ; see libincs:utility/tagitem.bb2
+
+
+    ;myMList = 0
+
+    ileft   = 1
+    itop    = wbscrdata\BarHeight +2
+    iwidth  = 250
+    iheight = wbscrdata\BarHeight + 1
+
+    zoomsize(0) = ileft          ; Left   - of zoomed window
+    zoomsize(1) = itop           ; Top
+    zoomsize(2) = iwidth         ; Width  - min width of system gadgets
+    zoomsize(3) = iheight        ; Height - min height 10
+
+    iflg = #IDCMP_NEWSIZE|#IDCMP_REFRESHWINDOW
+    iflg = iflg|#IDCMP_MENUPICK|#IDCMP_IDCMPUPDATE
+    iflg = iflg|#IDCMP_GADGETDOWN|#IDCMP_GADGETUP|#IDCMP_CLOSEWINDOW
+    iflg = iflg|#IDCMP_ACTIVEWINDOW|#IDCMP_CHANGEWINDOW
+    iflg = iflg|#IDCMP_RAWKEY
+
+    wflg = #WFLG_DRAGBAR|#WFLG_DEPTHGADGET|#WFLG_CLOSEGADGET
+    wflg = wflg|#WFLG_ACTIVATE|#WFLG_NW_EXTENDED
+    wflg = wflg|#WFLG_SMART_REFRESH|#WFLG_NEWLOOKMENUS
+
+    winTag(0)\ti_Tag  = #WA_Left,50       ; wleft, wtop etc, are
+    winTag(1)\ti_Tag  = #WA_Top,100
+    winTag(2)\ti_Tag  = #WA_Width,320     ;    all deftype.w
+    winTag(3)\ti_Tag  = #WA_Height,65 + wbscrdata\BarHeight;
+    winTag(4)\ti_Tag  = #WA_IDCMP,iflg
+    winTag(5)\ti_Tag  = #WA_Flags,wflg
+    winTag(6)\ti_Tag  = #WA_AutoAdjust,True
+    winTag(7)\ti_Tag  = #WA_Zoom,&zoomsize(0)
+    winTag(8)\ti_Tag  = #TAG_DONE,0
+
+    DefaultIDCMP iflg
+    WindowTags #w0,wflg,"Collision Course Alpha",&winTag(0)
+    Use Window #w0
+
+    ;GTSetMenu myMList
+
+    SetMenu 0
+
+    AttachGTList #w0,#w0
+
+
+
+Return
+
+;*******************************************************************************************************************************
+.showscore
+
+    If done(#_LOADSCR) = False
+        Gosub readscore
+        done(#_LOADSCR) = True
+    EndIf
+    For cnt.b = 1 To 5
+      ;  GTBevelBox #wscr,10 ,25 * cnt - 10,300,20, 1
+        GTText #wscr, cnt, 12 , 25 * cnt - 9, 286, 16, "", 1, ""
+      ;  GTBevelBox #wscr,318 ,25 * cnt - 10,52,20, 1
+        GTNumber #wscr, cnt + 5, 320, 25  * cnt - 9, 50, 16, "", 1, 0
+    Next
+
+    Select show_level
+        Case 0
+            the$ = ":- Normal"
+        Case 1
+            the$ = ":- Hard  "
+        Case 2
+            the$ = ":- Easy  "
+    End Select
+
+    Window #wscr,80,40,390,wbscrdata\BarHeight +140,$2|$4|$8,"CCA high scores" + the$,1,2
+    AttachGTList #wscr, #wscr
+
+    Activate #wscr
+
+    the$ = ""
+
+    For may.b = 0 To 4
+        _arrtostr{&table(show_level,may)\name, 18}
+
+        GTSetString #wscr, may + 1, the$
+        GTSetInteger #wscr, may + 6, table(show_level,may)\level
+    Next
+
+    Repeat
+        evb.l=WaitEvent
+
+    ;  If ev = $40 Then Gosub gadgevent
+    ;  If ev = $100 Then Gosub menuevent
+    Until evb=$200  ;close prog
+
+    Activate #w0
+    Free Window #wscr
+    Free GTList #wscr
+
+Return
+
+;*******************************************************************************************************************************
+.entername
+
+    If NmReq = True
+
+        GTText #wnm, 0, 5, 6, 215, 12, "", 1, "Enter Your Name"
+        GTString #wnm, 1, 5, 26, 165, 12, "", 16, 19, PlyrNm$
+        GTButton #wnm, 2 , 170, 26, 50, 12, "<Ok", 16
+
+
+        Window #wnm,80,40,235,wbscrdata\BarHeight +45,$2|$4,"CCA enter name",1,2
+        AttachGTList #wnm,#wnm
+
+        Activate #wnm
+
+
+        Repeat
+            evc.l = WaitEvent
+            If evc = $40 AND EventWindow = #wnm
+
+                If GadgetHit = 2 Then evc = $200
+            EndIf
+        Until evc=$200
+
+        the$ = GTGetString(#wnm, 1)
+
+
+        Activate #w0
+        Free Window #wnm
+        Free GTList #wnm
+
+    Else
+        the$ = PlyrNm$
+
+    EndIf
+
+    _strtoarr{&the$, &table(level,cnt)\name}
+
+
+Return
+
+
+;*******************************************************************************************************************************
+
+;;;;;CCA High Score Table - Regen
+
+.genscore
+    fake$ = "Sonic Youth"
+    For r.w = 0 To 2            ; fill table
+        For t.w = 0 To 4
+
+            table(r,t)\level = 100 - ( t * 20 )
+
+            _strtoarr{&fake$ , &table(r,t)\name}
+
+        Next
+    Next
+
+    Gosub writescore
+Return
+
+;*******************************************************************************************************************************
+
+.readscore
+
+    If ReadFile(#SCR_FILE,scr_file$) = True
+        ReadMem #SCR_FILE, &table(0,0)\level, #LOF_SCR
+        CloseFile #SCR_FILE
+    Else
+        Gosub genscore
+        If ReadFile(#SCR_FILE,scr_file$) = True
+            ReadMem #SCR_FILE, &table(0,0)\level, #LOF_SCR
+            CloseFile #SCR_FILE
+        Else
+            ok.b = Request("CCA error", "Unable to Allocate High Score file|" + scr_file$,"See you Later")
+            End
+        EndIf
+
+    EndIf
+
+Return
+;*******************************************************************************************************************************
+.writescore
+
+    If Exists(scr_file$) Then KillFile scr_file$
+
+    If WriteFile(#SCR_FILE,scr_file$) = False
+        ok.b = Request("CCA error", "Unable to Allocate High Score file|" + scr_file$,"See you Later")
+        End
+    Else
+        WriteMem #SCR_FILE, &table(0,0)\level, #LOF_SCR
+        CloseFile #SCR_FILE
+    EndIf
+Return
+
+;*******************************************************************************************************************************
+.startbit
+    Gosub lock
+
+    If back.s <> lastback.s
+        done(#_BACKG) = False
+        done(#_LEVEL) = False
+    EndIf
+    If level.b <> last_level.b
+        done(#_LEVEL) = False
+        If level <> 2 Then done(#_SHPS) = False
+    EndIf
+    last_level.b = level.b
+
+    Gosub play
+    lastback.s = back
+
+    If done(#_LOADSCR) = False
+        Gosub readscore
+        done(#_LOADSCR) = True
+    EndIf
+
+    table(level, #SC_TABLEN)\level = high_score.l
+
+    cnt.b = 0
+    cnt.b = sortscr{level}
+    If cnt.b < 5
+        Gosub entername
+        Gosub writescore
+        show_level.b = level.b
+        Gosub showscore
+    EndIf
+
+    Gosub unlock
+
+Return
+
+;*******************************************************************************************************************************
+.randimg
+
+    Gosub lock
+    ;getfirst img
+    Gosub scandir
+    gh.l = #GETIMG + 1
+    GTSetString #w0, #IMG, "backs/" + bk_files.s(Rnd(num_bk_files.b))
+    Gosub userimage1
+    Gosub unlock
+
+Return
+
+;*******************************************************************************************************************************
+.scandir
+
+    num_bk_files.b = 0
+
+    scandir.l = Lock_("backs", #ACCESS_READ)
+    olddir.l  = CurrentDir_(scandir.l)
+
+    DEFTYPE .AnchorPath  anchor
+    succ.w = MatchFirst_("#?.ilbm", anchor)
+
+    While succ.w = 0
+
+        If anchor\ap_Info\fib_DirEntryType < 1 ;not interested in directories
+            _arrtostr{&anchor\ap_Info\fib_FileName, 30}
+            If(num_bk_files < #BK_NAMES)
+                bk_files(num_bk_files) = the$
+                num_bk_files = num_bk_files + 1
+            EndIf
+        EndIf
+
+        succ.w = MatchNext_(anchor)
+    Wend
+
+    MatchEnd_(anchor)
+    olddir.l = CurrentDir_(olddir.l) ;tidy up
+
+    If succ <> #ERROR_NO_MORE_ENTRIES; error, did not exit cleanly?
+       ; NPrint "Did not finish normally:" + Str$(suc)
+       ; End
+    EndIf
+
+Return
+
+;*******************************************************************************************************************************
+;*******************************************************************************************************************************
+
+End
+INCLUDE "game.bb2"

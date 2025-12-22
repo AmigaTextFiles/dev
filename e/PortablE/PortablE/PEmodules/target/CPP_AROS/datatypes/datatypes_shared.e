@@ -1,0 +1,2 @@
+OPT NATIVE
+NATIVE {ID_BODY}         CONST ID_BODY         = "BODY"

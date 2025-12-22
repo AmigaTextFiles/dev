@@ -1,0 +1,6 @@
+IMPLEMENTATION MODULE Dos ;
+
+IMPORT M2Lib ;
+
+BEGIN DosBase := M2Lib.OpenLib( DOSNAME , VERSION )
+END Dos.

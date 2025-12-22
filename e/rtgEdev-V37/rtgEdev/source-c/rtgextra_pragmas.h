@@ -1,0 +1,11 @@
+#pragma libcall RTGExtraBase OpenClient 1e 2109805
+#pragma libcall RTGExtraBase OpenServer 24 210804
+#pragma libcall RTGExtraBase CloseClient 2a 9802
+#pragma libcall RTGExtraBase CloseServer 30 9802
+#pragma libcall RTGExtraBase RunServer 36 0BA9805
+#pragma libcall RTGExtraBase RtgSend 3c 0BA9805
+#pragma libcall RTGExtraBase RtgRecv 42 0BA9805
+#pragma libcall RTGExtraBase RtgAccept 48 9802
+#pragma libcall RTGExtraBase RtgIoctl 4e A9803
+#pragma libcall RTGExtraBase GetUDPName 54 9802
+#pragma libcall RTGExtraBase RtgInAdr 5a 9802

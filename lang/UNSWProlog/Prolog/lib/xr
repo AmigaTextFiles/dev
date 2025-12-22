@@ -1,0 +1,438 @@
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+
+%	Cross reference generator for PROLOG programs
+%	R.A. Sammut, Department of Mathematics, ADFA
+%	Additions, D. Hume, DCS, UNSW.
+
+%	This version assumes PRINC_VARS is defined.
+
+%	Top level predicates
+%  if pre V4.2 prolog change member1 to member and maybe increase stack size
+
+
+xr(Files) :-
+%	print("variable principal functor clauses:"),
+%	print("they represent warnings, so probably ignore them \n"),
+	proc_input(Files),
+	repeat,
+	queries,
+	!.
+
+proc_input([F|Rest]):- for_each(X,[F | Rest], proc_input1(X)), !.
+proc_input(F):- proc_input1(F).
+
+proc_input1(File) :-
+	see(File),
+	repeat,
+	read(Clause),
+	proc_clause(Clause),
+	remember(Clause),
+	Clause = end_of_file,
+	close(File),!.
+
+queries :-
+	bagof(X, (used(X) , not(builtin(X))), Userc),
+	bagof(Y, defined(Y), Userd),
+	divide(Userc, Userd, Undef, Unused),
+	nodef(Undef),
+	nouse(Unused),
+	multcalldef,
+	print('  Now checking multiple definitions of common clauses'),
+	print('  among different files \n'),
+	cm,
+	print('\n now query data base for calls and paths \n'),
+	print(' calls(func) or calls(func / ar) list predicates which func calls'),
+	print(' calledby(func) or calledby(func / ar) list predicates which call func'),
+	print(' pcon(func1, func2) shows paths connecting func1 to func2'),
+	print(' pfrom(func) shows all paths emanating from func'),
+	print(' and pto(func) shows all paths ending at func \n'),
+	print(' when completed, type quit! <cr> to clear data base \n').
+
+calls(X / M) :- !, 
+	calls(X / M, Y),
+	print(X / M, '  calls  ', Y).
+calls(X) :-
+	calls(X / M, Y),
+	print(X / M, '  calls  ', Y). 
+
+calledby(X / M) :- !, 
+	called(X / M, Y),
+	print(X / M, '  is called by  ', Y).
+calledby(X) :-
+	called(X / M, Y),
+	print(X / M, '  is called by  ', Y).
+
+pcon(X, Y) :-
+	cpath(X, Y, L),
+	ppath(L).  
+pfrom(X) :- 
+	fpath(X, L),
+	ppath(L).
+pto(X) :- 
+	tpath(X, L),
+	ppath(L). 
+
+nodef([]) :- !.
+nodef(L) :-
+	print(' The following predicates are called but not defined :'),
+	print(' These may be facts which are asserted and retracted or'),
+	print('  predicates defined in other files'),
+	nl, 
+	plist(L).
+
+nouse([]) :- !.
+nouse(L) :- 
+	print(' The following predicates are defined but never used :'), 
+	print(' These may be predicates called from the  command line or'),
+	print('  predicates defined for the benefit of other files'),
+	nl, 
+      	plist(L).
+
+used(X) :-
+	called(X, [_, _|_]). 
+used(X) :-
+	called(X, [Y]),
+	X /= Y.
+
+quit :-
+	retractall(filepreds(_, _)),
+	retractall(calls(_, _)),
+	retractall(called(_, _)),
+	retractall(defined(_)).
+
+%	Clause processing
+
+proc_body(Caller, Body) :-
+	list_goals(Body, [], Goals),
+	seeing(File),
+	newfilepred(File, Caller),
+	update(calls, Caller, Goals),
+	update_all(Goals, Caller).
+
+list_goals((G1 -> G2), Oldlist, Newlist) :- !,
+	list_goals((G1 , G2), Oldlist, Newlist).
+list_goals((G1 ; G2), Oldlist, Newlist) :- !,
+	list_goals((G1 , G2), Oldlist, Newlist).
+list_goals((G1 | G2), Oldlist, Newlist) :- !,
+	list_goals((G1 , G2), Oldlist, Newlist).
+list_goals((! , G2), Oldlist, Newlist) :- !,
+	list_goals(G2, Oldlist, Newlist).
+list_goals((G1 , G2), Oldlist, Newlist) :- !,
+	list_goals(G1, Oldlist, L1),
+	list_goals(G2, L1, Newlist).
+list_goals(bagof(_, Body, _), Oldlist, Newlist) :- !,
+	list_goals(Body, [bagof / 3|Oldlist], Newlist).
+list_goals(setof(_, Body, _), Oldlist, Newlist) :- !,
+	list_goals(Body, [setof / 3|Oldlist], Newlist).
+list_goals(not(Body), Oldlist, Newlist) :- !,
+	list_goals(Body, [not / 1|Oldlist], Newlist).
+list_goals(!, Oldlist, Oldlist) :- !.
+list_goals(Goal, Oldlist, [Func|Oldlist]) :- 
+	proc_goal(Goal, Func).
+
+proc_c(op(Priority, Type, Name)) :- !,
+	opar(Type, Ar),
+	define(Name, Ar),
+	op(Priority, Type, Name).
+proc_c( import File ) :- !,
+	seeing(Old),
+	proc_input1(File),
+	see(Old).
+proc_c( load File ) :- !,
+	seeing(Old),
+	proc_input1(File),
+	see(Old).
+proc_c(Command) :-
+	proc_body('COMMAND', Command).
+
+proc_goal(assert(Term), assert / 1) :- !,
+	proc_clause(Term).
+proc_goal(asserta(Term), asserta / 1) :- !,
+	proc_clause(Term).
+proc_goal(assertz(Term), assertz / 1) :- !,
+	proc_clause(Term).
+proc_goal(Term, Func / Ar) :-
+	functor(Term, Func, Ar),
+	nonvarb(Func), !.
+proc_goal(Term, 'VAR' / Ar) :- 
+	functor(Term, _, Ar).
+%	spottedvar('VAR'  /Ar).
+
+proc_head(Head, Func / Ar) :-
+	functor(Head, Func, Ar),
+	nonvarb(Func), !,
+	define(Func, Ar).
+proc_head(Term, 'VAR' / Ar) :-
+	functor(Term, _, Ar),
+%	spottedvar('VAR'  /Ar),
+	define('VAR', Ar).
+
+proc_clause(end_of_file) :- !.
+proc_clause((Head :- Body)) :- !,
+	proc_head(Head, Hpred),
+	proc_body(Hpred, Body).
+proc_clause((:- Commands)) :- !,
+	proc_c(Commands).
+proc_clause((Commands !)) :- !,
+	proc_c(Commands).
+proc_clause((Question ?)) :- !,
+	proc_body('QUESTION', Question).
+proc_clause((?- Question)) :- !,
+	proc_body('QUESTION', Question).
+proc_clause(Fact) :- 
+	proc_head(Fact, _).
+
+%	Database modification
+
+define(Func, Ar) :-
+	defined(Func / Ar), !.
+define(Func, Ar) :- 
+	assertz(defined(Func / Ar)).
+
+insert(_, _, L, L) :- !.
+insert(Mode, Key, Old, New) :-
+	retract(Mode(Key, Old)),
+	assertz(Mode(Key, New)).
+
+newfilepred(File, Caller) :-
+	filepreds(File, Caller), !.
+newfilepred(File, Caller) :-
+	assertz(filepreds(File, Caller)).
+
+update(_, _, []) :- !.
+update(Mode, Key, Data) :-
+	Mode(Key, Oldlist),
+	!,
+	add(Data, Oldlist, Newlist),
+	insert(Mode, Key, Oldlist, Newlist).
+update(Mode, Key, Data) :-
+	add(Data, [], Newlist),
+	assertz(Mode(Key, Newlist)).
+
+update_all([], _) :- !.
+update_all([G1|Goals], Hpred) :-
+	update(called, G1, [Hpred]),
+	update_all(Goals, Hpred).
+
+%	CallPath predicates
+
+cpath(X / M, Y, L1, L) :-
+	calls(X / M, XL),
+	member(Y / N, XL),
+	reverse([Y / N|L1], L).
+cpath(X / M, Y, Path, L) :-
+	calls(X / M, L1),
+	member(Z / N, L1),
+	not(member1(Z / N, Path)),
+	cpath(Z / N, Y, [Z / N|Path], L).
+cpath(X, Y, L) :-
+	calls(X / _, _),
+	called(Y / _, _),
+	cpath(X / M, Y, [X / M], L).
+
+fpath(X / M, L1, L) :-
+	not(calls(X / M, _)), 
+	reverse(L1, L).
+fpath(X / M, L1, L) :-
+	calls(X / M, [X / M]),
+	reverse(L1, L).
+fpath(X / M, Path, L) :- 
+	calls(X / M, L1),
+	member(Y / N, L1),
+	not(member1(Y / N , Path)),
+	fpath(Y / N, [Y / N|Path], L).
+fpath(X, L) :-
+	calls(X / M, _),
+	fpath(X / M, [X / M], L).
+
+tpath(X / M, L, L) :-
+	not(called(X / M, _)). 
+tpath(X / M, L, L) :-
+	called(X / M, [X / M]).
+tpath(X / M, Path, L) :- 
+	called(X / M, L1),
+	member(Y / N, L1),
+	not(member1(Y / N , Path)),
+	tpath(Y / N, [Y / N|Path], L).
+tpath(X, L) :-
+	called(X / M, _),
+	tpath(X / M, [X / M], L). 
+
+ppath([X, Y]) :- !,
+	print(X, '  -->  ', Y).
+ppath([X|Y]) :-
+	prin(X, '  -->  '),
+	ppath(Y).
+
+%	List manipulation predicates
+
+add([], L, L) :- !.
+add([H|T], L1, L2) :-
+	member1(H, L1), !,
+	add(T, L1, L2).
+add([H|T], L1, L2) :- 
+	add(T, [H|L1], L2).
+
+divide(L1, L2, L1minL2, L2minL1) :-
+	diff(L1, L2, [], L1minL2),
+	diff(L2, L1, [], L2minL1).
+
+diff([], _, L, L) :- !.
+diff([H|T], L1, L2, L) :-
+	member1(H, L1), !,
+	diff(T, L1, L2, L).
+diff([H|T], L1, L2, L) :- 
+	diff(T, L1, [H|L2], L).
+
+member(X, [X|_]).
+member(X, [_|Y]) :- 
+	member(X, Y).
+
+reverse(L1, L2) :-
+	rev(L1, [], L2).
+rev([X|L], L2, L3) :-
+	rev(L, [X|L2], L3).
+rev([], L, L). 
+
+plist([]).
+plist([H|T]) :-
+	filepreds(F, H),
+	print('\t', H, ' in ',F),
+	plist(T).
+plist([H|T]) :-
+	print('\t', H),
+	plist(T).
+
+%	Arity of operator types
+
+opar(fx, 1).
+opar(fy, 1).
+opar(xf, 1).
+opar(yf, 1).
+opar(xfx, 2).
+opar(yfx, 2).
+opar(xfy, 2).
+
+%	"Built-in" predicates
+
+builtin(abort / 0).
+builtin(assert / 1).
+builtin(asserta / 1).
+builtin(assertz / 1).
+builtin(atom / 1).
+builtin(atomic / 1).
+builtin(bagof / 3).
+builtin(close / 1).
+builtin(cputime / 1).
+builtin(fail / 0).
+builtin(file / 2).
+builtin(functor / 3).
+builtin(halt / 0).
+builtin(infix /= / 2).
+builtin(infix = / 2).
+builtin(infix =.. / 2).
+builtin(infix < / 2).
+builtin(infix > / 2).
+builtin(infix >= / 2).
+builtin(infix <= / 2).
+builtin(infix == / 2).
+builtin(prefix pp / 1).
+builtin(prefix # / 1).
+builtin(tab / 1).
+builtin(told / 0).
+builtin(infix is / 2).
+builtin(integer / 1).
+builtin(length / 2).
+builtin(name / 2).
+builtin(nl / 0).
+builtin(nonvar / 1).
+builtin(not / 1).
+builtin(op / 3).
+builtin(prefix pp / 1).
+builtin(prefix trace / 1).
+builtin(prin / _2).
+builtin(print / _2).
+builtin(property / 1).
+builtin(read / _3).
+builtin(repeat / 0).
+builtin(retract / 1).
+builtin(retractall / 1).
+builtin(retractz / 1).
+builtin(see / 1).
+builtin(seen / 0).
+builtin(setof / 3).
+builtin(tell / 1).
+builtin(var / 1).
+
+nonvarb(X) :-
+	assert(tempo(X)),
+	retract(tempo(Y)),
+	Y /= arbitrary_atom_for_comparison.
+
+last_seen(_).
+
+remember(Clause) :-
+	retract(last_seen(_)),
+	assertz(last_seen((Clause))),
+	!.
+
+spottedvar(Name)  :-
+	last_seen(LastClause),
+	print('\t', Name," after ",LastClause),
+	!.
+
+multcalldef :-
+	print(' The following predicates are multiply defined when calling or called :'),
+	print(' This may be due to a functor explicitly using more than one arity'),
+	nl, 
+	bagof(X, (used(X / Y) , not(builtin(X / Y))), Call),
+	bagof(U, defined(U / V), Def),
+	add( Call,Def, NUCallDef),
+	unique_list(NUCallDef, CallDef),
+	member(Pred, CallDef),
+	bagof(Pred / A, used(Pred / A), Used),
+	bagof(Pred / B, defined(Pred / B), Calls),
+	add(Used, Calls, Preds),
+	length(Preds, Len),
+	Len > 1,
+	print('\t',Preds),
+	fail.
+multcalldef :-
+	!.
+
+unique_list([],[]) :- !.
+unique_list([A,..B],C) :-
+	member1(A,B),
+	unique_list(B,C), !.
+unique_list([A,..B],[A,..C]) :-
+	unique_list(B,C), !.
+
+for_each(X, L, Command):-
+	member(X, L),
+	Command,
+	fail.
+for_each(_, _, _).
+
+% ========= C M ========== 
+% checks multiple definitions of common clauses
+% among different files
+%
+
+cm:-
+	filepreds(F1,Pred),
+	filepreds(F2, Pred),
+	F1 /= F2,
+	not(checked(F2,F1, Pred)),
+	assertz(checked(F1,F2,Pred)),
+	print('\t',F1, " and ", F2, " have ", Pred, " in common"),
+	fail.
+cm.
+
+
+nl!
+print("  ========== X R  ============")!
+print("  a symbolic reference checker")!
+nl!
+print("You may need a large stack size perhaps 10000 per 1000 lines of prolog")!
+nl!
+print("Start linting with `xr(Filename)!` or `xr([FName1, FName2, ..FNames])`")!

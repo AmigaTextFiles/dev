@@ -1,0 +1,430 @@
+10    ' jpad  version 1.00   originally titled skpad
+11    '
+12    ' This program should give you an idea of the kinds of graphic 
+13    '  things you can do in ABASIC. Unfortunately this is not perfect
+14    '  but it is FREE. Yes it's FREE. Please circulate.
+15    ' 
+16    ' Feel free to modify this program and put it backup on Compuserve.
+17    ' 
+18    ' This program will not save and load picture files correctly please
+19    '  help me on this one. The disk menu is at 410 happy hacking.
+20    '
+21    ' jpad has no printer routine if you know how to do it please add it
+22    '
+23    'One other thing, this program eats memory! My amiga has the extra
+24    ' 256k and I need more.
+25    '
+26    'That brings up a couple of real problems.
+27    ' First cutting a full screen is not possible-memory constraints.
+28    ' Second don't try to use screen top/bottom icons you'll get
+29    '   an out of memory error.
+30    ' 
+31    ' Look for a lo-res version soon!
+32    '
+33    ' ******************************************************
+34    ' 
+35    'To use this program you need to point, click and sometimes drag.
+36    '
+37    'The choices from left to right on the screen are:
+38    ' 16 color bars (far left) 
+39    ' active color /color register window
+40    ' eraser/clear screen icon
+41    ' brush/pens and brushes window  icon
+42    ' rubber band line icon
+43    ' box outline icon
+44    ' filled box icon
+45    ' outline circle icon
+46    ' filled circle icon
+47    ' paint (roller) icon
+48    ' cut (scissors) icon
+49    ' paste (glue bottle) icon
+50    ' and couple of empties for further mods
+51    ' P / pattern window select icon
+52    ' M / main menu icon (not much there, yet)
+53    ' D / disk menu icon (buggy)
+54    ' undo/don't undo icon (looks a diamond)
+55    ' Q quit icon 
+56    '
+57    ' skpad by Rick Schaeffer
+58    ' and modified by Jack Russell [ 74706.2406 ]
+59    ' as of 11-16-85
+60    '
+61    ' THIS IS PUBLIC DOMAIN
+62    '
+63    scnclr:graphic(1):ask window s1%,s2%:if s1%<330 then screen 1,4,0
+64    dim undo%(16002):dim undid%(16002):dim za%(3):dim zb%(3):dim zc%(7)
+65    dim edit%(9702):dim checker%(1):dim tile%(7):dim crust%(7)
+66    dim zd%(1):dim ze%(3):dim zf%(7):dim zg%(3):dim zh%(3):dim zi%(7):dim zj%(7):dim zk%(7)
+67    za%(0)=34952:za%(1)=17476:za%(2)=8738:za%(3)=4369
+68    zb%(0)=4369:zb%(1)=8738:zb%(2)=17476:zb%(3)=34952
+69    zc%(0)=34952:zc%(1)=17476:zc%(2)=8738:zc%(3)=4369:zc%(4)=4369:zc%(5)=8738:zc%(6)=17476:zc%(7)=34952
+70    zd%(0)=34952:zd%(1)=34952:ze%(0)=39321:ze%(1)=52428:ze%(2)=26214:ze%(3)=13107
+71    zf%(0)=13107:zf%(1)=771:zf%(2)=64379:zf%(3)=64379:zf%(4)=771:zf%(5)=12336:zf%(6)=47031:zf%(7)=47031
+72    zg%(0)=0:zg%(1)=30583:zg%(2)=30583:zg%(3)=30583:zh%(0)=34952:zh%(1)=65535:zh%(2)=34952:zh%(3)=65535
+73    zi%(0)=0:zi%(1)=16383:zi%(2)=16383:zi%(3)=15363:zi%(4)=15363:zi%(5)=15363:zi%(6)=15363:zi%(7)=16383
+74    zj%(0)=4112:zj%(1)=10280:zj%(2)=21588:zj%(3)=43690:zj%(4)=21588:zj%(5)=10280:zj%(6)=4112:zj%(7)=0
+75    zk%(0)=30598:zk%(1)=39064:zk%(2)=63736:zk%(3)=63736:zk%(4)=30598:zk%(5)=35209:zk%(6)=36751:zk%(7)=36751
+76    checker%(0)=43690:checker%(1)=21845
+77    tile%(0)=65280:tile%(1)=65280:tile%(2)=65280:tile%(3)=65280
+78    tile%(4)=255:tile%(5)=255:tile%(6)=255:tile%(7)=255
+79    crust%(0)=3084:crust%(1)=16131:crust%(2)=65472:crust%(3)=16176
+80    crust%(4)=3084:crust%(5)=12351:crust%(6)=49407:crust%(7)=831
+81    ppa%=4:ppb%=2:ppo%=1:doit%=2:old%=2:pin%=1:pat%=1
+82    b%=bb%=bbn%=bl%=blm%=0
+83    ca=cr=cx%=cy%=g%=gn%=i=jump%=0
+84    r%=rn%=s1%=s2%=w4%=0
+85    x%=y%=x1%=y1%=x2%=y2%=0
+86    qx=0:z$=""
+87    pena ppa%:penb ppb%:peno ppo%
+88    pattern 0,tile%()
+89    paste%=1:dm%=1:drawmode dm%
+90    x1%=-1:y1%=-1
+91    ' set-up screen --------------------------------------
+92    gosub 231:gosub 269:gosub 271
+93    ' ================main================================
+94    ask mouse x%,y%,b%:if b%=4 then 94
+95    gosub 269
+96    ask mouse x%,y%,b%
+97    x1%=x%:y1%=y%
+98    if b%=0 then 96
+99    if y%<11 and b%=4 and x%<160 then 100 else 104
+100   ppa%=int(x%*.1)
+101   if ppa%<0 then ppa%=0
+102   gosub 275:outline 0:pattern 0,tile%():box(163,0;187,12),1:gosub 251:outline 1
+103   goto 96
+104   if y%>14 then 126
+105   if x%>163 and x%<187 then 277
+106   if x%>190 and x%<210 and b%=4 and doit%<>1 then doit%=1:goto 94
+107   if x%>190 and x%<210 and b%=4 and doit%=1 then outline 1:pattern 0,tile%():box(0,14;617,186),1:gosub 251:goto 95
+108   if x%>210 and x%<230 and b%=4 and doit%<>2 then doit%=2:goto 94 else if x%>210 and x%<230 and b%=4 then 312
+109   if x%>230 and x%<250 and b%=4 then doit%=3:goto 95
+110   if x%>250 and x%<270 and b%=4 then doit%=4:goto 95
+111   if x%>270 and x%<290 and b%=4 then doit%=5:goto 95
+112   if x%>290 and x%<310 and b%=4 then doit%=6:goto 95
+113   if x%>310 and x%<330 and b%=4 then doit%=7:goto 95
+114   if x%>330 and x%<350 and b%=4 then doit%=8:gosub 269:goto 96
+115   if x%>350 and x%<370 and b%=4 then doit%=9:goto 95
+116   if x%>370 and x%<390 and b%=4 then doit%=10:goto 95
+117   if x%>410  and x%<430 and b%=4 then ? at (320,100)fre:goto 96
+118   if x%>510 and x%<530 and b%=4 then 361
+119   if x%>530 and x%<550 and b%=4 then 394
+120   if x%>550 and x%<570 and b%=4 then 410
+121   if x%>570 and x%<590 and b%=4 and undo<>1 then gosub 127:undo=1:goto 96
+122   if x%>570 and x%<590 and b%=4 and undo=1 then gosub 128:undo=0:goto 96
+123   if x%>590 and x%<610 and b%=4 then 434
+124   if y%<14 then 96
+125   ' stash screen and go --------------------------------
+126   undo=0:sshape(0,0;640,200),undo%():goto 129
+127   sshape(0,0;640,200),undid%():gshape (0,0), undo%():gosub 267:return
+128   gshape(0,0),undid%():gosub 267:return
+129   on doit% gosub 157,131,164,177,188,192,207,190,209,226:goto 96
+130   ' use pen or brush  ----------------------------------
+131   outline 0:on pin% goto 132,133,134,135,136,137,138,139,140,141,142,143,144,147,152:return
+132   draw(x1%,y1% to x%,y%):x1%=x%:y1%=y%:goto 153
+133   area(x%,y% to x%+1,y% to x%+2,y%+1 to x%,y%+1 to x%,y%):goto 153
+134   area(x%,y% to x%+6,y% to x%+6,y%+4 to x%,y%+4 to x%,y%):goto 153
+135   area(x%,y% to x%+10,y% to x%+10,y%+6 to x%,y%+6 to x%,y%):goto 153
+136   area(x%,y% to x%+10,y% to x%+10,y%+1 to x%,y%+1 to x%,y%):goto 153
+137   area(x%,y% to x%+20,y% to x%+20,y%+1 to x%,y%+1 to x%,y%):goto 153
+138   area(x%,y% to x%+2,y% to x%+2,y%+5 to x%,y%+5 to x%,y%):goto 153
+139   area(x%,y% to x%+2,y% to x%+2,y%+10 to x%,y%+10 to x%,y%):goto 153
+140   area(x%,y% to x%+1,y% to x%-9,y%+5 to x%-10,y%+5 to x%,y%):goto 153
+141   area(x%,y% to x%+1,y% to x%-19,y%+10 to x%-20,y%+10 to x%,y%):goto 153
+142   area(x%,y% to x%+1,y% to x%+10,y%+5 to x%+9,y%+5 to x%,y%):goto 153
+143   area(x%,y% to x%+1,y% to x%+20,y%+10 to x%+19,y%+10 to x%,y%):goto 153
+144   area(x%,y% to x%+2,y% to x%+2,y%+1 to x%,y%+1 to x%,y%):area(x%,y%+6 to x%+2,y%+6 to x%+2,y%+7 to x%,y%+7 to x%,y%+6)
+145   area(x%-4,y%+3 to x%-2,y%+3 to x%-2,y%+4 to x%-4,y%+4 to x%-4,y%+3):area(x%+4,y%+3 to x%+6,y%+3 to x%+6,y%+4 to x%+4,y%+4 to x%+4,y%+3)
+146   if pin%<>15 then 153 else return
+147   area(x%,y% to x%+2,y% to x%+2,y%+1 to x%,y%+1 to x%,y%):area(x%+16,y% to x%+18,y% to x%+18,y%+1 to x%+16,y%+1 to x%+16,y%)
+148   area(x%+8,y%+5 to x%+10,y%+5 to x%+10,y%+6 to x%+8,y%+6 to x%+8,y%+5)
+149   area(x%,y%+10 to x%+2,y%+10 to x%+2,y%+11 to x%,y%+11 to x%,y%+10)
+150   area(x%+16,y%+10 to x%+18,y%+10 to x%+18,y%+11 to x%+16,y%+11 to x%+16,y%+10)
+151   if pin%<>15 then 153 else return
+152   gosub 147:x%=x%+8:y%=y%+2:gosub 144
+153   ask mouse x%,y%,b%:if y%<14 then y%=14
+154   if b%=4 then 131
+155   outline 1:return
+156   ' eraser ---------------------------------------------
+157   ask mouse x%,y%,b%:if b%=0 then 157
+158   pena 0:outline 0:pattern 0,tile%()
+159   if y%<14 then y%=14
+160   area(x%,y% to x%+3,y% to x%+3,y%+3 to x%,y%+3 to x%,y%)
+161   ask mouse x%,y%,b%:if b%=4 then 159
+162   pena ppa%:outline 1:return
+163   ' line   ---------------------------------------------
+164   ask mouse x%,y%,b%:if b%=0 then 164
+165   x2%=x%:y2%=y%
+166   x1%=x%:y1%=y%
+167   drawmode 2
+168   ask mouse x%,y%,b%:if y%<14 then y%=14
+169   if b%=0 then drawmode dm%:draw(x1%,y1% to x2%,y2%):return
+170   pena 0
+171   draw(x1%,y1% to x2%,y2%)
+172   pena ppa%
+173   draw(x1%,y1% to x%,y%)
+174   x2%=x%:y2%=y%
+175   goto 168
+176   ' box    ---------------------------------------------
+177   ask mouse x%,y%,b%:if b%=0 then 177
+178   x2%=x%:y2%=y%
+179   x1%=x%:y1%=y%
+180   drawmode 2
+181   ask mouse x%,y%,b%:if y%<14 then y%=14
+182   if b%=0 then drawmode dm%:peno ppa%:box(x1%,y1%;x2%,y2%):peno ppo%:return
+183   box(x1%,y1%;x2%,y2%)
+184   box(x1%,y1%;x%,y%)
+185   x2%=x%:y2%=y%
+186   goto 181
+187   ' filled box ----------------------------------------
+188   gosub 177:box(x1%,y1%;x2%,y2%),1:return
+189   ' paint      ----------------------------------------
+190   ask mouse x%,y%,b%:paint(x%,y%),1:return
+191   ' circle     ----------------------------------------
+192   ask mouse x%,y%,b%:if b%=0 then 192
+193   cx%=x%:cy%=y%
+194   x1%=x%:y1%=y%
+195   ca=0:cr=0
+196   drawmode 2
+197   ask mouse x%,y%,b%:if y%<14 then y%=14
+198   if x%>617 then x%=617
+199   if b%=0 then drawmode dm%:peno ppa%:circle(cx%,cy%),cr,ca:peno ppo%:return
+200   circle(cx%,cy%),cr,ca
+201   cx%=(x1%+x%)/2:cy%=(y1%+y%)/2
+202   cr=abs(x1%-x%)/2
+203   if abs(x1%-x%)=0 then ca=1 else ca=abs(y1%-y%)/abs(x1%-x%)
+204   circle(cx%,cy%),cr,ca
+205   goto 197
+206   ' filled circle -------------------------------------
+207   gosub 192:peno ppa%:paint(cx%,cy%),0:peno ppo%:return
+208   ' lift area into edit array -----------------------------
+209   ask mouse x%,y%,b%:if b%=0 then 209
+210   gosub 220:if st then 209
+211   ask mouse x2%,y2%,b%:if (x%=x2%) and (y%=y2%) then 209
+212   drawmode 2:box(x%,y%;x2%,y2%):box(x%,y%;x2%,y2%):drawmode 0
+213   if b%=4 then 211
+214   qx=abs((x%-x2%)+(y%-y2%))
+215   if qx>700 then 209
+216   box(x%,y%;x2%,y2%)
+217   if x2%>x% then x2%=x2%+1 else if x2%<x% then x2%=x2%-1
+218   if y2%>y% then y2%=y2%+1 else if y2%<y% then y2%=y2%-1
+219   sshape(x%,y%;x2%,y2%),edit%():gosub 127:return
+220   if (x%<0) or (y%<0) then st=-1:return
+221   if x%>620 then st=-1:return
+222   if y%>185 then st=-1:return
+223   st=0:return
+224   peno 1:box(0,14;617,186)
+225   ' ------------ place edited array -------------
+226   ask mouse x%,y%,b%:if b%=0 then 226
+227   if y%<14 then y%=14
+228   gshape(x%,y%),edit%()
+229   ask mouse x%,y%,b%:if b%=4 then 227 else return
+230   ' initial screen set-up ---------------------------------
+231   peno 1:box(0,14;617,186)
+232   for i=0 to 15:pena i:box(i*10,0;i*10+9,12),1:next i
+233   for i=19 to 58 step 2:box(i*10,0;i*10+19,10):next i
+234   pena 1:draw(193,5 to 200,2 to 205,4 to 198,7 to 193,5 to 193,7 to 198,9 to 205,6 to 205,4):draw(198,7 to 198,9)
+235   draw(213,8 to 213,4 to 217,4 to 217,2 to 222,2 to 222,4 to 226,4 to 226,8 to 212,8),1:draw(213,4 to 226,4),1:paint(219,3),1
+236   draw(217,6 to 217,8):draw(221,6 to 221,8)
+237   draw(233,2 to 246,8)
+238   box(255,3;265,7)
+239   box(275,3;285,7),1
+240   circle(300,5),3:circle(320,5),3:paint(320,5)
+241   circle(341,3),3,.5:draw(334,3 to 334,6 to 340,6):box(340,6;341,8)
+242   circle(356,8),1:circle(364,8),1:draw(356,6 to 362,4 to 363,1 to 364,5 to 357,7)
+243   draw(364,6 to 358,4 to 357,1 to 356,5 to 363,7)
+244   circle(380,7),3,.5:draw(378,5 to 378,2 to 381,1 to 382,2 to 382,5)
+245   draw(580,2 to 587,5 to 580,8 to 573,5 to 580,2):paint(574,3),1
+246   drawmode 0:pena 2:? at(516,8)"P";at(536,8)"M";at(556,8)"D";at(595,9)"Q";" ";
+247   peno ppo%:pena 0:box(0,0;10,12),1
+248   pena ppa%:outline 0:box(163,0;187,12),1:pattern 0,tile%():outline 1
+249   return
+250   ' function subroutines ------------------------------
+251   on pat% gosub 252,253,254,255,256,257,258,259,260,261,262,263,264,265,266:return
+252   pattern 0,tile%():return
+253   pattern 2,checker%():return
+254   pattern 8,tile%():return
+255   pattern 8,crust%():return
+256   pattern 4,za%():return
+257   pattern 4,zb%():return
+258   pattern 8,zc%():return
+259   pattern 2,zd%():return
+260   pattern 4,ze%():return
+261   pattern 8,zf%():return
+262   pattern 4,zg%():return
+263   pattern 4,zh%():return
+264   pattern 8,zi%():return
+265   pattern 8,zj%():return
+266   pattern 8,zk%():return
+267   draw(193,12 to 590,12),0
+268   ' tool icon update -----------------------------------
+269   draw(old%*20+175,12 to old%*20+185,12),0:old%=doit%:draw(doit%*20+175,12 to doit%*20+185,12),1:return
+270   ' ------------ clear and redraw pattern box ---------
+271   peno 1:pena 0:outline 1:pattern 0,tile%():box(510,0;530,10),1:pena 1:penb 0
+272   ' pattern in icon box update -------------------------
+273   gosub 251:paint(511,2),1:pena 2:drawmode 0:? at(516,8)"P";at(605,9)" ";
+274   ' update pen assignment -------------------
+275   drawmode dm%:pena ppa%:penb ppb%:peno ppo%:return
+276   ' ++++++++++++++++++++++++++++++++++++++++++++++++++++
+277   w4%=1:window #1,120,0,350,115,"Color registers":cmd #1
+278   bl%=0:blm%=0
+279   graphic (1):scnclr:peno ppo%:gosub 300:gosub 297:jump%=cp%
+280   ask mouse x%,y%,b%
+281   while w4%>0
+282   ask mouse x%,y%,b%
+283   while b%<>0 
+284   if x%>238 and x%<255 and y%>37 and y%<50 then ppa%=jump%:pena ppa%:box(238,37;255,50),1:goto 292
+285   if y%>0 and y%<35 then jump%=fix(x%/20):pena jump%:box(140,50;230,95),1:gosub 294:gosub 298:goto 292
+286   if x%>238 and x%<255 and y%>52 and y%<65 then ppb%=jump%:pena ppb%:box(238,52;255,65),1:pena ppa%:penb ppb%:goto 292
+287   if x%>238 and x%<255 and y%>67 and y%<80 then ppo%=jump%:peno ppa%:pena ppo%:box(238,67;255,80),1:pena ppa%:goto 292
+288   if x%>238 and x%<320 and y%>82 and y%<99 then w4%=0
+289   if y%>50 and y%<65 and x%<128 then gosub 294:r%=fix(x%/8):gosub 295:gosub 296:gosub 297:goto 292
+290   if y%>65 and y%<80 and x%<128 then gosub 294:g%=fix(x%/8):gosub 295:gosub 296:gosub 297:goto 292
+291   if y%>80 and y%<95 and x%<128 then gosub 294:bb%=fix(x%/8):gosub 295:gosub 296:gosub 297:goto 292
+292   ask mouse x%,y%,b%:wend:wend:if b%<>0 then 293 else 280
+293   close #1:cmd 0:penb ppb%:goto 102
+294   rn%=r%:gn%=g%:bbn%=bb%:if y%<35 then ask rgb jump%,r%,g%,bb%:goto 296 else return
+295   rgb jump%,r%,g%,bb%:return
+296   peno 0:circle(rn%*8+4,58),2:circle(gn%*8+4,73),2:circle(bbn%*8+4,88),2:return
+297   cp%=pixel(145,75):ask rgb cp%,r%,g%,bb%
+298   peno ppo%:circle(r%*8+4,58),2:circle(g%*8+4,73),2:circle(bb%*8+4,88),2:return
+299   ' color reg initial screen set-up --------------------
+300   for i=0 to 15:pena i:box(i*20,0;i*20+19,35),1:next i
+301   box(238,37;255,50):box(238,52;255,65):box(238,67;255,80):box(238,82;320,99)
+302   box(140,50;230,95)
+303   draw(0,65 to 128,65),ppo%
+304   draw(0,80 to 128,80),ppo%
+305   box(0,50;128,95)
+306   pena ppa%:paint(240,45):pena ppb%:paint(240,60):pena ppo%:paint(240,75):pena ppa%
+307   ? at(130,60)"R";at(130,75)"G";at(130,90)"B";at(260,46)"PEN A";at(260,61)"PEN B";at(260,76)"PEN O"
+308   ? at(258,93)"CLOSE"
+309   ? at(0,48)"0....5....10...15"
+310   blm%=blm%+8:draw(blm%,50 to blm%,95),1:if blm%<128 then 310 else return
+311   ' ++++++++++++++++++++++++++++++++++++++++++++++++++++
+312   window #2,50,0,530,50,"PENS & BRUSHES":graphic(1)
+313   cmd #2:peno ppo%:pena ppo%
+314   for i=0 to 14:box(i*30,9;i*30+30,25):next i
+315   box(453,9;505,25)
+316   ? at(458,21)"CLOSE"
+317   draw(8,19 to 22,12 to 27,13 to 11,21),1:area(8,19 to 11,21 to 4,23 to 8,19)
+318   outline 0
+319   area(43,16 to 47,16 to 47,18 to 43,18 to 43,16)
+320   area(72,15 to 78,15 to 78,19 to 72,19 to 72,15)
+321   area(100,14 to 110,14 to 110,20 to 100,20 to 100,14)
+322   area(130,16 to 140,16 to 140,17 to 130,17 to 130,16)
+323   area(155,16 to 175,16 to 175,17 to 155,17 to 155,16)
+324   area(193,15 to 195,15 to 195,20 to 193,20 to 193,15)
+325   area(223,12 to 225,12 to 225,22 to 223,22 to 223,12)
+326   area(259,15 to 260,15 to 250,20 to 249,20 to 259,15)
+327   area(294,12 to 295,12 to 275,22 to 274,22 to 294,12)
+328   area(308,15 to 310,15 to 320,20 to 318,20 to 308,15)
+329   area(334,12 to 336,12 to 356,22 to 354,22 to 334,12)
+330   area(374,13 to 376,13 to 376,14 to 374,14 to 374,13):area(374,19 to 376,19 to 376,20 to 374,20 to 374,19)
+331   area(378,16 to 380,16 to 380,17 to 378,17 to 378,16):area(370,16 to 372,16 to 372,17 to 370,17 to 370,16)
+332   area(396,11 to 398,11 to 398,12 to 396,12 to 396,11):area(412,11 to 414,11 to 414,12 to 412,12 to 412,11)
+333   area(396,21 to 398,21 to 398,22 to 396,22 to 396,21):area(412,21 to 414,21 to 414,22 to 412,22 to 412,21)
+334   area(404,16 to 406,16 to 406,17 to 404,17 to 404,16)
+335   area(434,13 to 436,13 to 436,14 to 434,14 to 434,13):area(434,19 to 436,19 to 436,20 to 434,20 to 434,19)
+336   area(430,16 to 432,16 to 432,17 to 430,17 to 430,16):area(438,16 to 440,16 to 440,17 to 438,17 to 438,16)
+337   area(426,11 to 428,11 to 428,12 to 426,12 to 426,11):area(442,11 to 444,11 to 444,12 to 442,12 to 442,11)
+338   area(426,21 to 428,21 to 428,22 to 426,22 to 426,21):area(442,21 to 444,21 to 444,22 to 442,22 to 442,21)
+339   draw(pin%*30-25,27 to pin%*30-5,27),1
+340   ask mouse x%,y%,b%:if b%=0 then 340
+341   if y%<10 or y%>25 then 340
+342   if x%>0 and x%<30 and b%=4 then pin%=1:goto 359
+343   if x%>30 and x%<60 and b%=4 then pin%=2:goto 359
+344   if x%>60 and x%<90 and b%=4 then pin%=3:goto 359
+345   if x%>90 and x%<120 and b%=4 then pin%=4:goto 359
+346   if x%>120 and x%<150 and b%=4 then pin%=5:goto 359
+347   if x%>150 and x%<180 and b%=4 then pin%=6:goto 359
+348   if x%>180 and x%<210 and b%=4 then pin%=7:goto 359
+349   if x%>210 and x%<240 and b%=4 then pin%=8:goto 359
+350   if x%>240 and x%<270 and b%=4 then pin%=9:goto 359
+351   if x%>270 and x%<300 and b%=4 then pin%=10:goto 359
+352   if x%>300 and x%<330 and b%=4 then pin%=11:goto 359
+353   if x%>330 and x%<360 and b%=4 then pin%=12:goto 359
+354   if x%>360 and x%<390 and b%=4 then pin%=13:goto 359
+355   if x%>390 and x%<420 and b%=4 then pin%=14:goto 359
+356   if x%>420 and x%<450 and b%=4 then pin%=15:goto 359
+357   if x%>450 and x%<510 and b%=4 then 359
+358   goto 340
+359   pena ppa%:close 2:cmd 0:goto 94
+360   ' ++++++++++++++++++++++++++++++++++++++++++++++++++++
+361   window #3,50,0,530,50,"PATTERNS ETC":graphic(1)
+362   cmd #3:peno ppo%:pena ppa%:penb ppb%:drawmode 1
+363   for i=0 to 14:box(i*30,9;i*30+30,25):next i:box(453,9;505,25):? at(458,21)"CLOSE"
+364   pattern 0,tile%():paint(5,15):pattern 2,checker%():paint(35,15)
+365   pattern 8,tile%():paint(65,15):pattern 8,crust%():paint(95,15)
+366   pattern 4,za%():paint(125,15):pattern 4,zb%():paint(155,15)
+367   pattern 8,zc%():paint(185,15):pattern 2,zd%():paint(215,15)
+368   pattern 2,ze%():paint(245,15):pattern 2,zf%():paint(275,15)
+369   pattern 2,zg%():paint(305,15):pattern 4,zh%():paint(335,15)
+370   pattern 8,zi%():paint(365,15):pattern 8,zj%():paint(395,15)
+371   pattern 8,zk%():paint(425,15)
+372   draw(pat%*30-25,27 to pat%*30-5,27),1
+373   ask mouse x%,y%,b%:if b%=0 then 373
+374   if y%<10 or y%>25 then 373
+375   if x%>0 and x%<30 and b%=4 then pat%=1:goto 392
+376   if x%>30 and x%<60 and b%=4 then pat%=2:goto 392
+377   if x%>60 and x%<90 and b%=4 then pat%=3:goto 392
+378   if x%>90 and x%<120 and b%=4 then pat%=4:goto 392
+379   if x%>120 and x%<150 and b%=4 then pat%=5:goto 392
+380   if x%>150 and x%<180 and b%=4 then pat%=6:goto 392
+381   if x%>180 and x%<210 and b%=4 then pat%=7:goto 392
+382   if x%>210 and x%<240 and b%=4 then pat%=8:goto 392
+383   if x%>240 and x%<270 and b%=4 then pat%=9:goto 392
+384   if x%>270 and x%<300 and b%=4 then pat%=10:goto 392
+385   if x%>300 and x%<330 and b%=4 then pat%=11:goto 392
+386   if x%>330 and x%<360 and b%=4 then pat%=12:goto 392
+387   if x%>360 and x%<390 and b%=4 then pat%=13:goto 392
+388   if x%>390 and x%<420 and b%=4 then pat%=14:goto 392
+389   if x%>420 and x%<450 and b%=4 then pat%=15:goto 392
+390   if x%>450 and x%<505 and b%=4 then 392
+391   goto 373
+392   pena ppa%:gosub 251:close 3:cmd 0:gosub 271:goto 94
+393   ' +++++++++++++++++++++++++++++++++++++++++++++++++++++
+394   window #4,100,0,430,100,"MAIN MENU":cmd #4:pena 1
+395   scnclr
+396   ? at(80,10)"- = MAIN MENU = -"
+397   ? at(20,30)"DRAWMODE IS      ";dm%
+398   ? at(20,50)"CLOSE"
+399   ? at(20,70)"PLEASE ADD A PRINT ROUTINE AND A"
+400   ? at(20,80)"BETTER DISK ROUTINE, THANK YOU."
+401   ask mouse x%,y%,b%:if b%=0 then 401
+402   if y%<20 or y%>50 then 401
+403   if x%<20 and x%>100 then 401
+404   if y%>20 and y%<35 and b%=4 then 406
+405   if y%>35 and y%<50 and b%=4 then 408
+406   dm%=dm%+1:if dm%=3 then dm%=0:goto 395 else goto 395
+407   goto 401
+408   close 4:cmd 0:pena ppa%:goto 94
+409   ' ++++++++++++++++++++++++++++++++++++++++++++++++++++
+410   sshape(0,0;640,200),undo%()
+411   window #5,100,0,430,120,"Disk Menu":cmd #5:graphic(0):pena 1
+412   scnclr:? at(9,0)"*DISK MENU*    MAKE YOUR SELECTION"
+413   for i=0 to 3:box(i*100,10;i*100+100,25):next i
+414   ? at(5,3)"DIR";at(17,3)"SAVE";at(30,3)"LOAD";at(42,3)"CLOSE"
+415   ask mouse x%,y%,b%:if b%=0 then 415
+416   if y%<9 or y%>26 then 415
+417   if x%>0 and x%<100 and b%=4 then 421
+418   if x%>100 and x%<200 and b%=4 then 423
+419   if x%>200 and x%<300 and b%=4 then 427
+420   if x%>300 and x%<400 and b%=4 then 431
+421   ?:shell "dir languages":?"PRESS LEFT MOUSE BUTTON TO CONTINUE"
+422   ask mouse x%,y%,b%:if b%=0 then 422 else 412
+423   ? at(0,5)"Enter name for SAVE or <cr> to abort"
+424   line input"NAME: ";z$:if z$=""then 412
+425   bsave z$, varptr(undo%(0)),16002
+426   goto 412
+427   ? at(0,5)"Enter name for LOAD or <cr> to abort"
+428   line input "   ";z$:if z$="" then 412
+429   bload z$,varptr(undo%(0))
+430   goto 412
+431   cmd 0:close #5
+432   gshape(0,0),undo%():graphic(1):goto 94
+433   ' ++++++++++++++++++++++++++++++++++++++++++++++++++++
+434   window #9,475,0,150,40,"END ? Y/N":cmd 9:graphic(0)
+435   ? "ARE YOU SURE   Y":?"(click one)    N":cmd 0
+436   ask mouse x%,y%,b%:if b%=0 then 436
+437   if x%>590 and x%<610 and y%<12 then 439
+438   close #9:graphic(1):goto 96
+439   close 9:pattern 0,tile%():end

@@ -1,0 +1,331 @@
+; --------------------------------------------------------------------------------------
+;
+; This source file is part of PureBasic
+; For the latest info, see http://www.purebasic.com/
+; 
+; Copyright (c) 1998-2006 Fantaisie Software
+;
+; This program is free software; you can redistribute it and/or
+; modify it under the terms of the GNU General Public License
+; as published by the Free Software Foundation; either version 2
+; of the License, or (at your option) any later version.
+;
+; This program is distributed in the hope that it will be useful,
+; but WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+; GNU General Public License for more details.
+;
+; You should have received a copy of the GNU General Public License
+; along with this program; if not, write to the Free Software
+; Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+;
+; --------------------------------------------------------------------------------------
+;
+; PB Editor Cut/Copy/Paste ..er, and Printer !
+
+
+Statement DeleteLine{DeleteMode.b}
+ SHARED PBMainWindow,Source(),PBCursor,PBGlobals
+
+ If PBMainWindow\NbLines>1
+   KillItem Source()
+   PBMainWindow\NbLines-1
+
+   If NextItem(Source())
+    ; Next text ready...
+   Else
+     If PBCursor\Y ;>0
+       PBCursor\Y-1
+     Else
+       If PBCursor\OffsetY ;>0
+          PBCursor\OffsetY-1
+          !DPrint{2,"OffsetY2 -1"}
+       EndIf
+     EndIf
+   EndIf
+
+ Else
+   ; nothing left to delete..
+   Source()\Text = ""
+   PBCursor\X = 0
+   PBCursor\OffsetX = 0
+   PBCursor\Y=0
+   PBCursor\OffsetY=0
+ EndIf
+
+ PBGlobals\Modified  = 1
+ PBGlobals\ReCompile = 1
+
+ If DeleteMode  = 0
+   RefreshLines{PBCursor\Y, 1}
+ EndIf
+End Statement
+
+;------------------------------------------------------------------------
+
+Statement Copy{}
+  SHARED Source(),SelectedZone
+
+  If SelectedZone\EndY > -1
+    PushItem Source()
+    ResetList Source()
+
+    For k.w=0 To SelectedZone\Y
+      NextItem Source()
+    Next
+
+    If SelectedZone\Y = SelectedZone\EndY
+      tmp.s = Mid$(Source()\Text, SelectedZone\X+1, SelectedZone\EndX - SelectedZone\X+1)
+    Else
+      value.l = Len(Source()\Text) - SelectedZone\X
+      If value < 1: value = 1: EndIf
+      tmp.s = Right$(Source()\Text, value)
+    EndIf
+
+    For k=SelectedZone\Y To SelectedZone\EndY-1
+      NextItem Source()
+
+      If k = SelectedZone\EndY-1
+        tmp.s+Chr$(10)+Left$(Source()\Text, SelectedZone\EndX+1)
+      Else
+        tmp.s+Chr$(10)+Source()\Text
+      EndIf
+
+
+    Next
+
+    PopItem Source()
+
+    NSetClipText tmp.s
+
+  EndIf
+End Statement
+
+;------------------------------------------------------------------------
+
+Statement Cut{}
+  SHARED SelectedZone,Source(),PBCursor,PBMainWindow
+
+  If SelectedZone\EndY > -1
+    Copy{}
+
+    ResetList Source()
+
+    For l.w=0 To SelectedZone\Y
+      NextItem Source()
+    Next
+
+    If SelectedZone\Y = SelectedZone\EndY
+      Source()\Text = Left$(Source()\Text, SelectedZone\X)+Right$(Source()\Text, Len(Source()\Text)-SelectedZone\EndX-1)
+    Else
+
+      Source()\Text = Left$(Source()\Text, SelectedZone\X)
+
+      If PBCursor\Y < PBMainWindow\NbWindowLines-1
+        PBCursor\Y+1
+      Else
+       PBCursor\OffsetY+1
+      EndIf
+
+      For k.w =SelectedZone\Y To SelectedZone\EndY-1
+        DeleteLine{1}
+      Next
+
+      Source()\Text = Right$(Source()\Text, Len(Source()\Text)-SelectedZone\EndX-1)
+
+      If Source()\Text=""
+       DeleteLine{1}
+      EndIf
+
+      PBCursor\OffsetX = 0
+      PBCursor\X = 0
+
+      If PBCursor
+       PBCursor\Y-1  ;## I think...
+      Else
+       If PBCursor\OffsetY
+         PBCursor\OffsetY-1
+       EndIf
+      EndIf
+
+    EndIf
+
+    SelectedZone\EndY = -1    ; No more selected zone...
+
+    UpdateBoopsi{}
+    ;RefreshLines{SelectedZone\Y, 1}  ;-- wrong variable!!
+    RefreshLines{PBCursor\Y,1}
+
+    DisplayNewCursor{}
+  EndIf
+
+End Statement
+
+;------------------------------------------------------------------------
+
+Statement Paste{}
+  SHARED Source(),PBMainWindow,PBCursor,PBGlobals
+
+  USEPATH Source()
+  ClipboardText.s = NGetClipText
+
+  If ClipboardText
+
+    StartBuffer.l = &ClipboardText
+    EndBuffer.l   = StartBuffer+Len(ClipboardText)
+
+    PBGlobals\Modified  = 1
+    PBGlobals\ReCompile = 1
+
+    PushItem Source()
+
+    tmp.s=PeekNL{(StartBuffer)}
+    StartBuffer+Len(tmp)+1
+
+    EndLine.s = Right$(\Text, Len(\Text)-(PBCursor\OffsetX+PBCursor\X))
+    \Text = Left$(\Text, PBCursor\OffsetX+PBCursor\X)+tmp
+
+    While StartBuffer < EndBuffer
+      AddItem Source()
+      tmp.s=PeekNL{StartBuffer}
+      StartBuffer+Len(tmp)+1
+      \Text = tmp.s
+      PBMainWindow\NbLines+1
+    Wend
+
+    \Text + EndLine  ; Put the end of the first line to this line (if any)
+
+    PopItem Source()
+
+    RefreshLines{0, 1}
+  EndIf
+
+End Statement
+
+;------------------------------------------------------------------------
+
+Statement BuildPrintFile{}
+  SHARED Source(),Default_Printer.s
+
+  If WriteFile(0,"T:PureBasic.Print")
+    FileOutput 0
+
+    UpdateStatus{"Printing in progress..."}
+
+    PushItem Source()
+
+    ResetList Source()
+    While NextItem(Source())
+      NPrint Source()\Text
+    Wend
+
+    PopItem Source()
+
+    CloseFile 0
+
+    If WriteFile(0,"T:PureBasic.Print.Script")
+      FileOutput 0
+
+      NPrint "Copy >NIL: T:PureBasic.Print To "+Default_Printer
+      NPrint "Delete >NIL: T:PureBasic.Print"
+
+      CloseFile 0
+
+      a.w = NRun{"Execute >NIL: T:PureBasic.Print.Script", 4096}
+    EndIf
+
+    UpdateStatus{""}
+
+    DefaultOutput
+  EndIf
+
+End Statement
+
+
+
+;------------------------------------------------------------------------
+
+Statement PrintSource{}
+  SHARED *MyScreen,Default_Printer.s,PBMetrics
+  SHARED Language(),PBGlobals,*TagList
+
+  WindowW.w = 320-20
+  OkPrint.b=0
+
+  If NCreateGadgetList(#Window_Print, *MyScreen)
+
+    HG.w  = PBMetrics\WTitleHeight+5
+    HF.w  = PBMetrics\SFontHeight+5
+    HF2.w = HF+4
+    XG.w  = 10
+
+    NSetGadgetFlags #PLACETEXT_LEFT
+
+    NResetTagList #GTST_MaxChars,100
+          NAddTag #GTST_String, &Default_Printer
+    NStringGadget #PS_PrintTo, XG+PBMetrics\PS_PrintToW, HG, WindowW-PBMetrics\PS_PrintToW, HF, Language(38), *TagList
+    HG+HF2+8
+
+    Old_HG.w = HG
+
+    NSetGadgetFlags #PLACETEXT_IN
+
+    a.w = (WindowW/2)-6
+    NButtonGadget #PS_Print , XG     , HG, a, HF, Language(39), 0
+    NButtonGadget #PS_Cancel, XG+a+10, HG, a, HF, Language(27), 0
+
+    HG+HF2+5
+  EndIf
+
+
+  If OpenStandardWindow{#Window_Print, WindowW+20, HG, 37}
+
+    NActivateGadget #PS_PrintTo
+
+    Rect{NWBorderLeft-1,Old_HG-6,NWInnerWidth+2,2,1}
+
+    Repeat
+
+      IDCMP.l = NWaitWindowEvent
+
+
+      Select IDCMP
+
+        Case #IDCMP_GADGETUP
+
+          Code.w = NGadgetCode
+
+          Select NEventID
+
+            Case #PS_Print
+              OkPrint = 1
+              Default_Printer = NGetStringText(#PS_PrintTo)
+              IDCMP = #IDCMP_CLOSEWINDOW
+
+
+            Case #PS_Cancel
+              IDCMP = #IDCMP_CLOSEWINDOW
+
+          End Select
+
+        Case #IDCMP_VANILLAKEY
+
+      End Select
+
+
+    Until IDCMP = #IDCMP_CLOSEWINDOW
+
+    NCloseWindow #Window_Print
+  EndIf
+
+  NFreeGadgetList #Window_Print
+
+  NUseWindow #Window_Main
+
+  If OkPrint
+    BuildPrintFile{}
+  EndIf
+
+End Statement
+
+

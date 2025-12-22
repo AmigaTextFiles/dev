@@ -1,0 +1,53 @@
+# Generated automatically from Makefile.in by configure.
+# Makefile - rain by Evil (mystic@tenebrous.com)
+# Copyright(c) 2001 mystic@tenebrous.com
+
+CC=gcc
+RAIN_PLATFORM=m68k-unknown-amigaos
+RAIN_VERSION="1.2.7beta3"
+RAIN_URL=http://www.tenebrous.com/rain
+CFLAGS= -g -Wall -I./include -DHAVE_CONFIG_H -D_GNU_SOURCE -DRAIN_PLATFORM=\"$(RAIN_PLATFORM)\" -DRAIN_VERSION=\"$(RAIN_VERSION)\" -DRAIN_URL=\"$(RAIN_URL)\"
+INSTALLER=/bin/install -c
+MAKE=
+
+all:
+	@echo Making all
+	-$(CC) $(CFLAGS) -c source/rain_command_line.c
+	-$(CC) $(CFLAGS) -c source/rain_defaults.c
+	-$(CC) $(CFLAGS) -c source/rain_die.c
+	-$(CC) $(CFLAGS) -c source/rain_icmp.c
+	-$(CC) $(CFLAGS) -c source/rain_igmp.c
+	-$(CC) $(CFLAGS) -c source/rain_inet_common.c
+	-$(CC) $(CFLAGS) -c source/rain_main.c
+	-$(CC) $(CFLAGS) -c source/rain_mem.c
+	-$(CC) $(CFLAGS) -c source/rain_resolv.c
+	-$(CC) $(CFLAGS) -c source/rain_services.c
+	-$(CC) $(CFLAGS) -c source/rain_signal.c
+	-$(CC) $(CFLAGS) -c source/rain_string.c
+	-$(CC) $(CFLAGS) -c source/rain_tcp.c
+	-$(CC) $(CFLAGS) -c source/rain_udp.c
+
+	-$(CC) -o rain rain_command_line.o rain_defaults.o rain_die.o rain_icmp.o rain_igmp.o rain_inet_common.o rain_main.o rain_mem.o rain_resolv.o rain_services.o rain_signal.o rain_string.o rain_tcp.o rain_udp.o 
+
+	@echo done.
+
+install:
+	@echo Installing rain binary to /sbin
+	-$(INSTALLER) ./rain /sbin/rain
+
+
+distclean: clean
+
+
+clean:
+	@echo Cleaning up...
+	-rm -f Makefile
+	-rm -f config.cache config.log config.status
+	-rm -f confdefs.h
+	-rm -f include/config.h
+	-rm -f *.o
+	-rm -f rain
+	@echo done.
+
+
+

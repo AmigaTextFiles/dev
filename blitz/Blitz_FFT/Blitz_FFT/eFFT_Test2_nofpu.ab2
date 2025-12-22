@@ -1,0 +1,219 @@
+
+; "eFFT_Test2_nofpu.ab2" a C to Blitz adaptation by Lorence Lombardo.
+; Based on Alexander Marx "eFFT_Test.c" example.
+
+; NoFPU version with "timer.device".
+
+; Calculations made with the standard ".f" type on the Blitz side.
+
+; Need at least ROM 2.x
+
+; Compile with classic Blitz for less than 020.
+
+; See the archive "Blitz_Timer.lha" on the aminet for additional information.
+
+
+; optimize 5 ; <- good for 020 or greater
+
+INCLUDE "easyFFT.include.bb2"
+INCLUDE "timer.include.bb2"
+
+*time1.EClockVal=0 : *time2.EClockVal=0 : myhl.l=0
+
+If easyFFT_InitLib{2}=0 Then NPrint " Could not initialize v2 easyFFT lib...!!!" : End
+
+If timer_Init{#UNIT_ECLOCK}
+   *time1=AllocVec_(SizeOf.EClockVal, #MEMF_PUBLIC)
+   *time2=AllocVec_(SizeOf.EClockVal, #MEMF_PUBLIC)
+Else
+   NPrint "Could not initialize timer...!!!" : easyFFT_FreeLib{} : End
+EndIf
+
+If *time1=0 OR *time2=0 Then NPrint "Could not initialize timer...!!!" : Goto exit
+
+Macro startime
+   !timer_ReadEClock {E_Freq.l, *time1}
+End Macro
+
+Macro stoptime
+   !timer_ReadEClock {E_Freq.l, *time2}
+End Macro
+
+
+; The following function was taken from "unsign.ab2" from "SANE.lha"
+; on the aminet.
+
+; Converts a signed long to an unsigned float.
+; Change the ".f" type to a ".d" type if greater precision is required.
+
+Function.f unsL{long.l}
+   If long<0 Then ret.f=256^4+long Else ret.f=long
+   Function Return ret
+End Function
+
+
+Macro prtime
+   thi.f = unsL{*time2\ev_hi} - unsL{*time1\ev_hi}
+   tlo.f = unsL{*time2\ev_lo} - unsL{*time1\ev_lo}
+   sec.f=(65536.0^2 * thi + tlo) / unsL{E_Freq}
+   NPrint "STAT.: Operation took ",sec," seconds."
+End Macro
+
+
+l$=Chr$(10) : NPrint l$+"STAT.: Opened easyFFT.library V2.0."
+
+!easyFFT_eFFTnew{myhl.l, 150}
+
+If myhl=0 Then NPrint "ERROR: Failed to get handle!" : Goto exit
+
+NEWTYPE .dub : dub.l[2] : End NEWTYPE : FloatMode -1
+
+Dim smpldat.dub(256), FFTamp.dub(256), FFTpha.dub(256), syndat.dub(256)
+
+NPrint "STAT.: Got handle from easyFFT.library. (150 samples)"
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_NUM}
+NPrint "---> : Ok, library's set samples to ",Peek.l(sampn)
+
+!easyFFT_eFFTsetdat{ret.l, myhl, #eFFT_NUM, 256}
+If ret=0
+   NPrint "ERROR: Failed to set samples to 256." : Goto exit
+Else
+   NPrint "ACT. : Set Samples to 256."
+   !easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_NUM}
+   NPrint "---> : Ok, library's set samples to ",Peek.l(sampn)
+EndIf
+
+NPrint "ACT. : Set sampling rate to 6400 S/s."
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_SRATE, 6400}
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_SRATE}
+NPrint "---> : Ok, library's set sampling rate to ",Peek.l(sampn)
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_RESOL}
+ieee.l = IEEEDPTieee_ ( Peek.l(sampn) , Peek.l(sampn+4) )
+ffpl.l = SPFieee_(ieee)
+NPrint "---> : Ok, library's set FFT resolution to ",Peek.f(&ffpl)
+
+NPrint "ACT. : 'Sample' sin with 50Hz and 8 bit resolution."
+
+!startime
+
+For i.l=0 To 255
+   smpdt.f=Int(128.0*Sin(2*Pi*50*(1/6400.0)*i))
+   ieee.l = SPTieee_( Peek.l(&smpdt) )
+   smpldat(i)\dub[0] = IEEEDPFieee_ ( ieee ) : PutReg d1, smpldat(i)\dub[1]
+Next i
+
+!stoptime
+!prtime
+
+
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_SIG, &smpldat(0)}
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_DOPD, True}
+
+NPrint "ACT. : Do spectrum analizing; with settings -> TRASH-FALSE, DOPD-TRUE)."
+
+!startime
+
+!easyFFT_eFFTcalc{myhl}
+
+!stoptime
+!prtime
+
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_ASP}
+NPrint "---> :Printing now first 10 Entries."
+NPrint "      Index Frequency Amplitude(= *128)"
+NPrint "      ----- --------- -----------------"
+For i=0 To 9
+   ieee.l = IEEEDPTieee_ ( Peek.l(sampn+(i*8)) , Peek.l(sampn+(i*8)+4) )
+   ffpl.l = SPFieee_(ieee)
+   NPrint "      ", i, "     "+LSet$(Str$(i*25),10), Int( Peek.f(&ffpl) )
+Next i
+
+NPrint l$+"ACT. : Do spectrum analizing; with settings -> TRASH-FALSE, DOPD-FALSE)."
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_DOPD, False}
+
+!startime
+
+!easyFFT_eFFTcalc{myhl}
+
+!stoptime
+!prtime
+
+NPrint "ACT. : Do spectrum analizing; with settings -> TRASH-TRUE, DOPD-FALSE)."
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_TRASH, True}
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_DOPD, False}
+
+!startime
+
+!easyFFT_eFFTcalc{myhl}
+
+!stoptime
+!prtime
+
+NPrint "ACT. : 'Sample' sin with 50Hz and 8 bit resolution. (again! because we trashed it!)"
+
+!startime
+
+For i.l=0 To 255
+   smpdt.f=Int(128.0*Sin(2*Pi*50*(1/6400.0)*i))
+   ieee.l = SPTieee_( Peek.l(&smpdt) )
+   smpldat(i)\dub[0] = IEEEDPFieee_ ( ieee ) : PutReg d1, smpldat(i)\dub[1]
+Next i
+
+!stoptime
+!prtime
+
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_TRASH, False}
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_DOPD, True}
+!easyFFT_eFFTcalc{myhl}
+
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_ASP}
+For i=0 To 255
+   FFTamp(i)\dub[0]= Peek.l( sampn+(i*8) )
+   FFTamp(i)\dub[1]= Peek.l( sampn+(i*8)+4 )
+Next i
+
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_PSP}
+For i=0 To 255
+   FFTpha(i)\dub[0]= Peek.l( sampn+(i*8) )
+   FFTpha(i)\dub[1]= Peek.l( sampn+(i*8)+4 )
+Next i
+
+NPrint "ACT. : Synthesize signal now."
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_SYN, True}
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_ASP, &FFTamp(0)}
+!easyFFT_eFFTsetdat{bla.l, myhl, #eFFT_PSP, &FFTpha(0)}
+
+!startime
+
+!easyFFT_eFFTcalc{myhl}
+
+!stoptime
+!prtime
+
+!easyFFT_eFFTgetdat{sampn.l, myhl, #eFFT_SYN}
+For i=0 To 255
+   syndat(i)\dub[0]= Peek.l( sampn+(i*8) )
+   syndat(i)\dub[1]= Peek.l( sampn+(i*8)+4 )
+Next i
+NPrint "       Orig.Dat.   Synth.Dat"+l$+"       ---------------------"
+For i=0 To 10
+   ieee.l = IEEEDPTieee_ ( smpldat(i)\dub[0] , smpldat(i)\dub[1] )
+   ffpl1.l = SPFieee_(ieee)
+   ieee.l = IEEEDPTieee_ ( syndat(i)\dub[0] , syndat(i)\dub[1] )
+   ffpl2.l = SPFieee_(ieee)
+   NPrint "       "+LSet$(Str$( Peek.f(&ffpl1) ),11), Peek.f(&ffpl2)/128
+Next i
+
+exit:
+If *time1 Then FreeVec_(*time1)
+If *time2 Then FreeVec_(*time2)
+If myhl<>0
+   !easyFFT_eFFTfree{myhl}
+   NPrint l$+"STAT.: Free'ed handle from easyFFT.library."
+EndIf
+easyFFT_FreeLib{}
+NPrint l$+"STAT.: Closed easyFFT.library."+l$
+timer_Free {}
+End
+
+

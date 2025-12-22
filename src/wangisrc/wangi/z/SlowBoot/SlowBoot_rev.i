@@ -1,0 +1,14 @@
+VERSION		EQU	1
+REVISION	EQU	24
+DATE	MACRO
+		dc.b	'4.2.96'
+	ENDM
+VERS	MACRO
+		dc.b	'SlowBoot 1.24'
+	ENDM
+VSTRING	MACRO
+		dc.b	'SlowBoot 1.24 (4.2.96)',13,10,0
+	ENDM
+VERSTAG	MACRO
+		dc.b	0,'$VER: SlowBoot 1.24 (4.2.96)',0
+	ENDM

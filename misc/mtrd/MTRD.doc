@@ -1,0 +1,343 @@
+*************************************************************************
+*                                                                       *
+*                 MTRD Library for the Amiga                            *
+*                                                                       *
+*                   A Programmer's manual                               *
+*                                                                       *
+*************************************************************************
+
+Version 0.99 Beta.
+1992 By Amit Fridman. (Silk).
+
+Contents
+--------
+
+ 1. Status.
+ 2. General Description.
+ 3. Library Description
+  3.1 Data Structures.
+  3.2 Function Description.
+  3.3 Macros.
+ 4. Technical Data
+  4.1 Command Data Block.
+  4.2 File Type & SubType.
+  4.3 Compiler notes.
+ 5. Package Contents.
+
+
+1. Status
+---------
+
+  The library and support routines are Public Domain. All non-commercial use
+  is permitted. For commercial use contact me.
+  If you feel a terrible urge to send me money , don't hesitate!
+
+
+2. General Description
+----------------------
+
+ What is MTRD ?
+  This library gives all tasks in the system the means for accessing
+  a buffer of common data. This buffer can be global or private to every task.
+  Further more this data can be dynamically changed and that change would
+  be reflected in every task's own buffer.
+
+The system has two key components :
+  1. File - A File defines a Buffer of data & also describes it's contents.
+            The buffer connected with the File is global and can be read
+            by all tasks in the system.
+            Every File has a special user associated with it - the MasterUser.
+            Normally only the MasterUser can write to the buffer , unless the
+            File is defined Global.
+  2. User - Any Task/Process in the system can register to a File and thus
+            have access to that file's buffer. It can also define a private
+            buffer which will be updated when the global buffer is changed.
+
+A frame of use is as follows:
+
+ MasterUser:
+  opens a File.
+  ...
+  writes data to the file.
+  ...
+  closes the File.
+
+ Any other User:
+  queries for the available Files.
+  finds a suitable file (by Type/SubType or Name).
+  joins a File as a User.
+  ...
+  read data from the MasterUser's buffer.
+   or
+  read data from it's own private buffer.
+  ...
+  leaves File
+
+( see mouse.c for an example of MasterUser
+  see print.c for an eaample of a regular User )
+
+
+3. Description of Library
+-------------------------
+
+Following sections define the Data Structures , Functions and Macros
+of the Library.
+
+ 3.1 Data Structures
+ -------------------
+
+> MtrdBase -- Internal definition of the library *** Private ***
+
+> MFile    -- Defines a File. The following fields are of interest :
+   struct FileID FID        - Definition of the buffer.
+   struct MUser *MasterUser - MasterUser for this file.
+   UWORD Flags              - File's flags.
+
+	MTFF_PUBLIC - This file is Public (All users can write to it).
+
+> MUser    -- Defines a User. Don't mess with any of the fields.
+	UWORD Flags              - User's flags. (Use CUSERFLAGS Macro to change).
+
+   MUSF_LOCED     - This buffer is locked against updating.
+   MUSF_BUFFER    - This user has a private buffer.
+   MUSF_NOTIFY    - Let me know when an update has occured.
+   MUSF_LOCKWRITE - Lock the buffer after each update. (Use UNLOCK Macro to
+                     allow for further updates).
+   MUSF_MASTER    - This user is the MasterUser *** Private ***
+
+> FileID   -- Define the location , size & contents of a File's buffer.
+   UWORD Type     - Defines the type of data in the buffer (see MTRDTypes.h)
+   UWORD SubType  - Further defines the type of data and it's format.
+   ULONG Size     - Size in bytes of the buffer.
+   char *Data     - Pointer to the buffer itself.
+   char *Name     - A string identifying this buffer (optional).
+   ULONG Defs[4]  - Parameters to define complex types of buffers.
+
+> FileList -- A Description of one file in the system.
+	struct MFile *File - A Pointer to the specific file.
+	UWORD Flags        - That file's flags.
+	struct FileID FID  - A description of the buffer's contents.
+
+> MUpdate  -- A Message from the system.
+   struct MFile *File - The file this message relates to.
+   ULONG Type         - Type of message.
+
+   MTUP_UPDATE - The message indicates that the user's buffer has been updated.
+   MTUP_CLOSE  - The File has been closed.
+
+   When recieving any message you should ReplyMsg() it back.
+
+
+ 3.2 Functions
+ -------------
+
+The library should first be opened by:
+ struct MtrdBase *MtrdBase;
+
+ MtrdBase=OpenLibrary("mtrd.library",VERSION); /* VERSION is currently 0 */
+
+When exiting close the library with:
+ CloseLibrary(MtrdBase);
+
+
+> struct MFile *OpenMFile(Port,Fid,Flags)
+
+   Opens a new File and adds the caller as the MasterUser for this file.
+
+    struct MsgPort *Port - Pointer to MsgPort for recieving messages
+                             (may be NULL).
+    struct FileID *Fid   - Pointer to the FileID definition for this File.
+    UWORD Flags          - File's flags (MTFF_PUBLIC if needed).
+
+    Returns              - A Pointer to a MFile if successful or NULL.
+
+> void CloseFile(File,User)
+
+   Closes a file previously opened by this User. notifies all connected Users
+    and unlinks them.
+
+    struct MFile *File - The File to be closed.
+    struct MUser *User - The MasterUser for this file. (DON'T cheat here).
+
+> void WriteData(File,User,Data)
+
+   Writes new data to the Global buffer , also updates the local buffers and
+    notifies their users.
+
+    struct MFile *File - The File who's buffer is to be updated.
+    struct MUser *User - The calling user (MasterUser for non-public File).
+    char *Data         - A Pointer to a well formatted data block (see 4.1).
+
+>>> for the following two functions see also 4.2 <<<
+
+> ULONG CountFiles(Type,SubType)
+
+   Count the number of files in the system that are of a specific type &
+    SubType.
+
+    UWORD Type     - Type mask for counted Files (GET_ALL counts all).
+    UWORD SubTypes - SubType mask for counted Files (GET_ALL counts all).
+
+    Returns        - Number of Files of indicated type.
+
+> ULONG GetFileList(FList,Max,Type,SubType)
+
+   Fill a set of FileList structures with File definitions according to their
+    Type & SubType.
+
+    struct FileList *FList - Pointer to array of FileList structures.
+    ULONG Max              - Maximum number of entries to fill.
+    UWORD Type             - Type mask for Files.
+    UWORD SubType          - SubType mask for Files.
+
+    Returns                - Actual number of FileList entries.
+
+> struct MUser *AddUser(File,Port,Buffer,Flags)
+
+   Adds User to an open File. Optionally defines user's private buffer.
+
+    struct MFile *File   - The File you wish to join.
+    struct MsgPort *Port - A pointer to the MsgPort where messages will be
+                             recieved (may be NULL).
+    char *Buffer         - A pointer to a private buffer (optionally NULL).
+    UWORD Flags          - User's flags. See MUser structure description.
+                            (Do not set MUSF_MASTER bit!).
+
+    Returns              - A Pointer to MUser if successful , NULL otherwise.
+
+> void RemUser(User)
+
+   Remove a User from a File.
+
+    struct MUser *User - The User to be removed. No need to specify the File.
+
+>>> Data Block Functions (see 4.1) <<<
+
+> void InitData(block)
+
+   Initialize a Command Data Block.
+
+    char *block - Pointer to Data Block.
+
+> void AddBytes(block,offset,count,ptr)
+> void AddWords(block,offset,count,ptr)
+> void AddLongs(block,offset,count,ptr)
+
+   These functions add another command to the Data Block. They differ in the
+    type of data that is used.
+
+    char *block  - A Pointer to the Command Data Block.
+    ULONG offset - Sets offset from start of Buffer for this command.
+    UWORD count  - Number of elements in this command.
+    (char/UWORD/ULONG) *ptr - A Pointer to an array of 'count' items used to
+                               Update the Buffer.
+
+> void AddFill(block,offset,count,fill)
+
+   This function adds a fill command to the Data Block. The fill is done with
+    UWORDs.
+
+    char *block  - A Pointer to the Command Data Block.
+    ULONG offset - Sets offset from start of Buffer for this command.
+    UWORD count  - How many times to repeat the fill UWORD.
+    UWORD fill   - The UWORD to use for the fill.
+
+
+ 3.3 Macros
+ ----------
+
+There are several Macros in the MTRD.h file :
+
+> GETMUSER(file,user)    : Place a pointer to the MasterUser for this File in
+                            user.
+> GETFID(file,fid)       : Structure copy the FileID for this File into fid.
+> GETBUFFER(file,buffer) : Grab the Global Buffer address from File and place
+                            it in buffer.
+> CUSERFLAGS(user,flags) : Change the Flags for this User.
+> UNLOCK(user)           : Unlock a private buffer.
+
+
+4. Technical Data
+-----------------
+
+ 4.1 Command Data Block
+ ----------------------
+
+  Updating a buffer is done via a call to WriteData().
+  The data is delivered in the Command Data Block. This is a block of memory
+  which contains the specific information as to how the buffer should be
+  changed. Each Command Data Block can contain several 'sub-blocks' that change
+  Different areas of the Buffer. The only limit on the CDB is that it shouldn't
+  exceed 64K.
+  To change the Buffer do the following :
+   InitData() your CDB.  
+   do a series of AddBytes(),AddWords(),AddLongs(),AddFill() to set
+    different areas of the Buffer.
+   Execute a WriteData().
+
+  The size of your Data Block should be longer than the amount of data you
+  wish to send. To calculate the size use the following scheme :
+   4+(6+bytes_of_data)*for_each_sub_block
+
+ 4.2 File Type & SubType
+ -----------------------
+
+ The Type field contains the general Type of data stored. (TEXT,GRAPH etc.)
+ The SubType field contains a further definition of the type of data (such as
+  RELMOUSECOORDS or RAWTEXT) and also the data format (CHAR,FLOAT etc.)
+ All Type & SubType definitions are flags , that is they define one bit-field
+ and thus can be masked.
+ To Request a specific type of File Set the corresponding bits in the request
+  parameters Type/SubType. Setting them to GET_ALL (0xFFFF) gets any type of
+  File.
+ Examples:
+  num=CountFiles(GET_ALL,GET_ALL)          ; Count all files in the system.
+  num=CountFiles(MTT_TEXT,MTS_CHAR)        ; Count character based Texts.
+  num=GetFileList(myFList,4,GET_TABLE,MTS_LONG|MTS_FLOAT|GET_ALLSUB)
+                                           ; Read Max 4 Table Files of any 
+                                           ; SubType with ULONG or Float
+                                           ; data format.
+
+ 4.3 Compiler Notes
+ ------------------
+
+ The library was written in C on AztecC V5.2 . (using the myLib demo).
+ The pragmas are Aztec compatible so you may have to recode them for other
+  compilers.
+
+
+5. Package Contents
+-------------------
+
+The package contains the following files :
+ MTRD.library -- the library itself. Copy it to your LIBS: directory.
+ MTRD.fd      -- fd definition file.
+ MTRD.h       -- Include file for writing programs that user the library.
+ MTRDTypes.h  -- A sample of defined types and sub-types.
+ mouse.c      -- A demo of a MasterUser. code.
+ mouse        -- Executable for the MasterUser demo.
+ print.c      -- A demo of a regular user. code.
+ print        -- Executable for the regular user demo.
+ MTRD.doc     -- This file.
+
+To run the demo programs do the following :
+
+* RUN 'mouse'
+* RUN 'print'
+* Activate the 'mouse' window and move the mouse. You should see the mouse
+  coordinates in the 'print' window.
+* To quit click the RMB in the 'mouse' window.
+
+
+
+**************   That's All Folks!!!  **************
+
+Amit Fridman (Silk)
+
+EMail:
+s2449558@techst02.technion.ac.il
+
+SnailMail:
+Amit Fridman
+Eshkol 15 Yehud
+Israel 56000

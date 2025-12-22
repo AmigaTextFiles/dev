@@ -1,0 +1,27 @@
+
+
+
+	XDEF gMul_num1_num2
+
+
+gMul_num1_num2:
+
+	MOVEM.L	4(A7),D0/D1
+	MOVEA.L	D3,A0
+	MOVE.L	D0,D2
+	MOVE.L	D1,D3
+	SWAP	D2
+	MULU.W	D3,D2
+	SWAP	D1
+	MULU.W	D0,D1
+	ADD.W	D1,D2
+	SWAP	D2
+	CLR.W	D2
+	MULU.W	D3,D0
+	ADD.L	D2,D0
+	MOVE.L	A0,D3
+	RTS
+
+
+
+

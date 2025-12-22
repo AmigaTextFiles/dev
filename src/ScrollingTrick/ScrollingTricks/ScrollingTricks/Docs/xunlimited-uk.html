@@ -1,0 +1,245 @@
+<html>
+<head>
+ <title>Scroller_XUnlimited</title>
+</head>
+<body bgcolor=#FFFFFF>
+
+This algorithm uses a rather big (wide) bitmap. Therefore it's usually
+not the best choice, but has the advantage that the size of the bitmap
+does not depend on the size of the map (level). Usually one should not
+use this technique, because it's only half as fast as the technique of
+Scroller_XLimited and Scroller_XLimited_64. We can make an exception
+if the maps are really very big, and we therefore cannot live with the
+main and in that case extremely decisive disadvantage of the
+"Limited-Algorithms" namely the problem that their bitmap size depends
+on the map size.<p>
+
+But why does the bitmap need to be 704 pixels wide? First of all one
+has to say that the bitmap always needs to be wider than the visible
+area because we blit 'coming in' map areas block by block and we must
+do that in an area of the bitmap that is not visible - otherwise it
+would not look very nice or professional for the user. The visible
+area has a width of 320 pixels, that is 20 blocks (VISIBLE WIDTH :
+BLOCKWIDTH = 320 : 16 = 20). But, most of the time the number of
+blocks that are visible horizontally is not 20, but 21, namely when
+the map position (that is the horizontal position of the map's visible
+area in pixels) is not divisible by 16 (BLOCKWIDTH) or in other words,
+when the map position is not a multiple of 16 (BLOCKWIDTH).<p>
+
+<center>
+ <img src="images/visibleblocks.gif" width=365 height=145><p>
+</center>
+
+Because of this the bitmap needs to be at least 22 blocks wide, that
+is 2 blocks = 32 pixels more than the visible width. Depending on the
+FETCH Mode we must also take care of aligning the bitmap width correctly:
+in 1x FETCH Mode the width needs to be a multiple of 16, in 2x FETCH
+Mode a multiple of 32 and in 4x FETCH Mode a multiple of 64. It is <b>not</b>
+true, that the extra width of the bitmap needs to be at least as big as
+the area at the left side which we have to hide with the help of some
+Copper display registers (DIWSTART, DIWSTOP, DDFSTART, DDFSTOP) in order
+to avoid an ugly "push effect". In 4x FETCH Modu this area needs to be
+64 pixels wide (2x: 32 pixels, 1x: 16 pixels) but anyway it is for example
+no problem to have a visible width of 288 pixels and an extra width of 32
+with that FETCH mode. 288 + 32 = 320. 320 is a multiple of 64 and therefore
+okay for 4x FETCH mode. But if we have a visible width of 320, an extra width
+of 32 is not enough to use 4x FETCH Mode because the resulting overall
+bitmap width (352) is not a multiple of 64.<p>
+
+But hey! 320 + 32 is only 352. Didn't we talk about 740 pixels? Well, we get
+704 pixels if we multiply 352 by 2. To say, the main trick of this scrolling
+algorithm consists of the fact that our bitmap is twice as wide as it should
+be normally. The right half of the bitmap is always an exact copy of the
+left half, at least as long as we don't blit any BOBs. Luckiliy these need
+to be blitted only once. This only by the way. At startup we fill the two
+bitmap halfs with the initially visible map area:<p>
+
+<center>
+ <img src="images/xunlimited.gif" width=360 height=149>
+</center>
+
+<p>
+
+The red rectangle shows the initial actual-bitmap-area as displayed
+by the Copper. The first and the last 16 pixels are hidden. The user
+only sees the area within the yellow rectangle. When we scroll right
+the actual-area moves right, too. When we scroll left, the actual-area
+moves left. Of course it is not enough to just move around the actual-area.
+We also need to blit the new blocks which come in. Let's assume we want
+to go right. At the beginning in the two bitmap halfs we have the
+block columns 0 .. 21, that is the first 22 columns of the map. At the
+latest after 16 pixels (= one column width) of scrolling right the bitmap
+halfs must contain the block columns 1 .. 22. Since we have 16 pixels
+of time to do that we don't blit the new (22) block column all at once
+but step by step. A time of 16 pixels means that we blit the block
+column in 16 steps. One block column consists of 16 (BITMAPHEIGHT : BLOCKHEIGHT
+= 256 : 16 = 16) single blocks. Therefore we need to blit just one block
+per step (= per 1 pixel scrolling). To calculate which block to blit in
+a certain situation (= map position) we devide the map position X by 16
+and look at the remainder. The remainder determines the step. In C it
+is possible to calculate the remainder of a division with the modulo
+operator (%). But since 16 is a power of 2 it can also be done with a
+binary AND:
+
+<p>
+<blockquote>
+ 1) MapPositionX % BLOCKWIDTH<p>
+ 2) MapPositionX & (BLOCKWIDTH - 1)
+</blockquote>
+<p>
+
+The result will be values between 0 and BLOCKWIDTH - 1. In our case (that is
+a block width of 16 pixels) values between 0 and 15. The block at the very
+top of the column is block 0, the block at the very bottom is block 15.
+We wanted to scroll right, that is go from map position X 0 to map position
+X 1. For a map position of 1 above calculation would give as a result of 1,
+but since we must or want to blit the topmost block (0) first we increase
+the variable MapPositionX (in the source code called mapposx) only at the
+end of the ScrollRight() function. By doing so when scrolling from map
+position 0 to map position 1 the calculation's result is step 0, for map
+position 1 to map position 2 the calculation's result is step 1 etc.
+So the block column gets filled step by step with the new map area.<p>
+
+Earlier there was a mention that the first and the last 16 pixel column
+of the actual-bitmap-area is hidden, so that the user only sees the
+area within the yellow rectangle in the above picture. In 1x FETCH
+Mode we need to hide the first 16 pixels anyway to avoid the already
+mentioned push effect - so that fits perfectly. But in 2x FETCH Mode
+we must hide 32 pixels and in 4x FETCH Mode even 64 pixels. To solve
+the problem there is a very simple trick. It works like this. When
+blitting we simply assume that the bitmap is 16 Pixel = 2 Bytes (for
+2x FETCH Mode) or 48 Pixel = 6 Bytes (4x FETCH Mode) more at the
+back in memory. Therefore in the source code the bitmap variable used
+for blitting (frontbuffer) does not necesserily equal the real bitmap
+address but the real bitmap address plus an offset (0 bytes for 1x
+FETCH Mode - 2 bytes for 2x FETCH Mode - 6 bytes for 4x FETCH Mode).
+Because of that when allocating the bitmap we must not forget to ask
+for one more line (if the bitmap is created with AllocBitmap()) or
+2 or 6 more bytes (if AllocMem() is used). Thanks to this render
+offset no other changes are necessary to be able to use the 2x and
+4x FETCH Modes, because we shift the hidden area to where it suits
+as best so to speak:<p>
+
+<center>
+ <img src="images/xunlimited3.gif" width=378 height=267>
+</center>
+
+<p>
+
+The blue rectangle in the above pictures shows the second bitmap half. Note
+the "wraparound" at the right side and the resulting false color effect at
+the left side. You can of course see these false colors which are caused by
+"plane shifting" only when using the real bitmap address for display and
+when hiding nothing at the left side.<p>
+
+One question is still up. At which X position stays the fillup-column in
+the bitmap - where do we have to blit the new blocks? Answer: At the place
+where the "going out" block column is. In the above example this would be
+column 0. Since during scrolling each block is blitted twice, that is one
+time in the left bitmap half and one time in the right bitmap half, the
+actual visible area when scrolling right slowly approaches the fillup-column
+of the right bitmap half. This column will be completely done (filled =
+blitted) just in time before it becomes visible to the user. When this
+happens the fillup-column will already have advanced one block to the
+right. In the source code the variable videoposx contains the position
+of the actual-bitmap-area (red rectangle). We use this variable to
+calculate the position of the fillup-column in the bitmap, that is the
+position where to blit the blocks. Again there is a slow (1) and a
+faster (2) method - the latter only working if BLOCKWIDTH is a power
+of 2:
+
+<p>
+<blockquote>
+1) x = videoposx - (videoposx % BLOCKWIDTH)<p>
+2) x = videoposx & ~(BLOCKWIDTH - 1)
+</blockquote>
+</p>
+
+This formula calculates the position for the left bitmap half. For blitting
+into the right bitmap half we simply add HALFBITMAPWIDTH, that is 352.<p>
+
+Scrolling to the left is pretty much the same except that we adjust
+the MapPositionX variable no longer at the end of the scroll function but
+at the init. We use predecrement instead of postincrement as used in
+the scroll right function, so to speak. The reason: Let's imagine to
+have scrolled from map position 0 to map position 1, that is 1 pixel to
+the right. The result is, that block 0 (at the very top) of the fillup-column
+is a block which came in at the right side, more precisely block (22,0), that
+is the 23rd block of the topmost row in the map - in the following picture
+shown as a yellow rectangle with a red outline:<p>
+
+<center>
+ <img src="images/xunlimited2.gif" width=352 height=128>
+</center>
+
+<p>
+
+So we are on map position 1 and want back to map position 0. The yellow-red
+block must disappear and be replaced with block (0,0). For map position
+1 the step calculation forumla gives a result of 1. That's wrong, because
+it would mean for us to blit the block (0,1) under the yellow-red
+block. The solution is to change the map position variable at the init
+of the scroll left function. By doing so the step gets calculated from
+map position 0 and we get the result 0 (0 % 16 = 0). For the scroll function
+this means that it has to blit the block (0,0) which kills the yellow-red rectangle
+- exactly what we wanted :-)<p>
+
+I nearly forgot something very important. As already said, the actual and
+visible bitmap area (red rectangle) gets moved when we scroll. But what
+happens when we have scrolled so far to the right that the area risks
+to cross and go over the bitmap boundaries? This is gonna happen very
+soon, after 352 pixels. Simple. When we have scrolled so far to the right
+we set the actual-bitmap-area, and automatically also the visible area
+within it, again to the beginning of the bitmap (position 0). That is possible
+because the left and the right bitmap half are identical. And what happens
+when the actual-bitmap-area risks to go out of bitmap at the left side?
+In this case we set the position of the actual-bitmap-area to the maximum
+right (position 351). So the formula to calculate the actual-bitmap-area
+position will be:
+
+<p>
+<blockquote>
+videoposx = MapPositionX % HALFBITMAPWIDTH, that is<br>
+videoposx = MapPositionX % 352
+</blockquote>
+<p>
+
+At the end some comments about the source code of the demo program. When the
+variable mapposx, which contains the map position X in pixels, is 0, then the
+user sees the map area beginning at position BLOCKWIDTH (16), because of the
+first BLOCKWIDTH (16) pixels being always hidden. So what the user is seeing
+is the area:<p>
+
+<blockquote>
+ (mapposx + BLOCKWIDTH,0) - (mapposx + BLOCKWIDTH + SCREENWIDTH - 1,SCREENHEIGHT - 1)
+</blockquote>
+
+<p>
+
+This means that the first block column of the map file is never visible. If
+you want to blit something into the bitmap for example blitter objects (BOBs)
+you must do it in the actual visible bitmap area. This area is:<p>
+
+<blockquote>
+ (videoposx + BLOCKWIDTH,0) - (videoposx + BLOCKWIDTH + SCREENWIDTH - 1,SCREENHEIGHT - 1)
+</blockquote>
+
+<p>
+
+You are allowed to round down the start X coordinate (videoposx + BLOCKWIDTH) and
+round up the end X coordinate (videoposx + BLOCKWIDTH + SCREENWIDTH - 1) to a
+multiple of BLOCKWIDTH. This leads to a blitable area that is SCREENWIDTH +
+BLOCKWIDTH pixels wide:<p>
+
+<blockquote>
+ blitarea_strtx = (videoposx + BLOCKWIDTH) & ~(BLOCKWIDTH - 1)<p>
+ blitarea_endx = blitarea_strtx + SCREENWIDTH + BLOCKWIDTH - 1
+</blockquote>
+
+<p>
+
+Blit addresses must be based on the variable frontbuffer, because this
+variable does not equal the real bitmap address in 2x and 4x FETCH Modes.
+
+</body>
+</html>

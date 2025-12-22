@@ -1,0 +1,13 @@
+extern
+„IEEEDPFix(floatn)long;
+„IEEEDPFlt(longn)float;
+„IEEEDPCmp(floatleft,right)int;
+„IEEEDPTst(floatn)int;
+„IEEEDPAbs(floatn)float;
+„IEEEDPNeg(floatn)float;
+„IEEEDPAdd(floata,b)float;
+„IEEEDPSub(floata,b)float;
+„IEEEDPMul(floata,b)float;
+„IEEEDPDiv(floata,b)float;
+„IEEEDPFloor(floatn)float;
+„IEEEDPCeil(floatn)float;

@@ -1,0 +1,5 @@
+(byte)
+(word)
+(long)
+(void)
+

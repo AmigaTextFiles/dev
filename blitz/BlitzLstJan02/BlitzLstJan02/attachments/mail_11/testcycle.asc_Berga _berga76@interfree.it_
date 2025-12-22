@@ -1,0 +1,132 @@
+;TestCycle
+;(c) 1997-2002 Flashlight Entertainment
+
+;This program loads an IFF ILBM file then waits for LMB. It then starts
+;colour-cycling (LMB again to load new picture). Choose cancel on file-requester
+;to exit program.
+
+;Requirements:
+;NeilsReqToolsLib.obj - for reqtools requesters commands
+;reqtools.library - for requesters
+
+WBStartup:NoCli:CloseEd
+
+
+;This statement was found on blitz-list (I think) years ago. Don't know the
+;owner of this code, but it works well. It reads data directly by the blitz
+;palette object, so you can use it within the blitz palette structure limits.
+;To use a range of colours you must modify the statement.
+Statement CycleColours{PaletteAddress.l}
+MOVEM.l d0-d7,-(a7)
+MOVE.l d0,a0 ; a0 Points to .Palette
+MOVE.l (a0),a0 ; a0 Points to .Palettedata
+MOVE.w (a0),d0 ; d0 is number of colours
+CMP.w #3,d0
+BLE ExitCycleColours
+ADDA.l #16,a0
+MOVE.l (a0)+,d1 ; store the first palette entry
+MOVE.l (a0)+,d2 ; so that it can be put in the
+MOVE.l (a0)+,d3 ; last entry when we get there
+SUB.w #3,d0
+CopyNext:
+; Copy palette entries to the previous entry
+MOVE.l (a0)+,-16(a0)
+MOVE.l (a0)+,-16(a0)
+MOVE.l (a0)+,-16(a0)
+DBRA d0,CopyNext:
+SUBA #12,a0
+; Copy the fist entry to the last entry
+MOVE.l d1,(a0)+
+MOVE.l d2,(a0)+
+MOVE.l d3,(a0)
+ExitCycleColours:
+MOVEM.l (a7)+,d0-d7
+AsmExit ; Not ASMEND
+End Statement
+
+
+;This function was written by me. It checks for a valid IFF ILBM header.
+;If you supply an invalid IFF ILBM file to the iff commands, your system
+;could crash.
+Function .b check{filename$}
+        If ReadFile(0,filename$)
+          Then
+              FileInput 0
+              tmp$=Inkey$(12)
+              If NOT Left$(tmp$,4)="FORM" AND Right$(tmp$,4)="ILBM"
+                Then
+                    temp.b=RTEZRequest("TestCycle","Not an IFF ILBM file.","_Continue")
+                    tmp.b=False
+                Else tmp.b=True
+                EndIf
+              CloseFile 0
+              PopInput
+          Else
+              temp.b=RTEZRequest("TestCycle","Cannot open file.","_Ok")
+              tmp.b=False
+          EndIf
+Function Return tmp
+End Function
+
+
+;GetFile - returns filename$ from reqtools RTEZLoadFile() requester output
+;Returns the following strings:
+;STRING FEEDED                 |             STRING RETURNED
+;Work:Games/.../SuperShooter   |    SuperShooter
+;Work:SuperShooter             |    SuperShooter
+;Games/.../SuperShooter        |    SuperShooter
+;SuperShooter                  |    SuperShooter
+;NULL                          |    NULL
+Function .s getfile{filename$}
+        filename$=UnRight$(filename$,Instr(filename$,":"))
+        offset.b=Instr(filename$,"/")
+        While offset>0
+             filename$=UnRight$(filename$,offset)
+             offset=Instr(filename$,"/")
+             Wend
+Function Return filename$
+End Function
+
+
+WbToScreen 0  ;output screen for requesters
+restart:
+filename$=RTEZLoadFile("TestCycle",getfile{filename$}) ;select IFF ILBM to cycle
+If filename$="" Then End:EndIf  ;If pushed 'cancel' then exit program
+If check{filename$}=False Then Goto restart:EndIf  ;If not a valid IFF ILBM
+                                                   ;then select another file
+ILBMInfo filename$  ;retrieving file informations
+dep.b=ILBMDepth     ;depth
+wid.w=ILBMWidth     ;width
+hei.w=ILBMHeight    ;height
+vm.l=ILBMViewMode  ;and the viewmode (useful to open the correct screen)
+
+;If picture width less than 320 then screen cannot be opened
+If wid<320
+  Then
+      temp=RTEZRequest("TestCycle","Picture width must be at least 320.","_Ok")
+      Goto restart
+  EndIf
+
+Screen 0,0,0,wid,hei,dep,vm,"",0,1  ;opening a screen identical to picture
+LoadPalette 0,filename$  ;loading palette from picture
+Use Palette 0            ;makin it the currently used palette
+LoadScreen 0,filename$   ;finally loading the picture
+
+;This will wait until LMB pressing
+Repeat
+      VWait
+     Until Joyb(0)
+
+VWait 10  ;a little wait needed because of the next LMB wait routine
+
+Repeat
+      VWait ;you can remove this or raise the vwaits to get the colour-cycling
+            ;faster or slower
+      CycleColours{Addr Palette(0)}  ;recall this statement every frame
+      Use Palette 0  ;because only the blitz palette object will be changed
+                     ;by colour-cycling routine, you must do a 'Use Palette n'
+                     ;to see changes
+      Until Joyb(0)  ;wait for LMB
+Free Screen 0  ;closes screen and asks for a new picture
+Goto restart
+

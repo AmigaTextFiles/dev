@@ -1,0 +1,5516 @@
+; ***********************************************************
+; ****              OctaMED Pro source code              ****
+; ****             Written by Teijo Kinnunen             ****
+; **** Copyright 1995-1996 Teijo Kinnunen & RBF Software ****
+; ****                All rights reserved.               ****
+; ****                  Mixing routines                  ****
+; ***********************************************************
+
+; This file is used as such both by OctaMED and the external
+; player routines. These flags specify the correct mode.
+
+; This must be 0 always (except when compiling OctaMED)
+OCTAMED_INTERN	EQU	0
+
+; Set either or both to 1
+SUPPORT_000	EQU	1
+SUPPORT_020	EQU	1
+
+; Set to 1 if you need smoothing (usually you won't...I suppose)
+SUPPORT_SMOOTH	EQU	0
+
+		MC68020
+		MC68881
+	IFEQ	OCTAMED_INTERN
+		OUTPUT	med-mixasm.o
+	ELSEIF
+		OUTPUT	obj/med-mixasm.o
+	ENDC
+		LINKOBJ
+		INCLUDE	"medtrkdata.i"
+	IFEQ	OCTAMED_INTERN
+		INCLUDE	"chinfo.i"
+	ENDC
+		BOPT	O+,wo-
+
+		XREF	_buffsize
+		XREF	_chinfo
+
+; -------------------------------------------------------------------
+; These register variables are used by all mixing routines.
+; -------------------------------------------------------------------
+;	D2 = ci_offset
+;	D4 = ci_fraction
+;	D5 = ci_advance
+;	D6 = ci_advfract
+
+
+	IFNE	OCTAMED_INTERN
+		XREF	_UtilityBase
+	ELSEIF
+		XREF	UtBase
+	ENDC
+
+	IFNE	SUPPORT_000
+; -------------------------------------------------------------------
+; MixSample(WORD *dest,UWORD mixlen) (a1,d2)
+; -------------------------------------------------------------------
+; Note: mixlen may not be > 32767!!
+
+MixSample
+		movem.l	d2-d7/a2-a6,-(sp) ;note: (sp).l = mixlen
+; --- Track loop:
+		move.w	m_channels(pc),d7
+		movea.l	_chinfo,a5
+		subq.w	#1,d7
+msm_chloop	tst.b	ci_flags(a5)	;CHFLAG_MUTED?
+		bmi.w	msm_chloopend
+		moveq	#0,d3	;the upper word used by some mix routines
+		move.w	2(sp),d3	;d3 = mixlen
+; --- load registers for mixing
+		movem.l	ci_mixregs(a5),d2/d4/d5/d6/a4
+		movea.l	a1,a2		;destination pointer
+		btst	#CHFLAGB_BACKW,ci_flags(a5) ;backwards?
+		bne.w	msm_backwards
+msm_loop2	;while(left_to_mix > 0)...
+		move.l	d5,d1	;d1 = advance
+; Tests whether current sample end is reached within remaining
+; space in mixing buffer.
+		move.w	d3,d0
+		mulu	d6,d0	;advfract * size...
+		add.l	d4,d0	;... + fraction
+		clr.w	d0
+		swap	d0
+		mulu	d3,d1	;advance * size
+		add.l	d0,d1
+		move.l	ci_endoffset(a5),d0
+		sub.l	d2,d0	;d0 = endoffset - offset
+		ble.s	msm_mutechan	;loop too short
+		cmp.l	d0,d1
+		bhs.s	msm_calcsize
+; Sample end won't be reached... just fill the remaining mix buffer
+; size straight away.
+		move.w	d3,d0
+		jsr	(a4)
+		cmp.l	ci_endoffset(a5),d2
+		blo.s	msm_savereg
+		moveq	#0,d3
+		bra.s	msm_sampleend
+; Sample end will be reached: calculate how many bytes can be mixed.
+; (This calculation requires that remaining buffer size fits in a word.)
+msm_calcsize	swap	d0	;d0 already contains endoffs - offs
+		clr.w	d0	;<< 16
+		sub.l	d4,d0	; - fraction
+		subq.l	#1,d0	; - 1
+		move.w	d5,d1	;advance..
+		swap	d1
+		move.w	d6,d1	;advfract.
+; 32-bit division required... utility.library used for 68000
+; compatibility
+	IFNE	OCTAMED_INTERN
+		movea.l	_UtilityBase,a0
+	ELSEIF
+		movea.l	UtBase,a0
+	ENDC
+		jsr	-$9C(a0)	;UDivMod32()
+		addq.w	#1,d0
+		sub.w	d0,d3		;left_to_mix -= passsize
+		jsr	(a4)		;mix/skip
+		cmp.l	ci_endoffset(a5),d2
+		bhs.s	msm_sampleend
+		tst.w	d3
+		beq.s	msm_savereg
+msm_sampleend	btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	msm_mutechan
+		btst	#CHFLAGB_PINGPONG,ci_flags(a5)
+		bne.s	msm_pingpong
+		sub.l	ci_restartoffset(a5),d2
+		move.l	ci_newstart_addr(a5),d0
+		beq.s	msm_loopend
+		move.l	d0,ci_sample_start(a5)
+		move.l	ci_newendoffset(a5),d0
+		move.l	d0,ci_endoffset(a5)
+		move.l	d0,ci_restartoffset(a5)
+msm_loopend	tst.w	d3	;left_to_mix
+		bgt.s	msm_loop2
+		bra.s	msm_savereg
+msm_mutechan	bset	#CHFLAGB_MUTED,ci_flags(a5)
+; --- save registers after mixing
+msm_savereg
+		movem.l	d2/d4,ci_mixregs(a5)
+msm_chloopend	adda.w	#ci_sizeof,a5
+		dbra	d7,msm_chloop
+		movem.l	(sp)+,d2-d7/a2-a6
+		rts
+
+; swap mixing routine (change direction)
+msm_pingpong	move.l	ci_altmixroutine(a5),d0
+		move.l	a4,ci_altmixroutine(a5)
+		movea.l	d0,a4
+		move.l	d0,ci_mixroutine(a5)
+		bchg	#CHFLAGB_BACKW,ci_flags(a5)
+; loop beginning -> loop end
+		move.l	ci_endoffset(a5),d0
+; turn pointer to the other side of the previous end offset
+		sub.l	d0,d2
+		neg.l	d2
+		add.l	d0,d2
+		sub.l	ci_restartoffset(a5),d0
+		move.l	d0,ci_endoffset(a5)
+		tst.w	d3
+		beq.s	msm_savereg
+msm_backwards	
+msmb_loop2	;while(left_to_mix > 0)...
+		move.l	d5,d1	;d1 = advance
+; Tests whether current sample end is reached within remaining
+; space in mixing buffer.
+		move.w	d3,d0
+		mulu	d6,d0	;advfract * size...
+		add.l	d4,d0	;... + fraction
+		clr.w	d0
+		swap	d0
+		mulu	d3,d1	;advance * size
+		add.l	d0,d1
+		move.l	d2,d0
+		sub.l	ci_endoffset(a5),d0	;d0 = offset - endoffset
+		ble.s	msm_mutechan	;loop too short
+		cmp.l	d0,d1
+		bhs.s	msmb_calcsize
+; Sample end won't be reached... just fill the remaining mix buffer
+; size straight away.
+		move.w	d3,d0
+		jsr	(a4)
+		cmp.l	ci_endoffset(a5),d2
+		bgt.s	msm_savereg
+		moveq	#0,d3
+		bra.s	msmb_sampleend
+; Sample end will be reached: calculate how many bytes can be mixed.
+; (This calculation requires that remaining buffer size fits in a word.)
+msmb_calcsize	swap	d0	;d0 already contains endoffs - offs
+		clr.w	d0	;<< 16
+		sub.l	d4,d0	; - fraction
+		subq.l	#1,d0	; - 1
+		move.w	d5,d1	;advance..
+		swap	d1
+		move.w	d6,d1	;advfract.
+; 32-bit division required... utility.library used for 68000
+; compatibility
+	IFNE	OCTAMED_INTERN
+		movea.l	_UtilityBase,a0
+	ELSEIF
+		movea.l	UtBase,a0
+	ENDC
+		jsr	-$9C(a0)	;UDivMod32()
+		addq.w	#1,d0
+		sub.w	d0,d3		;left_to_mix -= passsize
+		jsr	(a4)		;mix/skip
+		cmp.l	ci_endoffset(a5),d2
+		ble.s	msmb_sampleend
+		tst.w	d3
+		beq.s	msm_savereg
+msmb_sampleend	btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	msm_mutechan
+		btst	#CHFLAGB_PINGPONG,ci_flags(a5)
+		bne.s	msm_pingpong2
+		add.l	ci_restartoffset(a5),d2
+		tst.w	d3	;left_to_mix
+		bgt.s	msmb_loop2
+		bra.s	msm_savereg
+
+; swap mixing routine (change direction)
+msm_pingpong2	move.l	ci_altmixroutine(a5),d0
+		move.l	a4,ci_altmixroutine(a5)
+		movea.l	d0,a4
+		move.l	d0,ci_mixroutine(a5)
+		bchg	#CHFLAGB_BACKW,ci_flags(a5)
+; loop beginning -> loop end
+		move.l	ci_endoffset(a5),d0
+; turn pointer to the other side of the previous end offset
+		sub.l	d0,d2
+		neg.l	d2
+		add.l	d0,d2
+		add.l	ci_restartoffset(a5),d0
+		move.l	d0,ci_endoffset(a5)
+		tst.w	d3
+		bgt.s	msm_loop2
+		bra.s	msm_savereg
+	ENDC
+
+	IFNE	SUPPORT_020
+; -------------------------------------------------------------------
+; MixSample_020(WORD *dest,UWORD mixlen) (a1,d2)
+; -------------------------------------------------------------------
+
+MixSample_020	movem.l	d2-d7/a2-a6,-(sp) ;note: (sp).l = mixlen
+; --- Track loop:
+		move.w	m_channels(pc),d7
+		movea.l	_chinfo,a5
+		subq.w	#1,d7
+msm2_chloop	tst.b	ci_flags(a5)	;CHFLAG_MUTED?
+		bmi.w	msm2_chloopend
+		moveq	#0,d3	;the upper word used by some mix routines
+		move.w	2(sp),d3	;d3 = mixlen
+; --- load registers for mixing
+		movem.l	ci_mixregs(a5),d2/d4/d5/d6/a4
+		movea.l	a1,a2		;destination pointer
+		btst	#CHFLAGB_BACKW,ci_flags(a5) ;backwards?
+		bne.w	msm2_backwards
+msm2_loop2	;while(left_to_mix > 0)...
+		move.l	d5,d1	;d1 = advance
+; Tests whether current sample end is reached within remaining
+; space in mixing buffer.
+		ext.l	d3
+		swap	d1
+		move.w	d6,d1
+		mulu.l	d3,d0:d1
+		add.l	d4,d1		;add fraction
+		move.w	d0,d1
+		swap	d1
+		move.l	ci_endoffset(a5),d0
+		sub.l	d2,d0	;d0 = endoffset - offset
+		ble.s	msm2_mutechan	;loop too short
+		cmp.l	d0,d1
+		bhs.s	msm2_calcsize
+; Sample end won't be reached... just fill the remaining mix buffer
+; size straight away.
+		move.w	d3,d0
+		jsr	(a4)
+		cmp.l	ci_endoffset(a5),d2
+		blo.s	msm2_savereg
+		moveq	#0,d3
+		bra.s	msm2_sampleend
+; Sample end will be reached: calculate how many bytes can be mixed.
+; (This calculation requires that remaining buffer size fits in a word.)
+msm2_calcsize	swap	d0	;d0 already contains endoffs - offs
+		clr.w	d0	;<< 16
+		sub.l	d4,d0	; - fraction
+		subq.l	#1,d0	; - 1
+		move.w	d5,d1	;advance..
+		swap	d1
+		move.w	d6,d1	;advfract.
+		divu.l	d1,d0
+		addq.w	#1,d0
+		sub.w	d0,d3		;left_to_mix -= passsize
+		jsr	(a4)		;mix/skip
+		cmp.l	ci_endoffset(a5),d2
+		bhs.s	msm2_sampleend
+		tst.w	d3
+		beq.s	msm2_savereg
+msm2_sampleend	btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	msm2_mutechan
+		btst	#CHFLAGB_PINGPONG,ci_flags(a5)
+		bne.s	msm2_pingpong
+		sub.l	ci_restartoffset(a5),d2
+		move.l	ci_newstart_addr(a5),d0
+		beq.s	msm2_loopend
+		move.l	d0,ci_sample_start(a5)
+		move.l	ci_newendoffset(a5),d0
+		move.l	d0,ci_endoffset(a5)
+		move.l	d0,ci_restartoffset(a5)
+msm2_loopend	tst.w	d3	;left_to_mix
+		bgt.s	msm2_loop2
+		bra.s	msm2_savereg
+msm2_mutechan	bset	#CHFLAGB_MUTED,ci_flags(a5)
+; --- save registers after mixing
+msm2_savereg
+		movem.l	d2/d4,ci_mixregs(a5)
+msm2_chloopend	adda.w	#ci_sizeof,a5
+		dbra	d7,msm2_chloop
+		movem.l	(sp)+,d2-d7/a2-a6
+		rts
+
+; swap mixing routine (change direction)
+msm2_pingpong	move.l	ci_altmixroutine(a5),d0
+		move.l	a4,ci_altmixroutine(a5)
+		movea.l	d0,a4
+		move.l	d0,ci_mixroutine(a5)
+		bchg	#CHFLAGB_BACKW,ci_flags(a5)
+; loop beginning -> loop end
+		move.l	ci_endoffset(a5),d0
+; turn pointer to the other side of the previous end offset
+		sub.l	d0,d2
+		neg.l	d2
+		add.l	d0,d2
+		sub.l	ci_restartoffset(a5),d0
+		move.l	d0,ci_endoffset(a5)
+		tst.w	d3
+		beq.s	msm2_savereg
+msm2_backwards	
+msmb2_loop2	;while(left_to_mix > 0)...
+		move.l	d5,d1	;d1 = advance
+; Tests whether current sample end is reached within remaining
+; space in mixing buffer.
+		ext.l	d3
+		swap	d1
+		move.w	d6,d1
+		mulu.l	d3,d0:d1
+		move.w	d0,d1
+		swap	d1
+		move.l	d2,d0
+		sub.l	ci_endoffset(a5),d0	;d0 = offset - endoffset
+		ble.s	msm2_mutechan	;loop too short
+		cmp.l	d0,d1
+		bhs.s	msmb2_calcsize
+; Sample end won't be reached... just fill the remaining mix buffer
+; size straight away.
+		move.w	d3,d0
+		jsr	(a4)
+		cmp.l	ci_endoffset(a5),d2
+		bgt.s	msm2_savereg
+		moveq	#0,d3
+		bra.s	msmb2_sampleend
+; Sample end will be reached: calculate how many bytes can be mixed.
+; (This calculation requires that remaining buffer size fits in a word.)
+msmb2_calcsize	swap	d0	;d0 already contains endoffs - offs
+		clr.w	d0	;<< 16
+		sub.l	d4,d0	; - fraction
+		subq.l	#1,d0	; - 1
+		move.w	d5,d1	;advance..
+		swap	d1
+		move.w	d6,d1	;advfract.
+		divu.l	d1,d0
+		addq.w	#1,d0
+		sub.w	d0,d3		;left_to_mix -= passsize
+		jsr	(a4)		;mix/skip
+		cmp.l	ci_endoffset(a5),d2
+		ble.s	msmb2_sampleend
+		tst.w	d3
+		beq.s	msm2_savereg
+msmb2_sampleend	btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	msm2_mutechan
+		btst	#CHFLAGB_PINGPONG,ci_flags(a5)
+		bne.s	msm2_pingpong2
+		add.l	ci_restartoffset(a5),d2
+		tst.w	d3	;left_to_mix
+		bgt.s	msmb2_loop2
+		bra.s	msm2_savereg
+
+; swap mixing routine (change direction)
+msm2_pingpong2	move.l	ci_altmixroutine(a5),d0
+		move.l	a4,ci_altmixroutine(a5)
+		movea.l	d0,a4
+		move.l	d0,ci_mixroutine(a5)
+		bchg	#CHFLAGB_BACKW,ci_flags(a5)
+; loop beginning -> loop end
+		move.l	ci_endoffset(a5),d0
+; turn pointer to the other side of the previous end offset
+		sub.l	d0,d2
+		neg.l	d2
+		add.l	d0,d2
+		add.l	ci_restartoffset(a5),d0
+		move.l	d0,ci_endoffset(a5)
+		tst.w	d3
+		bgt.s	msm2_loop2
+		bra.s	msm2_savereg
+	ENDC
+
+	IFNE	SUPPORT_000
+; Skip mix pass (just advance pointers)
+Skip		move.w	d0,d1	;passsize...
+		mulu	d6,d0	;* advfract
+		mulu	d5,d1	;* advance
+		add.l	d1,d2	;offset += passsize * advance
+		add.w	d0,d4	;add fraction
+		clr.w	d0
+		swap	d0	;get upper word
+		addx.l	d0,d2	;add to offset.
+		rts
+
+Skipb		move.w	d0,d1	;passsize...
+		mulu	d6,d0	;* advfract
+		mulu	d5,d1	;* advance
+		sub.l	d1,d2	;offset -= passsize * advance
+		add.w	d0,d4	;add fraction
+		clr.w	d0
+		swap	d0	;get upper word
+		subx.l	d0,d2	;add to offset.
+		rts
+	ENDC
+
+	IFNE	SUPPORT_020
+Skip_020	move.w	d5,d1
+		swap	d1
+		move.w	d6,d1
+		ext.l	d0
+		mulu.l	d0,d0:d1
+		add.w	d1,d4	,add fraction
+		move.w	d0,d1
+		swap	d1
+		addx.l	d1,d2	;add offset
+		rts
+
+Skipb_020	move.w	d5,d1
+		swap	d1
+		move.w	d6,d1
+		ext.l	d0
+		mulu.l	d0,d0:d1
+		add.w	d1,d4	,add fraction
+		move.w	d0,d1
+		swap	d1
+		subx.l	d1,d2	;add offset
+		rts
+	ENDC
+
+	IFNE	SUPPORT_SMOOTH
+; -------------------------------------------------------------------
+; Mixing routines: Mono, 8/16-bit, forwards/backwards, smooth
+; -------------------------------------------------------------------
+
+		addq.l	#1,d2
+		rts
+GetNextSample	move.l	ci_endoffset(a5),d3
+		subq.l	#1,d3
+		cmp.l	d3,d2
+		bhs.s	gns_end
+		moveq	#0,d3
+		move.b	1(a6,d2.l),d3
+		bra.s	gns_noloop
+gns_end		moveq	#0,d3
+		btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	gns_noloop
+		move.l	d2,-(sp)
+		sub.l	ci_restartoffset(a5),d2
+		tst.l	ci_newstart_addr(a5)
+		beq.s	1$
+		move.l	a6,-(sp)
+		movea.l	ci_newstart_addr(a5),a6
+		btst	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		beq.s	3$
+		adda.l	ci_rightch_offs(a5),a6
+3$		move.b	1(a6,d2.l),d3
+		move.l	(sp)+,a6
+		bra.s	2$
+1$		move.b	1(a6,d2.l),d3
+2$		move.l	(sp)+,d2
+gns_noloop	add.w	d3,d3
+		move.w	0(a3,d3.w),d3
+		btst	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		bne.s	1$
+		move.w	d3,ci_nextsample(a5)
+		rts
+1$		move.w	d3,ci_nextsample_r(a5)
+		rts
+
+		subq.l	#1,d2
+		rts
+GetNextSampleB	move.l	ci_endoffset(a5),d3
+		addq.l	#1,d3
+		cmp.l	d3,d2
+		ble.s	gnsb_end
+		moveq	#0,d3
+		move.b	-1(a6,d2.l),d3
+		bra.s	gns_noloop
+gnsb_end	moveq	#0,d3
+		btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	gns_noloop
+		move.l	d2,-(sp)
+		add.l	ci_restartoffset(a5),d2
+		move.b	-1(a6,d2.l),d3
+		move.l	(sp)+,d2
+		bra.s	gns_noloop
+
+		subq.l	#1,d2
+		rts
+GetNextSample_16B
+		move.l	ci_endoffset(a5),d3
+		addq.l	#1,d3
+		cmp.l	d3,d2
+		ble.s	gnsb16_end
+		move.l	d2,d3
+		add.l	d3,d3
+		move.w	-2(a6,d3.l),d3
+		bra.s	gns16_noloop
+gnsb16_end	moveq	#0,d3
+		btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	gns16_noloop
+		move.l	d2,-(sp)
+		add.l	ci_restartoffset(a5),d2
+		move.l	d2,d3
+		add.l	d3,d3
+		move.w	2(a6,d3.l),d3
+		move.l	(sp)+,d2
+		bra.s	gns16_noloop
+
+		addq.l	#1,d2
+		rts
+GetNextSample_16
+		move.l	ci_endoffset(a5),d3
+		subq.l	#1,d3
+		cmp.l	d3,d2
+		bhs.s	gns16_end
+		move.l	d2,d3
+		add.l	d3,d3
+		move.w	2(a6,d3.l),d3
+		bra.s	gns16_noloop
+gns16_end	moveq	#0,d3
+		btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	gns16_noloop
+		move.l	d2,-(sp)
+		sub.l	ci_restartoffset(a5),d2
+		move.l	d2,d3
+		add.l	d3,d3
+		tst.l	ci_newstart_addr(a5)
+		beq.s	1$
+		move.l	a6,-(sp)
+		movea.l	ci_newstart_addr(a5),a6
+		move.w	2(a6,d3.l),d3
+		move.l	(sp)+,a6
+		bra.s	2$
+1$		move.w	2(a6,d3.l),d3
+2$		move.l	(sp)+,d2
+gns16_noloop	asr.w	d7,d3
+		btst	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		bne.s	1$
+		move.w	d3,ci_nextsample(a5)
+		rts
+1$		move.w	d3,ci_nextsample_r(a5)
+		rts
+		rts
+
+sMIX_mono8	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a3
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	sMIX_avg
+		movem.l	d3/d5/a4,-(sp)
+		bsr.w	GetCurrS_8
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSample(pc),a4
+		bsr.w	sMIX_monoloop
+		movem.l	(sp)+,d3/d5/a4
+		rts
+sMIX_avg	movem.l	a1/a4,-(sp)
+		lea	GetCurrS_8(pc),a1
+		lea	GetS_1(pc),a4
+		bsr.w	sMIX_avgmono
+		movem.l	(sp)+,a1/a4
+		rts
+
+sMIXb_mono8	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a3
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	sMIXb_avg
+		movem.l	d3/d5/a4,-(sp)
+		bsr.w	GetCurrS_8
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSampleB(pc),a4
+		bsr.w	sMIX_monoloop
+		movem.l	(sp)+,d3/d5/a4
+		rts
+sMIXb_avg	movem.l	a1/a4,-(sp)
+		lea	GetCurrS_8(pc),a1
+		lea	GetS_1b(pc),a4
+		bsr.w	sMIX_avgmono
+		movem.l	(sp)+,a1/a4
+		rts
+
+sMIX_mono16	movea.l	ci_sample_start(a5),a6
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	sMIX_avg16
+		movem.l	d3/d5/d7/a4,-(sp)
+		move.w	ci_volshift_l(a5),d7
+		bsr.w	GetCurrS_16
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSample_16(pc),a4
+		bsr.s	sMIX_monoloop
+		movem.l	(sp)+,d3/d5/d7/a4
+		rts
+sMIX_avg16	movem.l	a1/a4/d7,-(sp)
+		lea	GetS_1_16(pc),a4
+		lea	GetCurrS_16(pc),a1
+		move.w	ci_volshift_l(a5),d7
+		bsr.w	sMIX_avgmono
+		movem.l	(sp)+,a1/a4/d7
+		rts
+
+sMIXb_mono16	movea.l	ci_sample_start(a5),a6
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	sMIXb_avg16
+		movem.l	d3/d5/d7/a4,-(sp)
+		move.w	ci_volshift_l(a5),d7
+		bsr.w	GetCurrS_16
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSample_16B(pc),a4
+		bsr.s	sMIX_monoloop
+		movem.l	(sp)+,d3/d5/d7/a4
+		rts
+sMIXb_avg16	movem.l	a1/a4/d7,-(sp)
+		lea	GetS_1_16b(pc),a4
+		lea	GetCurrS_16(pc),a1
+		move.w	ci_volshift_l(a5),d7
+		bsr.w	sMIX_avgmono
+		movem.l	(sp)+,a1/a4/d7
+		rts
+
+sMIX_monoloop	jsr	(a4)
+1$		move.w	ci_currsample(a5),d1
+		ext.l	d1
+		move.w	ci_prevsample(a5),d5
+		ext.l	d5
+		sub.l	d1,d5
+		neg.l	d5		;f' at fract 0 (curr - prev)
+		move.w	ci_nextsample(a5),d3
+		ext.l	d3
+		sub.l	d1,d3		;f' at fract $FFFF (next - curr)
+		sub.l	d5,d3		;f'' during the curr. sample
+		lsr.l	#2,d3
+		lsr.w	#1,d4
+		muls	d4,d3		;get f'' at curr. fract
+		roxl.w	#1,d4
+		swap	d3		;/ 0x10000
+		ext.l	d3
+		asl.l	#2,d3
+		add.l	d5,d3		;add initial f' at fract 0
+		lsr.l	#2,d3
+		lsr.w	#1,d4
+		muls	d4,d3
+		roxl.w	#1,d4
+		asl.l	#3,d3
+		swap	d3		;/ 0x10000
+		move.w	ci_prevsample(a5),d5
+		ext.l	d5
+		add.l	d5,d1
+		lsr.l	#1,d1
+		add.w	d3,d1		;add to initial sample value
+		bvc.s	2$
+		move.w	ci_currsample(a5),d1
+2$		add.w	d1,(a2)+
+		add.w	d6,d4		;actually advance fraction
+		bcc.s	4$
+		jsr	-4(a4)	;add (or subtract) one to offset
+		move.l	ci_currsample(a5),ci_prevsample(a5)
+		jsr	(a4)
+4$		dbra	d0,1$
+		rts
+
+GetCurrS_8	moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;current sample
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1
+		rts
+
+GetCurrS_16	move.l	d2,d1
+		add.l	d1,d1
+		move.w	0(a6,d1.l),d1
+		asr.w	d7,d1
+		rts
+
+sMIX_avgmono	move.l	d3,-(sp)
+1$		move.w	d4,d3
+		not.w	d3		;what's left of current sample
+		jsr	(a1)
+		lsr.w	#1,d3
+		muls	d1,d3
+		asr.l	#7,d3		;/ 256..
+		move.w	d5,-(sp)
+		move.w	d6,-(sp)
+		move.w	d4,d6
+		not.w	d6
+		lsr.w	#8,d6		;divisor
+		add.l	-4(a4),d2	;advance offset
+		subq.w	#2,d5
+		bmi.s	2$		;no full samples to skip
+3$		jsr	(a4)
+		add.l	-4(a4),d2	;advance offset
+		swap	d1
+		asr.l	#8,d1
+		add.l	d1,d3
+		dbra	d5,3$
+2$		add.w	(sp),d4		;d6 = (sp) = advfract
+		bcc.s	4$
+		jsr	(a4)
+		add.l	-4(a4),d2	;advance offset
+		swap	d1
+		asr.l	#8,d1
+		add.l	d1,d3
+4$		jsr	4(a4)		;get last (partial) sample
+		move.w	d4,d5
+		lsr.w	#8,d5
+		add.w	d5,d6
+		move.w	d4,d5
+		lsr.w	#1,d5
+		muls	d5,d1
+		asr.l	#7,d1
+		add.l	d1,d3
+		divs	d6,d3		;divide to get average
+		move.w	(sp)+,d6
+		move.w	(sp)+,d5
+		add.w	d3,(a2)+
+		dbra	d0,1$
+		move.l	(sp)+,d3
+		rts
+
+		dc.l	1
+GetS_1		add.w	#$100,d6
+		moveq	#0,d1
+		move.l	d6,-(sp)
+		move.l	d2,d6
+		cmp.l	ci_endoffset(a5),d6
+		bls.s	aag_ok
+		btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	aag_noloop
+		sub.l	ci_restartoffset(a5),d6
+aag_ok		move.b	0(a6,d6.l),d1
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1
+		;move.w	d1,ci_prevsample(a5)
+aag_noloop	move.l	(sp)+,d6
+		rts
+
+		dc.l	1
+GetS_1_16	add.w	#$100,d6
+		moveq	#0,d1
+		move.l	d6,-(sp)
+		move.l	d2,d6
+		cmp.l	ci_endoffset(a5),d6
+		bls.s	aag16_ok
+		btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	aag16_noloop
+		sub.l	ci_restartoffset(a5),d6
+aag16_ok	add.l	d6,d6
+		move.w	0(a6,d6.l),d1
+		asr.w	d7,d1
+		;move.w	d1,ci_prevsample(a5)
+aag16_noloop	move.l	(sp)+,d6
+		rts
+
+		dc.l	-1
+GetS_1b		add.w	#$100,d6
+		moveq	#0,d1
+		move.l	d6,-(sp)
+		move.l	d2,d6
+		cmp.l	ci_endoffset(a5),d6
+		bge.s	aag_ok
+		btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	aag_noloop
+		add.l	ci_restartoffset(a5),d6
+		bra.s	aag_ok
+
+		dc.l	-1
+GetS_1_16b	add.w	#$100,d6
+		moveq	#0,d1
+		move.l	d6,-(sp)
+		move.l	d2,d6
+		cmp.l	ci_endoffset(a5),d6
+		bge.s	aag16_ok
+		btst	#CHFLAGB_LOOP,ci_flags(a5)
+		beq.s	aag16_noloop
+		add.l	ci_restartoffset(a5),d6
+		bra.s	aag16_ok
+
+; -------------------------------------------------------------------
+; Mixing routines: Stereo, 8/16-bit, forwards/backwards, smooth
+; -------------------------------------------------------------------
+
+sMIX_stereo8l	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a3
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/a4,-(sp)
+		bsr.w	GetCurrS_8
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSample(pc),a4
+		bsr.w	sMIX_leftloop
+		movem.l	(sp)+,d3/d5/a4
+		rts
+1$		movem.l	a1/a4,-(sp)
+		lea	GetCurrS_8(pc),a1
+		lea	GetS_1(pc),a4
+		bsr.w	sMIX_avgleft
+		movem.l	(sp)+,a1/a4
+		rts
+
+sMIXb_stereo8l	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a3
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/a4,-(sp)
+		bsr.w	GetCurrS_8
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSampleB(pc),a4
+		bsr.w	sMIX_leftloop
+		movem.l	(sp)+,d3/d5/a4
+		rts
+1$		movem.l	a1/a4,-(sp)
+		lea	GetCurrS_8(pc),a1
+		lea	GetS_1b(pc),a4
+		bsr.w	sMIX_avgleft
+		movem.l	(sp)+,a1/a4
+		rts
+
+sMIX_stereo8r	movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		movea.l	ci_voltable_r(a5),a3
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/a4,-(sp)
+		bset	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		bsr.w	GetCurrS_8
+		move.w	d1,ci_currsample_r(a5)
+		lea	GetNextSample(pc),a4
+		bsr.w	sMIX_rightloop
+		bclr	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		movem.l	(sp)+,d3/d5/a4
+		rts
+1$		movem.l	a1/a4,-(sp)
+		lea	GetCurrS_8(pc),a1
+		lea	GetS_1(pc),a4
+		bsr.w	sMIX_avgright
+		movem.l	(sp)+,a1/a4
+		rts
+
+sMIXb_stereo8r	movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		movea.l	ci_voltable_r(a5),a3
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/a4,-(sp)
+		bset	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		bsr.w	GetCurrS_8
+		move.w	d1,ci_currsample_r(a5)
+		lea	GetNextSampleB(pc),a4
+		bsr.w	sMIX_rightloop
+		bclr	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		movem.l	(sp)+,d3/d5/a4
+		rts
+1$		movem.l	a1/a4,-(sp)
+		lea	GetCurrS_8(pc),a1
+		lea	GetS_1b(pc),a4
+		bsr.w	sMIX_avgright
+		movem.l	(sp)+,a1/a4
+		rts
+
+sMIX_stereo8	movea.l	ci_voltable_l(a5),a3
+		bra.s	sMIX_st8
+sMIX_stereo8c	movea.l	ci_voltable_l(a5),a3
+		move.l	a3,ci_voltable_r(a5)
+sMIX_st8	movea.l	ci_sample_start(a5),a6
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/a4,-(sp)
+		movem.l	d0/d2/d4/a2,-(sp)
+		bsr.w	GetCurrS_8
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSample(pc),a4
+		bsr.w	sMIX_leftloop
+		movem.l	(sp)+,d0/d2/d4/a2
+		bset	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		movea.l	ci_voltable_r(a5),a3
+		movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		bsr.w	GetCurrS_8
+		move.w	d1,ci_currsample_r(a5)
+		bsr.w	sMIX_rightloop
+		bclr	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		movem.l	(sp)+,d3/d5/a4
+		rts
+1$		movem.l	a1/a4,-(sp)
+		lea	GetCurrS_8(pc),a1
+		lea	GetS_1(pc),a4
+		movem.l	d0/d2/d4/a2,-(sp)
+		bsr.	sMIX_avgleft
+		movem.l	(sp)+,d0/d2/d4/a2
+		movea.l	ci_voltable_r(a5),a3
+		bsr.w	sMIX_avgright
+		movem.l	(sp)+,a1/a4
+		rts
+
+sMIXb_stereo8	movea.l	ci_voltable_l(a5),a3
+		bra.s	sMIXb_st8
+sMIXb_stereo8c	movea.l	ci_voltable_l(a5),a3
+		move.l	a3,ci_voltable_r(a5)
+sMIXb_st8	movea.l	ci_sample_start(a5),a6
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/a4,-(sp)
+		movem.l	d0/d2/d4/a2,-(sp)
+		bsr.w	GetCurrS_8
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSampleB(pc),a4
+		bsr.w	sMIX_leftloop
+		movem.l	(sp)+,d0/d2/d4/a2
+		bset	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		movea.l	ci_voltable_r(a5),a3
+		movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		bsr.w	GetCurrS_8
+		move.w	d1,ci_currsample_r(a5)
+		bsr.w	sMIX_rightloop
+		bclr	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		movem.l	(sp)+,d3/d5/a4
+		rts
+1$		movem.l	a1/a4,-(sp)
+		lea	GetCurrS_8(pc),a1
+		lea	GetS_1b(pc),a4
+		movem.l	d0/d2/d4/a2,-(sp)
+		bsr.	sMIX_avgleft
+		movem.l	(sp)+,d0/d2/d4/a2
+		movea.l	ci_voltable_r(a5),a3
+		bsr.w	sMIX_avgright
+		movem.l	(sp)+,a1/a4
+		rts
+
+sMIX_stereo16l	movea.l	ci_sample_start(a5),a6
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/d7/a4,-(sp)
+		move.w	ci_volshift_l(a5),d7
+		bsr.w	GetCurrS_16
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSample_16(pc),a4
+		bsr.w	sMIX_leftloop
+		movem.l	(sp)+,d3/d5/d7/a4
+		rts
+1$		movem.l	a1/a4/d7,-(sp)
+		move.w	ci_volshift_l(a5),d7
+		lea	GetCurrS_16(pc),a1
+		lea	GetS_1_16(pc),a4
+		bsr.w	sMIX_avgleft
+		movem.l	(sp)+,a1/a4/d7
+		rts
+
+sMIXb_stereo16l	movea.l	ci_sample_start(a5),a6
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/d7/a4,-(sp)
+		move.w	ci_volshift_l(a5),d7
+		bsr.w	GetCurrS_16
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSample_16B(pc),a4
+		bsr.w	sMIX_leftloop
+		movem.l	(sp)+,d3/d5/d7/a4
+		rts
+1$		movem.l	a1/a4/d7,-(sp)
+		move.w	ci_volshift_l(a5),d7
+		lea	GetCurrS_16(pc),a1
+		lea	GetS_1_16b(pc),a4
+		bsr.w	sMIX_avgleft
+		movem.l	(sp)+,a1/a4/d7
+		rts
+
+sMIX_stereo16r	movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/d7/a4,-(sp)
+		move.w	ci_volshift_r(a5),d7
+		bset	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		bsr.w	GetCurrS_16
+		move.w	d1,ci_currsample_r(a5)
+		lea	GetNextSample_16(pc),a4
+		bsr.w	sMIX_rightloop
+		bclr	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		movem.l	(sp)+,d3/d5/d7/a4
+		rts
+1$		movem.l	a1/a4/d7,-(sp)
+		move.w	ci_volshift_r(a5),d7
+		lea	GetCurrS_16(pc),a1
+		lea	GetS_1_16(pc),a4
+		bsr.w	sMIX_avgright
+		movem.l	(sp)+,a1/a4/d7
+		rts
+
+sMIXb_stereo16r	movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/d7/a4,-(sp)
+		bset	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		move.w	ci_volshift_r(a5),d7
+		bsr.w	GetCurrS_16
+		move.w	d1,ci_currsample_r(a5)
+		lea	GetNextSample_16B(pc),a4
+		bsr.w	sMIX_rightloop
+		bclr	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		movem.l	(sp)+,d3/d5/d7/a4
+		rts
+1$		movem.l	d7/a1/a4,-(sp)
+		move.w	ci_volshift_r(a5),d7
+		lea	GetCurrS_16(pc),a1
+		lea	GetS_1_16b(pc),a4
+		bsr.w	sMIX_avgright
+		movem.l	(sp)+,d7/a1/a4
+		rts
+
+sMIX_stereo16c	move.w	ci_volshift_l(a5),ci_volshift_r(a5)
+sMIX_stereo16	movea.l	ci_sample_start(a5),a6
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/d7/a4,-(sp)
+		movem.l	d0/d2/d4/a2,-(sp)
+		move.w	ci_volshift_l(a5),d7
+		bsr.w	GetCurrS_16
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSample_16(pc),a4
+		bsr.w	sMIX_leftloop
+		movem.l	(sp)+,d0/d2/d4/a2
+		bset	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		move.w	ci_volshift_r(a5),d7
+		movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		bsr.w	GetCurrS_16
+		move.w	d1,ci_currsample_r(a5)
+		bsr.w	sMIX_rightloop
+		bclr	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		movem.l	(sp)+,d3/d5/d7/a4
+		rts
+1$		movem.l	d7/a1/a4,-(sp)
+		lea	GetCurrS_16(pc),a1
+		lea	GetS_1_16(pc),a4
+		movem.l	d0/d2/d4/a2,-(sp)
+		move.w	ci_volshift_l(a5),d7
+		bsr.	sMIX_avgleft
+		movem.l	(sp)+,d0/d2/d4/a2
+		move.w	ci_volshift_r(a5),d7
+		bsr.w	sMIX_avgright
+		movem.l	(sp)+,d7/a1/a4
+		rts
+
+sMIXb_stereo16c	move.w	ci_volshift_l(a5),ci_volshift_r(a5)
+sMIXb_stereo16	movea.l	ci_sample_start(a5),a6
+		subq.w	#1,d0
+		tst.w	d5
+		bne.s	1$
+		movem.l	d3/d5/d7/a4,-(sp)
+		movem.l	d0/d2/d4/a2,-(sp)
+		move.w	ci_volshift_l(a5),d7
+		bsr.w	GetCurrS_16
+		move.w	d1,ci_currsample(a5)
+		lea	GetNextSample_16B(pc),a4
+		bsr.w	sMIX_leftloop
+		movem.l	(sp)+,d0/d2/d4/a2
+		bset	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		move.w	ci_volshift_r(a5),d7
+		movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		bsr.w	GetCurrS_16
+		move.w	d1,ci_currsample_r(a5)
+		bsr.w	sMIX_rightloop
+		bclr	#CHFLAGB_MIXING_RIGHT,ci_flags(a5)
+		movem.l	(sp)+,d3/d5/d7/a4
+		rts
+1$		movem.l	d7/a1/a4,-(sp)
+		lea	GetCurrS_16(pc),a1
+		lea	GetS_1_16b(pc),a4
+		movem.l	d0/d2/d4/a2,-(sp)
+		move.w	ci_volshift_l(a5),d7
+		bsr.	sMIX_avgleft
+		movem.l	(sp)+,d0/d2/d4/a2
+		move.w	ci_volshift_r(a5),d7
+		bsr.w	sMIX_avgright
+		movem.l	(sp)+,d7/a1/a4
+		rts
+
+sMIX_leftloop	jsr	(a4)
+1$		move.w	ci_currsample(a5),d1
+		ext.l	d1
+		move.w	ci_prevsample(a5),d5
+		ext.l	d5
+		sub.l	d1,d5
+		neg.l	d5		;f' at fract 0 (curr - prev)
+		move.w	ci_nextsample(a5),d3
+		ext.l	d3
+		sub.l	d1,d3		;f' at fract $FFFF (next - curr)
+		sub.l	d5,d3		;f'' during the curr. sample
+		lsr.l	#2,d3
+		lsr.w	#1,d4
+		muls	d4,d3		;get f'' at curr. fract
+		roxl.w	#1,d4
+		swap	d3		;/ 0x10000
+		ext.l	d3
+		asl.l	#2,d3
+		add.l	d5,d3		;add initial f' at fract 0
+		lsr.l	#2,d3
+		lsr.w	#1,d4
+		muls	d4,d3
+		roxl.w	#1,d4
+		asl.l	#3,d3
+		swap	d3		;/ 0x10000
+		move.w	ci_prevsample(a5),d5
+		ext.l	d5
+		add.l	d5,d1
+		lsr.l	#1,d1
+		add.w	d3,d1		;add to initial sample value
+		bvc.s	2$
+		move.w	ci_currsample(a5),d1
+2$		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4		;actually advance fraction
+		bcc.s	4$
+		jsr	-4(a4)	;add (or subtract) one to offset
+		move.l	ci_currsample(a5),ci_prevsample(a5)
+		jsr	(a4)
+4$		dbra	d0,1$
+		rts
+
+sMIX_rightloop	jsr	(a4)
+1$		move.w	ci_currsample_r(a5),d1
+		ext.l	d1
+		move.w	ci_prevsample_r(a5),d5
+		ext.l	d5
+		sub.l	d1,d5
+		neg.l	d5		;f' at fract 0 (curr - prev)
+		move.w	ci_nextsample_r(a5),d3
+		ext.l	d3
+		sub.l	d1,d3		;f' at fract $FFFF (next - curr)
+		sub.l	d5,d3		;f'' during the curr. sample
+		lsr.l	#2,d3
+		lsr.w	#1,d4
+		muls	d4,d3		;get f'' at curr. fract
+		roxl.w	#1,d4
+		swap	d3		;/ 0x10000
+		ext.l	d3
+		asl.l	#2,d3
+		add.l	d5,d3		;add initial f' at fract 0
+		lsr.l	#2,d3
+		lsr.w	#1,d4
+		muls	d4,d3
+		roxl.w	#1,d4
+		asl.l	#3,d3
+		swap	d3		;/ 0x10000
+		move.w	ci_prevsample_r(a5),d5
+		ext.l	d5
+		add.l	d5,d1
+		lsr.l	#1,d1
+		add.w	d3,d1		;add to initial sample value
+		bvc.s	2$
+		move.w	ci_currsample(a5),d1
+2$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4		;actually advance fraction
+		bcc.s	4$
+		jsr	-4(a4)	;add (or subtract) one to offset
+		move.l	ci_currsample_r(a5),ci_prevsample_r(a5)
+		jsr	(a4)
+4$		dbra	d0,1$
+		rts
+
+sMIX_avgleft	move.l	d3,-(sp)
+1$		move.w	d4,d3
+		not.w	d3		;what's left of current sample
+		jsr	(a1)
+		lsr.w	#1,d3
+		muls	d1,d3
+		asr.l	#7,d3		;/ 256..
+		move.w	d5,-(sp)
+		move.w	d6,-(sp)
+		move.w	d4,d6
+		not.w	d6
+		lsr.w	#8,d6		;divisor
+		add.l	-4(a4),d2	;advance offset
+		subq.w	#2,d5
+		bmi.s	2$		;no full samples to skip
+3$		jsr	(a4)
+		add.l	-4(a4),d2	;advance offset
+		swap	d1
+		asr.l	#8,d1
+		add.l	d1,d3
+		dbra	d5,3$
+2$		add.w	(sp),d4		;d6 = (sp) = advfract
+		bcc.s	4$
+		jsr	(a4)
+		add.l	-4(a4),d2	;advance offset
+		swap	d1
+		asr.l	#8,d1
+		add.l	d1,d3
+4$		jsr	4(a4)		;get last (partial) sample
+		move.w	d4,d5
+		lsr.w	#8,d5
+		add.w	d5,d6
+		move.w	d4,d5
+		lsr.w	#1,d5
+		muls	d5,d1
+		asr.l	#7,d1
+		add.l	d1,d3
+		divs	d6,d3		;divide to get average
+		move.w	(sp)+,d6
+		move.w	(sp)+,d5
+		add.w	d3,(a2)
+		addq.l	#4,a2
+		dbra	d0,1$
+		move.l	(sp)+,d3
+		rts
+
+sMIX_avgright	move.l	d3,-(sp)
+1$		move.w	d4,d3
+		not.w	d3		;what's left of current sample
+		jsr	(a1)
+		lsr.w	#1,d3
+		muls	d1,d3
+		asr.l	#7,d3		;/ 256..
+		move.w	d5,-(sp)
+		move.w	d6,-(sp)
+		move.w	d4,d6
+		not.w	d6
+		lsr.w	#8,d6		;divisor
+		add.l	-4(a4),d2	;advance offset
+		subq.w	#2,d5
+		bmi.s	2$		;no full samples to skip
+3$		jsr	(a4)
+		add.l	-4(a4),d2	;advance offset
+		swap	d1
+		asr.l	#8,d1
+		add.l	d1,d3
+		dbra	d5,3$
+2$		add.w	(sp),d4		;d6 = (sp) = advfract
+		bcc.s	4$
+		jsr	(a4)
+		add.l	-4(a4),d2	;advance offset
+		swap	d1
+		asr.l	#8,d1
+		add.l	d1,d3
+4$		jsr	4(a4)		;get last (partial) sample
+		move.w	d4,d5
+		lsr.w	#8,d5
+		add.w	d5,d6
+		move.w	d4,d5
+		lsr.w	#1,d5
+		muls	d5,d1
+		asr.l	#7,d1
+		add.l	d1,d3
+		divs	d6,d3		;divide to get average
+		move.w	(sp)+,d6
+		move.w	(sp)+,d5
+		addq.l	#2,a2
+		add.w	d3,(a2)+
+		dbra	d0,1$
+		move.l	(sp)+,d3
+		rts
+	ENDC
+
+	IFNE	SUPPORT_000
+; -------------------------------------------------------------------
+; Mixing routine: Mono, 16-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_mono16	movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		add.l	d2,d2	;temporarily mul by 2
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l),d1
+		asr.w	d3,d1
+6$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		addq.l	#2,d2
+5$		move.w	0(a6,d2.l),d1
+		asr.w	d3,d1
+7$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		addq.l	#2,d2
+		dbra	d0,4$
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Mono, 16-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_mono16	movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset -= advance
+2$		move.l	d2,d1
+		add.l	d1,d1
+		move.w	0(a6,d1.l),d1
+		asr.w	d3,d1
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		add.l	d2,d2	;temporarily mul by 2
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l),d1
+		asr.w	d3,d1
+6$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		subq.l	#2,d2
+5$		move.w	0(a6,d2.l),d1
+		asr.w	d3,d1
+7$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		asr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		subq.l	#2,d2
+		dbra	d0,4$
+		asr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Mono, 8-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_mono8	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1
+6$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		addq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1
+7$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		rts
+8$		addq.l	#1,d2
+		dbra	d0,4$
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Mono, 8-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_mono8	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1
+6$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		subq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1
+7$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		rts
+8$		subq.l	#1,d2
+		dbra	d0,4$
+		rts
+	ENDC
+
+	IFNE	SUPPORT_020
+; -------------------------------------------------------------------
+; Mixing routine: Mono, 16-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_mono16_020	movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		lea	0(a6,d2.l*2),a0
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	(a0)+,d1
+		asr.w	d3,d1
+6$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+5$		move.w	(a0)+,d1
+		asr.w	d3,d1
+7$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a0
+		move.l	a0,d2
+		subq.l	#1,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a0
+		move.l	a0,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Mono, 16-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_mono16_020	movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset -= advance
+2$		move.w	0(a6,d2.l*2),d1
+		asr.w	d3,d1
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l*2),d1
+		asr.w	d3,d1
+6$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		subq.l	#1,d2
+5$		move.w	0(a6,d2.l*2),d1
+		asr.w	d3,d1
+7$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		move.l	a3,d3
+		rts
+8$		subq.l	#1,d2
+		dbra	d0,4$
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Mono, 8bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_mono8_020	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a3
+		swap	d3	;scratch the upper word of D3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a6,d2.l),d3	;sample
+		move.w	0(a3,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.b	0(a6,d2.l),d3
+		move.w	0(a3,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		rts
+3$		movea.l	a6,a0
+		add.l	d2,a0
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	(a0)+,d3
+		move.w	0(a3,d3.w*2),d1
+6$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+5$		move.b	(a0)+,d3
+		move.w	0(a3,d3.w*2),d1
+7$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a0
+		move.l	a0,d2
+		subq.l	#1,d2
+		swap	d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a0
+		move.l	a0,d2
+		swap	d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Mono, 8-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_mono8_020	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a3
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a6,d2.l),d3	;sample
+		move.w	0(a3,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.b	0(a6,d2.l),d3
+		move.w	0(a3,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		rts
+3$		lea	1(a6,d2.l),a0
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	-(a0),d3
+		move.w	0(a3,d3.w*2),d1
+6$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+;		subq.l	#1,d2
+5$		move.b	-(a0),d3
+		move.w	0(a3,d3.w*2),d1
+7$		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a0
+		move.l	a0,d2
+		swap	d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a0
+		move.l	a0,d2
+		subq.l	#1,d2
+		swap	d3
+		rts
+	ENDC
+
+	IFNE	SUPPORT_000
+; -------------------------------------------------------------------
+; Mixing routine: Stereo generic, 8-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_stereo8	movea.l	ci_sample_start(a5),a6
+		movem.l	ci_voltable_l(a5),a0/a3
+		swap	d7
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d7	;left volume
+		add.w	d7,(a2)+
+		move.w	0(a3,d1.w),d7
+		add.w	d7,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d7	;left volume
+		add.w	d7,(a2)+
+		move.w	0(a3,d1.w),d7
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		swap	d7
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d7	;left volume
+		move.w	0(a3,d1.w),d1
+6$		add.w	d7,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		addq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d7
+		move.w	0(a3,d1.w),d1
+7$		add.w	d7,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		swap	d7
+		rts
+8$		addq.l	#1,d2
+		dbra	d0,4$
+		swap	d7
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo left ch, 8-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_stereo8l	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a0
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+6$		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		bcc.s	7$
+		addq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+7$		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		rts
+8$		addq.l	#1,d2
+		dbra	d0,4$
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo right ch, 8-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_stereo8r	movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		movea.l	ci_voltable_r(a5),a0
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+6$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		addq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+7$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		rts
+8$		addq.l	#1,d2
+		dbra	d0,4$
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo centered, 8-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_stereo8c	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a0
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+6$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		addq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+7$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		rts
+8$		addq.l	#1,d2
+		dbra	d0,4$
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo two-channel, 8-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_stereo8s	movem.l	d7/a4,-(sp)
+		move.l	ci_sample_start(a5),a0
+		move.l	a0,a6
+		adda.l	ci_rightch_offs(a5),a6
+		movem.l	ci_voltable_l(a5),a3/a4
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a0,d2.l),d1	;sample (left)
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1	;left volume
+		add.w	d1,(a2)+
+		moveq	#0,d7
+		move.b	0(a6,d2.l),d7	;sample (right)
+		add.w	d7,d7
+		move.w	0(a4,d7.w),d7
+		add.w	d7,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a0,d2.l),d1	;sample (left)
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1	;left volume
+		add.w	d1,(a2)+
+		moveq	#0,d7
+		move.b	0(a6,d2.l),d7	;sample (right)
+		add.w	d7,d7
+		move.w	0(a4,d7.w),d7
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		movem.l	(sp)+,d7/a4
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a0,d2.l),d1	;sample (left)
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1	;left volume
+		moveq	#0,d7
+		move.b	0(a6,d2.l),d7	;sample (right)
+		add.w	d7,d7
+		move.w	0(a4,d7.w),d7
+6$		add.w	d1,(a2)+
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		addq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a0,d2.l),d1	;sample (left)
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1	;left volume
+		moveq	#0,d7
+		move.b	0(a6,d2.l),d7	;sample (right)
+		add.w	d7,d7
+		move.w	0(a4,d7.w),d7
+7$		add.w	d1,(a2)+
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		movem.l	(sp)+,d7/a4
+		rts
+8$		addq.l	#1,d2
+		dbra	d0,4$
+		movem.l	(sp)+,d7/a4
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo, 8-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_stereo8	movea.l	ci_sample_start(a5),a6
+		movem.l	ci_voltable_l(a5),a0/a3
+		move.w	d7,-(sp)
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d7	;left volume
+		add.w	d7,(a2)+
+		move.w	0(a3,d1.w),d7
+		add.w	d7,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d7	;left volume
+		add.w	d7,(a2)+
+		move.w	0(a3,d1.w),d7
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		move.w	(sp)+,d7
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d7	;left volume
+		move.w	0(a3,d1.w),d1
+6$		add.w	d7,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		subq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d7
+		move.w	0(a3,d1.w),d1
+7$		add.w	d7,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		move.w	(sp)+,d7
+		rts
+8$		subq.l	#1,d2
+		dbra	d0,4$
+		move.w	(sp)+,d7
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo left ch, 8-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_stereo8l	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a0
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+6$		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		bcc.s	7$
+		subq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+7$		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		rts
+8$		subq.l	#1,d2
+		dbra	d0,4$
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo right ch, 8-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_stereo8r	movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		movea.l	ci_voltable_r(a5),a0
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+6$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		subq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+7$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		rts
+8$		subq.l	#1,d2
+		dbra	d0,4$
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo centered, 8-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_stereo8c	movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a0
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1	;left volume
+6$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		subq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1
+		add.w	d1,d1
+		move.w	0(a0,d1.w),d1
+7$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		rts
+8$		subq.l	#1,d2
+		dbra	d0,4$
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo two-channel, 8-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_stereo8s	movem.l	d7/a4,-(sp)
+		movea.l	ci_sample_start(a5),a0
+		move.l	a0,a6
+		adda.l	ci_rightch_offs(a5),a6
+		movem.l	ci_voltable_l(a5),a3/a4
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		moveq	#0,d1
+		move.b	0(a0,d2.l),d1	;sample (left)
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1	;left volume
+		add.w	d1,(a2)+
+		moveq	#0,d7
+		move.b	0(a6,d2.l),d7	;sample (right)
+		add.w	d7,d7
+		move.w	0(a4,d7.w),d7
+		add.w	d7,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d1	;sample (left)
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1	;left volume
+		add.w	d1,(a2)+
+		moveq	#0,d7
+		move.b	0(a6,d2.l),d7	;sample (right)
+		add.w	d7,d7
+		move.w	0(a4,d7.w),d7
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		movem.l	(sp)+,d7/a4
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		moveq	#0,d1
+		move.b	0(a0,d2.l),d1	;sample (left)
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1	;left volume
+		moveq	#0,d7
+		move.b	0(a6,d2.l),d7	;sample (right)
+		add.w	d7,d7
+		move.w	0(a4,d7.w),d7
+6$		add.w	d1,(a2)+
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		subq.l	#1,d2
+5$		moveq	#0,d1
+		move.b	0(a0,d2.l),d1	;sample (left)
+		add.w	d1,d1
+		move.w	0(a3,d1.w),d1	;left volume
+		moveq	#0,d7
+		move.b	0(a6,d2.l),d7	;sample (right)
+		add.w	d7,d7
+		move.w	0(a4,d7.w),d7
+7$		add.w	d1,(a2)+
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		movem.l	(sp)+,d7/a4
+		rts
+8$		subq.l	#1,d2
+		dbra	d0,4$
+		movem.l	(sp)+,d7/a4
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo two-channel, 16-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+; (No alternative version here... out of registers.)
+
+MIX_stereo16s	move.l	ci_sample_start(a5),a0
+		movea.l	a0,a6
+		adda.l	ci_rightch_offs(a5),a6
+		swap	d3
+		swap	d7
+		move.w	ci_volshift_l(a5),d3
+		move.w	ci_volshift_r(a5),d7
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,a3
+		add.l	a3,a3	;offset * 2
+		move.w	0(a0,a3.l),d1	;sample (L)
+		asr.w	d3,d1	;scale vol (L)
+		add.w	d1,(a2)+
+		move.w	0(a6,a3.l),d1
+		asr.w	d7,d1	;scale vol (R)
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.l	d2,a3
+		add.l	a3,a3	;offset * 2
+		move.w	0(a0,a3.l),d1	;sample (L)
+		asr.w	d3,d1	;scale vol (L)
+		add.w	d1,(a2)+
+		move.w	0(a6,a3.l),d1
+		asr.w	d7,d1	;scale vol (R)
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		swap	d3
+		swap	d7
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo left ch, 16-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_stereo16l	movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		add.l	d2,d2
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+		addq.l	#2,d2
+5$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		addq.l	#2,d2
+		dbra	d0,4$
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo right ch, 16-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_stereo16r	movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_r(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		add.l	d2,d2
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+		addq.l	#2,d2
+5$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		addq.l	#2,d2
+		dbra	d0,4$
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo centered, 16-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_stereo16c	movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		add.l	d2,d2
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+		addq.l	#2,d2
+5$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		addq.l	#2,d2
+		dbra	d0,4$
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo generic, 16-bit, forwards, 68000
+; -------------------------------------------------------------------
+
+MIX_stereo16	movea.l	ci_sample_start(a5),a6
+		swap	d3	;upper words are free for scratch
+		swap	d7	;use
+		move.w	d6,a3
+		move.w	ci_volshift_l(a5),d3
+		move.w	ci_volshift_r(a5),d7
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		asr.w	d7,d6
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		asr.w	d7,d6
+		add.w	d6,(a2)+
+		add.w	a3,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+3$		add.l	d2,d2
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1
+		asr.w	d7,d6
+6$		add.w	d1,(a2)+
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		bcc.s	7$
+		addq.l	#2,d2
+5$		move.w	0(a6,d2.l),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		asr.w	d7,d6
+7$		add.w	d1,(a2)+
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		lsr.l	#1,d2
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+8$		addq.l	#2,d2
+		dbra	d0,4$
+		lsr.l	#1,d2
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo two-channel, 16-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_stereo16s	move.l	ci_sample_start(a5),a0
+		movea.l	a0,a6
+		adda.l	ci_rightch_offs(a5),a6
+		swap	d3
+		swap	d7
+		move.w	ci_volshift_l(a5),d3
+		move.w	ci_volshift_r(a5),d7
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,a3
+		add.l	a3,a3	;offset * 2
+		move.w	0(a0,a3.l),d1	;sample (L)
+		asr.w	d3,d1	;scale vol (L)
+		add.w	d1,(a2)+
+		move.w	0(a6,a3.l),d1
+		asr.w	d7,d1	;scale vol (R)
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.l	d2,a3
+		add.l	a3,a3	;offset * 2
+		move.w	0(a0,a3.l),d1	;sample (L)
+		asr.w	d3,d1	;scale vol (L)
+		add.w	d1,(a2)+
+		move.w	0(a6,a3.l),d1
+		asr.w	d7,d1	;scale vol (R)
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		swap	d3
+		swap	d7
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo left ch, 16-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_stereo16l	movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		add.l	d2,d2
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+		subq.l	#2,d2
+5$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		asr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		subq.l	#2,d2
+		dbra	d0,4$
+		asr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo right ch, 16-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_stereo16r	movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_r(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		add.l	d2,d2
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+		subq.l	#2,d2
+5$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		asr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		subq.l	#2,d2
+		dbra	d0,4$
+		asr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo centered, 16-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_stereo16c	movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		add.l	d2,d2
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+		subq.l	#2,d2
+5$		move.w	0(a6,d2.l),d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		asr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		subq.l	#2,d2
+		dbra	d0,4$
+		asr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo generic, 16-bit, backwards, 68000
+; -------------------------------------------------------------------
+
+MIXb_stereo16	movea.l	ci_sample_start(a5),a6
+		swap	d3	;upper words are free for scratch
+		swap	d7	;use
+		move.w	d6,a3
+		move.w	ci_volshift_l(a5),d3
+		move.w	ci_volshift_r(a5),d7
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		asr.w	d7,d6
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.l	d2,d1
+		add.l	d1,d1	;offset * 2
+		move.w	0(a6,d1.l),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		asr.w	d7,d6
+		add.w	d6,(a2)+
+		add.w	a3,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+3$		add.l	d2,d2
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1
+		asr.w	d7,d6
+6$		add.w	d1,(a2)+
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		bcc.s	7$
+		subq.l	#2,d2
+5$		move.w	0(a6,d2.l),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		asr.w	d7,d6
+7$		add.w	d1,(a2)+
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		asr.l	#1,d2
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+8$		subq.l	#2,d2
+		dbra	d0,4$
+		asr.l	#1,d2
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+	ENDC
+
+	IFNE	SUPPORT_020
+; -------------------------------------------------------------------
+; Mixing routine: Stereo generic, 8-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_stereo8_020	movea.l	ci_sample_start(a5),a6
+		movem.l	ci_voltable_l(a5),a0/a3
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a6,d2.l),d3	;sample
+		move.w	0(a0,d3.w*2),d1	;left volume
+		add.w	d1,(a2)+
+		move.w	0(a3,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.b	0(a6,d2.l),d3
+		move.w	0(a0,d3.w*2),d1
+		add.w	d1,(a2)+
+		move.w	0(a3,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		rts
+3$		swap	d7
+		move.l	a4,-(sp)
+		movea.l	a6,a4
+		add.l	d2,a4
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	(a4)+,d3
+		move.w	0(a0,d3.w*2),d7	;left volume
+		move.w	0(a3,d3.w*2),d1
+6$		add.w	d7,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+5$		move.b	(a4)+,d3
+		move.w	0(a0,d3.w*2),d7
+		move.w	0(a3,d3.w*2),d1
+7$		add.w	d7,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a4
+		move.l	a4,d2
+		subq.l	#1,d2
+		swap	d7
+		swap	d3
+		move.l	(sp)+,a4
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a4
+		move.l	a4,d2
+		swap	d7
+		swap	d3
+		move.l	(sp)+,a4
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo left ch, 8-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_stereo8l_020
+		movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a0
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a6,d2.l),d3	;sample
+		move.w	0(a0,d3.w*2),d1	;left volume
+		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d3
+		move.w	0(a0,d3.w*2),d1
+		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	0(a6,d2.l),d3
+		move.w	0(a0,d3.w*2),d1	;left volume
+6$		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		bcc.s	7$
+		addq.l	#1,d2
+5$		move.b	0(a6,d2.l),d3
+		move.w	0(a0,d3.w*2),d1
+7$		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		swap	d3
+		rts
+8$		addq.l	#1,d2
+		dbra	d0,4$
+		swap	d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo right ch, 8-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_stereo8r_020
+		movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		movea.l	ci_voltable_r(a5),a0
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a6,d2.l),d3	;sample
+		move.w	0(a0,d3.w*2),d1	;left volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.b	0(a6,d2.l),d3
+		move.w	0(a0,d3.w*2),d1
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		rts
+3$		movea.l	a6,a3
+		add.l	d2,a3
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	(a3)+,d3
+		move.w	0(a0,d3.w*2),d1	;left volume
+6$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+5$		move.b	(a3)+,d3
+		move.w	0(a0,d3.w*2),d1
+7$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a3
+		move.l	a3,d2
+		subq.l	#1,d2
+		swap	d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a3
+		move.l	a3,d2
+		swap	d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo centered, 8-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_stereo8c_020
+		movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a0
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a6,d2.l),d3	;sample
+		move.w	0(a0,d3.w*2),d1	;left volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.b	0(a6,d2.l),d3
+		move.w	0(a0,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		rts
+3$		movea.l	a6,a3
+		add.l	d2,a3
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	(a3)+,d3
+		move.w	0(a0,d3.w*2),d1	;left volume
+6$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+5$		move.b	(a3)+,d3
+		move.w	0(a0,d3.w*2),d1
+7$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a3
+		move.l	a3,d2
+		subq.l	#1,d2
+		swap	d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a3
+		move.l	a3,d2
+		swap	d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo two-channel, 8-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_stereo8s_020
+		move.l	a4,-(sp)
+		move.l	ci_sample_start(a5),a0
+		move.l	a0,a6
+		adda.l	ci_rightch_offs(a5),a6
+		movem.l	ci_voltable_l(a5),a3/a4
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a0,d2.l),d3	;sample (left)
+		move.w	0(a3,d3.w*2),d1	;left volume
+		add.w	d1,(a2)+
+		move.b	0(a6,d2.l),d3	;sample (right)
+		move.w	0(a4,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.b	0(a0,d2.l),d3	;sample (left)
+		move.w	0(a3,d3.w*2),d1	;left volume
+		add.w	d1,(a2)+
+		move.b	0(a6,d2.l),d3	;sample (right)
+		move.w	0(a4,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		move.l	(sp)+,a4
+		rts
+3$		swap	d7
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	0(a0,d2.l),d3	;sample (left)
+		move.w	0(a3,d3.w*2),d1	;left volume
+		move.b	0(a6,d2.l),d3	;sample (right)
+		move.w	0(a4,d3.w*2),d7
+6$		add.w	d1,(a2)+
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		addq.l	#1,d2
+5$		move.b	0(a0,d2.l),d3	;sample (left)
+		move.w	0(a3,d3.w*2),d1	;left volume
+		move.b	0(a6,d2.l),d3	;sample (right)
+		move.w	0(a4,d3.w*2),d7
+7$		add.w	d1,(a2)+
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		swap	d3
+		swap	d7
+		move.l	(sp)+,a4
+		rts
+8$		addq.l	#1,d2
+		dbra	d0,4$
+		swap	d3
+		swap	d7
+		move.l	(sp)+,a4
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo generic, 8-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_stereo8_020
+		movea.l	ci_sample_start(a5),a6
+		movem.l	ci_voltable_l(a5),a0/a3
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a6,d2.l),d3	;sample
+		move.w	0(a0,d3.w*2),d1	;left volume
+		add.w	d1,(a2)+
+		move.w	0(a3,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.b	0(a6,d2.l),d3
+		move.w	0(a0,d3.w*2),d1
+		add.w	d1,(a2)+
+		move.w	0(a3,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		rts
+3$		swap	d7
+		move.l	a4,-(sp)
+		lea	1(a6,d2.l),a4
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	-(a4),d3
+		move.w	0(a0,d3.w*2),d7	;left volume
+		move.w	0(a3,d3.w*2),d1
+6$		add.w	d7,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+5$		move.b	-(a4),d3
+		move.w	0(a0,d3.w*2),d7
+		move.w	0(a3,d3.w*2),d1
+7$		add.w	d7,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a4
+		move.l	a4,d2
+		move.l	(sp)+,a4
+		swap	d7
+		swap	d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a4
+		move.l	a4,d2
+		subq.l	#1,d2
+		move.l	(sp)+,a4
+		swap	d7
+		swap	d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo left ch, 8-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_stereo8l_020
+		movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a0
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a6,d2.l),d3	;sample
+		move.w	0(a0,d3.w*2),d1	;left volume
+		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		moveq	#0,d1
+		move.b	0(a6,d2.l),d3
+		move.w	0(a0,d3.w*2),d1
+		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		rts
+3$		lea	1(a6,d2.l),a3
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	-(a3),d3
+		move.w	0(a0,d3.w*2),d1	;left volume
+6$		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		bcc.s	7$
+5$		move.b	-(a3),d3
+		move.w	0(a0,d3.w*2),d1
+7$		add.w	d1,(a2)
+		addq.l	#4,a2
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a3
+		move.l	a3,d2
+		swap	d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a3
+		move.l	a3,d2
+		subq.l	#1,d2
+		swap	d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo right ch, 8-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_stereo8r_020
+		movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		movea.l	ci_voltable_r(a5),a0
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a6,d2.l),d3	;sample
+		move.w	0(a0,d3.w*2),d1	;left volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.b	0(a6,d2.l),d3
+		move.w	0(a0,d3.w*2),d1
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		rts
+3$		lea	1(a6,d2.l),a3
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	-(a3),d3
+		move.w	0(a0,d3.w*2),d1	;left volume
+6$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+5$		move.b	-(a3),d3
+		move.w	0(a0,d3.w*2),d1
+7$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a3
+		move.l	a3,d2
+		swap	d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a3
+		move.l	a3,d2
+		subq.l	#1,d2
+		swap	d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo centered, 8-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_stereo8c_020
+		movea.l	ci_sample_start(a5),a6
+		movea.l	ci_voltable_l(a5),a0
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a6,d2.l),d3	;sample
+		move.w	0(a0,d3.w*2),d1	;left volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.b	0(a6,d2.l),d3
+		move.w	0(a0,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		rts
+3$		lea	1(a6,d2.l),a3
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	-(a3),d3
+		move.w	0(a0,d3.w*2),d1	;left volume
+6$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+5$		move.b	-(a3),d3
+		move.w	0(a0,d3.w*2),d1
+7$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a3
+		move.l	a3,d2
+		swap	d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a3
+		move.l	a3,d2
+		subq.l	#1,d2
+		swap	d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo two-channel, 8-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_stereo8s_020
+		move.l	a4,-(sp)
+		move.l	ci_sample_start(a5),a0
+		move.l	a0,a6
+		adda.l	ci_rightch_offs(a5),a6
+		movem.l	ci_voltable_l(a5),a3/a4
+		swap	d3
+		tst.w	d5
+		beq.s	3$	;advance zero
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.b	0(a0,d2.l),d3	;sample (left)
+		move.w	0(a3,d3.w*2),d1	;left volume
+		add.w	d1,(a2)+
+		move.b	0(a6,d2.l),d3	;sample (right)
+		move.w	0(a4,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.b	0(a0,d2.l),d3	;sample (left)
+		move.w	0(a3,d3.w*2),d1	;left volume
+		add.w	d1,(a2)+
+		move.b	0(a6,d2.l),d3	;sample (right)
+		move.w	0(a4,d3.w*2),d1
+		add.w	d1,(a2)+
+		add.w	d6,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		swap	d3
+		move.l	(sp)+,a4
+		rts
+3$		swap	d7
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.b	0(a0,d2.l),d3	;sample (left)
+		move.w	0(a3,d3.w*2),d1	;left volume
+		move.b	0(a6,d2.l),d3	;sample (right)
+		move.w	0(a4,d3.w*2),d7
+6$		add.w	d1,(a2)+
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		bcc.s	7$
+		subq.l	#1,d2
+5$		move.b	0(a0,d2.l),d3	;sample (left)
+		move.w	0(a3,d3.w*2),d1	;left volume
+		move.b	0(a6,d2.l),d3	;sample (right)
+		move.w	0(a4,d3.w*2),d7
+7$		add.w	d1,(a2)+
+		add.w	d7,(a2)+
+		add.w	d6,d4
+		bcs.s	8$
+		dbra	d0,6$
+		swap	d3
+		swap	d7
+		move.l	(sp)+,a4
+		rts
+8$		subq.l	#1,d2
+		dbra	d0,4$
+		swap	d3
+		swap	d7
+		move.l	(sp)+,a4
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo two-channel, 16-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_stereo16s_020
+		move.l	ci_sample_start(a5),a0
+		movea.l	a0,a6
+		adda.l	ci_rightch_offs(a5),a6
+		swap	d3
+		swap	d7
+		move.w	ci_volshift_l(a5),d3
+		move.w	ci_volshift_r(a5),d7
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a0,d2.l*2),d1	;sample (L)
+		asr.w	d3,d1	;scale vol (L)
+		add.w	d1,(a2)+
+		move.w	0(a6,d2.l*2),d1
+		asr.w	d7,d1	;scale vol (R)
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.w	0(a0,d2.l*2),d1	;sample (L)
+		asr.w	d3,d1	;scale vol (L)
+		add.w	d1,(a2)+
+		move.w	0(a6,d2.l*2),d1
+		asr.w	d7,d1	;scale vol (R)
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		swap	d3
+		swap	d7
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo left ch, 16-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_stereo16l_020
+		movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		lea	0(a6,d2.l*2),a0
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	(a0)+,d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+		addq.l	#1,d2
+5$		move.w	(a0)+,d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a0
+		move.l	a0,d2
+		subq.l	#2,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a0
+		move.l	a0,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo right ch, 16-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_stereo16r_020
+		movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_r(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		lea	0(a6,d2.l*2),a0
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	(a0)+,d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+5$		move.w	(a0)+,d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a0
+		move.l	a0,d2
+		subq.l	#2,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a0
+		move.l	a0,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo centered, 16-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_stereo16c_020
+		movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		lea	0(a6,d2.l*2),a0
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	(a0)+,d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+5$		move.w	(a0)+,d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a0
+		move.l	a0,d2
+		subq.l	#2,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a0
+		move.l	a0,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo generic, 16-bit, forwards, 68020+
+; -------------------------------------------------------------------
+
+MIX_stereo16_020
+		movea.l	ci_sample_start(a5),a6
+		swap	d3	;upper words are free for scratch
+		swap	d7	;use
+		move.w	d6,a3
+		move.w	ci_volshift_l(a5),d3
+		move.w	ci_volshift_r(a5),d7
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a6,d2.l*2),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		asr.w	d7,d6
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		addx.l	d5,d2	;offset += advance
+2$		move.w	0(a6,d2.l*2),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		asr.w	d7,d6
+		add.w	d6,(a2)+
+		add.w	a3,d4
+		addx.l	d5,d2
+		dbra	d0,1$
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+3$		lea	0(a6,d2.l*2),a0
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	(a0)+,d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1
+		asr.w	d7,d6
+6$		add.w	d1,(a2)+
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		bcc.s	7$
+5$		move.w	(a0)+,d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		asr.w	d7,d6
+7$		add.w	d1,(a2)+
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a0
+		move.l	a0,d2
+		subq.l	#2,d2
+		lsr.l	#1,d2
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a0
+		move.l	a0,d2
+		lsr.l	#1,d2
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo two-channel, 16-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_stereo16s_020
+		move.l	ci_sample_start(a5),a0
+		movea.l	a0,a6
+		adda.l	ci_rightch_offs(a5),a6
+		swap	d3
+		swap	d7
+		move.w	ci_volshift_l(a5),d3
+		move.w	ci_volshift_r(a5),d7
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a0,d2.l*2),d1	;sample (L)
+		asr.w	d3,d1	;scale vol (L)
+		add.w	d1,(a2)+
+		move.w	0(a6,d2.l*2),d1
+		asr.w	d7,d1	;scale vol (R)
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.w	0(a0,d2.l*2),d1	;sample (L)
+		asr.w	d3,d1	;scale vol (L)
+		add.w	d1,(a2)+
+		move.w	0(a6,d2.l*2),d1
+		asr.w	d7,d1	;scale vol (R)
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		swap	d3
+		swap	d7
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo left ch, 16-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_stereo16l_020
+		movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		lea	2(a6,d2.l*2),a0
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	-(a0),d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+5$		move.w	-(a0),d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		add.w	d1,(a2)+
+		addq.l	#2,a2
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a0
+		move.l	a0,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a0
+		move.l	a0,d2
+		subq.l	#2,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo right ch, 16-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_stereo16r_020
+		movea.l	ci_sample_start(a5),a6
+		adda.l	ci_rightch_offs(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_r(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		lea	2(a6,d2.l*2),a0
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	-(a0),d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+5$		move.w	-(a0),d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		addq.l	#2,a2
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a0
+		move.l	a0,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a0
+		move.l	a0,d2
+		subq.l	#2,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo centered, 16-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_stereo16c_020
+		movea.l	ci_sample_start(a5),a6
+		move.l	d3,a3	;store
+		move.w	ci_volshift_l(a5),d3
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.w	0(a6,d2.l*2),d1	;sample
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+		dbra	d0,1$
+		move.l	a3,d3
+		rts
+3$		lea	2(a6,d2.l*2),a0
+		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	-(a0),d1	;sample
+		asr.w	d3,d1	;scale volume
+6$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcc.s	7$
+5$		move.w	-(a0),d1	;sample
+		asr.w	d3,d1	;scale volume
+7$		add.w	d1,(a2)+
+		add.w	d1,(a2)+
+		add.w	d6,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		suba.l	a6,a0
+		move.l	a0,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+8$		dbra	d0,4$
+		suba.l	a6,a0
+		move.l	a0,d2
+		subq.l	#2,d2
+		lsr.l	#1,d2
+		move.l	a3,d3
+		rts
+
+; -------------------------------------------------------------------
+; Mixing routine: Stereo generic, 16-bit, backwards, 68020+
+; -------------------------------------------------------------------
+
+MIXb_stereo16_020
+		movea.l	ci_sample_start(a5),a6
+		swap	d3	;upper words are free for scratch
+		swap	d7	;use
+		move.w	d6,a3
+		move.w	ci_volshift_l(a5),d3
+		move.w	ci_volshift_r(a5),d7
+		tst.w	d5
+		beq.s	3$
+		lsr.w	#1,d0
+		bcs.s	2$
+		subq.w	#1,d0
+1$		move.w	0(a6,d2.l*2),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		asr.w	d7,d6
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		subx.l	d5,d2	;offset += advance
+2$		move.w	0(a6,d2.l*2),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		add.w	d1,(a2)+
+		asr.w	d7,d6
+		add.w	d6,(a2)+
+		add.w	a3,d4
+		subx.l	d5,d2
+		dbra	d0,1$
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+3$		lsr.w	#1,d0
+		bcs.s	5$
+		subq.w	#1,d0
+4$		move.w	0(a6,d2.l*2),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1
+		asr.w	d7,d6
+6$		add.w	d1,(a2)+
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		bcc.s	7$
+		subq.l	#1,d2
+5$		move.w	0(a6,d2.l*2),d1	;sample
+		move.w	d1,d6
+		asr.w	d3,d1	;scale volume
+		asr.w	d7,d6
+7$		add.w	d1,(a2)+
+		add.w	d6,(a2)+
+		add.w	a3,d4	;fraction += advfract
+		bcs.s	8$
+		dbra	d0,6$
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+8$		subq.l	#1,d2
+		dbra	d0,4$
+		move.l	a3,d6
+		swap	d3
+		swap	d7
+		rts
+	ENDC
+
+; -------------------------------------------------------------------
+; Interface routines called by the player routine.
+; -------------------------------------------------------------------
+
+		XDEF	_MixSetTrkPeriod
+
+;	D1 = period, D7 = track number, A5 = track data
+
+_MixSetTrkPeriod:
+
+		cmp.w	m_channels(pc),d7
+		bhs.s	mstp_exit
+		movea.l	trk_cinfo(a5),a0
+		moveq	#0,d0
+		move.w	d1,d0
+		beq.s	_ChOff_mix
+		move.w	m_actualrate(pc),d1
+; CalcAdv	;d0.l = note_freq, d1.w = actualrate_hz
+		divu	d1,d0
+		move.w	d0,ci_advance+2(a0)	;set advance
+		clr.w	d0
+		divu	d1,d0
+		move.w	d0,ci_advfract+2(a0)
+		beq.s	mstp_advfract0
+mstp_exit	rts
+
+; advfract == 0, if also advance == 0, stop sound (would cause
+; division by zero).
+mstp_advfract0	tst.w	ci_advance+2(a0)
+		beq.s	_ChOff_mix
+		rts
+
+; Prepare for a synthsound. (The next MixSetSynthWF will start
+; playing from the beginning of the wf instead of waiting for
+; the previous wf to finish.)
+
+		XDEF	_MixPrepSynth
+
+_MixPrepSynth
+		cmp.w	m_channels(pc),d7
+		bhs.s	mps_exit
+		movea.l	trk_cinfo(a5),a0
+		bset	#CHFLAGB_STARTSYN,ci_flags(a0)
+mps_exit	rts
+
+
+; Channel off. (Just set the MUTED flag.)
+; (Note: do not trash anything without modifying _ChannelOff!)
+
+		XDEF	_ChOff_mix
+
+_ChOff_mix
+		cmp.w	m_channels(pc),d7
+		bhs.s	comix_exit
+		movea.l	trk_cinfo(a5),a0
+		bset	#CHFLAGB_MUTED,ci_flags(a0)
+comix_exit	rts
+
+
+; Set Synthsound waveform.
+; A1 = Synth waveform, D7 = track, A5 = track data
+
+		XDEF	_MixSetSynthWF
+
+_MixSetSynthWF
+		cmp.w	m_channels(pc),d7
+		bhs.s	mssw_exit
+		movea.l	trk_cinfo(a5),a0
+		moveq	#0,d1
+		move.w	(a1)+,d1	;synthwf length
+		add.w	d1,d1		;* 2
+		move.w	d1,ci_newendoffset+2(a0)
+		move.l	a1,ci_newstart_addr(a0)
+		btst	#CHFLAGB_STARTSYN,ci_flags(a0)
+		beq.s	mssw_setloop
+		move.l	a1,ci_sample_start(a0)
+		move.l	d1,ci_endoffset(a0)
+		move.l	d1,ci_restartoffset(a0)
+		clr.l	ci_offset(a0)
+mssw_setloop	move.b	#1<<CHFLAGB_LOOP,ci_flags(a0)
+mssw_exit	rts
+
+
+
+; Set volume table and mixing routine
+; D0 = volume (UBYTE), D7 = track, A5 = track data, A4 = song
+
+		XDEF	_MixSetTrkVol
+		XREF	_voltable,_chshift
+
+mstv_exit	rts
+_MixSetTrkVol
+		cmp.w	m_channels(pc),d7
+		bhs.s	mstv_exit
+		movea.l	trk_cinfo(a5),a0
+; --- find correct handler
+		subq.b	#1,d0
+		bpl.s	mstv_non0
+		lea	mixr_skip(pc),a1
+		bra.s	mstv_set
+mstv_non0	tst.b	m_stereo
+		bne.s	mstv_stereo
+		lea	mixr_mono(pc),a1
+		bra.s	mstv_set
+mstv_stereo
+	IFNE	OCTAMED_INTERN
+		lea	msng_trkpan(a4),a1
+	ELSEIF
+		move.l	msng_trkpan(a4),d1
+		beq.s	mstv_nopanarray
+		move.l	d1,a1
+	ENDC
+		move.b	0(a1,d7.w),d1	;get pan
+mstv_nopanarray	cmp.b	#-16,d1
+		bne.s	mstv_noleftpan
+		lea	mixr_stereol(pc),a1
+		bra.s	mstv_set
+mstv_noleftpan	cmp.b	#16,d1
+		bne.s	mstv_norightpan
+		lea	mixr_stereor(pc),a1
+		bra.s	mstv_set
+mstv_norightpan	btst	#CHFLAGB_STEREO,ci_flags(a0)
+		beq.s	mstv_nostereos
+		lea	mixr_stereos(pc),a1
+		bra.s	mstv_set
+mstv_nostereos	tst.b	d1
+		bne.s	mstv_nocenter
+		lea	mixr_stereoc(pc),a1
+		bra.s	mstv_set
+mstv_nocenter	lea	mixr_stereo(pc),a1
+; --- handler found... set parameters
+mstv_set	btst	#CHFLAGB_16BIT,ci_flags(a0)
+		bne.s	mstv_set16
+		btst	#CHFLAGB_BACKW,ci_flags(a0)
+		bne.s	mstv_set8b
+		move.l	8(a1),ci_mixroutine(a0)	;set 8-bit routine
+		move.l	16(a1),ci_altmixroutine(a0) ;backwards
+		move.l	(a1),a1
+		jmp	(a1)
+mstv_set8b	move.l	16(a1),ci_mixroutine(a0) ;8-bit backwards
+		move.l	8(a1),ci_altmixroutine(a0) ;forwards
+		move.l	(a1),a1
+		jmp	(a1)
+mstv_set16	btst	#CHFLAGB_BACKW,ci_flags(a0)
+		bne.s	mstv_set16b
+		move.l	12(a1),ci_mixroutine(a0) ;16-bit routine
+		move.l	20(a1),ci_altmixroutine(a0)
+		move.l	4(a1),a1
+		jmp	(a1)
+mstv_set16b	move.l	20(a1),ci_mixroutine(a0) ;16-bit backwards
+		move.l	12(a1),ci_altmixroutine(a0)
+		move.l	4(a1),a1
+		jmp	(a1)
+
+; --- mono/stereo, volume zero
+mstv_skip	rts
+; --- stereo 8-bit
+mstv_stereo8	move.l	d2,-(sp)
+		moveq	#16,d2
+		sub.b	d1,d2		;16 - trkpan
+		ext.w	d0
+		mulu	d0,d2		;* (vol - 1)
+		and.w	#$FFE0,d2	:/ 32 * 256 * 2..
+		lsl.w	#4,d2
+		move.l	_voltable,a1
+		add.l	a1,d2
+		move.l	d2,ci_voltable_l(a0)
+		add.b	#16,d1		;16 + trkpan
+		ext.w	d1
+		mulu	d0,d1		; * (vol - 1)
+		and.w	#$FFE0,d1
+		lsl.w	#4,d1
+		add.l	a1,d1
+		move.l	d1,ci_voltable_r(a0)
+		move.l	(sp)+,d2
+		rts
+; --- stereo 8-bit (panned to left) or mono 8-bit
+mstv_stereo8l	lsl.w	#8,d0
+		move.l	_voltable,a1
+		add.w	d0,d0
+		adda.w	d0,a1
+		move.l	a1,ci_voltable_l(a0)
+		rts
+; --- stereo 8-bit (panned to right)
+mstv_stereo8r	lsl.w	#8,d0
+		move.l	_voltable,a1
+		add.w	d0,d0
+		adda.w	d0,a1
+		move.l	a1,ci_voltable_r(a0)
+		rts
+; --- stereo 8-bit (panned to center)
+mstv_stereo8c	bclr	#0,d0
+		lsl.w	#8,d0
+		move.l	_voltable,a1
+		adda.w	d0,a1
+		move.l	a1,ci_voltable_l(a0)
+		rts
+; --- stereo 16-bit (panned to left) or mono 16-bit
+mstv_stereo16l	move.w	_chshift,d1
+		ext.w	d0
+		add.b	volshifttbl(pc,d0.w),d1
+		move.w	d1,ci_volshift_l(a0)
+		rts
+; --- stereo 16-bit (panned to center)
+mstv_stereo16c	move.w	_chshift,d1
+		ext.w	d0
+		add.b	volshifttbl(pc,d0.w),d1
+		addq.b	#1,d1
+		move.w	d1,ci_volshift_l(a0)
+		rts
+; --- stereo 16-bit
+mstv_stereo16	movem.l	d2/d3,-(sp)
+		moveq	#16,d2
+		sub.b	d1,d2		;16 - trkpan
+		ext.w	d0
+		mulu	d0,d2		;* (vol - 1)
+		lsr.w	#5,d2		;/ 32
+		move.w	_chshift,d3
+		move.b	volshifttbl(pc,d2.w),d2
+		add.w	d3,d2
+		move.w	d2,ci_volshift_l(a0)
+		add.b	#16,d1
+		ext.w	d1
+		mulu	d0,d1
+		lsr.w	#5,d1
+		add.b	volshifttbl(pc,d1.w),d3
+		move.w	d3,ci_volshift_r(a0)
+		movem.l	(sp)+,d2/d3
+		rts
+; --- stereo 16-bit (panned to right)
+mstv_stereo16r	move.w	_chshift,d1
+		ext.w	d0
+		add.b	volshifttbl(pc,d0.w),d1
+		move.w	d1,ci_volshift_r(a0)
+		rts
+; 16 bit volume shifting table
+volshifttbl	dc.b	6,5,5,4,4,4,4,3,3,3,3,3,3,3,3,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,2,1
+		dc.b	1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,1,0
+
+	IFNE	SUPPORT_000
+mixr_skip	dc.l	mstv_skip,mstv_skip,Skip,Skip,Skipb,Skipb
+mixr_mono	dc.l	mstv_stereo8l,mstv_stereo16l,MIX_mono8,MIX_mono16,MIXb_mono8,MIXb_mono16
+mixr_stereo	dc.l	mstv_stereo8,mstv_stereo16,MIX_stereo8,MIX_stereo16,MIXb_stereo8,MIXb_stereo16
+mixr_stereol	dc.l	mstv_stereo8l,mstv_stereo16l,MIX_stereo8l,MIX_stereo16l,MIXb_stereo8l,MIXb_stereo16l
+mixr_stereor	dc.l	mstv_stereo8r,mstv_stereo16r,MIX_stereo8r,MIX_stereo16r,MIXb_stereo8r,MIXb_stereo16r
+mixr_stereoc	dc.l	mstv_stereo8c,mstv_stereo16c,MIX_stereo8c,MIX_stereo16c,MIXb_stereo8c,MIXb_stereo16c
+mixr_stereos	dc.l	mstv_stereo8,mstv_stereo16,MIX_stereo8s,MIX_stereo16s,MIXb_stereo8s,MIXb_stereo16s
+	ELSEIF
+mixr_skip	dc.l	mstv_skip,mstv_skip,Skip_020,Skip_020,Skipb_020,Skipb_020
+mixr_mono	dc.l	mstv_stereo8l,mstv_stereo16l,MIX_mono8_020,MIX_mono16_020,MIXb_mono8_020,MIXb_mono16_020
+mixr_stereo	dc.l	mstv_stereo8,mstv_stereo16,MIX_stereo8_020,MIX_stereo16_020,MIXb_stereo8_020,MIXb_stereo16_020
+mixr_stereol	dc.l	mstv_stereo8l,mstv_stereo16l,MIX_stereo8l_020,MIX_stereo16l_020,MIXb_stereo8l_020,MIXb_stereo16l_020
+mixr_stereor	dc.l	mstv_stereo8r,mstv_stereo16r,MIX_stereo8r_020,MIX_stereo16r_020,MIXb_stereo8r_020,MIXb_stereo16r_020
+mixr_stereoc	dc.l	mstv_stereo8c,mstv_stereo16c,MIX_stereo8c_020,MIX_stereo16c_020,MIXb_stereo8c_020,MIXb_stereo16c_020
+mixr_stereos	dc.l	mstv_stereo8,mstv_stereo16,MIX_stereo8s_020,MIX_stereo16s_020,MIXb_stereo8s_020,MIXb_stereo16s_020
+	ENDC
+
+	IFNE	SUPPORT_000&SUPPORT_020
+mixr_020	dc.l	Skip_020,Skip_020,Skipb_020,Skipb_020
+		dc.l	MIX_mono8_020,MIX_mono16_020,MIXb_mono8_020,MIXb_mono16_020
+		dc.l	MIX_stereo8_020,MIX_stereo16_020,MIXb_stereo8_020,MIXb_stereo16_020
+		dc.l	MIX_stereo8l_020,MIX_stereo16l_020,MIXb_stereo8l_020,MIXb_stereo16l_020
+		dc.l	MIX_stereo8r_020,MIX_stereo16r_020,MIXb_stereo8r_020,MIXb_stereo16r_020
+		dc.l	MIX_stereo8c_020,MIX_stereo16c_020,MIXb_stereo8c_020,MIXb_stereo16c_020
+		dc.l	MIX_stereo8s_020,MIX_stereo16s_020,MIXb_stereo8s_020,MIXb_stereo16s_020
+	ENDC
+
+	IFNE	SUPPORT_SMOOTH
+mixs		dc.l	sMIX_mono8,sMIX_mono16,sMIXb_mono8,sMIXb_mono16
+		dc.l	sMIX_stereo8,sMIX_stereo16,sMIXb_stereo8,sMIXb_stereo16
+		dc.l	sMIX_stereo8l,sMIX_stereo16l,sMIXb_stereo8l,sMIXb_stereo16l
+		dc.l	sMIX_stereo8r,sMIX_stereo16r,sMIXb_stereo8r,sMIXb_stereo16r
+		dc.l	sMIX_stereo8c,sMIX_stereo16c,sMIXb_stereo8c,sMIXb_stereo16c
+		dc.l	sMIX_stereo8,sMIX_stereo16,sMIXb_stereo8,sMIXb_stereo16
+	ENDC
+
+		XREF	_freq_tables
+
+	IFNE	SUPPORT_SMOOTH
+; Set smoothing routines
+
+; smoothing, D0 = 0 or 1 for off or on (no other values accepted!)
+
+		XDEF	_MixSmooth
+
+_MixSmooth	cmp.b	m_smoothing(pc),d0
+		bne.s	1$
+		rts
+1$		move.b	d0,m_smoothing
+		lea	mixs(pc),a0
+		lea	mixr_mono(pc),a1
+; swap mixing function pointers
+		moveq	#5,d0
+2$		addq.l	#8,a1
+		move.l	(a0),d1
+		move.l	(a1),(a0)+
+		move.l	d1,(a1)+
+		move.l	(a0),d1
+		move.l	(a1),(a0)+
+		move.l	d1,(a1)+
+		move.l	(a0),d1
+		move.l	(a1),(a0)+
+		move.l	d1,(a1)+
+		move.l	(a0),d1
+		move.l	(a1),(a0)+
+		move.l	d1,(a1)+
+		dbra	d0,2$
+		rts
+	ENDC
+
+; Set 68020+ routines for mixing
+
+		XDEF	_MixUse020
+
+_MixUse020
+	IFNE	SUPPORT_000&SUPPORT_020
+		lea	mixr_020(pc),a0
+		lea	mixr_skip(pc),a1
+		moveq	#6,d0
+1$		addq.l	#8,a1
+		move.l	(a0)+,(a1)+
+		move.l	(a0)+,(a1)+
+		move.l	(a0)+,(a1)+
+		move.l	(a0)+,(a1)+
+		dbra	d0,1$
+; --- modify code directly to use the 020 MixSample routine
+		move.w	#MixSample_020-(MixS_instr+2),MixS_instr+2
+		move.l	a6,-(sp)
+		movea.l	4.w,a6
+		jsr	-$27C(a6)	;CacheClearU()
+		move.l	(sp)+,a6
+	ENDC
+		rts
+
+; PlayNoteMix --- note playing
+; Registers:
+;		D7 = track number
+;		D1 = note number (BYTE)
+;		A0 = sample pointer
+;		A3 = song sample data (used in OCTAMED_INTERN)
+;		A5 = track data structure
+; Play backwards if bit #6 of trk_miscflags is set.
+
+		XDEF	_PlayNoteMix
+
+	IFEQ	OCTAMED_INTERN
+		XREF	flags,rptrptlen
+	ENDC
+
+_PlayNoteMix	move.l	a2,-(sp)
+		cmp.w	m_channels(pc),d7
+		bhs.w	pnm_exit
+		movea.l	trk_cinfo(a5),a1
+		lea	_freq_tables+32,a2
+		move.b	trk_finetune(a5),d0
+		ext.w	d0
+		add.w	d0,d0
+		add.w	d0,d0
+		move.l	0(a2,d0.w),a2
+		move.l	a2,trk_periodtbl(a5)
+		ext.w	d1	;not > $7F anyway
+		add.w	d1,d1
+		move.w	0(a2,d1.w),trk_prevper(a5) ;store frequency
+	IFNE	OCTAMED_INTERN
+		btst	#0,45(a3)	;SSFLG_LOOP of ss->flags?
+		beq.w	pnm_noloop
+		cmp.l	#2,56(a3)	;ss->replen > 2?
+		bls.w	pnm_noloop
+		bset	#CHFLAGB_LOOP,ci_flags(a1)
+		btst	#3,45(a3)	;SSFLG_PINGPONG of ss->flags?
+	ELSEIF
+		moveq	#0,d0
+		move.b	trk_previnstr(a5),d0
+		lea	flags,a3
+		move.b	0(a3,d0.w),d1
+		lea	rptrptlen,a3
+		lsl.w	#3,d0
+		adda.w	d0,a3
+		btst	#0,d1		;SSFLG_LOOP?
+		beq.w	pnm_noloop
+		cmp.l	#2,4(a3)	;ss->replen...
+		bls.w	pnm_noloop
+		bset	#CHFLAGB_LOOP,ci_flags(a1)
+		btst	#3,d1		;SSFLG_PINGPONG of ss->flags?
+	ENDC
+		beq.s	1$
+		bset	#CHFLAGB_PINGPONG,ci_flags(a1)
+		bra.s	2$
+1$		bclr	#CHFLAGB_PINGPONG,ci_flags(a1)
+2$
+	IFNE	OCTAMED_INTERN
+		move.l	40(a3),d0	;ss->rep
+		move.l	56(a3),d1	;ss->replen
+	ELSEIF
+		move.l	(a3)+,d0
+		move.l	(a3),d1
+	ENDC
+		move.l	d1,ci_restartoffset(a1)	;loop length
+		btst	#6,trk_miscflags(a5)
+		bne.s	pnm_loopbackw
+; --- loop forwards
+		add.l	d1,d0		;sum rep + length
+		move.l	d0,ci_endoffset(a1)	;endoffset
+		moveq	#0,d1
+		move.w	trk_soffset(a5),d1	;start offset
+		cmp.l	d0,d1
+		blo.s	3$		;start offs < end offs (valid)
+		moveq	#0,d1		;invalid -> clear start offset
+3$		move.l	d1,ci_offset(a1)
+		bclr	#CHFLAGB_BACKW,ci_flags(a1)
+		bra.w	pnm_loopset
+; --- loop backwards
+pnm_loopbackw
+		bset	#CHFLAGB_BACKW,ci_flags(a1)
+		move.l	(a0),d1		;sample length
+		btst	#4,5(a0)	;16-bit?
+		beq.s	1$
+		lsr.l	#1,d1		;/ 2, if so
+1$		subq.l	#1,d1
+		move.l	d1,ci_offset(a1)
+		sub.l	d0,d1
+		subq.l	#1,d0
+		move.l	d0,ci_endoffset(a1)	;ss->rep
+		moveq	#0,d0
+		move.w	trk_soffset(a5),d0
+		cmp.l	d0,d1
+		bls.s	pnm_loopset	;offs - endoffs <= trk_soffset
+		sub.l	d0,ci_offset(a1)
+		bra.s	pnm_loopset
+; --- no loop
+pnm_noloop
+		bclr	#CHFLAGB_LOOP,ci_flags(a1)
+		clr.l	ci_restartoffset(a1)
+		move.l	(a0),d1		;get sample length
+		btst	#4,5(a0)	;16-bit?
+		beq.s	2$
+		lsr.l	#1,d1		;/ 2
+2$		btst	#6,trk_miscflags(a5)
+		beq.s	pnm_oneshotforw
+; --- one-shot, backwards
+		bset	#CHFLAGB_BACKW,ci_flags(a1)
+		moveq	#-1,d0
+		move.l	d0,ci_endoffset(a1)
+		subq.l	#1,d1
+		moveq	#0,d0
+		move.w	trk_soffset(a5),d0
+		sub.l	d0,d1
+		bpl.s	3$
+		add.l	d0,d1	;overflow.. compensate
+3$		move.l	d1,ci_offset(a1)
+		bra.s	pnm_loopset
+; --- one-shot, forwards
+pnm_oneshotforw
+		bclr	#CHFLAGB_BACKW,ci_flags(a1)
+		move.l	d1,ci_endoffset(a1)
+		moveq	#0,d0
+		move.w	trk_soffset(a5),d0
+		cmp.l	d1,d0
+		blo.s	1$
+		moveq	#0,d0
+1$		move.l	d0,ci_offset(a1)
+pnm_loopset
+; --- set other parameters
+		clr.l	ci_newstart_addr(a1)
+		lea	6(a0),a2
+		move.l	a2,ci_sample_start(a1)
+		btst	#5,5(a0)	;test stereo...
+		beq.s	1$		;no stereo
+		move.l	(a0),ci_rightch_offs(a1)
+		bset	#CHFLAGB_STEREO,ci_flags(a1)
+		bra.s	2$
+1$		bclr	#CHFLAGB_STEREO,ci_flags(a1)
+		clr.l	ci_rightch_offs(a1)
+2$		bclr	#CHFLAGB_MUTED,ci_flags(a1)
+		btst	#4,5(a0)	;16-bit??
+		bne.s	pnm_16bit
+		bclr	#CHFLAGB_16BIT,ci_flags(a1)
+pnm_exit	move.l	(sp)+,a2
+		rts
+pnm_16bit	bset	#CHFLAGB_16BIT,ci_flags(a1)
+		move.l	(sp)+,a2
+		rts
+
+
+	IFNE	OCTAMED_INTERN
+; _PlayDataMix --- sample playing
+; Registers:
+;		D7 = track number
+;		D1 = frequency (UWORD)
+;		D2 = offset
+;		D3 = length
+;		D4 = loop (UBYTE, boolean)
+;		A0 = sample pointer
+
+		XDEF	_PlayDataMix
+
+_PlayDataMix	cmp.w	m_channels(pc),d7
+		bhs.w	pdm_rts
+		movem.l	a4-a5,-(sp)
+		lea	trackdataptrs,a1
+		move.w	d7,d0
+		add.w	d0,d0
+		add.w	d0,d0
+		adda.w	d0,a1
+		movea.l	(a1),a5
+		move.w	d1,trk_prevper(a5) ;store frequency
+		move.b	#64,trk_prevvol(a5)	;full volume
+		movea.l	trk_cinfo(a5),a1
+		move.l	d2,ci_offset(a1)
+		tst.b	d4		;loop?
+		bne.s	1$
+		clr.l	ci_restartoffset(a1)	;no
+		bclr	#CHFLAGB_LOOP,ci_flags(a1)
+		bra.s	2$
+1$		move.l	d3,ci_restartoffset(a1)
+		bset	#CHFLAGB_LOOP,ci_flags(a1)
+2$		move.l	d2,d0
+		add.l	d3,d0
+		move.l	d0,ci_endoffset(a1)
+		bsr.s	pdm_set
+		move.w	trk_prevper(a5),d1
+		bsr.w	_MixSetTrkPeriod
+		moveq	#64,d0
+		movea.l	_sng,a0
+		movea.l	(a0),a4	;MixSetTrkVol needs this for pan
+		bsr.w	_MixSetTrkVol
+		movem.l	(sp)+,a4-a5
+pdm_rts		rts
+
+pdm_set		move.l	a2,-(sp)
+		bra.s	pnm_loopset
+	ENDC
+
+; -------------------------------------------------------------------
+; SetMixTempo(sg) (a0)
+; -------------------------------------------------------------------
+
+		XDEF	_SetMixTempo
+
+_SetMixTempo	btst	#5,msng_flags2(a0)	;BPM?
+		beq.s	smt_nobpm
+		move.l	m_actualrate(pc),d0
+		move.b	msng_flags2(a0),d1
+		and.w	#$1F,d1		;BPM lpb mask
+		addq.w	#1,d1
+		mulu	msng_deftempo(a0),d1
+	IFNE	OCTAMED_INTERN
+		movea.l	_UtilityBase,a0
+	ELSEIF
+		movea.l	UtBase,a0
+	ENDC
+		jsr	-$9C(a0)	;UDivMod32()
+		move.l	d0,d1
+		lsl.l	#3,d0		;* 8
+		add.l	d1,d0
+		add.l	d1,d0		;* 10
+		move.l	d0,_passlength
+		rts
+smt_nobpm	move.l	#470000,d0
+		divu	msng_deftempo(a0),d0
+		mulu	m_actualrate(pc),d0
+		lsr.l	#4,d0
+		divu	#44336,d0
+		moveq	#0,d1
+		movem.w	d0/d1,_passlength
+		rts
+
+; -------------------------------------------------------------------
+; Variables
+; -------------------------------------------------------------------
+
+; This routine copies the variables defined in C-source to here
+; for local access.
+
+		XDEF	_SetMixVars
+	IFNE	OCTAMED_INTERN
+		XREF	_sng
+		XREF	_m_swapchan
+	ELSEIF
+		XREF	_sng_struct
+	ENDC
+		XREF	_mix_channels,maxaudiotrk
+		XREF	_actualrate_hz,_actualrate_fract
+		XREF	trackdataptrs
+_SetMixVars	move.w	_mix_channels,d0
+		move.w	d0,m_channels
+		move.w	d0,maxaudiotrk
+	IFNE	OCTAMED_INTERN
+		movea.l	_sng,a0
+		movea.l	(a0),a0
+		move.b	msng_m_stereo(a0),m_stereo
+	ELSEIF
+		movea.l	_sng_struct,a0
+		move.l	528(a0),d1	;flags3 in MMD2song
+		btst	#0,d1
+		sne	m_stereo
+	ENDC
+		move.b	msng_m_echo(a0),m_echo
+		move.b	msng_m_echodep(a0),m_echodepth
+		move.w	_actualrate_hz,m_actualrate
+		move.w	_actualrate_fract,m_actualrfract
+; --- set trk_cinfo field of track data structures
+		move.l	_chinfo,d1
+		lea	trackdataptrs,a0
+		subq.w	#1,d0
+		bmi.s	smv_rts
+1$		movea.l	(a0)+,a1
+		move.l	d1,trk_cinfo(a1)
+		add.l	#ci_sizeof,d1
+		dbra	d0,1$
+smv_rts		rts
+		
+; Local variables:
+m_channels	ds.w	1
+m_stereo	ds.b	1
+m_echo		ds.b	1
+m_echodepth	ds.b	1
+m_smoothing	ds.b	1
+m_actualrate	dc.w	1	;\ keep together
+m_actualrfract	ds.w	1	;/
+m_whichbuff	ds.w	1
+m_destbuff	ds.l	4
+
+; -------------------------------------------------------------------
+; Audio Interrupts (Amiga audio output)
+; -------------------------------------------------------------------
+
+		XREF	_chipbuff
+
+AudI8m		move.w	#$80,$9C(a0)	;clear AUD0 of INTREQ
+		not.b	m_whichbuff-AudI8m(a5)
+		beq.s	1$	;use audio buffer #1
+		addq.l	#4,a1	;use audio buffer #2
+1$		move.l	(a1),d0
+		move.l	d0,$A0(a0)	;set ac_ptr
+		move.l	d0,$B0(a0)
+		move.l	d0,$C0(a0)
+		move.l	d0,$D0(a0)
+		move.l	d0,m_destbuff-AudI8m(a5)
+		lea	mixsint(pc),a1
+		jmp	-$B4(a6)	;Cause()
+
+AudSI8m		move.l	a2,-(sp)
+		move.l	(a1),a2		;mixbuff
+		bsr.w	_BuffFillPass
+		movea.l	m_destbuff-AudSI8m(a5),a0
+		move.l	_buffsize,d0
+		lsr.w	#1,d0
+		subq.w	#1,d0
+1$		move.w	(a2)+,d1
+		move.b	(a2),d1
+		addq.l	#2,a2
+		move.w	d1,(a0)+
+		dbra	d0,1$
+		move.l	(sp)+,a2
+		rts
+
+AudI14m		move.w	#$80,$9C(a0)	;clear AUD0 of INTREQ
+		not.b	m_whichbuff-AudI14m(a5)
+		beq.s	1$	;use audio buffer #1
+		addq.l	#8,a1	;use audio buffer #2
+1$		move.l	(a1)+,d0
+		move.l	d0,$A0(a0)	;set ac_ptr
+		move.l	d0,$B0(a0)
+		move.l	(a1),d1
+		move.l	d1,$C0(a0)
+		move.l	d1,$D0(a0)
+		movem.l	d0/d1,m_destbuff-AudI14m(a5)
+		lea	mixsint(pc),a1
+		jmp	-$B4(a6)	;Cause()
+
+AudSI14m	move.l	a2,-(sp)
+		move.l	(a1),a2		;mixbuff
+		bsr.w	_BuffFillPass
+		movem.l	m_destbuff-AudSI14m(a5),a0/a1
+		move.l	_buffsize,d0
+		lsr.w	#1,d0
+		subq.w	#1,d0
+		move.l	d2,a5
+1$		move.w	(a2)+,d1
+		moveq	#0,d2
+		move.b	d1,d2
+		move.b	(a2)+,d1
+		move.w	d1,(a0)+
+		lsl.w	#6,d2
+		move.b	(a2)+,d2
+		lsr.b	#2,d2
+		move.w	d2,(a1)+
+		dbra	d0,1$
+		move.l	a5,d2
+		move.l	(sp)+,a2
+		rts
+
+AudI8s		move.w	#$80,$9C(a0)	;clear AUD0 of INTREQ
+		not.b	m_whichbuff-AudI8s(a5)
+		beq.s	1$	;use audio buffer #1
+		addq.l	#8,a1	;use audio buffer #2
+1$		movem.l	(a1)+,d0/d1
+		movem.l	d0/d1,m_destbuff-AudI8s(a5)
+	IFNE	OCTAMED_INTERN
+		tst.b	_m_swapchan
+		beq.s	2$
+		exg	d0,d1
+2$
+	ENDC
+		move.l	d1,$A0(a0)	;set ac_ptr
+		move.l	d0,$B0(a0)
+		move.l	d0,$C0(a0)
+		move.l	d1,$D0(a0)
+		lea	mixsint(pc),a1
+		jmp	-$B4(a6)	;Cause()
+
+AudSI8s		move.l	a2,-(sp)
+		move.l	(a1),a2		;mixbuff
+		bsr.w	_BuffFillPass
+		movem.l	m_destbuff-AudSI8s(a5),a0/a1
+		move.l	_buffsize,d0
+		lsr.w	#1,d0
+		subq.w	#1,d0
+1$		move.w	(a2)+,d1
+		move.b	2(a2),d1
+		move.w	d1,(a0)+
+		move.w	(a2),d1
+		move.b	4(a2),d1
+		move.w	d1,(a1)+
+		addq.l	#6,a2
+		dbra	d0,1$
+		move.l	(sp)+,a2
+		rts
+
+AudI14s		move.w	#$80,$9C(a0)	;clear AUD0 of INTREQ
+		not.b	m_whichbuff-AudI14s(a5)
+		beq.s	1$		;use audio buffer #1
+		lea	16(a1),a1	;use audio buffer #2
+1$		movem.l	(a1)+,d0/d1
+		movem.l	d0/d1,m_destbuff-AudI14s(a5)
+	IFNE	OCTAMED_INTERN
+		tst.b	_m_swapchan
+		bne.s	2$
+	ENDC
+		move.l	d0,$B0(a0)	;set ac_ptr
+		move.l	d1,$C0(a0)
+		movem.l	(a1)+,d0/d1
+		movem.l	d0/d1,m_destbuff+8-AudI14s(a5)
+		move.l	d0,$A0(a0)
+		move.l	d1,$D0(a0)
+		lea	mixsint(pc),a1
+		jmp	-$B4(a6)	;Cause()
+	IFNE	OCTAMED_INTERN
+2$		move.l	d0,$A0(a0)
+		move.l	d1,$D0(a0)
+		movem.l	(a1)+,d0/d1
+		movem.l	d0/d1,m_destbuff+8-AudI14s(a5)
+		move.l	d0,$B0(a0)	;set ac_ptr
+		move.l	d1,$C0(a0)
+		lea	mixsint(pc),a1
+		jmp	-$B4(a6)	;Cause()
+	ENDC
+
+AudSI14s	movem.l	a2/a3/d2/d3,-(sp)
+		move.l	(a1),a2		;mixbuff
+		bsr.w	_BuffFillPass
+		movem.l	m_destbuff-AudSI14s(a5),a0/a1/a3/a5
+		move.l	_buffsize,d0
+		lsr.w	#1,d0
+		subq.w	#1,d0
+1$		move.w	(a2)+,d1
+		move.b	d1,d3
+		move.w	(a2)+,d2
+		move.b	(a2)+,d1
+		move.w	d1,(a0)+
+		moveq	#0,d1
+		move.b	d3,d1
+		lsl.w	#6,d1
+		move.b	(a2)+,d1
+		lsr.b	#2,d1
+		move.w	d1,(a1)+
+		move.w	d2,d1
+		move.b	(a2)+,d1
+		move.w	d1,(a3)+
+		moveq	#0,d1
+		move.b	d2,d1
+		lsl.w	#6,d1
+		move.b	(a2)+,d1
+		lsr.b	#2,d1
+		move.w	d1,(a5)+
+		dbra	d0,1$
+		movem.l	(sp)+,a2/a3/d2/d3
+		rts
+
+; -------------------------------------------------------------------
+; StartAmigaMix(14bit) (d2)
+; -------------------------------------------------------------------
+
+		XREF	_mixbuff
+		XDEF	_StartAmigaMix
+
+_StartAmigaMix	move.l	a6,-(sp)
+		tst.w	d2
+		beq.s	sam_8bit
+		tst.b	m_stereo
+		bne.s	sam_stereo14
+		lea	AudI14m(pc),a0
+		lea	AudSI14m(pc),a1
+		bra.s	sam_setintr
+sam_stereo14	lea	AudI14s(pc),a0
+		lea	AudSI14s(pc),a1
+		bra.s	sam_setintr
+sam_8bit	tst.b	m_stereo
+		bne.s	sam_stereo
+		lea	AudI8m(pc),a0
+		lea	AudSI8m(pc),a1
+		bra.s	sam_setintr
+sam_stereo	lea	AudI8s(pc),a0
+		lea	AudSI8s(pc),a1
+sam_setintr	move.l	a0,mixintr
+		move.l	a1,mixsintr
+		clr.b	m_whichbuff
+		moveq	#7,d0		;INTB_AUD0
+		lea	mixint(pc),a1
+		movea.l	4.w,a6
+		jsr	-$A2(a6)	;SetIntVector
+		lea	_chipbuff,a1
+		lea	$dff000,a0
+		tst.w	d2
+		beq.s	sam_8bit2
+		tst.b	m_stereo
+		beq.s	sam_nostereo1
+	IFNE	OCTAMED_INTERN
+		tst.b	_m_swapchan
+		bne.s	1$
+	ENDC
+		move.l	(a1)+,$B0(a0)
+		move.l	(a1)+,$C0(a0)
+		move.l	(a1)+,$A0(a0)
+		move.l	(a1)+,$D0(a0)
+		bra.s	sam_startdma
+	IFNE	OCTAMED_INTERN
+1$		move.l	(a1)+,$A0(a0)
+		move.l	(a1)+,$D0(a0)
+		move.l	(a1)+,$B0(a0)
+		move.l	(a1)+,$C0(a0)
+		bra.s	sam_startdma
+	ENDC
+sam_nostereo1	move.l	(a1)+,d0
+		move.l	d0,$B0(a0)
+		move.l	d0,$A0(a0)
+		move.l	(a1),d0
+		move.l	d0,$D0(a0)
+		move.l	d0,$C0(a0)
+		bra.s	sam_startdma
+sam_8bit2	move.l	(a1)+,d0	;chipbuff (1)
+		move.l	d0,$B0(a0)	;to ac_ptr[1]
+		move.l	d0,$C0(a0)
+		tst.b	m_stereo
+		beq.s	sam_nostereo2
+	IFNE	OCTAMED_INTERN
+		tst.b	_m_swapchan
+		beq.s	1$
+		move.l	d0,$A0(a0)
+		move.l	d0,$D0(a0)
+		move.l	(a1),d0
+		move.l	d0,$B0(a0)
+		move.l	d0,$C0(a0)
+		bra.s	sam_startdma
+1$
+	ENDC
+		move.l	(a1),d0		;chipbuff (2)
+sam_nostereo2	move.l	d0,$A0(a0)	;ac_ptr[0]
+		move.l	d0,$D0(a0)
+sam_startdma	move.w	#$8080,$9A(a0)	;INTENA
+		move.w	#$0080,$9C(a0)	;INTREQ (avoids spurious interrupt when turning DMA on)
+		move.w	#$800F,$96(a0)	;DMACON
+		move.l	(sp)+,a6
+		rts
+
+
+mixintname	dc.b	'OctaMED Mixing Interrupt',0
+		EVEN
+mixint		ds.w	5
+		dc.l	mixintname,_chipbuff
+mixintr		dc.l	AudI8m
+mixsintname	dc.b	'OctaMED Mixing SoftInt',0
+		EVEN
+mixsint		ds.w	5
+		dc.l	mixsintname,_mixbuff
+mixsintr	dc.l	AudSI8m
+
+; -------------------------------------------------------------------
+; BuffFillPass(WORD *mix_dest) (a2)
+; -------------------------------------------------------------------
+
+; Fills the mix buffer (calling IntHandler and mixing routines as
+; required).
+
+		XREF	_IntHandler
+		XDEF	_BuffFillPass
+
+_BuffFillPass	movem.l	a2/d2-d5,-(sp)
+		movem.w	_currleft(pc),d3/d5
+		move.l	_buffsize,d4	;fillleft
+; --- clear destination buffer
+		move.w	d4,d0
+		movea.l	a2,a0
+		tst.b	m_stereo
+		bne.s	2$
+		lsr.w	#1,d0
+		bcc.s	2$
+		clr.w	(a0)+
+1$		clr.l	(a0)+
+2$		dbra	d0,1$
+; --- loop
+bfp_loop	tst.l	d4
+		beq.s	bfp_exit
+		tst.w	d3
+		beq.s	bfp_nomix
+		cmp.l	d3,d4		;min(currleft,fillleft)
+		bls.s	1$
+		move.l	d3,d2
+		bra.s	2$
+1$		move.l	d4,d2
+2$		movea.l	a2,a1
+		sub.w	d2,d3
+		sub.l	d2,d4
+MixS_instr
+	IFNE	SUPPORT_000
+		bsr.w	MixSample	;will be modified for 020+
+	ELSEIF
+		bsr.w	MixSample_020
+	ENDC
+		tst.b	m_stereo
+		beq.s	bfp_mono
+		add.l	d2,d2
+bfp_mono	add.l	d2,d2
+		add.l	d2,a2
+bfp_nomix	tst.w	d3
+		bne.s	bfp_loop
+		jsr	_IntHandler(pc)
+		move.w	_passlength(pc),d3
+		add.w	_passfract(pc),d5
+		bcc.s	bfp_loop
+		addq.w	#1,d3
+		bra.s	bfp_loop
+bfp_exit	movem.w	d3/d5,_currleft	;store back
+		movem.l	(sp)+,a2/d2-d5
+		tst.b	m_echo
+		beq.s	bfp_noecho
+		movea.l	a2,a0
+		bsr.s	_Fx_Echo
+bfp_noecho
+	IFNE	OCTAMED_INTERN
+		movea.l	_sng,a0
+		movea.l	(a0),a0
+		move.b	msng_m_stsep(a0),d1
+		beq.s	bfp_rts
+		tst.b	msng_m_stereo(a0)
+		beq.s	bfp_rts
+	ELSEIF
+		movea.l	_sng_struct,a0
+		move.b	540(a0),d1	;stereosep
+		beq.s	bfp_rts
+		btst	#0,531(a0)	;flags3 (last byte) (STEREO flag)
+		beq.s	bfp_rts
+	ENDC
+		movea.l	a2,a0
+		bra.w	_Fx_StereoSep
+bfp_rts		rts
+
+; Variables for buffer filling.
+
+		XDEF	_currleft,_currleftfract
+		XDEF	_passlength,_passfract
+_currleft	dc.w	0	;\ don't change ordering
+_currleftfract	dc.w	0	;/
+_passlength	dc.w	0	;\ here too
+_passfract	dc.w	0	;/
+
+; -------------------------------------------------------------------
+; _Fx_Echo(WORD *mixbuff) (a0)
+; -------------------------------------------------------------------
+		XDEF	_Fx_Echo
+		XREF	_echobuffer	;(WORD *)
+		XREF	_echord		;(LONG)
+		XREF	_echobuffsz	;(LONG)
+
+_Fx_Echo	movem.l	d2-d6/a2,-(sp)
+		move.l	_echobuffer,d0
+		beq.w	fxec_return
+		move.l	d0,a2		;a2 = echobuffer (start)
+		moveq	#0,d2		;d2 = copied samples
+		move.l	_buffsize,d3	;d3 = mix buffer size
+		move.l	_echord,d4	;d4 = echobuffer position
+		move.l	_echobuffsz,d5	;d5 = echobuffer size
+		move.b	m_echodepth(pc),d6	;d6 = echo shift cnt
+		tst.b	m_stereo
+		beq.w	fxec_mono
+		cmp.b	#2,m_echo
+		beq.w	fxec_crossecho
+; --- STEREO, NORMAL ECHO
+fxec_loop1	cmp.l	d3,d2		;copied >= buffsize?
+		bhs.w	fxec_return
+		cmp.l	d5,d4		;echord >= echobuffsz?
+		blo.s	1$
+		moveq	#0,d4		;if so, echord = 0
+1$		move.l	d3,d0		;buffsize...
+		sub.l	d2,d0		; - copied
+		move.l	d5,d1		;echobuffsz
+		sub.l	d4,d1		; - echord
+		cmp.l	d1,d0		;d0 > d1?
+		bhs.s	2$		;yes, lower # in d1
+		move.l	d0,d1		;move lower to d1 => copylen
+2$		move.l	d4,d0		;echord
+		add.l	d0,d0
+		add.l	d0,d0		; *= 4..
+		lea	0(a2,d0.l),a1	;a1 = echo buffer pointer
+		add.l	d1,d2		;copied += copylen
+		add.l	d1,d4		;echord += copylen
+		lsr.l	#1,d1
+		bcc.s	4$
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+4$		lsr.l	#1,d1
+		bcs.s	5$
+; --- echo loop
+3$		subq.l	#1,d1		;copylen--
+		bmi.s	fxec_loop1	;end of copy
+		move.w	(a1),d0		;get word from echo buffer
+		asr.w	d6,d0		;shift...
+		add.w	d0,(a0)		;add to mix buffer
+		move.w	(a0)+,(a1)+	;mix buffer -> echo buffer
+		move.w	(a1),d0		;the same for the right ch.
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+; --- 3 times more
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+5$		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+		bra.s	3$
+fxec_return	move.l	d4,_echord	;store...
+		movem.l	(sp)+,d2-d6/a2
+		rts
+fxec_crossecho
+; --- STEREO, CROSS ECHO (additive)
+fxec_loop2	cmp.l	d3,d2		;copied >= buffsize?
+		bhs.s	fxec_return
+		cmp.l	d5,d4		;echord >= echobuffsz?
+		blo.s	1$
+		moveq	#0,d4		;if so, echord = 0
+1$		move.l	d3,d0		;buffsize...
+		sub.l	d2,d0		; - copied
+		move.l	d5,d1		;echobuffsz
+		sub.l	d4,d1		; - echord
+		cmp.l	d1,d0		;d0 > d1?
+		bhs.s	2$		;yes, lower # in d1
+		move.l	d0,d1		;move lower to d1 => copylen
+2$		move.l	d4,d0		;echord
+		add.l	d0,d0
+		add.l	d0,d0		; *= 4..
+		lea	0(a2,d0.l),a1	;a1 = echo buffer pointer
+		add.l	d1,d2		;copied += copylen
+		add.l	d1,d4		;echord += copylen
+		lsr.l	#1,d1
+		bcc.s	4$
+		move.w	2(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,2(a0)
+		move.l	(a0)+,(a1)+
+4$		lsr.l	#1,d1
+		bcs.s	5$
+; --- echo loop
+3$		subq.l	#1,d1		;copylen--
+		bmi.s	fxec_loop2	;end of copy
+		move.w	2(a1),d0	;get word from right ch
+		asr.w	d6,d0		;and shift...
+		add.w	d0,(a0)		;add to left ch
+		move.w	(a1),d0		;get left ch echo
+		asr.w	d6,d0
+		add.w	d0,2(a0)	;add to right ch
+		move.l	(a0)+,(a1)+	;copy the lw to echo buffer
+		move.w	2(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,2(a0)
+		move.l	(a0)+,(a1)+
+5$		move.w	2(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,2(a0)
+		move.l	(a0)+,(a1)+
+		move.w	2(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,2(a0)
+		move.l	(a0)+,(a1)+
+		bra.s	3$
+fxec_mono
+; --- MONO
+fxec_loop3	cmp.l	d3,d2		;copied >= buffsize?
+		bhs.w	fxec_return
+		cmp.l	d5,d4		;echord >= echobuffsz?
+		blo.s	1$
+		moveq	#0,d4		;if so, echord = 0
+1$		move.l	d3,d0		;buffsize...
+		sub.l	d2,d0		; - copied
+		move.l	d5,d1		;echobuffsz
+		sub.l	d4,d1		; - echord
+		cmp.l	d1,d0		;d0 > d1?
+		bhs.s	2$		;yes, lower # in d1
+		move.l	d0,d1		;move lower to d1 => copylen
+2$		lea	0(a2,d4.l),a1	;a1 = echo buffer pointer
+		add.l	d4,a1		;(index *= 2)
+		add.l	d1,d2		;copied += copylen
+		add.l	d1,d4		;echord += copylen
+		lsr.l	#1,d1
+		bcc.s	4$
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+4$		lsr.l	#1,d1
+		bcs.s	5$
+; --- echo loop
+3$		subq.l	#1,d1		;copylen--
+		bmi.s	fxec_loop3	;end of copy
+		move.w	(a1),d0		;get word from echo buffer
+		asr.w	d6,d0		;shift...
+		add.w	d0,(a0)		;add to mix buffer
+		move.w	(a0)+,(a1)+	;mix buffer -> echo buffer
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+5$		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+		move.w	(a1),d0
+		asr.w	d6,d0
+		add.w	d0,(a0)
+		move.w	(a0)+,(a1)+
+		bra.s	3$
+
+
+
+
+; -------------------------------------------------------------------
+; _Fx_StereoSep(WORD stereosep,WORD *mixbuff) (d1, a0)
+; -------------------------------------------------------------------
+
+_Fx_StereoSep:	movem.l	d2/d3,-(sp)
+		move.l	_buffsize,d0
+		tst.b	d1
+		blt.s	fxss_neg
+		moveq	#5,d2
+		sub.b	d1,d2	;d2 = shift counter
+		lsr.w	#1,d0
+		bcc.s	fxss_even
+		move.w	(a0),d1
+		move.w	2(a0),d3
+		asr.w	d2,d3
+		sub.w	d3,(a0)+
+		asr.w	d2,d1
+		sub.w	d1,(a0)+
+fxss_even	lsr.w	#1,d0
+		bcc.s	3$		;length divisible by 4
+		bra.s	2$		;copy 2 samples first
+1$		move.w	(a0),d1		;left sample
+		move.w	2(a0),d3	;right sample
+		asr.w	d2,d3		;shift...
+		sub.w	d3,(a0)+	;sub from left
+		asr.w	d2,d1
+		sub.w	d1,(a0)+	;sub from right
+; --- loop rolled out four times
+		move.w	(a0),d1
+		move.w	2(a0),d3
+		asr.w	d2,d3
+		sub.w	d3,(a0)+
+		asr.w	d2,d1
+		sub.w	d1,(a0)+
+2$		move.w	(a0),d1
+		move.w	2(a0),d3
+		asr.w	d2,d3
+		sub.w	d3,(a0)+
+		asr.w	d2,d1
+		sub.w	d1,(a0)+
+		move.w	(a0),d1
+		move.w	2(a0),d3
+		asr.w	d2,d3
+		sub.w	d3,(a0)+
+		asr.w	d2,d1
+		sub.w	d1,(a0)+
+3$		dbra	d0,1$
+		movem.l	(sp)+,d2/d3
+		rts
+fxss_neg	addq.b	#5,d1	;d1 = shift counter
+		lsr.w	#1,d0
+		bcc.s	fxss_even2
+		move.w	(a0),d2
+		move.w	2(a0),d3
+		asr.w	d1,d3
+		add.w	d3,(a0)+
+		asr.w	d1,d2
+		add.w	d2,(a0)+
+fxss_even2	lsr.w	#1,d0
+		bcc.s	3$
+		bra.s	2$
+1$		move.w	(a0),d2		;left sample
+		move.w	2(a0),d3	;right sample
+		asr.w	d1,d3		;shift...
+		add.w	d3,(a0)+	;add to left
+		asr.w	d1,d2
+		add.w	d2,(a0)+	;add to right
+; --- rolled out
+		move.w	(a0),d2
+		move.w	2(a0),d3
+		asr.w	d1,d3
+		add.w	d3,(a0)+
+		asr.w	d1,d2
+		add.w	d2,(a0)+
+2$		move.w	(a0),d2
+		move.w	2(a0),d3
+		asr.w	d1,d3
+		add.w	d3,(a0)+
+		asr.w	d1,d2
+		add.w	d2,(a0)+
+		move.w	(a0),d2
+		move.w	2(a0),d3
+		asr.w	d1,d3
+		add.w	d3,(a0)+
+		asr.w	d1,d2
+		add.w	d2,(a0)+
+3$		dbra	d0,1$
+		movem.l	(sp)+,d2/d3
+		rts
+
+
+; -------------------------------------------------------------------
+; Effect handling (called by the player code)
+; -------------------------------------------------------------------
+
+		XDEF	Mix_FX20,Mix_FX2E,Mix_FX2F
+
+; -------------------------------------------------------------------
+; Effect 20: change sample position
+;	D0 = position change (pos or neg), D7 = track number
+;	A5 = track data structure
+; -------------------------------------------------------------------
+
+Mix_FX20	cmp.w	m_channels(pc),d7
+		bhs.s	mfx20_exit
+		movea.l	trk_cinfo(a5),a0
+		move.l	ci_offset(a0),d1
+		asl.w	#8,d0
+		ext.l	d0
+		add.l	d0,d1
+		bmi.s	mfx20_exit	;may not become negative
+		cmp.l	ci_endoffset(a0),d1
+		bhs.s	mfx20_exit	;nor exceed sample end
+		move.l	d1,ci_offset(a0)
+mfx20_exit	rts
+
+; -------------------------------------------------------------------
+; Effect 2E: panpot
+;	D4 = pan position (-16 - +16)
+;	A5 = track data structure
+;	A4 = song structure
+; -------------------------------------------------------------------
+
+	IFNE	OCTAMED_INTERN
+		XREF	_needrefresh
+	ENDC
+
+Mix_FX2E	cmp.w	m_channels(pc),d7
+		bhs.s	mfx2e_exit
+		cmp.b	#-16,d4
+		blt.s	mfx2e_exit
+		cmp.b	#16,d4
+		bgt.s	mfx2e_exit
+	IFNE	OCTAMED_INTERN
+		lea	msng_trkpan(a4),a0
+	ELSEIF
+		move.l	msng_trkpan(a4),d1
+		beq.s	mfx2e_exit
+		movea.l	d1,a0
+	ENDC
+		move.b	d4,0(a0,d7.w)
+	IFNE	OCTAMED_INTERN
+		or.w	#$1000,_needrefresh+2	;track pan refresh
+	ENDC
+mfx2e_exit	rts
+
+; -------------------------------------------------------------------
+; Effect 2F: effect settings
+;	D4 = settings data
+;		$Ex (x = 6 - 1) -> echo depth
+;		$Dx (x = C - 0 - 4) -> stereo separation
+;	A4 = song struct, A5 = track data structure
+; -------------------------------------------------------------------
+
+Mix_FX2F	move.b	d4,d0
+		and.b	#$F0,d0
+		and.w	#$000F,d4
+		cmp.b	#$E0,d0
+		bne.s	mfx2f_noEx
+		moveq	#7,d0
+		sub.b	d4,d0
+		ble.s	mfx2f_exit	;< 1
+		cmp.b	#6,d0
+		bgt.s	mfx2f_exit	;> 6
+		move.b	d0,m_echodepth
+		move.b	d0,msng_m_echodep(a4)
+		bra.s	mfx2f_upd
+mfx2f_noEx	cmp.b	#$D0,d0
+		bne.s	mfx2f_exit
+		btst	#3,d4
+		beq.s	1$
+		or.w	#$FFF0,d4	;negative
+1$		cmp.w	#4,d4
+		bgt.s	mfx2f_exit
+		cmp.w	#-4,d4
+		blt.s	mfx2f_exit
+		move.b	d4,msng_m_stsep(a4)
+mfx2f_upd
+	IFNE	OCTAMED_INTERN
+		or.w	#$2000,_needrefresh+2
+	ENDC
+mfx2f_exit	rts
+
+
+; -------------------------------------------------------------------
+; Fill a frequency table
+; -------------------------------------------------------------------
+; A0 = destination pointer (table size = 6 * 12 UWORDs)
+; D0 = base (C-1) frequency * 65536
+; D1 = ratio of successive notes * 65536
+
+		XDEF	_FillFreqTable,_FillFreqTable_FP
+
+_FillFreqTable
+	IFNE	OCTAMED_INTERN
+		movea.l	_UtilityBase,a1
+	ELSEIF
+		movea.l	UtBase,a1
+	ENDC
+		movem.l	d2-d4,-(sp)
+		move.l	d1,d2
+		move.l	d0,d3
+		moveq	#6*12-1,d4
+1$		move.l	d3,d0
+		clr.w	d0
+		swap	d0
+		move.w	d0,(a0)+	;store frequency
+		move.l	d2,d1
+; multiply frequency (upper word) with ratio
+		jsr	-$90(a1)	;UMult32
+		moveq	#0,d1
+		move.w	d3,d1
+		move.l	d0,d3		;store previous result
+		move.l	d2,d0
+; multiply lower word with ratio
+		jsr	-$90(a1)	;UMult32
+		swap	d0
+		add.w	d3,d0		;add the middle word..
+		swap	d3
+		moveq	#0,d1
+		addx.w	d1,d3		;and possible carry
+		swap	d3
+		move.w	d0,d3		;a new frequency.		
+		dbra	d4,1$
+		movem.l	(sp)+,d2-d4
+		rts
+
+; -------------------------------------------------------------------
+; A floating point version... wow!!
+; (gives a bit more exact results... and of course now there's
+; finally some FP code in OctaMED!! (requires an FPU))
+; -------------------------------------------------------------------
+
+_FillFreqTable_FP
+; D0 = base (C-1) frequency * 65536
+
+; used floating point regs:
+; FP0 = ratio of successive notes
+; FP1 = current frequency
+		fmove.l	d0,fp1
+		fdiv.x	#65536,fp1		;frequency of C-1
+		fmove.l	#1,fp0
+		fdiv.x	#12,fp0
+		ftwotox	fp0
+		moveq	#6*12-1,d1
+1$		fmove.l	fp1,d0
+		move.w	d0,(a0)+
+		fmul.x	fp0,fp1
+		dbra	d1,1$
+		rts
+		END

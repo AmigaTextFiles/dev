@@ -1,0 +1,223 @@
+<html>
+<head>
+ <title>Scroller_YUnlimited</title>
+</head>
+<body bgcolor=#FFFFFF>
+
+This algorithm uses a rather big (high) bitmap. Therefore it's usually
+not the best choice. Usually one should not use this technique, because
+it's only half as fast as the technique of Scroller_YUnlimited2.<p>
+
+But why does the bitmap need to be 576 pixels high? First of all one
+has to say that the bitmap always needs to be higher than the visible
+area because we blit 'coming in' map areas block by block and we must
+do that in an area of the bitmap that is not visible - otherwise it
+would not look very nice or professional for the user. The visible
+area has a height of 256 pixels, that is 16 blocks (VISIBLE HEIGHT :
+BLOCKHEIGHT = 256 : 16 = 16). But, most of the time the number of
+blocks that are visible vertically is not 16, but 17, namely when
+the map position (that is the vertical position of the map's visible
+area in pixels) is not divisible by 16 (BLOCKHEIGHT) or in other words,
+when the map position is not a multiple of 16 (BLOCKHEIGHT).<p>
+
+<center>
+ <img src="images/visibleblocksy.gif" width=358 height=293><p>
+</center>
+
+Because of this the bitmap needs to be at least 18 blocks high, that
+is 2 blocks = 32 pixels more than the visible height. In contrast to
+horizontal scrolling no changes are necessary when using different
+FETCH Modes, except that some of the video chip registers have to be
+set differently. A bitmap width of 320 pixels is a multiple of 64/32
+and therefore okay for both the 2x and 4x FETCH Modes. The bitmap
+height does not matter - FETCH Mode alignment restrictions apply only
+to the width of a bitmap.<p>
+
+But hey! 256 + 32 is only 288. Didn't we talk about 576 pixels? Well, we get
+576 pixels if we multiply 288 by 2. To say, the main trick of this scrolling
+algorithm consists of the fact that our bitmap is twice as high as it should
+be normally. The lower half of the bitmap is always an exact copy of the
+upper half, at least as long as we don't blit any BOBs. Luckiliy these need
+to be blitted only once. This only by the way. At startup we fill the two
+bitmap halfs with the initially visible map area:<p>
+
+<center>
+ <img src="images/yunlimited.gif" width=184 height=296>
+</center>
+
+<p>
+
+The red rectangle shows the initial actual-bitmap-area as displayed
+by the Copper. The first and the last 16 pixels are hidden. The user
+only sees the area within the yellow rectangle. When we scroll down
+the actual-area moves down, too. When we scroll up, the actual-area
+moves up. Of course it is not enough to just move around the actual-area.
+We also need to blit the new blocks which come in. Let's assume we want
+to go down. At the beginning in the two bitmap halfs we have the
+block rows 0 .. 17, that is the first 18 rows of the map. At the
+latest after 16 pixels (= one row height) of scrolling down the bitmap
+halfs must contain the block rows 1 .. 18. Since we have 16 pixels
+of time to do that we don't blit the new (18) block row all at once
+but step by step. A time of 16 pixels means that we blit the block
+row in 16 steps. One block row consists of 20 (BITMAPWIDTH : BLOCKWIDTH
+= 320 : 16 = 20) single blocks. This would mean blitting 1.25 (20 : 16
+= 1.25) blocks per step. Since we only want to blit whole blocks, we
+solve the problem by sometimes blitting one block and sometimes blitting
+two blocks. Calculation at how many of the overall 16 steps we need to blit
+two blocks instead of just one, to make sure that the row (20 blocks) is
+complete after the last step, works like this:<p>
+
+<blockquote>
+ 2 * x + (NUMSTEPS - x) * 1 = BLOCKSPERROW<p>
+ 2x + (16 - x) * 1 = 20<p>
+ 2x + 16 - x = 20<p>
+ x = 20 - 16<p>
+ x = 4
+</blockquote>
+
+<p>
+
+In our case this means, that at 4 of the overall 16 steps two blocks are
+blitted and at the remaining 12 steps only one block is blitted. In the
+demo source code the double-blitting happens at the <b>last</b> 4 steps,
+but it is of course also possible to do it at the <b>first</b> 4 steps.<p>
+
+To calculate which block or which two blocks to blit in
+a certain situation (= map position) we devide the map position Y by 16
+and look at the remainder. The remainder determines the step. In C it
+is possible to calculate the remainder of a division with the modulo
+operator (%). But since 16 is a power of 2 it can also be done with a
+binary AND:
+
+<p>
+<blockquote>
+ 1) MapPositionY % BLOCKHEIGHT<p>
+ 2) MapPositionY & (BLOCKHEIGHT -1)
+</blockquote>
+<p>
+
+The result will be values between 0 and BLOCKHEIGHT - 1. In our case (that is
+a block height of 16 pixels) values between 0 and 15. The block at the very
+left of the row is block 0, the block at the very right is block 19.
+We wanted to scroll down, that is go from map position Y 0 to map position
+Y 1. For a map position of 1 above calculation would give as a result of 1,
+but since we must or want to blit the leftmost block (0) first we increase
+the variable MapPositionY (in the source code called mapposy) only at the
+end of the ScrollDown() function. By doing so when scrolling from map
+position 0 to map position 1 the calculation's result is step 0, for map
+position 1 to map position 2 the calculation's result is step 1 etc.
+At the steps 0 .. 11 we blit the block STEP of the "fillup-row". At the
+steps 12 .. 15 (the last 4) we blit the block 12 + (STEP - 12) * 2 and the
+block 12 + (STEP - 12) * 2 + 1. So the block row gets filled step by step
+with the new map area.<p>
+
+One question is still up. At which Y position stays the fillup-row in
+the bitmap - where do we have to blit the new blocks? Answer: At the place
+where the "going out" block row is. In the above example this would be
+row 0. Since during scrolling each block is blitted twice, that is one
+time in the upper bitmap half and one time in the lower bitmap half, the
+actual visible area when scrolling down slowly approaches the fillup-row
+of the lower bitmap half. This row will be completely done (filled =
+blitted) just in time before it becomes visible to the user. When this
+happens the fillup-row will already have advanced one block to the
+bottom. In the source code the variable videoposy contains the position
+of the actual-bitmap-area (red rectangle). We use this variable to
+calculate the position of the fillup-row in the bitmap, that is the
+position where to blit the blocks. Again there is a slow (1) and a
+faster (2) method - the latter only working if BLOCKHEIGHT is a power
+of 2:<p>
+
+<blockquote>
+ 1) y = videoposy - (videoposy % BLOCKHEIGHT)<p>
+ 2) y = videoposy & ~(BLOCKHEIGHT - 1)
+</blockquote>
+
+</p>
+
+This formula calculates the position for the upper bitmap half. For blitting
+into the lower bitmap half we simply add HALFBITMAPHEIGHT, that is 288. In
+the demo source code the value is also muliplied by NUMPLANES, because of the
+block-blit-routine which expects the y coordinate in planeline units (1 pixelline
+consists of NUMPLANES planelines).<p>
+<p>
+
+Scrolling up is pretty much the same except that we adjust
+the MapPositionY variable no longer at the end of the scroll function but
+at the init. We use predecrement instead of postincrement as used in
+the scroll down function, so to speak. The reason: let's imagine to
+have scrolled from map position 0 to map position 1, that is 1 pixel to
+the bottom. The result is, that block 0 (at the very left) of the fillup-row
+is a block which came in at the bottom side, more precisely block (0,18), that
+is the 19th block of the leftmost column in the map - in the following picture
+shown as a yellow rectangle with a red outline:<p>
+
+<center>
+ <img src="images/yunlimited2.gif" width=168 height=296>
+</center>
+
+<p>
+
+So we are on map position 1 and want back to map position 0. The yellow-red
+block must disappear and be replaced with block (0,0). For map position
+1 the step calculation forumla gives a result of 1. That's wrong, because
+it would mean for us to blit the block (1,0) at the right of the yellow-red
+block. The solution is to change the map position variable at the init
+of the scroll up function. By doing so the step gets calculated from
+map position 0 and we get the result 0 (0 % 16 = 0). For the scroll function
+this means that it has to blit the block (0,0) which kills the yellow-red rectangle
+- exactly what we wanted :-)<p>
+
+As already said, the actual and
+visible bitmap area (red rectangle) gets moved when we scroll. But what
+happens when we have scrolled so far to the bottom that the area risks
+to cross and go over the bitmap boundaries? This is gonna happen very
+soon, after 288 pixels. Simple. When we have scrolled so far to the bottom
+we set the actual-bitmap-area, and automatically also the visible area
+within it, again to the beginning of the bitmap (position 0). That is possible
+because the upper and the lower bitmap half are identical. And what happens
+when the actual-bitmap-area risks to go out of bitmap at the top side?
+In this case we set the position of the actual-bitmap-area to the maximum
+bottom (position 287). So the formula to calculate the actual-bitmap-area
+position will be:
+
+<p>
+<blockquote>
+videoposy = MapPositionY % HALFBITMAPHEIGHT, d. h.<br>
+videoposy = MapPositionY % 288
+</blockquote>
+<p>
+
+At the end some comments about the source code of the demo program. When the
+variable mapposy, which contains the map position Y in pixels, is 0, then the
+user sees the map area beginning at position BLOCKHEIGHT (16), because of the
+first BLOCKHEIGHT (16) pixels being always hidden. So what the user is seeing
+is the area:<p>
+
+<blockquote>
+ (0,mapposy + BLOCKHEIGHT) - (SCREENWIDTH - 1,mapposy + BLOCKHEIGHT + SCREENHEIGHT - 1)
+</blockquote>
+
+<p>
+
+This means that the first block row of the map file is never visible. If
+you want to blit something into the bitmap for example blitter objects (BOBs)
+you must do it in the actual visible bitmap area. This area is:<p>
+
+<blockquote>
+ (0,videoposy + BLOCKHEIGHT) - (SCREENWIDTH - 1,videoposy + BLOCKHEIGHT + SCREENHEIGHT - 1)
+</blockquote>
+
+<p>
+ 
+You are allowed to round down the start Y coordinate (videoposy + BLOCKHEIGHT) and
+round up the end Y coordinate (videoposy + BLOCKHEIGHT + SCREENHEIGHT - 1) to a
+multiple of BLOCKHEIGHT. This leads to a blitable area that is SCREENHEIGHT +
+BLOCKHEIGHT pixels high:<p>
+
+<blockquote>
+ blitarea_strty = (videoposy + BLOCKHEIGHT) & ~(BLOCKHEIGHT - 1)<p>
+ blitarea_endy = blitarea_strtx + SCREENHEIGHT + BLOCKHEIGHT - 1
+</blockquote>
+
+</body>
+</html>

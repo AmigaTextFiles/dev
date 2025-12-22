@@ -1,0 +1,1189 @@
+
+	1st I gotta tell some important detail about machincode I forgot
+	to tell last time.
+
+	MOVE.W label,d0		moves the first 2 bytes following the
+				label. This should sound familiar to you.
+	example:
+
+      (	label1:		dc.b	$05,$e2,$34,$4a ..... 
+	label2:		dc.b	0,0,0,0....
+      )
+	move.w	label1,label2	; moves #$05e2 into the first word of label2
+	move.l	label1,label2	; moves #$05e2344a into label2
+
+	Right, this is nothing new, but now what I forgot to say:
+
+	if you move something from the dataregisters or addressregisters,
+	allways the rightmost part is taken !!
+
+	example: d0 contains #$05e2344a
+
+	move.w	d0,label	; moves #$344a into label (and not #$05e2)
+	move.b	d0,label	; moves #$4a into label (and not #$05)
+
+	move.b	#$20,d0		; moves #$20 into the rightmost byte of d0
+				; (the rest is unaffected)
+	move.w	#$20,d0		; moves #$0020 into the rightmost word of d0
+				; (the rest is unaffected)
+
+	same counts for addressregisters, but most of the time longwords
+	are used here. (it's even impossible to move bytes into/from
+	addressregisters, only words or longwords)
+
+	I forgot to tell you this coz it is so 'normal' to me.
+
+	Another instruction that I used in the mouse-source is EXT
+	EXT means EXTEND SIGN BIT.
+	As you know, values are stored in BYTES, WORDS or LONGWORDS,
+	and it is only because you tell the computer what size he must
+	use, that he knows whether it is meant to be byte, word or longword.
+	Value 5 will be written as #$05, #$0005 or #$00000005 depending
+	on the size. This example is no big problem if you wanna move it:
+	
+		clr.l	d0
+		move.b	label,d0
+		move.l	d0,d1
+
+		label:	dc.b	5
+
+	the BYTE 5 will be moved into d0, and the LONGWORD 5 will be then
+	moved into d1...
+
+	BUT !!! Negative values make a problem, because a negative value is
+	in fact not really negative... let's try to explain it with this 
+	example:
+		#$06 + #$00 = #$06
+		#$06 + #$ff = #$05	( 6 - 1 = 5  !!     #$ff = -1 )
+		#$06 + #$fe = #$04	( 6 - 2 = 4  !!     #$fe = -2 )
+
+	Now look what happens when we use WORDS:
+
+		#$0006 + #$0000 = #$0006
+		#$0006 + #$ffff = #$0005  ( 6 - 1 = 5 !!    #$ffff = -1 )
+	 but:	#$0006 + #$00ff = #$0105  ( #$00ff <> -1 !!)
+		#$0006 + #$fffe = #$0004  ( 6 - 2 = 4 !!    #$fffe = -2 )
+	 but:	#$0006 + #$00fe = #$0104  ( #$00ff <> -2 !!)
+
+	As you see : a negative BYTE is not a negative number as WORD.
+	EXT makes from a negative BYTE a negative WORD: if the last bit
+	(in a byte: 7th bit) is SET, ext will SET all bits left of it, so
+	that #$fe will become #$fffffffe, and then you can use this value
+	again as negative value)
+
+
+	CUSTOM CHIPS & REGISTERS
+	------------------------
+
+	You probably know that Amiga has, except for the Motorola 68000,
+	some other 'custom-made' chips to perform tasks like graphic-
+	handling, sound, disk-operations,... In demos, these are the most
+	important things, so it's obvious that we'll have to access these
+	chips to make demos. NOW that's why the hardware addresses (of which
+	I told about all the time) are used. Imagine Agnus, Paula or Denise,
+	(that's the names of the customchips) with the pins of the chip 
+	attached to each a hardware address. (that's not the real situation,
+	but it gets close)
+	These hardware registers start at the address $DFF000. If you refer
+	to list nr 2 somewhere among the copies, you'll see all the addresses
+	that are available. As said, each of these addresses is in fact a
+	port to one of the customchips, but it's not interesting nor important
+	to know which address belongs to which chip. Instead you just have
+	to know their function, and this is what we're now gonna do.
+
+
+	You can divide the special Amiga features into 6 parts:
+
+	- BITPLANES (these are the screens with gfx)
+	- COPPER (to put values in hardware registers when electronbeam of
+		  monitor reaches a given value)
+	- BLITTER (to transfer/fill parts of memory and to draw lines, very
+		   fast!)
+	- SPRITES (graphical objects that can be moved easily across screen)
+	- DISK
+	- AUDIO
+
+	You already met the copper, probably you also know some other ones,
+	but if not so, don't panic: everything will be explained later. Now
+	just remember that they exist.
+	Each of these parts can be accessed and used thru the hardware
+	registers. If you want a sprite, you move certain values to certain
+	registers. This way of programming is called DIRECT MEMORY ACCESS 
+	(DMA). The libraries of which I told you before are in fact meant to
+	keep the programmer away from DMA, because DMA is hardware-related,
+	and hardware can change (for example some Amiga500 demos don't work
+	on an A1000, because they make use of changed hardware-parts)
+	Another good example of the 'danger' of hardware programming is that 
+	most 'first-demos' of beginning programmers don't work on Amigas
+	with extra memory, also because of the difference in hardware.
+	But it's a bit too early to worry about this. Let's first go on 
+	with the important stuff.
+
+	All registers have a length of 1 WORD !!! (16 bits) 
+	On page '!', you can see some names of registers, with numbers from
+	15 to 0, with each some explanation behind them. These are ofcourse
+	the bits of the register. In some regs, each BIT has a function,
+	which you can turn on/off by setting/clearing the corresponding bit.
+	(that's why the binary notation of seka (%) could come in handy)
+	(don't forget that the first bit is called 'bit 0', so 'bit 4' is in
+	 fact the fifth in the row)
+
+	Most hardware registers can either be read from, or written into.
+	For some functions you have a register to write into and another to
+	read from. Writing in a 'read-only' register has no effects. However,
+	reading from 'write-only' regs can cause strange effects, or even 
+	GURUS !!  I'll attract your attention to this when the time is right.
+	The DMA-members all have some 'WORKING' registers, which only are
+	used for internal use, so we will never use them. They are marked 
+	with a '0' on the list.
+
+	While reading this part, please take the list nr 2, plus the extra
+	printed page marked with '!'
+
+	Titles underlined with '-----' are register descriptions, lines with
+	'*****' are DMA-part descriptions. A detailed description of each
+	DMA-part is necescarry to understand the use of the registers.
+
+
+
+	DMACON
+	------
+
+	DMACON is probably THE MOST IMPORTANT register, coz with it you can
+	switch the different DMA-actions (bitplane, copper...) on or off.
+	Look at page '!', somewhere you'll see 'DMACON $096 (R $002)'...
+	$096 means that this register is located at $dff000 (start of all
+	registers) + $096 = $dff096.   This is a write-only register. If
+	you wish to know the value of it, you have to look in DMACONR, the
+	read-only-equivalent of DMACON, and this one is at $dff002.
+	Don't worry about the location, this is only as an example to 
+	interpret the numbers. Don't go learning all registers by heart !!
+
+	When you start a demo, first thing you have to do is tell the
+	computer which 'DMA-channels' you're gonna use. For example if you
+	not intend to use music, it's best to turn off the AUDIO-DMA.
+
+	As told before, in some registers, each bit has aits own function,
+	and the DMACON is one of them. Each DMA channel has its own bit.
+	(see '!' page)
+	A possibility to turn a DMA channel on or off could be:  move a bit
+	1 to the channel you want to use, and a 0 to the not used channels,
+	but if you thought that it was that easy, you're wrong !! The DMA-
+	register is a bit more complex:
+	The DMACON uses a special bit: bit nr 15 is the set/clear-bit.
+	You move a word (16 bits) to DMACON, let's call this word X
+	(read this sentence carefully:)
+	If bit 15 of X is SET (1), all other bits with value 1 in X will be
+	SET in the register. If bit 15 of X is CLEAR (0), all bits with
+	value 1 in X will be CLEARED in the register. In both cases, the 
+	bits of X with value 0 are not considered.
+	Example:
+
+	     bit:1      8       0
+	         5
+
+	MOVE.W #%1000000001011000,$dff096
+		bit 6,4 and 3 will be SET in the register
+
+	MOVE.W #%0000100110110001,$dff096
+		bit 11,8,7,5,4 and 0 will be CLEARED...
+
+	On page '!' you can see a short explanation for each bit of DMACON.
+	bits 0 thru 8 represent each a DMA channel (disk, audio, copper...)
+	A 1 for these bits means this function is turned on, a 0 means not.
+	However, there is a special bit: bit 9 is used as MAIN SWITCH. If
+	this bit is zero, ALL channels are turned off no matter what their
+	value is. So to activate a certain DMA channel, you must turn on
+	both bits 9 and the bit corresponding to the DMAchannel you want.
+	(bits 13 & 14 aren't used to write, only to read. Bit 10 is used
+	rarely, 11 and 12 have no function)
+	Now let's give some examples:
+	- turn off diskDMA:
+		- turning off means: bit 15 is zero
+		- disk dma is bit 4
+
+	  so:	move.w #%0000000000010000,$dff096
+
+	- turn on copper- and blitter DMA:
+		- turning on means: bit 15 is ON (1)
+		- copper is bit 7, blitter is bit 6
+		- to be sure to have the mainswitch turned on, we'll set
+		  this bit too. (bit 9)
+
+	   so:	move.w #%1000001011000000,$dff096
+
+
+	THAT WAS A DESCRIPTION OF DMACON...  I hope not each register will
+	need this much explanation...
+
+
+
+	COPPER
+	******
+
+	The copper is in fact a very small processor, as you saw in the
+	examples of last time. It can perform instructions in form of
+	numbers. You should see these instructions like the ones in M68000
+	language. The only difference is that you can write the 68000 
+	instructions as 'commands' (move...), and the assembler converts 
+	them into numbers. There could also be an assembler for the copper-
+	instructions, but until then, we'll just have to write the numbers
+	ourselves...  This is not too hard, coz a copper can only handle 2
+	(in fact 3, but 1 is never used) instructions. (inagine the 68000
+	with only 'move' and 'jmp' (also see example sources last time).
+
+	The copper-'instructions' are put into the copper-source, mostly
+	called copperlist. To start the copper with executing this list,
+	you need certain hardware registers, namely:
+
+	COP1LCH, COP1LCL, COPJMP1, (COP2LCH, COP2LCL, COPJMP2, COPCON)
+	-------  -------  -------
+
+	The ones between brackets are for later. Now we'll only see the
+	3 most important ones. For the addresses please refer to the lists.
+	I use the names instead of the addresses, only because it is more
+	understandable. If you want to use one of these registers in a source
+	you should declare them somewhere in the souce, like:
+		COP1LCH=$dff080
+	The 'preprocessor' will then, at assembling time, replace all words
+	'COP1LCH' by the address $dff080. You can ofcourse also write the
+	address yourself, which makes it a bit harder to follow.
+
+	COP1LCH and COP1LCL:  notice the H and L at the end of the names.
+	 You'll see this very often in the hardwareregs. H means HIGH and
+	 L means (obviously) LOW. Each time you'll come across such a pair
+	 of registers, they will contain some ADDRESS. (As you know, an
+	 address is 32 bits long = longword = 2 WORDS, that's why 2 registers
+	 are needed)  the ...H contains the leftmost 16 bits of the address,
+	 (the highest bits) and the ...L contains the 16 rightmost bits.
+	Since the ...H and ...L words are next to eachother in memory, it will
+	suffice to write a LONGWORD into the ...H - word, causing the highest
+	word of the longword to be put in the ...H word, and the lower word
+	into the ...L word.
+
+	let's suppose 'copperlist:' is at $2a000
+
+	MOVE.L #copperlist,COP1LCH
+
+			COP1LCH  COP1LCL
+	$0002a000  --->	 $0002    $a000
+
+
+	COPJMP1 is somewhat a special register. By moving ANY value into it,
+	 it starts the copperlist located at the address in COP1LC L/H
+	These kinds of registers are called 'STROBE' registers. The fact that
+	there is a value written in it is enough to activate them. The value
+	itself doesn't matter. (clr.w copjmp1 would also be enough)
+
+
+      (	There was an explanation of the copper-instructions in one of the
+	sources from last time, but here's a summary:
+
+	Each instruction is 2 words. (or 1 longword)
+
+	The wait instruction WAITS for the electronbeam of the monitor to
+	reach a certain point, then it goes on with the next intruction.
+	A wait instruction has the following format:
+		dc.w	$<vvhh>,$FFFE
+	<vv> represent the number of the line for which to wait. <hh> is
+	the horizontal position, but only odd number are allowed.
+	ex:	dc.w	$2a0f,fffe	waits for line $2a, position $0f
+
+	PLEASE NOTE: the screen starts (horizontally) at $0f and ends at $df
+	so a	dc.w	$100f,$fffe  waits for the leftmost side on line $10
+	and	dc.w	$10df,$fffe  waits for the rightmost side on line $10
+
+	THE MOVE INSTRUCTION moves a value (1 WORD) into a hardware register.
+	Since all hardware regs have the same 'base' ($dff000), only the
+	offset is given in the copperinstruction, for example a $dff180 
+	will become $0180, $dff096 will become $0096.
+
+	dc.w	$0180,$0fff will move the word #$0fff into datareg $dff180.
+
+	You could ofcourse also write :		dc.l	$01800fff
+      )
+
+	WARNING: Copper is the easiest DMA-member. If you think this is pure
+		 non-sense, I advise you not to read on, coz it's NOT getting
+		 better !!
+
+
+	BITPLANES
+	*********
+
+	A bitplane is in fact a piece of memory that is made visible on the
+	screen. If you look at the current screen, you should see it as
+	a piece of memory, with the contents of this memory (the bytes) 
+	making up the picture on the screen. That's also why they're called
+	bitplanes...  A screen has a width and a height, width should be a
+	multiple of 16 bits. Bytes of memory are put next to eachother
+	on one line, until the right side of the screen is reached,
+	the next bytes will make up the next line of the screen and 
+	so on until the whole screen is filled. Already you know
+	how much memory a picture will use: width (bytes) * height. 
+	You are free to select the width (in steps of 2 bytes) and the height
+	of the displayed bitmap. This has several consequences: if you, 
+	lateron, make a picture which is 320 bits wide, 40 bytes will be 
+	shown next to eachother (320/8). Byte number 41 will be the first on
+	line 2. If you now display this same picture with a width of 336
+	bits (42 bytes) the picture will look very silly, because on the
+	first 2 bytes which should be on the second line, will now be the 
+	last 2 bytes on the first line, and so on...
+	Each pixel on a screen is related to a bit, somewhere in a byte,
+	somewhere in memory. If the bit is set, the pixel is 'lit'. If the
+	bit is not set, the pixel is 'dark'. Now you see: in one bit you
+	can't put much information, especially when you got 4096 colors to
+	choose from, 1 bit isn't enough to tell exactly in what color you 
+	want to display this pixel. That's why we can put more planes on
+	top of eachother. See page '1' in the copies.  If you put 2 planes
+	on top of eachother, a pixel of the 1st plane can be on or off, same
+	for a pixel on plane 2. This way you can create 4 combinations:
+	0&0, 1&0, 0&1, 1&1.  The number of combinations is always 2^x, with
+	x the number of planes you use.  For 8 colors you'll need 3 planes,
+	(2^3 = 8) Now to get 4096 combinations, you would need 12 bitplanes...
+	This is ofcourse a bit too much for 512 Kram of memory. That's why
+	there is the pallette. In it, you can define 32 colors, which you can
+	choose from the available 4096 colors.
+	You need 5 bits to make 32 combinations, which means to display 32
+	colored pictures, you need 5 planes. (see pages '1')
+
+	There are different resolutions. Amiga 500 has 4 resolutions:
+	320 bits per line or 640 bits per line, and 256 or 512 lines.
+	The lowest resolution is 320 x 256 (LO-RES), 640x256 is called
+	MED-RES or WORKBENCH, the '512 lines' resolutions are called 
+	INTERLACED,(this is a term from the TV-world) Because of some reasons,
+	the screen flickers when amiga displays 512 lines. In fact he first
+	displays the odd lines, then the even ones. 640x512 is the highest 
+	possible resolution. In this mode, only 16 colors are possible because
+	the AMIGA is not fast enough to fill the whole screen in time with
+	more colors. (I got sum lists with needed cycles per plane and per
+	resolution, but they're boring - ask if you'ld want to know anyway)
+	Now I told almost everything about the basic bitplanes. There's some
+	more to tell but let's first show you the registers that can be
+	addressed to 'set up' bitplanes:
+
+	1)  BPL1PTH & BPL1PTL
+	2)  BPL2PTH & BPL2PTL
+	    ...
+	6)  BPL6PTH & BPL6PTL
+	7)  BPLCON0
+	8)  BPLCON1
+	9)  BPLCON2
+	10) DDFSTART/DDFSTOP
+	11) DIWSTART/DIWSTOP
+	12) BPL1MOD/BPL2MOD
+	13) COLOR00 -> COLOR32
+
+	This is ofcourse quite a bit. You can do lots of things with these
+	bitplanes, and therefore, all these registers are needed.
+
+   1-6)	The first 6 pairs contains the startaddresses of the 6 possible 
+	bitplanes. (In normal mode, only 5 are possible, but later you'll
+	see that special modes (like HAM, EHB and DUAL PLAYFIELD) can use
+	6 planes)
+	If you have loaded a picture into memory at location 'pic:', you must
+	tell that to the grafixchips by giving them the address of the first
+	byte in this picture. Again there are 2 registers, because an address
+	is 2 words long, and a register is only 1 word long.
+	If you have more than one bitplane, you must also write the startaddress
+	of the other planes in the according registers.
+
+	IMPORTANT:
+
+	It is usual that the bitplane-registers are put in the copperlist
+	because in nearly each demo, more bitplanes are used on 1 screen,
+	just like the example-demo on the disk. The top part of the screen
+	is a picture in lo-res, and the bottom part is another picture with
+	the scroller (located somewhere else in memory, so other bitplane-
+	addresses will be needed). This is a typical problem for the copper:
+	you tell him to put the picture starting from line 30 (for example) 
+	and the scroll starting at line 200.
+	This brings us to a rather large problem: in the previous examples
+	we MOVED the whole address of the copperlist to the 2 registers 
+	containing the high and low word of the address:
+		MOVE.L #label,$REG-HIGH
+	At the assembling of this source, the computer would assign an address
+	to 'label' and 'replace' the TEXT 'label' with this address, so it
+	would in fact look like this:
+		MOVE.L #$32a14,$REG-HIGH
+	This would result in REG-HIGH containing the highword of the address
+	($0003) and REG-LOW containing the low word.($2a14)
+	IN the copperlist, this address is torn in 2 pieces:
+		DC.W	$REG-HIGH,$0003,$REG-LOW,$2a14
+				    ^^		   ^^
+	But since we aren't allowed to use fix addresses, we can't write our
+	programs like this last example...  ALWAYS USE LABELS !!
+	How do we tell the copperlist what the lowword and the highword is
+	of our label, if we don't know it ourself ??
+	Well, there is only one way around this problem, and that is the
+	following:  before we start with the real demo, we put a routine 
+	that calculates the 'highwords and lowwords' that we will use in
+	the copperlist. At this moment, the computer already assigned 
+	addresses to the labels, and so HE knows them. Now let's give a 
+	detailed example:
+
+	- We have a picture, it starts at label 'pic:'
+	- In our copperlist, we will need a line with the registers
+	  BPL1PTH and BPL1PTL (we will only use 1 plane now)
+	  this line will look like this:
+		dc.w $00e0,<HHHH>,$00e2,<LLLL>
+	  $00e0 and $00e2 are the BPL1PT registers (see list)
+	  HHHH is the highword of the address assigned to 'pic:' and LLLL is
+	  the lowword. Again: WE DON'T KNOW THE ADDRESS OF 'PIC:' until the
+	  program is running !!
+	THIS IS HOW WE DO IT:
+
+	start:	move.l	#pic,d0			;1
+		move.w	d0,lowword		;2
+		swap	d0			;3
+		move.w	d0,highword		;4
+		....
+
+	;----------------------
+
+	pic:	blk.b	picsize,0
+
+	copperlist:	....
+			dc.w	$00e0
+	  highword:	dc.w	$0000		;5
+			dc.w	$00e2
+	  lowword:	dc.w	$0000		;6
+			....
+
+	Explanation: in line 1 we move the address of the picture (which
+	at the moment of execution is known by the computer) to a data-
+	register.(Notice that we moved a LONGWORD, because it is and address)
+	Line 2 moves the LOWEST WORD of the dataregister to the label 
+	'LOWWORD'. At this label, we reserved 1 word to put this value in.
+	(line 6). The next instruction (line 3) is SWAP Dx. This instruction
+	switches the words from a dataregister, so that the highword now
+	becomes lowword and vice versa. If we then again do a move.w, the
+	word that we move is in fact the HIGHWORD of the address. That should
+	be clear enough ?? Examine this example until you get it !! It is 
+	indispendable because we will use it very often !! If you understand it
+	completely, we could try the same program written in a bit different
+	way:
+
+		lea.l	plane,a0
+		move.l	#pic,d0
+		move.w	d0,6(a0)
+		swap	d0
+		move.w	d0,2(a0)
+		....
+
+	copperlist:
+		....
+	plane:	dc.w	$00e0,$0000,$00e2,$0000
+
+	The results of this source are completely the same. Try to find out
+	how it's done in this case !
+
+
+
+	If you use a second plane, the startaddress of this one would be
+	put in BPL2PTH and -L. The planes are usually right after eachother
+	in memory. If again, the first plane starts at 'pic:', how do you 
+	calculate the start of the second plane ?  In fact it is easy: you
+	take the width of the picture, let's say it's 320 bits, equal to 40
+	BYTES. If your piccy is 256 lines high, the total amount of bytes in
+	ONE plane is 40 x 256, is 10240 bytes. In hexadecimal notation, 
+	this is #$2800. The start of the second plane would be 'pic:'+$2800
+	The third plane 'pic:'+ 2*$2800 and so on...
+
+		lea.l	plane,a0
+		move.l	#pic,d0			; 1st plane
+		move.w	d0,6(a0)		;
+		swap	d0			;
+		move.w	d0,2(a0)		;
+
+		move.l	#pic+$2800,d0		; 2nd plane
+		move.w	d0,14(a0)		;
+		swap	d0			;
+		move.w	d0,10(a0)		;
+
+		...				; and so on
+
+	You should take special care of the offsets: the 14 before the (a0)
+	means that the moved word will be put 14 bytes behind the label 
+	'plane:'  
+
+	plane:	dc.w	$00e0,$0000		; plane 1, high word
+		dc.w	$00e2,$0000		; plane 1, low word
+
+		dc.w	$00e4,$0000		; plane 2, high word
+		dc.w	$00e6,$0000		; plane 2, low word
+
+	After assembling, memory looks this way: (in seka: qplane)
+
+	mem.cont's:  00 e0  00 00  00 e2  00 00  00 e4  00 00  00 e6  00 00
+	offset:      0  1 / 2  3 / 4  5 / 6  7 / 8  9 / 10 11 /12 13 /14 15
+
+	As you see: at 14(a0) is $0000, it's the place we reserved to put
+	the low word of the second plane. If you are not sure of what ofset
+	you will have to take, just count as in this example. If you take a
+	wrong offset (for example 12) you would overwrite another part of
+	the copperlist, which could have strange effects. (like flashing
+	red bars)
+
+
+
+     7)	BPLCON0
+	-------
+	This is the main 'control'-register for the bitplanes. In it you
+	can say how many bitplanes you're gonna use, and what resolution.
+	Other things like HAM, EHB and DPF are also declared here, but that's
+	for later. If you want to use 5 planes, you must put this value in
+	bits 14 to 12 of BPLCON0. 5 planes is binary #%101, so the BPLCON0
+	would look like this:
+
+	 #%0101000000000000	; 5 planes activated.
+	    ^ ^		  ^
+	   14 12          0  <- bitnumber
+
+	A consequence of declaring 5 planes in CON0 is that you have to 
+	write addresses in BPL1PTH/L, BPL2PTH/L until BPL5PTH/L.
+
+	Other bits in this register are explained on the !-page...
+	If you want to turn on hires (640 wide), set the 15th bit.
+	 "  "    "   "   "   " interlace (512 lines) set the 2nd bit etc...
+	Bits 0 and 4 to 7 have no function. You'll probably never use 1,3,8
+	9 and 10. (I never did)
+
+   8-9)	In BPLCON1 and BPLCON2 you can declare some more things for your
+	bitplanes, they will be discussed later.
+
+    10)	DDFSTART and DDFSTOP are used to change the width of the picture.
+	As said, you can change the width in steps of 2 bytes. You do this
+	by moving certain values in DDFSTART and -STOP. (DDF means: DISPLAY
+	DATA FETCHT). These values are somewhat unlogical to me. There are
+	sophisticated formulas to calculate the DFFSTART and STOP values, 
+	but just remember this: DFFSTART is the left side of the screen.
+	It should at least be #$28. If you use sprites (later) this value
+	must be at least #$38 (because of internal timing, I'll tell you more
+	later) DDFSTOP should be maximum #$d8. Change DDFSTART/STOP only in
+	steps of #$8. (#$28, #$30, #$38... #$c0,#$c8,#$d0,#$d8) 
+      -	FOR A NORMAL SCREEN (320 wide), DDFSTART is #$38 and DDFSTOP is #$d0
+	see page '!'
+
+    11)	DIWSTART and DIWSTOP are used to 'hide' the outer parts of the
+	screen. Using these registers it's possible to make a screen of
+	for example 321 bits wide (no multiple of 2 bytes). In fact this
+	is only fake, the screen still is a multiple of 2 bytes wide, but
+	you hide a part of it. Same thing is for vertical 'hiding'.
+	I never use these registers, but it's best to declare them in your
+	demos (other programs could have changed them). Just put the values
+	in them which are on the '!' page. With these values, the complete
+	screen is visible (no hidden parts)
+
+    12)	Modulo is a special feature of Amiga (and probably other graphical
+	miracles). This is not only used in Bitplane but you'll encounter it
+	later again when we're at the BLITTER. Now what is MODULO ?
+	If you have a picture which is 320 bits wide, it's perfectly possible
+	to show it on screen: one screen can easily display 40 bytes next to
+	eachother. It's ofcourse harder to display 1000 bytes on 1 row, but
+	that's where the modulo enters the scene. Theoretically spoken, if 
+	Amiga builds a screen, consequent bytes from memory are put next to
+	eachother until the line is filled (DDFSTART/STOP values define the
+	number of bytes on a row). Then the modulo-value is added to the
+	address, and then the next line is filled with the following bytes.
+	An example: if the modulo is '2', and your screen is 40 bytes wide,
+	there will be 40 bytes from memory next to eachother on line one,
+	then 2 bytes will be skipped, and the next 40 bytes wil fill up 
+	line 2, again 2 bytes are skipped, etc... this way you are able to
+	display a (part of) picture of ANY width (in steps of 2 bytes) even
+	if it's 10000 bytes wide. An example might help:
+
+
+
+
+
+
+
+	Now you might ask: why are there 2 modulo registers ? Good question
+	It has to do with the 'dual playfield modus' which you also find in
+	BPLCON0. With this mode you can define 2 completely independent
+	screens, with both maximum 3 planes. That's why there are 6 planes
+	available, and that's also why you have 2 modulo registers. If you 
+	don't use Dual playfield, just put the same value in both registers.
+
+    13)	Finally, the easiest part: colors. As said before, you can define a
+	pallette containing 32 colors out of the possible 4096 colors
+	(confer DPaint,...) The values of these colors are put into the
+	registers COLOR00 until COLOR31. See also page '1' in the listings.
+	You don't have to know more about this if you make your pictures 
+	with Dpaint, but it might be interesting to know how the colors are
+	related to the patterns of bits in the planes:
+	if the on-top-of-eachother-laying bits of the different planes are
+	all 0, COLOR00 will be visible. A completely 'empty' picture will
+	therefore always be displayed in this color. If only the bit of 
+	plane 1 is set, this dot will be in COLOR01...  Don't worry, because
+	Dpaint will worry for you...  Later we will see how to import a 
+	DPAINT picture into your own demos, with colors and everything !!
+
+	FINALLY
+	-------
+	To get a better view of all this bitplane stuff, I advise you to
+	experiment with the Graphicsearcher, which is on the 'CODER-TOOLS'
+	the disk I sent last time. Pressing 1 to 5 will start/hold one of
+	the 5 planes. By moving planes on top of eachother (cursor keys)
+	you might be able to reconstruct a picture that could still be 
+	somewhere in memory (=ripping) press [ and ] to change DDFSTOP. 
+	Press . and / to change the MODULO. Press + and - to change the
+	number of planes in the picture. Press F10 to exit.
+
+
+	HOW TO IMPORT DELUXE PAINT PICTURES INTO YOUR OWN DEMOS
+	-------------------------------------------------------
+	Delucepaint saves it's pictures in the IFF-format. This is nice coz
+	most other programs can use these format too. In this format are 
+	much information about the picture: the size, the # of colors, the
+	'cycling' of the colros and more stuff. Also, IFF pictures are
+	CRUNCHED (packed) to gain some diskspace. We don't need most of this
+	and it would cause too much programming to DECRUNCH the pictures, so 
+	we will always CONVERT iff-pictures into RAW pictures. On the disk 
+	is an IFF-CONVERTER, which does this for us.  It will write a file
+	which contains only the bytes belonging to the picture (shape) and
+	if you desire, some extra words containing the color-values.
+	You simply LOAD the IFF picture with the 'load' gadget. Then you set
+	the gadget to RAW-NORM and SAVE. (don't forget to change the name if
+	you want to keep the IFF picture)
+	You can include the colors in this RAW picture, in 2 different ways:
+	BEFORE or BEHIND. BEFORE will first write the colors (# of colors *
+	2 bytes) (5 planes = 64 bytes extra) and THEN save the picture data,
+	BEHIND wil append the colors BEHIND the picture data. See example
+	in the demo. When doing this kind of conversion, you should remeber
+	somehow what the size of your picture is, I mostly put the size in
+	the name, like this: logo.40x100x3 which means 40 bytes wide, 100
+	lines high, 3 planes. The amount of bytes you must reserve for this
+	picture (if you included the colors BEFORE) is:
+
+	40 * 100 * 3 	(picture data)
+	2^depth		(# col (words))
+
+	so in a source we'ld get something like this:
+
+	WIDTH=		40	; bytes
+	HEIGHT=		100	; lines
+	DEPTH=		3
+	PICSIZE=	WIDTH * HEIGHT * DEPTH
+	NUMOFCOL=	2^DEPTH	; words !!
+
+	colors:	blk.w	NUMOFCOL
+	pic:	blk.b	PICSIZE
+
+	>extern "picname",colors
+
+	( or for 'RAW/BEHIND':
+
+	  pic:		blk.b	PICSIZE
+	  colors:	blk.w	NUMOFCOL
+
+	  >extern "picname",pic
+	)
+
+
+	SPRITES
+	*******
+
+	Sprites are nice because they don't need much programming, and 
+	they're pretty fast, but there are several limitations to them too.
+	I don't use them often, only for some boring stars, or for mouse-
+	pointer (which is a sprite too!)
+	The most important limitation is that a sprite can only be 1 word
+	wide. That's really a bad thing. Also you can only make sprites 
+	with 8 colors (normally only 4, but there's a special mode to 
+	combine 2 sprites into 1, see later)
+	I guess you already knew what a sprite is: a graphical object,
+	some kind of mini-bitplane, which can be moved across the normal
+	bitplane (the screen). Look at the mousepointer to see an example.
+	Sprites, like normal bitplanes, have more planes to select the
+	several colors. Since a sprite can (under normal circomstances)
+	have 4 colors, 2 planes are needed (see bitplane explanation) 
+	But where bitplane-planes were beneath eachother (first the first
+	plane, then the second and so on...), sprites-bitplanes are different:
+	first a word of the 1st plane, then a word of the second, then again
+	one of the 1st plane... Since a sprite is only one word wide, this
+	is no big deal to code: this is a normal way of drawing a sprite:
+
+	dc.w	%0000000000000000,%1111111111111111
+	dc.w	%0000000000000000,%1000000000000001
+	dc.w	%0000110000110000,%1000000000000001
+	dc.w	%0000110000110000,%1000100000010001
+	dc.w	%0010000000000100,%1000000110000001
+	dc.w	%0001100000011000,%1000000000000001
+	dc.w	%0000011111100000,%1000000000000001
+	dc.w	%0000000000000000,%1111111111111111
+			....		....
+		    ^^			^^
+		data of 1st plane     data of 2nd plane
+
+	The sprites have no own palette (see bitplanes) but they
+	use the color register 'color16' to 'color31'.
+
+	spritenumber	1st 2nd plane   displayed color
+
+	   0 & 1	 0   0		color00 (transparant)
+			 1   0		color17
+			 0   1		color18
+			 1   1		color19
+	   2 & 3	 0   0		color00 (transparant)
+			 1   0		color21
+			 0   1		color22
+			 1   1		color23
+	   4 & 5	 0   0		color00 (transparant)
+			 1   0		color25
+			 0   1		color26
+			 1   1		color27
+	   6 & 7	 0   0		color00 (transparant)
+			 1   0		color29
+			 0   1		color30
+			 1   1		color31
+
+	When you turned on Bitplane-DMA (in the DMACON (see earlier)) you
+	had to decalre the BPLxPTH & BPLxPTL, for each plane you used.
+	Same thing counts for sprites: If you use them, you must tell where
+	the data for the sprites is in memory, using similar registers as
+	BPLxPTH/L:  SPRxPTH/L !!
+
+	SPR0PTH & SPR0PTL contain the address of the sprite0-data.
+	  ...	     ...
+	SPR7PTH & SPR7PTL contain the address of the data for the last sprite.
+
+	However: you must fill in ALL these registers, even if you only use
+	1 sprite.
+
+	The sprite data does not only contain the shape of the 'mini bitplanes'
+	but also the position on the screen and the height of the sprite:
+	This is how the complete sprite-structure looks like:
+
+	dc.w	xxxx,yyyy
+	dc.w	%00000000,%00000000		; the shape of the 2 planes
+	dc.w	%00000000,%00000000		; can be anything
+		   ....	      ...
+	dc.l	0				; longword zero to end
+
+	the first 2 words are the 'controlling words' they control the
+	position and the height. 
+	There are 9 bits to declare the horizontal & vertical position of
+	a sprite. These bits are a bit strangely spread over the 2 words
+	xxxx and yyyy:
+
+	xxxx: bit:  15 14 13 12 11 10 9  8  7  6  5  4  3  2  1  0
+	meaning:    V7 V6 V5 V4 V3 V2 V1 V0 H8 H7 H6 H5 H4 H3 H2 H1
+
+	yyyy: bit:  15 14 13 12 11 10 9  8  7  6  5  4  3  2  1  0
+	meaning:    L7 L6 L5 L4 L3 L2 L1 L0 AT 0  0  0  0  V8 L8 H0
+
+	V8-V0:	9 bits for the vertical start position (1st line)
+	H8-H0:  9 bits for the horizontal position.
+	L8-L0:  9 bits for the vertical end position (last line)
+	AT:	attach-bit (if this is set, 2 sprites are combined into 1
+		giving 8 possible colors. Sprites combined as: 0&1, 2&3...)
+
+	V8,L8 & H0 are separated from the rest of their bits, and this 
+	causes some extra programming: if the sprite is over line 256,
+	the V8-bit is set, bit H0 will change each time you move it 1 pixel
+	to left or right, V8 will be 1 when the sprite is over line
+	256-length.
+
+	So now the computer has the vertical startposition of the sprite.
+	When the electronbeam of the monitor reaches this line, the computer
+	will take a word from the data and put it on screen, then going to
+	the next line and so on, until the last line (L-bits) is reached.
+	If the next 2 data words are both ZERO, the DMA-channel for this
+	sprite is turned off, so the cpu can start doing something else.
+	If they are NOT zero, the story starts all over: the next 2 words
+	will be controlling words which contain another position, and then
+	another part of datawords will follow, until the last 2 words are
+	zero:
+
+	dc.w	$10xx,$12yy			; vstart=$10,vend=$12
+						; (2 lines high)
+	dc.w	%00000000,%00000000		; 2 lines of data
+	dc.w	%00000000,%00000000		; (can be anything)
+	dc.w	$13xx,$15yy			; not zero -> new sprite
+	dc.w	%00000000,%00000000		; again some datalines
+	dc.w	%00000000,%00000000		; (can be anything)
+	dc.l	0				; longword zero to end
+
+	This way you can put more sprites on screen with in fact only
+	one sprite. The only thing that is necessary is that the vertical
+	position of the next sprite must always be 1 more than the end-
+	line of the previous one, (to give the CPU time to read the 2 
+	controlling words), so in the example sprite 1b starts at $13 where
+	sprite 1a ended at $12. (I say sprite 1a and 1b and not 1 and 2, coz
+	in fact they are only 1 sprite)
+	This very neat feature of sprites is often used to create starfields
+	in demos etc. What you see is only 1 sprite, with more controlling
+	words. Note that between each star will be one empty line, because
+	of reasons explained here. Using some copperinstructions (wait for
+	certain line and change spritecolor) you can give a different color
+	to each 'subsprite' and by changing the horizontal position each 
+	time, you can smoothly scroll each star with it's own speed, creating
+	a nice eefect of depth. (see demonstration on disk)
+
+	Sprites are also often used for mousepointers. By reading 2 registers
+	in memory (see soon) you can calculate the position of the mouse-
+	pointer, and calculate the appropriate values for the controlling-
+	words in the sprite-data. This is somewhat more difficult because the
+	bits of the horizontal and vertical position are strangely spread,
+	but there's an example of a mouse-routine on the disk. Here you will
+	see how to calculate the bits depending on the position of the
+	mouse.
+
+	MOUSE & JOYSTICK
+	****************
+	Mouse: JOY0DAT ($dff00a)
+	Joyst: JOY1DAT ($dff00c)
+	       -------
+
+	bit:  15 14 13 12 11 10 9  8  7  6  5  4  3  2  1  0
+	      Y7 Y6 Y5 Y4 Y3 Y2 Y1 Y0 X7 X6 X5 X4 X3 X2 X1 X0
+
+	first byte (Y7-Y0): vertical movement (delta Y)
+	secnd byte (X7-X0): horizontal movement (delta X)
+
+	As said, there's an example on disk. Please check out this to get
+	the picture. Don't worry if you don't get it, you won't need it
+	often I suppose.
+
+	The next thing however will be in nearly each program you'll write:
+
+
+
+	BLITTER !!! (yeah the famous one who writes 1.000.000 data per second)
+	***********
+
+	The blitter is one hell of a miniprocessor, which can be used to
+	copy memory, or to draw lines, at VVEEEERRRY rapid speeds.  I can
+	however at this point tell you that speed is very relative, and
+	once you're making serious demos, this VEEERYY rapid speed will soon
+	turn out to be not so fast at all, but remember: it's no wizardry,
+	it's only a chip !!
+	How does the blitter work:  via some registers you first tell him
+	some details about what you're gonna do: whether you're gonna draw
+	lines or copy memory, which modulo etc, (see later)  Finally you
+	tell him the size of the whole thing and by doing this you activate
+	him. He starts copying or drawing a line. The nice thing is that you
+	don't have to wait until he's ready: the CPU can go on with other
+	instructions. However, before you can start another blitter-task,
+	you must be sure to finish the last one, and this is done by checking
+	the 14th bit in DMACON (see page '!' - blitter busy) when this bit
+	is set, the blitter is still busy, so the subroutine 'WAITBLITTER:'
+	will look like this:
+
+		waitblitter:
+			btst	#14,$dff002
+			bne.s	waitblitter
+			rts
+
+	Now about the blitter: the drawing of lines is quite difficult, I
+	only tried it once, and I have to admit: I copied the routine from
+	a book and I didn't get all of it, so don't ask me to explain it.
+	Instead I'll try to make clear the copying abilities of the blitter,
+	which won't look to simple neither at the beginning... I'll put the
+	drawline routine somewhere on the disk if I still have it...
+	First: Blitter can combine several inputs into one output. You can
+	specify 3 sources and one destination. You can turn each one on or
+	off.
+	Second: (and this is a touch one!) did you ever hear of BOOLEAN 
+	MATHEMATICS ?? If so, that would be nice, but in case you didn't,
+	here is some brief explanation:  We count with 2 numbers (you guessed
+	right) 0 and 1. 0 means 'NOT TRUE' (or NOT SET) and 1 means 'TRUE'
+	(OR SET). We have 3 operations: AND, OR and NOT.  X OR Y = Z (try
+	putting it in words, and it becomes 'normal': if X is TRUE, OR Y is 
+	TRUE, then Z is TRUE. X AND Y = Z: X AND Y have to be true to make Z
+	true.If a or b is not true, c will be false too. NOT A = B: If A is 
+	true, B will be false and vice versa. You can also make combinations:
+	(NOT A) AND (B OR C) = D
+	(A OR (NOT B)) AND (C AND (B OR (NOT(A OR B)))....
+	After a few hours of theory, you'll find out that each of these 
+	functions can be written in a number of 'MINITERMS', which only use
+	the AND operation. These miniterms make the functions 'easier'.
+
+	With A,B and C and the AND function, we can make lotsa combinations:
+	A true AND B not true, and C true, and so on...  You can by now tell
+	me how many combinations there are using 3 of these 'bits' ? yes: 8 !
+	In other words: With 3 bits, we can make 8 miniterms:
+
+		A	B	C		ABC
+		---------------------		---
+		set	set	set		111
+		set	set	not set		110
+		set	not set	set		101
+		set	not set	not set		100
+		not set	set	set		011
+		not set	set	not set		010
+		not set	not set	set		001
+		not set	not set	not set		000
+
+	Now to come back at the blitter: A,B and C are parts of memory, 
+	where bits can be SET or NOT SET. The destination is D. Memory from
+	locations at A,B and C will be combined into a piece of memory at
+	location D, using sets of combinations: the miniterms.
+	In register BLTCON are 8 bits who represent each a miniterm of the
+	list above. If one of them bits is set, the destination bit will be
+	set if that particular combination is achieved in the sources.
+	Let's give an example, first an easy one:
+	if you want to copy memory from location A to location D, you just
+	say: if A is set, then D is set !! If A is not set, D isn't set
+	neither. B and C aren't used in this case, so their value (set or
+	not set) aren't important.
+
+	D is 1 'IF A=1'
+
+	D is 1 when  A=1 AND B=1 AND C=1
+		or   A=1 AND B=1 AND C=0
+		or   A=1 AND B=0 AND C=1
+		or   A=1 AND B=0 AND C=0
+
+	The miniterms in this case will be:
+	(111)	(110)	(101)	and	(100)	
+
+	And yes: in each case, A is set !! (ain't that fascinating ?)
+
+	Please try this example:
+	which combinations are needed when you wish to put a pixel at each
+	place where the B-bit is not set and the A bit is equal to the C bit ?
+	You should find the following:
+		B bit is not set -> only these combinations remain:
+			101,100,001,000
+		A = C so we get the result:
+			101 and 000
+	Or this (and this combination is often used when making BOBS - see
+	later ?):
+	You want to set the destination when A is set, OR when B is set but
+	C is not set. "A OR (B AND NOT C)"
+	This is true whenever the A bit is set, so: 111,110,101,100
+	And also when B is set while C is not set : 110,010
+	(110 happens to occurs twice, but that's no problem, just use'm once)
+	Together we'll have to set the miniterms: 111,110,101,100,and 010
+
+	As you see you can make quite complex comparisions using this in fact
+	simple (even prehistorical) boolean-stuff. It is because it is 
+	so simple that it is so fast. No speed is lost by doing these calculations
+	Imagine what time it would take if you had to write a program to do
+	the same for EACH BIT !! Blitter can put about one million bits per 
+	second !!
+
+	BLTxPT
+	------
+	As in the bitplanes and sprites, here too you must tell the start-
+	addresses of both Sources (A B and C) and Destination memory (D).
+	Each have their own pair of registers: (see list for values)
+	 BLTAPTH & BLTAPTL
+	 BLTBPTH & BLTBPTL
+	 BLTCPTH & BLTCPTL
+	 BLTDPTH & BLTDPTL
+	One problem: Blitter can only work with WORDS, so each of these
+	addresses must have an even value (but if you gave an odd one, 
+	he'ld adjust it himself)
+
+	BLTSIZE
+	-------
+	This register has 2 functions. As the name says, it contains the
+	size of the blitted (copied) part of memory. This size has a height
+	and a width. (Now when reading the next bit, it would be nice if you
+	understood the bitplane-stuff, like how a screen is built up and
+	why exactly MODULO is used)  For example you want to copy a part from
+	a 40 bytes wide screen, onto another screen of 42 bytes wide. Let's
+	say the image you're gonna copy is 4 words (only count in words when
+	using blitter) wide and 20 lines high. The WIDTH AND HEIGHT of the
+	copied part will be put in the BLTSIZE-register. There are 10 bits
+	for the height, and 6 bits for the width:
+		%hhhhhhhhhhwwwwww	(16 bits = 1 word = size of register)
+	This could be a way of calculating the correct bltsize for our example:
+		clr.l	d0
+		move.w	#20,d0		; (height)
+		asl.w	#6,d0		; shift left by 6 bits
+		or.w	#4,d0		; (width expressed in words)
+
+	20 is %0000010100,  4 is %000100, so d0 will look like this:
+
+		%0000010100000100
+		 ----------......
+		    20        4
+
+	Another way of calculating the BLTSIZE is: height*64 + width
+	%0100 * 2 = %1000, you see that multiplying by 2 is the same as
+	shifting 1 to the left. Shifting 6 to left is the same as multi-
+	plying by 64 (2^6). ASL is however much faster than MULU.
+	If your blitsize is constant, you could do this calculation BEFORE
+	the program, like this:
+	declaration_of_constants:
+		BLITSIZE=HEIGHT*64+WIDTH
+		.... 
+	program:
+		...
+		move.w	BLITSIZE,$dff058	; dff058=register for blitsize
+
+	Please note that you must calculate this value BEFORE you put it in
+	the BLTSIZE, coz when you put ANYTHING in the register, the blitter
+	will start. So we HAD to do the calculations in for example D0, and
+	THAN put d0 in BLTSIZE.  This would not work:
+		Move.w #20,$dff058
+		asl.w  #6,$dff058
+		.....
+
+	A write in BLTSIZE is the LAST THING you can do.
+
+	BLTxMOD
+	-------
+	Remember the object to be copied was 4 words wide, but it was on a
+	picture of 40 bytes wide. That's where the MODULO shows up again !
+	Imagine the blitter. First he reads the startaddress of our image,
+	in BLTAPTH/L. That is the left side of the image. He starts copying
+	words, one after another, going from left to right until it has 
+	copied 4 words and thus reached the right side. Then he will skip some
+	bytes until he has again reached the left side of the image and then
+	he'll again copy 4 words... and so on until he has copied 20 lines.
+	The amount of bytes to be skipped when going from one line to another,
+	is called the MODULO (see also bitplanes). Bitplanes have a modulo
+	to display a picture that is wider that the monitor, blitter uses
+	a modulo to copy images that are not as wide as the displayed screen.
+	Blitter has a modulo for each channle A,B,C and D. This makes it
+	possible to copy an image for example from a small screen onto a wide
+	screen. The modulos that the blitter uses are called BLTAMOD, BLTBMOD,
+	BLTCMOD and BLTDMOD.
+	Now let's calculate the value for our example. The source screen was
+	40 bytes wide, while our object was only 4 words (=8 bytes) wide.
+	After copying 8 bytes, there will be 32 bytes left to be skipped,
+	so the source-modulo will be 32 !! (yes indeed, this is the amount
+	of BYTES and NOT the amount of WORDS, don't ask me why)
+	The destination screen was 42 bytes wide, so after copying 4 words
+	onto this screen, 34 bytes will be left to skip. BLTDMOD = 34.
+	(move.w	#34,BLTDMOD)
+
+	BLTCON0 (cont'd)
+	-------
+	As said, the miniterm are represented by bits in the BLTCON0.
+	There's more to be found in this register: the USE bits, with which
+	you can select which 'channels' you're gonna use: if you use only
+	one source and the destination (D) you only turn on A and D.
+	(the less channels you use, the faster is goes!)
+
+	The highest 4 bits are called the BARRELSHIFTER. If for example you
+	put value '5' in this register, (0101) the incoming image will be
+	shifted 5 bits to the right (or left, I'm not sure). This is used
+	to smoothly scroll an image, remember you could only work in steps
+	of a word when using blitter !   See examples in the little demo...
+
+	BLTCON1
+	-------
+	The highest 4 bits are again used as barrelshifter, but this time
+	for source B. Not often used, only for bobs I think. (by the way
+	bobs are pretty complicated) bits 4,3,2 and 0 are used for lines
+	only. Bit 1 is the 'DESCENDING' bit. If the DESTINATION is partly
+	overlapping the source, like in this small illustration:
+
+
+
+
+	by writing the first values onto the destination, the source will
+	be overwritten. The solution is starting at the end. If this situation
+	should occur, you must set the DESCENDING bit, and you must also
+	give the END addresses of the sources and destination, and blitter
+	will copy the frame from end to start.
+
+	BLTAFWM & BLTALWM (first word mask and last word mask)
+	-----------------
+	You can mask the start and the end of the zone you copy by using these
+	registers. If you write the value %0011111111111111 into the register
+	BLTAFWM, the leftmost 2 bits of each line of the copied block would
+	never be set. It's like looking through a window, where only the 1's
+	are made of glass. The FWM & LWM only have effect on the first word
+	resp. last word, the words in between aren't effected.
+	These regs aren't used often.
+
+
+
+	In fact now you are able to write your own blitter routine. Please
+	refer to the demo for practical examples. I'll now give a brief 
+	explanation of how bobs work. I don't expect you to be making bobs 
+	in the first few months, but you might also understand what it's all
+	about.
+
+	BOBS (experts only !)
+	----
+	Bobs are probably the hardest stuff except for vector graphix, and
+	I advise you to experiment a whole lot with blitter before starting
+	with bobs.
+	Bobs are pieces of graphics, that are put on a screen using the 
+	blitter. Unlike sprites, where the HARDWARE does all the programming,
+	bobs need much programming. If you have a picture at the background,
+	and you put a spaceship or something on it, the background picture
+	is lost. If you then move the ship, the background needs to be 
+	restored. Therefore you must first save the piece of background on
+	which you put the spaceship. Afterwards, you must put back this 
+	background so that you won't see the spaceship anymore.  Sprites
+	work the same way, but the hardware does it for us and you will agree
+	that it is easier to work with sprites than to do it yourself.
+	A special trick that is almost always used for bobs is the DOUBLE
+	BUFFERING. 'refreshing' the bobs means you put the previously present
+	backgrounds back on the screen (on top of the bobs), then put the
+	various bobs back on their new position. The time it takes to repaint
+	all the backgroundparts will grow when you have more bobs, and by the
+	time all backgrouds are restored, the 1st bob will be 'gone' for 
+	quite a long time before you are able to put it on the new position.
+	As result you will see very nasty flickering on the screen.
+	That's why Double Buffering is used: There are 2 images in memory,
+	and each time you refresh the bobs, you switch the images. First
+	you paint the bobs on one screen while showing the other, then you
+	switch the pages and you put the bobs on the first screen while 
+	showing the second... You won't notice the flickering on the one
+	screen coz you are showing the other !  This way of working brings
+	even more programming to it all, and above all, it GULPS memory !!
+	As said: bobs are only for experts !!
+
+	Another rather large problem that occurs when using bobs is the
+	overlapping. A bob will consist of one or more bitplanes, which you
+	must copy onto the desired spot of the screen.
+	Source (the shape of the bob) is A, destination (background) is D.
+	Now when you set the miniterms this way: 111,110,101,100
+	this is what would happen:
+
+
+
+
+
+	It's therefor necessary that you keep track of the background, and
+	that's when the second and thirth source (B and C) come in handy.
+	Your A source points to the image of your spaceship, and the B-source
+	points to the background. Now you set the miniterms this way that
+	the destination is lit when a bit of the spaceship is set OR a bit
+	of the background is set.  That's better, coz look what will happen:
+
+
+
+
+
+
+	As you see, large openings in your spaceship, which in fact belong
+	to the ship, and which should NOT be transparant, are transparant,
+	you can see the background through it. What's worse: if you use 
+	more than 1 bitplane, the combination of 1's and 0's is relevant to
+	get the correct color. But by using the miniterms of the previous
+	example, these relevant 0's of your spaceship are not copied, the 
+	bits of the background in fact disturb your image, and you'll get
+	wrong colors. That is why we use MASKS (not the BLTAFWM and BLTALWM,
+	but OWN MASKS). This mask has the shape of our spaceship, but all bits
+	are set. Like this:
+
+
+
+
+
+	Now when we copy our spaceship onto the background, this background
+	may only be visible when it is OUTSIDE our spaceship, this means,
+	when the bit in our MASK IS NOT SET !!  When the shape of the ship
+	is in source A, and the background is in B, and te mask of the ship
+	is in C, the miniterms would be the following:
+	111,110,101,100 and 010
+	Explanation: If a bit in the spaceship is set, this bit must be set
+	in the destination ALWAYS (111,110,101 and 100)
+				   ^   ^   ^       ^
+	The last miniterm (010) means: when a bit in the spaceship is NOT
+	set, the background may only be visible when the mask is not set.
+	(=outside the spaceship)
+	This way you prevent the background to be set under the shape
+	of the spaceship...

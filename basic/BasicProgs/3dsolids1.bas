@@ -1,0 +1,207 @@
+1     rem error in line 1045 -- last two rgb #s unknown
+10    rem ** 3D Line Plotting System 
+20    rem ** Original from Analog Magazine Feb.84
+30    rem ** Modified by R. Grokett, Jr. 11/85
+40    rem ** Amiga version 1.1
+100   screen 1,2,0
+110   ? inverse(1) "3-D IMAGE PLOT SYSTEM"
+120   ? :?:?
+130   ?"Original by Tom Hudson  Analog Magazine #16 February 1984"
+140   ?:?
+150   print"Amiga version by R.Grok ------ Dec 85"
+154   ?" This is a modified version of Analog Magazine's SOLID STATES program.
+156   ?"This version has NOT been fully optimized to maximize ABasiC's speed. Even"
+157   ?"so, this version runs considerably faster than even the compiled  Atari"
+158   ?"version. Plus, this version is running with twice the resolution of the
+159   ?"original. Feel free to alter the coding of this program any way you wish!"
+160   DIM r$(1),A$(5),F$(20),DMA$(1),O$(1),EG$(2),IN$(1):EG$=CHR$(27)
+170   XL=0:XR=639:YT=0:yB=199
+180   ? at (15,23);"Press <RETURN> to begin ";
+185   getkey a$:if a$<>chr$(13) then 185
+200   scnclr
+210   ? inverse(1) "  3D-PLOTS  "
+220   ?:?"(D)isk file or (K)eyboard input? (D or K)";
+224   getkey a$:if a$="d" or a$="D" then 1100
+230   if a$="k" or a$="K" then 240 else 224
+240   ?:?"How many points are there";:input PS
+250   DIM X(PS),Y(PS),Z(PS),P(PS,2),VIS(PS)
+260   ? "Enter X,Y,Z coordinates for each point"
+270   FOR I=1 TO PS:? "POINT ";I;:INPUT Q1,Q2,Q3:X(I)=Q1:Y(I)=Q2:Z(I)=Q3:NEXT I
+280   ? :? "How many LINES are there";:INPUT LS:DIM LN(LS,1),z%(3,LS)
+290   ? :? "Now enter POINT information"
+300   ? "for each line."
+310   FOR I=1 TO LS:? :? "Line ";I:? "From POINT";:INPUT Q1:LN(I,0)=Q1:? "  To POINT";:INPUT Q1:LN(I,1)=Q1:NEXT I
+320   ? :? "Do you want to SAVE this object";:INPUT A$:IF A$="y" THEN 1250
+330   IF A$<>"n" THEN 320
+340   REM ***************************
+350   REM *    TIME FOR NEW PLOT    *
+360   REM ***************************
+370   ?:?"Do you wish to (V)iew, (E)dit, or (Q)uit? (V, E, or Q)";
+374   getkey a$:if a$="v" or a$="V" then 380 else if a$="e" or a$="E" then 1340 else if a$="q" or a$="Q" then scnclr:end else 374
+380   ?:?"Enter Observer location (X,Y,Z) : ";
+390   ZOOM=1
+400   INPUT OX,OY,OZ
+410   ? :? "Enter coordinates looked at X,Y,Z"
+420   input VX,VY,VZ
+430   ? :? "Enter ZOOM factor (1= normal)":on error goto 430:INPUT ZOOM:on error goto 0
+434   ? :? "Do you want to do an X-Y loop";:INPUT R$:IF R$<>"y" THEN 440
+436   ?:? "How many degrees TOTAL ROTATION";:INPUT AN2:AN2=(AN2/360)*6.28
+438   ? "How many degrees rotation per frame";:INPUT AN3:AN3=(AN3/360)*6.28
+439   GOTO 2000
+440   X(0)=VX:Y(0)=VY:Z(0)=VZ
+450   D0=1
+460   REM ***************************
+470   REM *  CALCULATE PERSPECTIVE  *
+480   REM ***************************
+490   DX=VX-OX:DY=VY-OY:DZ=VZ-OZ
+500   U1=SQR(DX*DX+DY*DY+DZ*DZ):IF U1=0 THEN U1=1E-06
+510   CX=DX/U1:CY=DY/U1:CZ=DZ/U1
+520   S3=SQR(1-CZ*CZ):S2=SQR(1-CY*CY)
+530   QX=OX+D0*CX:QY=OY+D0*CY:QZ=OZ+D0*CZ
+540   FOR I=0 TO PS:XW=X(I):YW=Y(I):ZW=Z(I):GOSUB 610:NEXT I
+550   FOR I=0 TO PS:IF VIS(I)=0 THEN 570
+560   XW=X(I):YW=Y(I):ZW=Z(I):GOSUB 610:GOSUB 670
+570   NEXT I:GOTO 740
+580   REM ***************************
+590   REM *  IS THE POINT VISIBLE?  *
+600   REM ***************************
+610   VIS(I)=1:VCX=XW-OX:VCY=YW-OY:VCZ=ZW-OZ
+620   IF DX*VCX+DY*VCY+DZ*VCZ>0 THEN RETURN 
+630   VIS(I)=0:RETURN 
+640   REM ***************************
+650   REM *  NOW CALC PLOT COORDS   *
+660   REM ***************************
+670   K=D0/(VCX*CX+VCY*CY+VCZ*CZ)
+680   AX=OX+K*VCX:AY=OY+K*VCY:AZ=OZ+K*VCZ
+690   IF S3=0 THEN 720
+700   P(I,1)=((AX-QX)*CY-(AY-QY)*CX)/S3
+710   P(I,2)=(AZ-QZ)/S3:RETURN 
+720   P(I,1)=((QX-AX)*CZ+(AZ-QZ)*CX)/S2
+730   P(I,2)=(AY-QY)/S2:RETURN 
+740   REM ***************************
+750   REM *     SCALE THE IMAGE     *
+760   REM ***************************
+770   T=450*ZOOM:FOR I=0 TO PS
+780   P(I,1)=P(I,1)*(T*2)
+790   P(I,2)=P(I,2)*T
+800   NEXT I
+810   XAD=320-P(0,1):YAD=100-P(0,2):FOR I=1 TO PS:P(I,1)=P(I,1)+XAD:P(I,2)=P(I,2)+YAD:NEXT I
+820   REM ***************************
+830   REM *   NOW DRAW THE IMAGE!   *
+840   REM ***************************
+850   rgb 0,0,0,0:rgb 2,0,0,0: rgb 3,15,15,15:pena 3
+860   gosub 2200
+870   FOR I=1 TO LS:TV=VIS(LN(I,0))+VIS(LN(I,1)):IF TV=0 THEN 1010
+880   IF TV=2 THEN 980
+890   QT=0:ISAVE=I:IF VIS(LN(I,0))=0 THEN I1=LN(I,0):I2=LN(I,1):I=LN(I,0):GOTO 910
+900   I1=LN(I,1):I2=LN(I,0):I=LN(I,1)
+910   XT1=X(I1):YT1=Y(I1):ZT1=Z(I1):XT2=X(I2):YT2=Y(I2):ZT2=Z(I2):FV=0:FH=0
+920   XW=(XT1+XT2)/2:YW=(YT1+YT2)/2:ZW=(ZT1+ZT2)/2:GOSUB 610
+930   IF VIS(I)>0 THEN XT2=XW:YT2=YW:ZT2=ZW:GOTO 950
+940   XT1=XW:YT1=YW:ZT1=ZW
+950   QT=QT+1:IF QT<15 THEN 920
+960   XW=XT2:YW=YT2:ZW=ZT2:GOSUB 610
+970   GOSUB 670:P(I,1)=P(I,1)*T+XAD:P(I,2)=P(I,2)*T+YAD:VIS(I)=0:I=ISAVE
+980   X1=P(LN(I,0),1):Y1=191-P(LN(I,0),2):X2=P(LN(I,1),1):Y2=191-P(LN(I,1),2):GOSUB 1550
+1010  NEXT I
+1012  scnclr
+1015  for i%=1 to LS:draw(z%(0,i%),z%(1,i%) to z%(2,i%),z%(3,i%)):next i%
+1020  rem
+1035  IF FLAG THEN 2100
+1040  get a$: if a$="" then 1035
+1045  scnclr:rgb 0,6,8,15:rgb 2,1,8,15
+1050  ?"LAST PARAMETERS:"
+1060  ? :? "OBSERVER: ";OX;",";OY;",";OZ:? "VIEWPOINT:";VX;",";VY;",";VZ:? "ZOOM:";ZOOM:GOTO 340
+1070  REM ***************************
+1080  REM *   LOAD 3-D IMAGE FILE   *
+1090  REM ***************************
+1100  gosub 1800:CLOSE #1:?:?:? "Enter Drive: Filename to load. (df_: filename) ";:INPUT F$:on error goto 1200:OPEN "i",#1,F$:on error goto 1180
+1110  INPUT #1,PS:DIM X(PS),Y(PS),Z(PS),P(PS,2),VIS(PS)
+1120  FOR X=1 TO PS:INPUT #1,Q1:X(X)=Q1:NEXT X
+1130  FOR X=1 TO PS:INPUT #1,Q1:Y(X)=Q1:NEXT X
+1140  FOR X=1 TO PS:INPUT #1,Q1:Z(X)=Q1:NEXT X
+1150  INPUT #1,LS:DIM LN(LS,1),z%(3,LS)
+1160  FOR X=1 TO LS:INPUT #1,Q1:LN(X,0)=Q1:INPUT #1,Q1:LN(X,1)=Q1:NEXT X
+1165  a$=" loaded."
+1170  CLOSE #1:on error goto 0
+1175  ?:?"File ";f$;a$:goto 340
+1180  ? :? "}FILE FORMAT ERROR!":GOTO 1210
+1190  ? :? "}I/O ERROR - ";err$(err):GOTO 1210
+1200  ? :? "}CAN'T OPEN FILE!"
+1210  ? "PRESS RETURN":INPUT IN$:clr:goto 100
+1220  REM ***************************
+1230  REM *   SAVE 3-D IMAGE FILE   *
+1240  REM ***************************
+1250  gosub 1800:CLOSE #1:? "Enter Drive: Filename to save. (df_: filename)";:INPUT F$:on error goto 1210:OPEN "o",#1,F$:on error goto 1190
+1260  ? #1,PS
+1270  FOR X=1 TO PS:? #1,X(X):NEXT X
+1280  FOR X=1 TO PS:? #1,Y(X):NEXT X
+1290  FOR X=1 TO PS:? #1,Z(X):NEXT X
+1300  ? #1,LS:FOR X=1 TO LS:? #1,LN(X,0):? #1,LN(X,1):NEXT X:a$=" saved.":GOTO 1170
+1310  REM ***************************
+1320  REM * EDIT THE 3-D IMAGE DATA *
+1330  REM ***************************
+1340  on error goto 0:? :? "(P)rint, (E)dit or (R)eturn";:INPUT A$:IF A$="E" or A$="e" THEN 1410
+1350  IF A$="R" or A$="r" THEN 340
+1360  if a$="p" or a$="P" then 1370 else 1340
+1370  on error goto 1340:PRINT "POINTS:";PS:PRINT 
+1380  FOR X=1 TO PS:PRINT "POINT ";X;": ";X(X),Y(X),Z(X):NEXT X:PRINT 
+1390  PRINT "LINES:";LS:PRINT 
+1400  FOR X=1 TO LS:PRINT "LINE ";X;": ";LN(X,0);" TO ";LN(X,1):NEXT X:PRINT :GOTO 1340
+1410  on error goto 0:? :? "Edit (P)oint or (L)ine or (E)xit";:INPUT A$:IF A$="l" THEN 1480
+1420  IF A$="e" THEN 320
+1430  IF A$<>"p" THEN 1410
+1440  ? :? "Enter POINT# or <RETURN>";:on error goto 1410:INPUT PT:IF PT>PS OR PT<0 THEN 1440
+1450  ? :? "X=";X(PT),"Y=";Y(PT),"Z=";Z(PT)
+1460  ? :? "Enter NEW X,Y,Z or <RETURN>":on error goto 1410
+1470  INPUT Q1,Q2,Q3:X(PT)=Q1:Y(PT)=Q2:Z(PT)=Q3:GOTO 1410
+1480  ? :? "Enter LINE# or <RETURN>";:on error goto 1410:INPUT LN:IF LN>LS OR LN<0 THEN 1480
+1490  ? :? "FROM point:";LN(LN,0):? "  TO point:";LN(LN,1)
+1500  ? :? "Enter new LINE POINTS or <RETURN>":on error goto 1410
+1510  ? "FROM point:";:INPUT Q1:IF Q1>PS THEN 1510
+1520  LN(LN,0)=Q1
+1530  ? "  TO point:";:INPUT Q1:IF Q1>PS THEN 1530
+1540  LN(LN,1)=Q1:GOTO 1410
+1550  REM ***************************
+1560  REM *  GRAPHICS
+1570  REM ***************************
+1580  L1=0:L2=0:R1=0:R2=0:T1=0:T2=0:B1=0:B2=0:POK=0
+1590  IF X1<XL THEN L1=1:GOTO 1610
+1600  IF X1>XR THEN R1=1
+1610  IF Y1>YB THEN B1=1:GOTO 1630
+1620  IF Y1<YT THEN T1=1
+1630  IF X2<XL THEN L2=1:GOTO 1650
+1640  IF X2>XR THEN R2=1
+1650  IF Y2>YB THEN B2=1:GOTO 1670
+1660  IF Y2<YT THEN T2=1
+1670  IF L1+L2=2 OR R1+R2=2 OR T1+T2=2 OR B1+B2=2 THEN RETURN 
+1680  X3=X1:Y3=Y1:X4=X2:Y4=Y2:GOSUB 1730
+1690  L1=L2:R1=R2:T1=T2:B1=B2
+1700  X1=XW:Y1=YW:X3=X2:Y3=Y2:X4=X1:Y4=Y1:GOSUB 1730
+1710  IF X1<XL OR X1>XR OR Y1<YT OR Y1>YB OR XW<XL OR XW>XR OR YW<YT OR YW>YB THEN RETURN 
+1715  z%(0,i)=x1:z%(1,i)=y1:z%(2,i)=xw:z%(3,i)=yw:pok=1:return
+1720  draw( X1,Y1 to XW,YW):POK=1:RETURN 
+1730  IF L1+T1+B1+R1=0 THEN XW=X3:YW=Y3:RETURN 
+1740  IF L1 THEN XW=XL:YW=Y3+(Y4-Y3)*(XL-X3)/(X4-X3):X3=XW:Y3=YW:IF Y3>=YT AND Y3<=YB THEN RETURN 
+1750  IF R1 THEN XW=XR:YW=Y3+(Y4-Y3)*(XR-X3)/(X4-X3):X3=XW:Y3=YW:IF Y3>=YT AND Y3<=YB THEN RETURN 
+1760  IF B1 THEN YW=YB:XW=X3+(X4-X3)*(YB-Y3)/(Y4-Y3):X3=XW:Y3=YW:IF X3>=XR AND X3<=XL THEN RETURN 
+1770  IF T1 THEN YW=YT:XW=X3+(X4-X3)*(YT-Y3)/(Y4-Y3):X3=XW:Y3=YW
+1780  RETURN 
+1800  rem ---- Disk Directory
+1810  rem
+1820  ?:?"For Disk Directory, input (df0:), (df1:) or (N)one";
+1830  input drive$:if left$(drive$,2)<>"df" then return
+1840  scnclr
+1845  on error goto 1190
+1847  chdir drive$
+1850  dir drive$
+1855  on error goto 0
+1860  return
+2000  FLAG=1:R=(OX^2+OY^2)^0.5:AN1=ATN(OY/OX):AN2=AN2+AN1
+2100  AN1=AN1+AN3:OX=R*COS(AN1):OY=R*SIN(AN1)
+2120  GOTO 440
+2200  if flag=0 then return
+2201  IF AN1>AN2 THEN FLAG=0:goto 1045
+2202  XI=XI+1-2*(XI=2):XA=2-(XI=2)
+2250  RETURN 
+2500  on error goto 0:scnclr    :RETURN 

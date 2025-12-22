@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+<meta name="author" content="-=ONIX=-">
+<title>DOS Global Vector (AmigaDOS v33/3v4)</title>
+<style>
+b { font-weight: bold; }
+u { text-decoration: underline; }
+i { font-style: italic; }
+li { font-style: normal; }
+body { margin-left: 30px; margin-right: 30px;
+	   font-size: 14px;
+	   line-height: 150%;
+	   font-family: 'Lucida Sans Unicode', sans-serif; }
+pre { font-family: Inconsolata, 'Lucida Console', 'Courier New', Courier, monospace;
+	  font-size: 14px; }
+#less { margin-bottom: -1.0em; }
+</style>
+</head>
+<body>
+<!-- Okay, I know that using NonBreakingSpaces with paragraphs is a bad coding style -->
+<!-- but it helps old Amiga browsers displaying this file almost correctly -->
+<h1>DOS Global Vector; Tripos based</h1>
+<p>&nbsp;</p>
+<p><b>Warning, this is all about an obsolete programming technique and a
+dropped interface!</b></p>
+<p>&nbsp;</p>
+<h2>Why then?</h2>
+<p id="less">I was going to back port an OS2+ only command line tool and needed an
+equivalent to ReadArgs().</p>
+<p id="less">First reaction was: Oh, I've already assembled such thing for Weaver
+and I can make use of it, then, I remembered that the old DOS of 1.2/1.3 offered
+such built-in functionality already.<p>
+<p id="less"> So I thought it would be nicer to use that function. In the end,
+it was not satisfying at all, because that function (g_rdargs) relies on an
+intact pr_CIS 'file' buffer, where the CLI stores the command line and C
+startup-codes render the contents of pr_CIS for g_rdargs unuseable. I ended with
+writing an own startup-code, only to make g_rdargs work.</p>
+<p>&nbsp;</p>
+<h3>In the beginning there was BCPL</h3>
+<p>When I refer to Tripos, I mean with this the AmigaDOS of version v2x to v35,
+which were written using a now dead programming language that is called BCPL,
+where BCPL was used to create an OS called Tripos, on which the AmigaDOS did
+base.</p>
+<p id="less">BCPL is a typeless language designed for low-level implementations.</p>
+<p id="less">BCPL stores information in tables, where all table entries are of size
+32 bits (m68k) and thus each table entry is addressed as index, so index 3 points
+to the fourth long word in the table. Because each element of the table occupies
+the same number of memory cells, this table is strictly speaking a vector.</p>
+<p id="less">In order to retrieve the physical address for a certain index in
+such a vector, as required by other programming languages like for example C or
+assembler, one has to multiply the address that BCPL associated with this vector
+by four and then adding the vectors's index (scalar).<p>
+<p id="less">Next, if you provide an address to BCPL, you have to
+change the physical address into one, which is just a quarter of the origin
+address, f.e. 400 to 100. This is due to the fact that BCPL can only address
+long words (32 bit) and instead of using the real physical address, just every
+fourth memory cell is consecutively numbered, in contrast to other
+programming languages on the Amiga, where each memory cell has got its very own
+memory address.</p>
+<p>In adddition, that requires the physical address to start at a memory cell
+being a multiple of four, otherwise the lower 16 bit content of the <b>index
+minus one</b> and the upper 16 bit content of <b>index</b> would be read or
+written; the latter case would render invalid the content of <b>index minus one</b>
+and <b>index</b>.</p>
+<p>To make programming life a little bit easier, macros for the C language were
+published:</p>
+<p id="less">BADDR is used to convert a BCPL index to its physical address and</p>
+<p>MKBADDR is used to convert a physical address into a BCPL index.</p>
+<p id="less">Using strings and representing each character (7 bit out of 8 used at that
+time) by a long word (32 bit) was back then a bit like taking a sledgehammer to
+crack a nut (UTF-32 still wasn't born) so strings are exceptions in the BCPL
+programming language. Each character is represented by only 8 bits in contrast
+to normal items, being 32 bits in width.</p>
+<p id="less">Still, the physical address of such a string has to start at a multiple of
+four memory cells!</p>
+<p id="less">BSTR (the BCPL string) consist out of a lead-byte containing the string's
+length in amount of bytes followed by the characters themselves. Note that
+there is no trailing NUL-byte indicating string's end.</p>
+<p>Because the lead-byte is 8-bits in width, at most BCPL strings can contain 255
+characters, i.e. the string itself can be at most 256 bytes (length byte plus
+255 characters) in width.</p>
+<p>&nbsp;</p>
+<h3>The Global Vector, the mystery</h3>
+<p>Beforehand, in the BCPL terminology a module or a program may consist of several
+segments, where a segment is nothing else than a hunk of code designed to fulfil a
+certain task.</p>
+<p id="less">BCPL is a hi-level programming language which doesn't offer a traditional
+link mode to link against separately compiled segments.</p>
+<p id="less">In order to make it possible for BCPL to call functions in separately
+compiled segments, a global vector, which is an array with a known order, is used.</p>
+<p id="less">Because BCPL compiled programs will be loaded into RAM by a special loader
+and there executed, this special loader must be instructed which additional segments
+have to be loaded in to form a complete program. In order to share the addresses of
+functions of such separately compiled segments, a global vector is set up pointing to
+the physical addresses representing the individual, global functions.
+Hence the global vector is the sole means of communication between separately
+compiled segments of a program! To call a function or routine which is declared in
+one segment from a position in another, it is necessary to declare it as a global in
+each of the two segments. Therefore this global vector, as used for the AmigaDOS of
+the old days, uses indices directly pointing to global functions or global routines.
+For example, in the programming language C we would call a function by its name, which
+gets translated to an absoulte address by the linker. In order to call a BCPL compiled
+function or routine from a different programming language than BCPL, we have to know
+its index in the global vector. Once we know it, we can use the global vector's
+function entry to execute the desired code.</p>
+<p>&nbsp;</p>
+<h3>AmigaDOS Library Base</h3>
+<p id="less">Now, let's take a look at the DOS library base, there are 3 variables that
+are important for calling Tripos global functions;</p>
+<p>dl_A2, dl_A5, dl_A6</p>
+<p>As these variable names suggest, these are m68k register contents that have to
+be placed in the appropriate register before calling a Tripos alike global
+function. dl_A2 points just to the global vector space, i.e. the table holding the 32
+bit absolute addresses to certain functions.</p>
+<p>But what do dl_A6, dl_A5?</p>
+<pre>
+Function description (DosLibrary dl_A5 / dl_A6)
+dl_A5 - enter Tripos lib function:
+	movea.l	(A7)+,A3		- Grab the return address
+	movem.l	A1/A3-A4,-12(A1,D0.l)	- Save the old stack pointer and the return address (in A3)
+					- and also the function address (in A4), in mind raising
+					- new stack, so that it can be easily restored later
+	adda.l	D0,A1			- Raise BCPL stack for local variables, pointers, results etc.
+	movem.l	D1-D4,(A1)		- Store the arguments within BCPL stack for Tripos alike
+					- lib functions
+	jmp	(A4)			- Finally, call Tripos alike lib function at this specific address
+
+dl_A6 - return from Tripos lib function:
+	movem.l	-12(A1),A1/A3	- Get original BCPL stack pointer back before it was raised by D0 so
+				- that it fits again for the callee and grab also the return address
+	movea.l	-4(A1),A4	- Get address of executed code back
+	jmp	(A3)		- Return to callee
+</pre>
+<p>Looks strange to you, yep, it's a bit strange, but remember that Tripos was
+written in mind BCPL and BCPL was designed for quick portability from one
+architecture to an other where as less as possible knowledge about the underlaying
+ABI was one condition it had to meet, hence dl_A5/dl_A6 guarant a consistent
+interface for calling BCPL functions from BCPL and assembler.</p>
+<p>&nbsp;</p>
+<p><b>Task (process) stack and BCPL stack</b></p>
+<p id="less">Normally, a language like C or assembler uses for local variables and to
+remember return addresses when a sub-function is called, the system provided
+user stack frame (usp, sp, A7 - you name it).</p>
+<p id="less">BCPL itself has got only a very limited knowledge of the underlying ABI, so it
+uses an own stack, which must be provided by the callee. In contrast to a m68k
+stack, this stack grows from the lower physical address to the upper.</p>
+<p>The first use you already saw in the routine dl_A5;</p>
+<pre>
+	movem.l	A1/A3-A4,-12(A1,D0.l)	- Save the old stack pointer and the return address
+</pre>
+<p>It remembers the actual state of the m68k programming flow in this BCPL
+stack, so that it can be restored when calling dl_A6.</p>
+<p>At least, this BCPL stack has to be 12 bytes (or 3 register content) tall, not
+taking into account arguments and local to BCPL variables (comes later).</p>
+<p id="less">But already here we are faced with the usage of the processor registers D0,
+A1, A3, A4. Remember, this is no code compiled by a BCPL compiler but glue
+code written in assembler in order to call BCPL functions.</p>
+<p>If we take a closer look we now see that A1 contains the BCPL stack frame
+pointer and D0 is a byte-index into this frame pointer. But as we already found
+out, BCPL can only address long words thus the result of A1 plus D0 has to
+represent an address that is divisible by four.</p>
+<p>Let's say we allocated 400 bytes for the BCPL stack and provide its address
+in A1, then D0 has to be 12, otherwise, in case D0 would be zero, in front of
+the allocated BCPL stack the current state [movem.l A1/A3-A4,-12(A1,D0.l)] will
+be stored, i.e. non allocated memory will be trashed.</p>
+<p>As we further see, A3 is trashed and its content isn't backed-up anywhere,
+instead it is loaded with the current content of the user stack (A7). Because
+this glue code (dl_A5) is performed via [jsr A5], it's the return address to
+where dl_A6 has to jump back, i.e. into our code and from there performing
+further the normal program flow;</p>
+<pre>
+	moveq	#12,D0
+	movea.l	_bcpl_stack,A1
+	movea.l	_DOSBase,A0
+	movea.l	dl_A2(A0),A2
+	movea.l	dl_A5(A0),A5
+	movea.l	dl_A6(A0),A6
+	jsr	A5
+</pre>
+<p>Hmm, A4 isn't set up as required by;</p>
+<pre>
+	jmp	(A4)			- Finally, call Tripos alike lib function at this specific address
+</pre>
+<p>As the code A4 points at is immediately performed, it's our task to set up
+A4. But how?</p>
+<p>A4 must point to BCPL generated code, which gets executed. As we deal with
+a global vector space (table), it's the address of a BCPL compiled function
+remembered in this table. In order to get the address, we have to know the
+index of a certain BCPL function in this table, for example index 47, which
+waits a specific time (see DOS Delay). Complete;</p>
+<pre>
+	moveq	#12,D0
+	movea.l	_bcpl_stack,A1
+	movea.l	_DOSBase,A0
+	movea.l	dl_A2(A0),A2
+	movea.l	dl_A5(A0),A5
+	movea.l	dl_A6(A0),A6
+	moveq	#47,D5
+	asl.w	#2,D5		; Index 47 (long word index) into offset (= * 4)
+	movea.l	0(A2,D5.w),A4	; This table entry contains the pointer to the BCPL code to execute
+	jsr	A5
+</pre>
+<p>As you know, Delay() requires an argument, the time out. BCPL functions can be
+feed with up to four arguments (D1 to D4) and they are stored with dl_A5 onto
+the BCPL stack;</p>
+<pre id="less">
+	movem.l	D1-D4,(A1)	- Make a copy of the arguments within BCPL stack for Tripos alike
+				- lib functions
+</pre>
+<p><small>If you need more than four arguments, you have to push any additional
+argument onto the BCPL stack in linear order right behind the long word where
+D4 will be written to.</small></p>
+<p>So with that in mind, we can provide the required argument. Fortunately, we
+do not have to clear unused arguments, as BCPL generated code ignores such pendent
+arguments. In our example we have to specify a value for D1 (first argument)
+but can ignore D2 to D4;</p>
+<pre>
+	moveq	#12,D0
+	moveq	#50,D1		; Argument
+	movea.l	_bcpl_stack,A1
+	movea.l	_DOSBase,A0
+	movea.l	dl_A2(A0),A2
+	movea.l	dl_A5(A0),A5
+	movea.l	dl_A6(A0),A6
+	moveq	#47,D5
+	asl.w	#2,D5		; Index 47 (long word index) into offset (= * 4)
+	movea.l	0(A2,D5.w),A4	; This table entry contains the pointer to the BCPL code to execute
+	jsr	A5
+</pre>
+<p>Seems to be complete, does it? No, it isn't. By luck, such code would run
+fine, but we have missed one important setup. The register A0 must be cleared
+before any BCPL code is executed, because it gets used from BCPL generated code
+to move data indirectly, while the address itself is in a data register;</p>
+<pre>
+	move.l	0(A0,D3.l),D1
+</pre>
+<p>In this (arbitrarily) example D3 holds the address of an item object and using
+A0 as base register with content 0 works for retrieving the contents where D3
+points at.</p>
+<p>As A3 is a scratch register anyway, we modify the code to;</p>
+<pre>
+	moveq	#12,D0
+	moveq	#50,D1		; Argument
+	suba.l	A0,A0		; Index register
+	movea.l	_bcpl_stack,A1
+	movea.l	_DOSBase,A3	; A3 is a scratch register anyway
+	movea.l	dl_A2(A3),A2
+	movea.l	dl_A5(A3),A5
+	movea.l	dl_A6(A3),A6
+	moveq	#47,D5
+	asl.w	#2,D5		; Index 47 (long word index) into offset (= * 4)
+	movea.l	0(A2,D5.w),A4	; This table entry contains the pointer to the BCPL code to execute
+	jsr	A5		; Uses (A7)+,A3 to get return address
+</pre>
+<p>That's it? Yes.</p>
+<p>&nbsp;</p>
+<h3>Returned codes/structures/addresses</h3>
+<p>The m68k ABI defines D0 as scratch register and thus it's free to take
+results from a called function, but as BCPL is quite different, BCPL uses D0
+partly as non-scratch register and puts results in D1, this means for higher
+programming languages like C that you have to destroy D0 too and place there
+the result;</p>
+<pre>
+	move.l	D1,D0		; Result in D0
+</pre>
+<p>Boolean results are also quite different, normally we could test against 1
+(true), but not the returned boolean results from BCPL, here false means 0 and
+unequal 0 means true. Even Commodore Amiga specified DOSTRUE as -1L (32 bits,
+hex FFFFFFFF), it isn't always returned, it's unsafe to test against DOSTRUE.
+What in contrast is safe, is to test against DOSFALSE.</p>
+<p>&nbsp;</p>
+<h3>Local variables</h3>
+<p>Local variables are placed within the BCPL stack and one has to increase the
+stack frame pointer manually in order to prevent those variables from being
+overridden; for this D0 is designed. The default value is 12, but can be
+increased to make space on this stack. Luckily, C or assembler programmers
+don't need that feature, but compiled BCPL functions make heavy use of it.</p>
+<p>&nbsp;</p>
+<h3>Annotation</h3>
+<p id="less">Disassembling CLI commands showed that there are always two code
+hunks; the first one is just a startup-code setting up a local Global Vector and
+rearranges by this global variables in such a manner that the command in question
+can be executed from the same memory location off multiple times without causing
+trouble, also known as reentrant/pure. As the BCPL code itself is reentrant, it
+means that the Global Vector is not! Without cloning it, no write access may be
+performed to it!</p>
+<p id="less">In the second code hunk you will find the instructions carrying out the
+task it was designed for. Note that the first long word of this code segment has to
+contain the size of this code segment in amount of long words, so that the last
+long word of this code segment can be read. This one must be the size in amount
+of long words that the local Global Vector should be made of (positive size, set
+it to $95). There are at least three long words in front of the Global Vector
+size item, normally 0, 1, 4 (more, if the command in question required more global
+items in the GV, indicated by a size greater $95). Important is 4, as it is
+the offset added to this segment's start for firing up that code, i.e. ignoring the
+long word containing the overall size of this 2nd code segment.</p>
+<p><small>
+For those interested in, 0 is the end mark as this record is an array with no
+absolute size, instead, any pair (for example 1, 4) instructs the loader to
+set index 1 of the GV to the address of the segment plus 4, where index 1 is the
+function address to start code of a certain segment. This is essential in order to
+share global functions within separately compiled segments / modules.
+</small></p>
+<p id="less">Don't do those stunts that the CLI programs do; they call BCPL
+functions (ROM) by adding to the last known function address (A4, ROM) the
+distance to the desired code, e.g. $1C0, where this new address represents not
+the start of a BCPL function, but points somewhere inbetween, i.e. a "goto label"
+instead of a regular function call.</p>
+<p>m68k instructions can be made of 16, 32 or 48 bits, but BCPL ignores this
+fact and handles code as if instructions always start at a long word boundary,
+which is not true! By this, jumping to a ROM address calculated via a
+distance and where this distance is always a multiple of four, will not work as
+intended. Often, there is just an additional branch instruction accidentally
+carried out that luckily has got no influence on further program flow, but it
+is anyway a source of potential errors.</p>
+<p>Please keep in mind that negative function indices do represent official
+Amiga DOS API functions, which were omitted for AmigaDOS 2+ and with this are
+not available by default.</p>
+<p>It goes without saying that using Global Vector functions under OS2+ may crash
+the entire system, so all what I've written is for purely programming AmigaDOS
+1.2 / AmigaDOS 1.3. Don't make a fool of yourself by using them for enhanced
+operating system versions!</p>
+<p>&nbsp;</p>
+<p>Jörg, 6/2018</p>
+</body>
+</html>

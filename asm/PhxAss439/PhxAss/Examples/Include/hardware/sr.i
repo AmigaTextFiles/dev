@@ -1,0 +1,38 @@
+	IFND	SR_I
+SR_I	SET	1
+**
+** $VER: sr.i 1.0 (4.6.97)
+**
+** definitions for the status register or ccr
+**
+** Written by Sunbeam/Shelter!
+**
+
+	IFND	EXEC_TYPES_I
+	INCLUDE	"exec/types.i"
+	ENDC	;EXEC_TYPES_I
+
+
+	BITDEF	SR,CARRY,0	;C
+	BITDEF	SR,OVERFLOW,1	;V
+	BITDEF	SR,ZERO,2	;Z
+	BITDEF	SR,NEGATE,3	;N
+	BITDEF	SR,EXTEND,4	;X
+	BITDEF	SR,IRQ0,8
+	BITDEF	SR,IRQ1,9
+	BITDEF	SR,IRQ2,10
+	BITDEF	SR,SUPERVISOR,13
+	BITDEF	SR,TRACE,15
+
+
+** alias defs for ccr
+
+
+	BITDEF	CCR,CARRY,0
+	BITDEF	CCR,OVERFLOW,1
+	BITDEF	CCR,ZERO,2
+	BITDEF	CCR,NEGATE,3
+	BITDEF	CCR,EXTEND,4
+
+
+	ENDC	;SR_I

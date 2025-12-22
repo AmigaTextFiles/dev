@@ -1,0 +1,164 @@
+Erläuterungen zu den Druckerroutinen 'printer.e'.
+Soll auf eine der nächsten EPD.
+
+Ante Scriptum:
+
+Guten Tach! alle zusammen. Unten stehen Erläuterungen zu den von mir
+geschriebenen Druckerroutinen. Bevor es diese Routinen gab, hatte ich vor
+dem 'printer.device' ganz schönen Respekt (da kompliziert), aber jetzt ist
+es doch recht einfach geworden, einen Text oder eine Hardcopy auszudrucken.
+Ich übernehme keinerlei Garantie für korrekten Ablauf, Benutzung auf eigene
+Gefahr!
+Nu aber schnell zu den Beschreibungen...
+
+
+
+Funktionsname:
+
+printer_open()
+
+Diese Routine erwartet keine Parameter. Sie 'öffnet' den in den Preferences
+eingestellten Drucker und kennzeichnet ihn im System als 'belegt', d.h.
+ein anderes Programm kann erst darauf zugreifen, wenn er von uns freigegeben
+wurde (in diesem Fall sinnvollerweise über printer_close()).
+Tritt beim Öffnen ein Fehler auf, wird der Rückgabewert der Funktion
+folndermaßen gesetzt:
+
+( -1 )	- RESERVIERT ( eigentlich Fehler bei Angabe der Unit, hier aber
+			sinnlos [oder?])
+  -2	- Fehler bei CreateMsgPort()
+	  Es war nicht möglich, einen 'message port' ['Nachrichtenhafen']
+	  einzurichten. Da diese für die Kommunikation innerhalb des
+	  Betriebssystems unentbehrlich sind, kann leider nicht
+	  gedruckt werden.
+  -3	- Fehler bei CreateIORequest()
+	  Ein IORequest ist ·die· wichtige Struktur für Devices. Darin
+	  ist u.a. der message port, die unit (bei Laufwerken: unit=0
+	  -> auf DF0 wird zugegriffen) und noch so manches verzeichnet.
+	  ··unheimlich·· wichtig!
+  -4	- Fehler bei OpenDevice()
+	  Im Gegensatz zu den Libraries benötigen Devices beim Öffnen
+	  bereits initialisierte Strukturen, eben den IORequest und so.
+	  Daher wird erst jetzt OpenDevice() aufgerufen, nachdem alles
+	  andere geglückt ist. Wenn jetzt aber zum Beispiel nicht mehr
+	  genügend Speicher frei ist, kann es trotzdem zu einem Fehler
+	  kommen. Schade drum, sollte aber selten sein.
+
+Wenn der Rückgabewert größer NULL ist, trat kein Fehler auf, dies ist den
+die Adresse des IORequests für den Zugriff auf den Drucker. Sie ist bei den
+übrigen Druckerfunktionen zu übergeben (dort findet keine Überprüfung ob
+der Richtigkeit dieser Angabe statt, also übergebt ja das Richtige!).
+[jetzt etwas über die interne Vorgehensweise, wer das nicht wissen will,
+überspringt diesen Abschnitt]
+Übrigens sind die IORequests für den Ausdruck von Texten mit und ohne
+Ersetzung von Escape-Sequenzen und für den Grafik-Ausdruck jeweils
+unterschiedlich groß, aber keine Angst, man muß jetzt nicht dreimal den
+Drucker öffnen oder ihn beim Wechsel der Druckart schließen und wieder
+öffnen - es wurde einfach der größte IORequest vom System besorgt
+(iodrpreq - InputOutputDumpRastPortREQuest [schätze ich mal]).
+Die Funktionsparameter sind nun einfach nur als LONG definiert, wenn man
+also auf Strukturelemente (ior.command) zugreifen will, muß man ohnehin
+vorher einer entsprechend 'typisierten' Variable (DEF ior:PTR TO iodrpreq)
+den Inhalt dieses Parameters zuweisen. Andere Sprachen meckern dann und
+verlangen ein type-casting (C), aber E ist das ja egal.
+
+Funktionsname:
+
+printer_close()
+
+Der einzige Parameter dieser Funktion ist der iodrpreq von printer_open().
+'Schließt' den Drucker und meldet den message port usw. ab. Das macht man ja
+nun einmal so, damit der Systemspeicher nicht zu wenig wird, gell ?
+
+Funktionsname:
+
+printer_rawwrite()
+
+Parameter:
+
+ioreq		- Ergebnis von printer_open()
+zkette		- die Zeichenkette, die ausgegeben werden soll
+laenge		- die Länge der Zeichenkette
+
+Auf dem Drucker wird die Zeichenkette ausgegeben. Die Zeichenkette kann
+auch Escape-Sequenzen beinhalten, diese werden nicht ersetzt. Diese
+Sequenzen können zum Beispiel druckerspezifische Kommandos sein, die nicht
+im ANSI-Standard enthalten sind. Während der Text gedruckt wird, schläft
+der Task, da mit DoIO() gearbeitet wird - SendIO() wäre asynchron.
+
+
+Funktionsname:
+
+printer_write
+
+Parameter:
+
+s. printer_rawwrite()
+
+Die Zeichenkette wird zum Drucker geschickt, hier jedoch findet eine
+Ersetzung der Escape-Sequenzen statt.
+
+
+Funktionsname:
+
+printer_command
+
+Parameter:
+
+ioreq		- wie gehabt
+kommando	- Nummer bzw Konstante, die das Kommando bezeichnet
+p0-p3		- Parameter 1 bis 4 für dieses Kommando
+
+Sieht gut aus, oder ? Diese Funktion schickt ein Kommando an den Drucker,
+das bis zu vier Parameter haben kann.
+Beispiele:
+
+Drucker-Reset
+		Kommandonummer: 0
+		Parameter 0:	0
+		Parameter 1:	0
+		Parameter 2:	0
+		Parameter 3:	0
+
+linken und rechten Rand setzen:
+		Kommandonummer: 65
+		Parameter 0:	2	/* linker Rand auf 2	*/
+		Parameter 1:	77	/* rechter	   77	*/
+		Parameter 2:	0
+		Parameter 3:	0
+
+Wie man sehen kann, werden nicht verwendete Parameter sinnvollerweise auf 0
+gesetzt.
+
+
+Funktionsname:
+
+printer_graphic_dump
+
+Parameter:
+
+ioreq		- Ergebnis von printer_open()
+rport		- der auszudruckende RastPort
+cmap		- die ColorMap
+vmodes		- ViewModes des Screens
+srcx,srcy,
+srcwidth,
+srcheight	- Dimensionen des Ausschnitts: Startpunkt & Breite & Höhe
+destcols,
+destrows	- Druckbreite auf dem Drucker in Punkten
+Special		- Special-Flags
+
+JaHAAAA, das ist eine feine Funktion, sie druckt nämlich einen RastPort
+aus. Wie Sie alle wissen, das brauche ich Ihnen ja gar nicht zu sagen, hat
+auch ein Screen einen RastPort, folglich kann man auch einfach einen ganzen
+Screeninhalt ausdrucken. Die ColorMap findet sich genauso wie die ViewModes
+im ViewPort des Screens - in der ColorMap stehen die Farbwerte, in den
+ViewModes, welche Auflösung der Screen hat.
+Nun folgen die Ausmaß des Ausschnitts, der ausgedruckt werden soll:
+zuerst die Koordinaten des Startpunktes im RastPort, dann Breite und Höhe,
+sodann die Ausmaße des Ausdrucks (destcols = destination columns =
+Ziel-Spalten; destrows = destination rows = Ziel-Zeilen; wobei mit Spalte
+und Zeile jeweils ein Punkt gemeint ist!).
+Zum Schluß ist es möglich über das SPECIAL-Flag den in den Preferences
+eingestellten Ausdruck (Dichte usw.) zu verändern. Setzt man das Flag auf
+NULL, bleibt alles beim alten. Das sollte man auch ruhig tun.

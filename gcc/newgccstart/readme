@@ -1,0 +1,275 @@
+
+***** A new startup code for gcc *****
+
+Why a new startup code?
+
+A few months ago I decided to install GCC on my amiga to write and compile some funny
+progs (perhaps you've tested my program TolleUhr) - and found out very soon:
+It doesn't feel at home very much there - it uses it's own shell, it's own
+way of handling filenames and a lot of stuff like that.
+
+I tried to recompile my little workbench-clock 'TolleUhr' - and what do you think -
+it worked. (Ehrm) Except two little new features: If you started it from WB
+you got a little funny extra cli-window (perhaps there's a way to shut this down - I
+don't know - the documentation that comes with GCC doesn't tell you everything you
+want to know) and to run this 20k thingy you needed a new 150k shared library called
+ixemul.library just to process the WBStartup message.
+
+Later I tried out some other libraries for gcc (even gerlib, you know it ;-) ),
+but none of them did exactly what I wanted them to do. So I decided to write my own.
+To write a new libc first of all you need a new startup code - here it is.
+
+So please let me know if you think this is worth writing a new libc - it's a hell of
+a lot of work.
+Apart from this you get a new startup code for writing amiga specific programs
+with some features you always need - as auto-opening libraries for example.
+
+The legal stuff:
+
+I don't know what to do with this yet, so I think I should make some restrictions
+just to be on the save side:
+
+Every part of the sourcecode is (C) by me. You can do modifications to it to fit
+your own needs and compile it to get a bug-free version of the objectfiles and
+link-libraries. I denote them freeware. You can do everything you want with them -
+I make no restrictions. You can link them together with your own objects
+to get a program with the legal status you want. But you are not allowed to
+redistribute a modified version of the sourcecode - you are only allowed
+to redistribute it in totally unmodified form. Perhaps this may change later.
+And of course there is no warranty at all, not even the warranty that it works.
+
+Usage:
+
+You can use one of the following lines:
+
+gcc -nostdlib crt0.o your_program.c libm.a libamy.a libstubs.a
+
+gcc -nostdlib -fbaserel -msmall-code bcrt0.o your_program.c blibm.a libamy.a blibstubs.a
+
+gcc -nostdlib -fbaserel -msmall-code rcrt0.o your_program.c blibm.a libamy.a blibstubs.a
+
+depanding on the code model you want to get.
+
+Important note: 
+(b)libstubs.a must be the last file to get linked in because it contains the
+library base pointers. Otherwise you will very probably get un unresolved symbol
+error. The startup code modules (b/r)crt0.o must be the first or your code
+will crash ;-).
+
+What you get - features:
+
+startup modules: 
+
+crt0.o  large data model startup code (contains geta4 stub function)
+bcrt0.o small data model (a4 relative) startup code (contains geta4 function)
+rcrt0.o resident startup code
+
+* The startup code modules first of all try to open all referenced libraries
+  with the library version number taken from the global variable
+
+    ULONG __oslibversion;
+
+  you can set this variable yourself if you like. Otherwise the default versionnumber
+  33 gets linked in (from libstubs.a).
+
+  If you want to use a main function instead of main you must set this to at least 36.
+  (gets linked in automagically if you use the main function and don't set your own
+   variable).
+
+* After that the function 
+  
+    int _autoinit(void);
+
+  gets called (maybe this is subject to change). This function should return a value
+  of 0 if all went well. Otherwise it should deallocate all ressources before returning.
+  If you don't set this function a stubs routine that does nothing gets called.
+
+* Your program gets called by jumping into
+
+    int _main(char *commandline);
+
+  (if you like). The workbench startup message stands in the global variable
+
+    extern struct WBStartup *_WBenchMsg;
+  
+  You can exit your program either by calling
+
+    extern void _exit(int returncode);
+
+  or by simply returning from _main.
+
+* The function
+  
+    void _autoexit(void);
+
+  gets called if _autoinit was done successfully. (maybe this is subject to change, too).
+
+* You also get an
+ 
+    void geta4(void);
+
+  function if this is possible. This isn't possible for resident programs 
+  (as far as I know) and very useless for large data model.
+
+A little ANSI support:
+
+libm.a  normal clib (large data model)
+blibm.a base-relative clib (small data model)
+
+These libraries (link-libraries, not the shared ones you know of the 
+libs: directory) contain a _main() function calling your 
+
+    int main(int argc,char *argv[]);
+
+function. If you start your program using WB you get an argc of 0 and the 
+pointer to the WBStartup message as argv. It's not possible to get 
+an argc of 0 by starting your program from the shell (as you already know).
+
+There are also the following ANSI functions:
+
+  void exit(int returncode);
+  void *malloc(size_t size);
+  void free(void *ptr);
+  void *realloc(void *ptr,size_t size);
+  void *calloc(size_t nmemb,size_t size);
+  size_t strlen(const char *s);
+  FILE *fopen(const char *filename,const char *mode);
+  int fclose(FILE *stream);
+  int fgetc(FILE *stream);
+  int fputc(int c,FILE *stream);
+  int ungetc(int c,FILE *stream);
+
+Most of the ANSI-stuff contains only little work, but the printf-style functions
+are a very huge hurdle. I would like to hear about any incompatibilities of these
+functions to the ANSI-standard.
+
+Last you get two functions you know from amiga.lib
+
+  void sprintf(STRPTR buffer,STRPTR fmt,...);
+  void BeginIO(struct IORequest *iorequest);
+
+The only reason that they are there is that I needed them myself.
+
+The stubs:
+
+libstubs.a  Normal
+blibstubs.a Base-relative
+
+These libraries mainly contain the library base pointers and library names.
+(Of course there are a some other things as well). It's very easy to add 
+new libraries to the supported list (i.e. your favourite PD library):
+Just add it to the library.list file and rerun the whole make process for the stubs.
+It's only about 1 hour on my plain 68000 so I think everybody can do this
+(at least everybody who has enough memory to run gcc :-) ).
+
+Theory of operation:
+
+I think you want to know how it works: here is the answer.
+
+The linkage process:
+Every object file contains some references to other objects or some elements
+referenced by other objects (or both). You may think of them as the two ends 
+of an arrow. For example the startup code contains a reference to _main and
+the function _exit which can be referenced by other objects.
+
+	+---------+
+	| Startup |
+	|         |
+	|   _main |-> Startup code calls _main
+	|         |
+	|   _exit |<- You can call _exit if you want
+	|         |
+	+---------+
+
+A link-library is nothing else than a large heap of this object files.
+
+	+---------+
+	|   fopen |<-
+	+---------+
+	|  fclose |<-
+	+---------+
+	     .
+	     .
+	     .
+	+---------+
+	|  malloc |<-
+	+---------+
+
+All the linker has to do is taking all the objects and looking for unresolved
+references (the -> arrows) in the link-libraries. If the objects that have to
+be linked in have unresolved references too, they must be looked after too.
+
+The linker normally scans the libraries in the order you give them. Therefore
+if a reference could be resolved by multiple libraries there is no conflict
+between them.
+
+What does this mean for opening the shared libraries?
+
+Every time you call a function of one of the shared libraries the glue code
+in amiga.lib (or the assembler inlines of gcc) make up a reference to 
+the library base pointer. The libstubs.a library contains these base 
+pointers together with one pointer to each library name (which are also in this
+library):
+
+	+---------+
+	| label 1 |<-
+	+---------+
+	| dosbase |<-
+	|         |
+	| pointer |->....
+	+---------+     .
+	     .          .
+	     .          .
+	     .          .
+	+---------+     .
+	| gfxbase |<-   .
+	|         |     .
+	| pointer |->.. .
+	+---------+   . .
+	| label 2 |<- . .
+	+---------+   . .
+	| gfxname |<-.. .
+	+---------+     .
+	| dosname |<-....
+	+---------+
+	     .
+	     .
+	     .
+
+All that is to do now is putting two labels at both ends of this table.
+The startup code now contains references to both of these labels before and after
+the library base pointers. If they follow immediately in your resulting executable
+there is no base pointer between them (ha!). This is evaluated run-time.
+(I know it's a lousy trick to depend on the order the objects get linked together,
+ but it seems to work :-P. Perhaps someone in the FSF can tell me if this always
+ works with the gnu ld.)
+
+I used this trick many times - for example the standard file I/O is only initialized
+if it's used and so on.
+
+A note on library bases: the startup code itself (and the clib, of course) also
+need DOSBase and UtilityBase sometimes. It would be of no good if you were allowed
+to open these libraries yourself after they got already used. Therefore I 
+decided to modify my code to use a private _DOSBase and _UtilityBase. So you
+are allowed to open them yourself (or let them be opened automatically).
+Don't be alarmed if some system monitor tells you your program opened
+dos.library twice. This is fully normal (and legal and costs you nothing) 
+most startup codes do this.
+
+That's all.
+
+As stated above a few times I expect lots of email - you can even flame me if you want
+(but don't expect an answer then :-} )
+
+My email address:
+
+  fleischr@izfm.uni-stuttgart.de
+
+I'm reachable by snail mail too (but I don't reply on it):
+
+  Matthias Fleischer
+  Adlerstraße 30
+  73760 Ostfildern
+  Federal Republic of Germany
+
+  Phone: 0711/3430286

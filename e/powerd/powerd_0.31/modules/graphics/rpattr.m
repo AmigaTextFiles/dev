@@ -1,0 +1,9 @@
+CONST	RPTAG_Font=$80000000,
+		RPTAG_APen=$80000002,
+		RPTAG_BPen=$80000003,
+		RPTAG_DrMd=$80000004,
+		RPTAG_OutLinePen=$80000005, /* get/set outline pen */
+		RPTAG_OutlinePen=$80000005, /* get/set outline pen. corrected case. */
+		RPTAG_WriteMask=$80000006,
+		RPTAG_MaxPen=$80000007,
+		RPTAG_DrawBounds=$80000008

@@ -1,0 +1,126 @@
+/*
+** $VER: CHelpRef.ttx 1.2 (03 Oct 1992)
+**
+** Written by Magnus Holmgren.
+**
+** Display the CHelp reference for the word currently under the
+** cursor. If no word under cursor, ask for one.
+**
+** Requires the file libs:rexxsupport.library, and the following
+** files to be available in your command path:
+**
+** ARunBack      (can be replaced)
+** CHelp         (can be replaced .. NOT! :)
+** WaitForPort   (part of the ARexx distribution)
+** Delete        (not really neccessary..)
+**
+*/
+
+OPTIONS RESULTS
+PARSE ARG Word
+
+/* Name of file that CHelp creates. Adjust according to your config */
+
+LookUpFile = 'T:CHelp.Lup'
+
+/*
+** We try to find the word to reference first, so that we can move the
+** cursor while the script is working.
+*/
+
+IF Word = "" THEN DO
+  GetChar        /* Need to check character under cursor */
+  Char = RESULT
+  GetWord        /* Get the word under the cursor */
+
+  /*
+  ** Check if cursor is placed over "whitespace". Needed, since
+  ** GetWord returns the word _closest_ to the cursor.
+  */
+
+  IF Char = ' ' | Char = '09'X | Char = '0a'X | Char = '00'X THEN DO
+    /* Ask for a reference */
+    RequestStr PROMPT '"Enter word to reference"'
+  END
+
+  /* Only use the RESULT value if the requester wasn't canceled */
+
+  IF RC = 0 THEN Word = RESULT
+
+END
+
+IF Word = "" | Word = "WORD" THEN DO
+  SetStatusBar 'No word to reference'
+  EXIT
+END
+
+/* Make sure rexxsupport.library is available */
+
+IF ~SHOW( 'L', 'rexxsupport.library' ) THEN
+  CALL ADDLIB( 'rexxsupport.library', 0, -30 )
+
+/* Make sure CHelp is around */
+
+IF ~SHOW( 'P', 'CHELP1' ) THEN DO
+  SetStatusBar TEMPORARY 'Starting CHelp'
+
+  /*
+  ** Start CHelp. If you don't have ARunBack, use e.g.
+  ** "Run >NIL: <NIL: CHelp -s"
+  */
+
+  ADDRESS COMMAND 'ARunBack CHelp -s QUIET STACK 4096'
+
+  /* And wait for it to load (up to 10 secs) */
+
+  ADDRESS COMMAND 'WaitForPort CHELP1'
+
+  IF ~SHOW( 'P', 'CHELP1' ) THEN DO  /* Did it load? */
+    SetStatusBar 'CHelp not found'   /* Nope */
+    EXIT
+  END
+END
+
+Size = Reference( Word )    /* Try to get the reference */
+
+IF Size = 0 THEN DO         /* Not found. Try again, without Tags part (if any) */
+  Offset = INDEX( Word, 'Tags' )
+  NewWord = Word
+
+  IF Offset ~= 0 THEN DO
+    NewWord = LEFT( Word, Offset - 1 )
+    Size = Reference( NewWord )
+  END
+
+  IF Size = 0 THEN DO       /* Not found. Try again, now with 'A' appended */
+    Size = Reference( NewWord || 'A' )
+  END
+END
+
+IF Size ~= 0 THEN DO
+  ADDRESS 'TURBOTEXT' 'OpenDoc NAME ' || LookUpFile
+  ADDRESS VALUE RESULT
+  SetReadOnly ON
+END
+ELSE DO
+  SetStatusBar 'Reference "' || Word || '" not found'
+END
+
+ADDRESS COMMAND 'Delete ' || LookUpFile
+
+EXIT
+
+/*
+** Set appropriate message in titlebar, ask CHelp for the reference,
+** and return the size of the file that CHelp creates.
+*/
+
+Reference: PROCEDURE EXPOSE LookUpFile
+
+  PARSE ARG Word
+
+  SetStatusBar TEMPORARY 'Searching for "' || Word || '"...'
+  ADDRESS 'CHELP1' LOOK Word
+  File = StateF( LookUpFile )  /* This requires rexxsupport.library */
+  PARSE VAR File Foo Size Bar  /* Extract size information */
+  RETURN Size

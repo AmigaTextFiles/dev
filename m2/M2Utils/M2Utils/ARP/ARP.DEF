@@ -1,0 +1,1822 @@
+(*
+   Name   : ARP.DEF
+   Version: 1.0
+   Author : Sascha Wildner
+   Date   : 07-Dec-90
+
+   Description: DEFINITION MODULE for Modula-2 interface to ARP 1.3
+
+
+   -== UPDATE HISTORY ==-
+
+   Date          Version            Author          Comments
+   --------------------------------------------------------------------------
+   07-Dec-90       1.0              Sascha Wildner  First implementation
+                                                                              *)
+
+
+DEFINITION MODULE ARP;
+
+   FROM SYSTEM          IMPORT ADDRESS, BYTE;
+   FROM AmigaDOS        IMPORT BPTR, DateStampRecord, FileHandle, FileInfoBlock,
+                               FileInfoBlockPtr, FileLock, InfoData,
+                               ProtectionSet;
+   FROM AmigaDOSExt     IMPORT DeviceListPtr, FileLockPtr, RootNodePtr;
+   FROM AmigaDOSProcess IMPORT ProcessID, ProcessPtr, StandardPacketPtr;
+   FROM Intuition       IMPORT WindowPtr;
+   FROM Libraries       IMPORT Library, LibraryPtr;
+   FROM Lists           IMPORT MinList;
+   FROM Memory          IMPORT MemReqSet;
+   FROM Nodes           IMPORT MinNode, Node;
+   FROM Ports           IMPORT Message, MsgPortPtr;
+   FROM Semaphores      IMPORT SignalSemaphore;
+   FROM Tasks           IMPORT SignalSet, TaskPtr;
+
+
+   (* Standard definitions for arp.library information *)
+
+   CONST ARPName    = "arp.library";
+         ARPVersion = 39;
+
+
+   (* RPN flag defintions *)
+
+   TYPE RPNFlags    = (NoCheck, (* No checksumming *)
+                       Cache,   (* Private usage *)
+                       RPNF2,
+                       RPNF3,
+                       RPNF4,
+                       RPNF5,
+                       RPNF6,
+                       RPNF7,
+                       RPNF8);
+        RPNFlagsSet = SET OF RPNFlags;
+
+
+   (* Resident Program Support [defined here because of the ResidentPrgList *)
+   (* entry in the ARPBase structure]                                       *)
+   (*                                                                       *)
+   (* This is the kind of node allocated for you when you AddResidentPrg()  *)
+   (* a code segment. They are stored as a single linked list with the root *)
+   (* in ARPBase. If you absolutely *must* wander through this list instead *)
+   (* of using the supplied functions, then you must first obtain the       *)
+   (* semaphore which protects this list, and then release it afterwards.   *)
+   (* Do not use Forbid() and Permit() to gain exclusive access! Note that  *)
+   (* the supplied functions handle this locking protocol for you.          *)
+
+   TYPE ResidentProgramNodePtr = POINTER TO ResidentProgramNode;
+        ResidentProgramNode    = RECORD
+                                    rpnNext     : ResidentProgramNodePtr; (* Next or NIL *)
+                                    rpnUsage    : LONGINT;                (* Number of current users *)
+                                    rpnAccessCnt: CARDINAL;               (* Total times used *)
+                                    rpnCheckSum : LONGCARD;               (* Checksum of code *)
+                                    rpnSegment  : BPTR;                   (* Actual segment *)
+                                    rpnFlags    : RPNFlagsSet;            (* See flag definitions above *)
+                                    rpnName     : BYTE;                   (* Allocated as needed *)
+                                 END;
+
+
+   (* These are used in release 33.4 but not by the library code. *)
+   (* Instead, individual programs check for these flags.         *)
+
+   TYPE ARPFlags    = (WildWorld, (* Mixed BCPL/Normal wildcards *)
+                       WildBCPL); (* Pure BCPL wildcards *)
+        ARPFlagsSet = SET OF ARPFlags;
+
+
+   (* The current ARP library node... *)
+
+   TYPE ARPBasePtr    = POINTER TO ARPBaseRecord;
+        ARPBaseRecord = RECORD
+                           LibNode         : Library;                (* Standard library node *)
+                           DosRootNode     : RootNodePtr;            (* Copy of dlRoot *)
+                           Flags           : ARPFlagsSet;            (* See flag definitions above *)
+                           ESCChar         : CHAR;                   (* Character to be used for escaping *)
+                           ArpReserved1    : LONGINT;                (* ArpLib's use only!! *)
+                           EnvBase         : LibraryPtr;             (* Dummy library *)
+                           DosBase         : LibraryPtr;             (* Cached DosBase *)
+                           GfxBase         : LibraryPtr;             (* Cached GfxBase *)
+                           IntuiBase       : LibraryPtr;             (* Cached IntuitionBase *)
+                           ResLists        : MinList;                (* Resource trackers *)
+                           ResidentPrgList : ResidentProgramNodePtr; (* Resident programs *)
+                           ResPrgProtection: SignalSemaphore;        (* Protection for above *)
+                           SegList         : BPTR;                   (* Pointer to loaded libcode *)
+                        END;
+
+
+   (* You use this when opening the library *)
+
+   VAR ARPBase: LibraryPtr;
+
+
+   (* The alert object is what you use if you really must return an alert *)
+   (* to the user. You would normally OR this with another alert number   *)
+   (* from the Alerts MODULE. Generally, should be NON deadend alerts.    *)
+
+   CONST AOArpLib       = 00008036D; (* Alert object *)
+
+   (* Alerts that arp.library may return... *)
+
+         ANArpLib       = 03600000D; (* Alert number *)
+         ANArpNoMem     = 03610000D; (* No more memory *)
+         ANArpInputMem  = 03610002D; (* No memory for input buffer *)
+         ANArpNoMakeEnv = 83610003D; (* No memory to make EnvLib *)
+         ANArpNoDOS     = 83630001D; (* Can't open dos.library *)
+         ANArpNoGfx     = 83630002D; (* Can't open graphics.library *)
+         ANArpNoIntuit  = 83630003D; (* Can't open intuition *)
+         ANBadPackBlues = 83640000D; (* Bad packet returned to SendPacket() *)
+         ANZombie       = 83600003D; (* Zombie roaming around system *)
+         ANArpScattered = 83600002D; (* Scatter loading not allowed for ARP *)
+
+
+   (* Return codes you can get from calling ARP Assign()... *)
+
+   CONST AssignOK     = 0D; (* Everything is cool and groovy *)
+         AssignNoDev  = 1D; (* "Physical" is not valid for assignment *)
+         AssignFatal  = 2D; (* Something really icky happened *)
+         AssignCancel = 3D; (* Tried to cancel something but it won't cancel *)
+
+
+   (* Size of buffer you need if you are going to call ReadLine() *)
+
+   CONST MaxInputBuf = 256D;
+
+
+   (* The following are the defines for frFuncFlags. These bits tell *)
+   (* FileRequest() what your frUserFunc is expecting, and what      *)
+   (* FileRequest() should call it for.                              *)
+   (*                                                                *)
+   (* You are called like so:                                        *)
+   (* frFunction(Mask: LONGCARD; Object: ADDRESS)                    *)
+   (*                                                                *)
+   (* The Mask is a copy of the flag value that caused FileRequest() *)
+   (* call your function. You can use this to determine what action  *)
+   (* you need to perform, and exactly what Object is, so you know   *)
+   (* what to do and what to return.                                 *)
+
+   TYPE FileRequesterFlags    = (ListFunc,    (* Not implemented yet *)
+                                 GEventFunc,  (* Function to call if one of your gadgets is selected *)
+                                 AddGadFunc,  (* You get to add gadgets *)
+                                 NewWindFunc, (* You get to modify the NewWindow structure *)
+                                 NewIDCMP,    (* Force a new IDCMP (only if frWindow#NIL) *)
+                                 DoColor,     (* Set this bit for that new and different look *)
+                                 DoMsgFunc,   (* You get all IDCMP messages not for FileRequest() *)
+                                 DoWildFunc); (* Call me with a FIB and a name, ZERO return accepts *)
+        FileRequesterFlagsSet = SET OF FileRequesterFlags;
+
+
+   (* These bits are for frFlags2 in the file requester structure *)
+
+   TYPE FileRequesterFlags2    = (LongPath); (* Specify the frDir buffer is 256 bytes long *)
+        FileRequesterFlags2Set = SET OF FileRequesterFlags2;
+
+
+   (* The ARP file requester data structure... *)
+
+   TYPE FileRequesterPtr = POINTER TO FileRequester;
+        FileRequester    = RECORD
+                              frHail     : ADDRESS;                                            (* Hailing text *)
+                              frFile     : ADDRESS;                                            (* Filename array *)
+                              frDir      : ADDRESS;                                            (* Directory array *)
+                              frWindow   : WindowPtr;                                          (* Window requesting or NIL *)
+                              frFuncFlags: FileRequesterFlagsSet;                              (* See flag definitions above *)
+                              frFlags2   : FileRequesterFlags2Set;                             (* New flags *)
+                              frFunction : PROCEDURE(FileRequesterFlagsSet, ADDRESS): INTEGER; (* Your function *)
+                              frLeftEdge : INTEGER;                                            (* To be used later *)
+                              frTopEdge  : INTEGER;
+                           END;
+
+
+   (* The sizes of the different buffers... *)
+
+   CONST FChars    = 32D;  (* Filename size *)
+         DSize     = 33D;  (* Directory name if not LongPath *)
+         LongDSize = 254D; (* If LongPath is set, use LongDSize *)
+         LongFSize = 126D; (* For compatibility with ArpBase.i *)
+
+
+   (* User GadgetIDs must be less than this value *)
+
+   CONST FRFirstGadget = 7680H;
+
+
+   (* AChain flag definitions *)
+
+   TYPE AChainFlags    = (PatternBit,ExaminedBit,Completed,AllBit);
+        AChainFlagsSet = SET OF AChainFlags;
+
+
+   (* Structure used by the pattern matching functions, no need to obtain, *)
+   (* diddle or allocate this yourself.                                    *)
+   (*                                                                      *)
+   (* Note: If you did, you will now break as it has changed...            *)
+
+   TYPE AChainPtr = POINTER TO AChain;
+        AChain = RECORD
+                    anChild : AChainPtr;
+                    anParent: AChainPtr;
+                    anLock  : FileLockPtr;
+                    anInfo  : FileInfoBlockPtr;
+                    anFlags : AChainFlagsSet;
+                    anString: CHAR;
+                 END;
+
+
+   (* Bit definitions for the new apFlags... *)
+
+   TYPE AnchorFlags    = (DoWild,   (* User option ALL *)
+                          ItsWild,  (* Set by FindFirst, used by FindNext *)
+                          DoDir,    (* Bit is set if a dir node should be entered *)
+                          DidDir,   (* Bit is set for an "expired" dir node *)
+                          NoMemErr, (* Set if there was not enough memory *)
+                          DoDot);   (* If set, '.' will convert to CurrentDir *)
+        AnchorFlagsSet = SET OF AnchorFlags;
+
+
+   (* Structure expected by FindFirst()/FindNext()                        *)
+   (*                                                                     *)
+   (* You need to allocate this structure and initialize it as follows:   *)
+   (*                                                                     *)
+   (* Set apBreakBits to the signal bits that you want to take a break    *)
+   (* on, or 0, if you don't want to convenience the user.                *)
+   (*                                                                     *)
+   (* If you want to have the FULL PATH NAME of the files you found,      *)
+   (* allocate a buffer at the END of this structure, and put the size of *)
+   (* it into apStrLen. If you don't want the full path name, make sure   *)
+   (* you set apStrLen to zero. In this case, the name of the file, and   *)
+   (* stats are available in the apInfo, as per usual.                    *)
+   (*                                                                     *)
+   (* Then call FindFirst() and the afterwards, FindNext() with this      *)
+   (* structure. You should check the return value each time (see below)  *)
+   (* and take the appropriate action, ultimately calling                 *)
+   (* FreeAnchorChain() when there are no more files and you are done.    *)
+   (* You can tell when you are done by checking for the normal AmigaDOS  *)
+   (* return code ErrorNoMoreEntries.                                     *)
+   (*                                                                     *)
+   (* You will also have to check the DirEntryType variable in the apInfo *)
+   (* structure to determine what exactly you have received.              *)
+
+   TYPE AnchorPathPtr = POINTER TO AnchorPath;
+        AnchorPath    = RECORD
+                           apBase      : AChainPtr;      (* Pointer to first anchor *)
+                           apLast      : AChainPtr;      (* Pointer to last anchor *)
+                           apBreakBits : LONGINT;        (* Bits to break on *)
+                           apFoundBreak: LONGINT;        (* Bits we broke on *)
+                           apFlags     : AnchorFlagsSet; (* New use for the extra word *)
+                           apReserved  : BYTE;           (* To fill it out *)
+                           apStrLen    : INTEGER;        (* This is what used to be apLength *)
+                           apInfo      : FileInfoBlock;
+                           apBuf       : BYTE;           (* Allocate a buffer here, if desired *)
+                        END;
+
+
+   (* Constants used by wildcard routines                              *)
+   (*                                                                  *)
+   (* These are the pre-parsed tokens referred to by pattern match. It *)
+   (* is not necessary for you to do anything about these, FindFirst() *)
+   (* and FindNext() handle all these for you.                         *)
+
+   CONST PAny      = 80H; (* Token for '*' + '#?' *)
+         PSingle   = 81H; (* Token for '?' *)
+
+   (* No need to muck with these as they may change... *)
+
+         POrStart  = 82H; (* Token for '(' *)
+         POrNext   = 83H; (* Token for '|' *)
+         POrEnd    = 84H; (* Token for ')' *)
+         PNot      = 85H; (* Token for '~' *)
+         PNotClass = 87H; (* Token for '^' *)
+         PClass    = 88H; (* Token for '[]' *)
+         PRepBeg   = 89H; (* Token for '[' *)
+         PRepEnd   = 8AH; (* Token for ']' *)
+
+
+   (* Defines you use to get a list of the devices you want to look at.    *)
+   (* For example, to get a list of all directories and volumes, do:       *)
+   (*                                                                      *)
+   (* AddDADevs(MyDAList,DeviceListFlagsSet{Dirs,Volumes})                 *)
+   (*                                                                      *)
+   (* After this, you can examine the deType field of the elements added   *)
+   (* to your list (if any) to discover specifics about the objects added. *)
+   (*                                                                      *)
+   (* Note that if you want only devices which are also disks, you must    *)
+   (* DeviceListFlagsSet{Devices,DiskOnly}.                                *)
+
+   TYPE DeviceListFlags    = (Devices,  (* Return devices *)
+                              DiskOnly, (* Modifier for above: Return disk devices only *)
+                              Volumes,  (* Return volumes only *)
+                              Dirs);    (* Return assigned devices only *)
+        DeviceListFlagsSet = SET OF DeviceListFlags;
+
+
+   (* Legal deType values, check for these after a call to AddDADevs(), *)
+   (* or use on your own as the ID values in AddDANode().               *)
+
+   CONST DLXFile      = BYTE(0);  (* AddDADevs() can't determine this *)
+         DLXDir       = BYTE(8);  (* AddDADevs() can't determine this *)
+         DLXDevice    = BYTE(16); (* It's a resident device *)
+
+         DLXVolume    = BYTE(24); (* Device is a volume *)
+         DLXUnmounted = BYTE(32); (* Device is not resident *)
+
+         DLXAssign    = BYTE(40); (* Device is a logical assignment *)
+
+
+   (* Structure used by AddDANode, AddDADevs, FreeDAList.             *)
+   (*                                                                 *)
+   (* This structure is used to create lists of names, which normally *)
+   (* are devices, assigns, volumes, files, or directories.           *)
+
+   TYPE DirectoryEntryPtr = POINTER TO DirectoryEntry;
+        DirectoryEntry    = RECORD
+                               deNext : DirectoryEntryPtr; (* Next in list *)
+                               deType : BYTE;              (* DLXMumble *)
+                               deFlags: BYTE;              (* For future expansion *)
+                               deName : BYTE;              (* The name of the thing found *)
+                            END;
+
+
+   (* The rlFirstItem list (ResList) is a list of TrackedResource (below) *)
+   (* It is very important that nothing in this list depend on the task   *)
+   (* existing at resource freeing time (i.e., RemTask(NIL) type stuff,   *)
+   (* DeletePort() and the rest).                                         *)
+   (*                                                                     *)
+   (* The tracking functions return a TrackerPtr to you, this is a        *)
+   (* pointer to whatever follows the trID variable.                      *)
+   (* The default case is reflected below, and you get it if you call     *)
+   (* GetTracker() (see DefaultTracker below).                            *)
+   (*                                                                     *)
+   (* However, you can still use ArpAlloc() to allocate your own tracking *)
+   (* nodes and they can be any size or shape you like, as long as the    *)
+   (* base structure is preserved. They will be freed automagically just  *)
+   (* like the default trackers.                                          *)
+
+   TYPE TrackedResourcePtr = POINTER TO TrackedResource;
+        TrackedResource    = RECORD
+                                trNode : MinNode;                             (* Double linked pointer *)
+                                trFlags: BYTE;                                (* Don't touch *)
+                                trLock : BYTE;                                (* Don't touch, for Get/FreeAccess() *)
+                                trID   : INTEGER;                             (* Item's ID *)
+
+   (* The DefaultTracker portion of the structure. The stuff below this point *)
+   (* can conceivably vary, depending on user needs, etc. This reflects the   *)
+   (* default.                                                                *)
+
+                                CASE trObject: BOOLEAN OF                     (* The thing being tracked *)
+                                   FALSE: trResource: ADDRESS|                (* Whatever *)
+                                   TRUE : tgVerify  : LONGINT                 (* For use during TrakGeneric *)
+                                END;
+                                CASE trExtra : BOOLEAN OF                     (* Only needed sometimes *)
+                                   FALSE: tgFunction: POINTER TO PROCEDURE()| (* Function to call for TrakGeneric *)
+                                   TRUE : trWindow2 : WindowPtr               (* For TrakWindow *)
+                                END;
+                             END;
+
+
+   (* You get a pointer to a structure of the following type when you call *)
+   (* GetTracker(). You can change this, and use ArpAlloc() instead of     *)
+   (* GetTracker() to do tracking. Of course, you have to take a wee bit   *)
+   (* more responsibility if you do so, as well as if you use TrakGeneric  *)
+   (* stuff.                                                               *)
+   (*                                                                      *)
+   (* TrakGeneric folks need to set up a task function to be called when   *)
+   (* an item is freed. Some care is required to set this up properly.     *)
+   (*                                                                      *)
+   (* Some special cases are indicated by the unions, for TrakWindow, if   *)
+   (* you have more than one window opened, and don't want the IDCMP       *)
+   (* closed particularly, you need to set a Ptr to the other window in    *)
+   (* dtWindow2. See CloseWindowSafely() for more info. If only one        *)
+   (* window, set this to NIL.                                             *)
+
+   TYPE DefaultTrackerPtr = POINTER TO DefaultTracker;
+        DefaultTracker    = RECORD
+                               CASE dtObject: BOOLEAN OF                     (* The object being tracked *)
+                                  FALSE: dtResource: ADDRESS|                (* Whatever *)
+                                  TRUE : tgVerify  : LONGINT                 (* For use during TrakGeneric *)
+                               END;
+                               CASE dtExtra : BOOLEAN OF
+                                  FALSE: tgFunction: POINTER TO PROCEDURE()| (* Function to call for TrakGeneric *)
+                                  TRUE : dtWindow2 : WindowPtr               (* For TrakWindow *)
+                               END;
+                            END;
+
+
+   (* Items the tracker knows what to do about *)
+
+   CONST TrakAAMem   =  0D; (* Default (ArpAlloc) element *)
+         TrakLock    =  1D; (* File lock *)
+         TrakFile    =  2D; (* Opened file *)
+         TrakWindow  =  3D; (* Window -- see docs *)
+         TrakScreen  =  4D; (* Screen *)
+         TrakLibrary =  5D; (* Opened library *)
+         TrakDAMem   =  6D; (* Pointer to DosAllocMem block *)
+         TrakMemNode =  7D; (* AllocEntry() node *)
+         TrakSegList =  8D; (* Program segment *)
+         TrakResList =  9D; (* ARP (nested) ResList *)
+         TrakMem     = 10D; (* Memory ptr/length *)
+         TrakGeneric = 11D; (* Generic element, your choice *)
+         TrakDAList  = 12D; (* DAList (aka file request *)
+         TrakAnchor  = 13D; (* Anchor chain (pattern matching) *)
+         TrakFReq    = 14D; (* FileRequest structure *)
+         TrakFont    = 15D; (* GfxBase CloseFont() *)
+         TrakMax     = 15D; (* Poof, anything higher is tossed *)
+
+
+   (* Tracker flag definitions *)
+
+   TYPE TrackerFlags    = (TF0,
+                           TF1,
+                           TF2,
+                           TF3,
+                           TF4,
+                           Moved,   (* Item moved *)
+                           Reloc,   (* This may be relocated (not used yet) *)
+                           Unlink); (* Free node bit *)
+        TrackerFlagsSet = SET OF TrackerFlags;
+
+
+   (* Note: ResList MUST be a DosAllocMem'ed list!, this is done for *)
+   (* you when you call CreateTaskResList(), typically, you won't    *)
+   (* need to access/allocate this structure.                        *)
+
+   TYPE ResListPtr = POINTER TO ResList;
+        ResList    = RECORD
+                        rlNode     : MinNode;    (* Used by ArpLib to link ResLists *)
+                        rlTaskID   : TaskPtr;    (* Owner of this list *)
+                        rlFirstItem: MinList;    (* List of tracked resources *)
+                        rlLink     : ResListPtr; (* SyncRun's use - hide list here *)
+                     END;
+
+
+   (* Returns from CompareLock() *)
+
+   CONST LCKEqual   = 0D; (* The two locks refer to the same object *)
+         LCKVolume  = 1D; (* Locks are on the same volumes *)
+         LCKDifVol1 = 2D; (* Locks are on different volumes *)
+         LCKDifVol2 = 3D; (* Locks are on different volumes *)
+
+
+   (* ASyncRun() stuff...                                          *)
+   (*                                                              *)
+   (* Message sent back on your request by an exiting process.     *)
+   (* You request this by putting the address of your message in   *)
+   (* pcbLastGasp, and initializing the ReplyPort variable of your *)
+   (* ZombieMsg to the port you wish the message posted to.        *)
+
+   TYPE ZombieMsgPtr = POINTER TO ZombieMsg;
+        ZombieMsg    = RECORD
+                          zmExecMessage: Message;
+                          zmTaskNum    : LONGCARD;        (* Task ID *)
+                          zmReturnCode : LONGINT;         (* Process's return code *)
+                          zmResult2    : LONGCARD;        (* System return code *)
+                          zmExitTime   : DateStampRecord; (* Date stamp at the time of exit *)
+                          zmUserInfo   : LONGCARD;        (* For whatever you wish *)
+                       END;
+
+
+   (* The following control bits determine what ASyncRun does on *)
+   (* abnormal exits and on background process termination.      *)
+
+   TYPE PCBFlags    = (SaveIO,      (* Don't free/check file handles on exit *)
+                       CloseSplat,  (* Close splat file, must request explicitly *)
+                       NoCli,       (* Don't create a CLI process *)
+                       Interactive, (* This is now obsolete... *)
+                       Code,        (* Dangerous yet enticing *)
+                       StdIO);      (* Do the StdIO thing, splat = CON:Filename *)
+        PCBFlagsSet = SET OF PCBFlags;
+
+
+   (* Structure required by ASyncRun() -- see docs for more info. *)
+
+   TYPE ProcessControlBlockPtr = POINTER TO ProcessControlBlock;
+        ProcessControlBlock    = RECORD
+                                    pcbStackSize : LONGCARD;         (* Stacksize for new process *)
+                                    pcbPri       : BYTE;             (* Priority of new task *);
+                                    pcbControl   : PCBFlagsSet;      (* Control bits, see defines above *)
+                                    pcbTrapCode  : ADDRESS;          (* Optional TrapCode *)
+                                    pcbInput     : BPTR;
+                                    pcbOutput    : BPTR;             (* Optional StdIn, StdOut *)
+                                    CASE pcbConsole: BOOLEAN OF
+                                       FALSE: pcbSplatFile: BPTR|    (* File to use for Open("*") *)
+                                       TRUE : pcbConName  : ADDRESS  (* CON: filename *)
+                                    END;
+                                    pcbLoadedCode: ADDRESS;          (* If not NIL, will not load/unload code *)
+                                    pcbLastGasp  : ZombieMsgPtr;     (* ReplyMsg() to be filled in by exit *)
+                                    pcbWBProcess : MsgPortPtr;       (* Valid only when NoCli *)
+                                 END;
+
+
+   (* Formerly needed to pass NULLCMD to a child. No longer needed. *)
+   (* It is being kept here for compatibility only...               *)
+   CONST NoCmd = "\n";
+
+
+   (* Error returns from SyncRun() and ASyncRun() *)
+
+   CONST PRNoFile       =  -1D; (* Could not LoadSeg() the file *)
+         PRNoMem        =  -2D; (* No memory for something *)
+      (* PRNoCLI        =  -3D;    This is now obsolete *)
+         PRNoSlot       =  -4D; (* No room in TaskArray *)
+         PRNoInput      =  -5D; (* Could not open input file *)
+         PRNoOutput     =  -6D; (* Could not get output file *)
+      (* PRNoLock       =  -7D;    This is now obsolete *)
+      (* PRArgErr       =  -8D;    This is now obsolete *)
+      (* PRNoBCPL       =  -9D;    This is now obsolete *)
+      (* PRBadLib       = -10D;    This is now obsolete *)
+         PRNoStdIO      = -11D; (* Couldn't get StdIO handles *)
+
+   (* Added V35 of arp.library *)
+
+         PRWantsMessage = -12D; (* Child wants you to report IoErr() to user *)
+         PRNoShellProc  = -13D; (* Can't create a Shell/CLI process *)
+         PRNoExec       = -14D; (* 'E' bit is clear *)
+         PRScript       = -15D; (* S and E are set, IoErr() contains directory *)
+
+
+   (* Bit values for nshControl, you should use them as shown below, or *)
+   (* just use the actual values indicated.                             *)
+
+   TYPE NSHFlags    = (CLI,         (* Do a CLI, not a Shell *)
+                       Background,  (* Background Shell *)
+                       execute,     (* Do as EXECUTE *)
+                       InterActive, (* Run an interactive shell *)
+                       NSHF4,
+                       NSHF5,
+                       NSHF6,
+                       FB);         (* Alt function bit *)
+        NSHFlagsSet = SET OF NSHFlags;
+
+
+   (* Common values for nshControl which allow you to do useful *)
+   (* and somewhat "standard" things...                         *)
+
+   CONST InteractiveShell = NSHFlagsSet{FB,InterActive};        (* Gimme a newshell! *)
+         InteractiveCLI   = NSHFlagsSet{FB,InterActive,CLI};    (* Gimme that ol' newcli *)
+         BackgroundShell  = NSHFlagsSet{FB,Background};         (* Gimme a background Shell *)
+         ExecuteMe        = NSHFlagsSet{FB,Background,execute}; (* Aptly named, doncha think? *)
+
+
+   (* Version 35 ASyncRun() allows you to create an independent            *)
+   (* interactive or background Shell/CLI. You need this variant of the    *)
+   (* pcb structure to do it, and you also have new values for nshControl, *)
+   (* see below.                                                           *)
+   (*                                                                      *)
+   (* Syntax for Interactive shell is:                                     *)
+   (*                                                                      *)
+   (* rc:=ASyncRun(ADR("Optional Window Name"),ADR("Optional From File"),  *)
+   (*              NewShell);                                              *)
+   (*                                                                      *)
+   (* Syntax for a background shell is:                                    *)
+   (*                                                                      *)
+   (* rc:=ASyncRun(ADR("Command line"),NIL,NewShell);                      *)
+   (*                                                                      *)
+   (* Same syntax for an execute style call, but you have to be on drugs   *)
+   (* if you want to do that.                                              *)
+
+   TYPE NewShellPtr = POINTER TO NewShell;
+        NewShell    = RECORD
+                         nshStackSize: LONGCARD;                (* Stacksize Shell will use for children *)
+                         nshPri      : BYTE;                    (* Ignored by interactive Shells *)
+                         nshControl  : NSHFlagsSet;             (* See above *)
+                         nshLogMsg   : ADDRESS;                 (* Optional login message, if NIL, use default *)
+                         nshInput    : BPTR;                    (* Ignored by interactive Shells, but     *)
+                         nshOutput   : BPTR;                    (* used by background and execute options *)
+                         nshReserved : ARRAY [0..4] OF LONGINT;
+                      END;
+
+
+   (* Additional IoErr() returns added by ARP... *)
+
+   CONST ErrorBufferOverflow = 303D; (* User or internal buffer overflow *)
+         ErrorBreak          = 304D; (* A break character was received *)
+         ErrorNotExecutable  = 305D; (* A file has E bit cleared *)
+         ErrorNotCLI         = 400D; (* Program/function needs to be CLI *)
+
+
+   (* If your program starts with this structure, ASyncRun() and SyncRun() *)
+   (* will override a users stack request with the value in rptStackSize.  *)
+   (* Furthermore, if you are actually attached to the resident list, a    *)
+   (* memory block of size rptDataSize will be allocated for you, and a    *)
+   (* pointer to this data passed to you in register A4. You may use this  *)
+   (* block to clone the data segment of programs, thus resulting in one   *)
+   (* copy of the text, but multiple copies of data/bss for each process   *)
+   (* invocation. If you are resident, your program will start at          *)
+   (* rptInstruction, otherwise, it will be launched from the initial      *)
+   (* branch.                                                              *)
+
+   TYPE ResidentProgramTagPtr = POINTER TO ResidentProgramTag;
+        ResidentProgramTag    = RECORD
+                                   rptNextSeg  : BPTR;     (* Provided by DOS at LoadSeg time *)
+
+   (* The initial branch destination and rptInstruction do not have to be the *)
+   (* same. This allows different actions to be taken if you are diskloaded   *)
+   (* or resident. DataSize memory will be allocated only if you are          *)
+   (* resident, but StackSize will override all user stack requests.          *)
+
+                                   rptBRA      : CARDINAL; (* Short branch to executable *)
+                                   rptMagic    : CARDINAL; (* Resident majik value *)
+                                   rptStackSize: LONGCARD; (* Min stack for this process *)
+                                   rptDataSize : LONGCARD; (* Data size to allocate if resident *)
+                                (* rptInstruction             Start here if resident *)
+                                END;
+
+
+   (* The form of the ARP allocated node in your tasks memlist when launched *)
+   (* as a resident program. Note that the data portion of the node will     *)
+   (* only exist if you have specified a nonzero value for rptDataSize. Note *)
+   (* also that this structure is READ ONLY, modify values in this at your   *)
+   (* own risk. The stack stuff is for tracking, if you need actual          *)
+   (* addresses or stack size, check the normal places for it in your        *)
+   (* process/task structure.                                                *)
+
+   TYPE ProcessMemoryPtr = POINTER TO ProcessMemory;
+        ProcessMemory    = RECORD
+                              pmNode     : Node;
+                              pmNum      : CARDINAL; (* This is 1 if no data, 2 if data *)
+                              pmStack    : ADDRESS;
+                              pmStackSize: LONGCARD;
+                              pmData     : ADDRESS;  (* Only here if pmNum=2 *)
+                              pmDataSize : LONGCARD;
+                           END;
+
+
+   (* To find the above on your memlist, search for the following name. *)
+   (* We guarantee this will be the only arp.library allocated node on  *)
+   (* your memlist with this name.                                      *)
+   (* i.e. FindName(ADR(task^.tcbMemEntry),PMemName);                   *)
+
+   CONST PMemName      = "ARP_MEM";
+         ResidentMagic = 4AFCH;     (* Same as RTCMatchWord (trapf) *)
+
+
+   (* For datFlags *)
+
+   TYPE DateTimeFlags    = (Subst,   (* Substitute "Today" & "Tomorrow" where appropriate *)
+                            Future); (* Day of the week is in future *)
+        DateTimeFlagsSet = SET OF DateTimeFlags;
+
+
+   (* Date string/data structures *)
+
+   TYPE DateTimePtr = POINTER TO DateTime;
+        DateTime    = RECORD
+                         datStamp  : DateStampRecord;  (* DOS DateStamp *)
+                         datFormat : BYTE;             (* Controls appearance on datStrDate *)
+                         datFlags  : DateTimeFlagsSet; (* See above *)
+                         datStrDay : ADDRESS;          (* Day of the week string *)
+                         datStrDate: ADDRESS;          (* Date string *)
+                         datStrTime: ADDRESS;          (* Time string *)
+                      END;
+
+
+   (* Size of buffer you need for each DateTime strings: *)
+
+   CONST LenDatString = 10D;
+
+
+   (* For datFormat *)
+
+   CONST FormatDOS = BYTE(0);   (* dd-mmm-yy AmigaDOS's own, unique style *)
+         FormatINT = BYTE(1);   (* yy-mm-dd  International format *)
+         FormatUSA = BYTE(2);   (* mm-dd-yy  The good ol' USA *)
+         FormatCDN = BYTE(3);   (* dd-mm-yy  Out brothers and sisters to the north *)
+         FormatMAX = FormatCDN; (* Larger than this? Defaults to AmigaDOS *)
+
+
+
+   (* These duplicate the calls in dos.library *)
+
+   TYPE ProcPtr = POINTER TO PROCEDURE();
+
+
+PROCEDURE Open(name: ADDRESS; accessMode: LONGINT): FileHandle;
+(*
+   Open a file for input or output.
+
+   name - a null terminated string
+   accessMode - ModeOldFile or ModeNewFile
+
+   result - file handle
+*)
+
+
+PROCEDURE Close(file: FileHandle);
+(*
+   Close an open file.
+
+   file - file handle
+*)
+
+
+PROCEDURE Read(file: FileHandle; buffer: ADDRESS; length: LONGINT): LONGINT;
+(*
+   Read n bytes of data from a file.
+
+   file - file handle
+   buffer - pointer to a buffer
+   length - number of bytes to read
+
+   result - actual number of bytes read or -1 if an error occured
+*)
+
+
+PROCEDURE Write(file: FileHandle; buffer: ADDRESS; length: LONGINT): LONGINT;
+(*
+   Write n bytes of data to a file.
+
+   file - file handle
+   buffer - pointer to a buffer
+   length - number of bytes to write
+
+   result - actual number of bytes written or -1 if an error occured
+*)
+
+
+PROCEDURE Input(): FileHandle;
+(*
+   Return the initial input file handle assigned to the program.
+
+   result - file handle
+*)
+
+
+PROCEDURE Output(): FileHandle;
+(*
+   Return the initial output file handle assigned to the program.
+
+   result - file handle
+*)
+
+
+PROCEDURE Seek(file: FileHandle; position: LONGINT; mode: LONGINT): LONGINT;
+(*
+   Move to a logical file position.
+
+   file - file handle
+   position - an offset to move file position ptr to, positive or negative
+   mode - OffsetBeginning or OffsetCurrent or OffsetEnd
+
+   result - old file position or -1 if an error occured
+*)
+
+
+PROCEDURE DeleteFile(name: ADDRESS): BOOLEAN;
+(*
+   Delete a file or directory.
+
+   name - null terminated string
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE Rename(oldName, newName: ADDRESS): BOOLEAN;
+(*
+   Rename directory or file.
+
+   oldName - null terminated string
+   newName - null terminated string
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE Lock(name: ADDRESS; accessMode: LONGINT): FileLock;
+(*
+   Lock a directory or file.
+
+   name - a null terminated string
+   accessMode - SharedLock or ExclusiveLock
+
+   result - BCPL pointer to a lock
+*)
+
+
+PROCEDURE UnLock(lock: FileLock);
+(*
+   Unlock a directory or file.
+
+   lock - BCPL pointer to a lock
+*)
+
+
+PROCEDURE DupLock(lock: FileLock): FileLock;
+(*
+   Duplicate a lock.
+
+   lock - BCPL pointer to a lock
+
+   result - BCPL pointer to a lock
+*)
+
+
+PROCEDURE Examine(lock: FileLock; VAR infoBlock: FileInfoBlock): BOOLEAN;
+(*
+   Examine a directory or file associated with a lock.
+
+   lock - BCPL pointer to a lock
+   infoBlock - pointer to a file info block to be filled in
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE ExNext(lock: FileLock; VAR infoBlock: FileInfoBlock): BOOLEAN;
+(*
+   Examine the next entry in a directory.
+
+   lock - BCPL pointer to a lock
+   infoBlock - pointer to a file info block to be filled in
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE Info(lock: FileLock; VAR infoData: InfoData): BOOLEAN;
+(*
+   Return information about a disk.
+
+   lock - BCPL pointer to a lock
+   infoData - pointer to a InfoData structure to be filled in
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE CreateDir(name: ADDRESS): FileLock;
+(*
+   Create a new directory.
+
+   name - null terminated string
+
+   result - BCPL pointer to a lock
+*)
+
+
+PROCEDURE CurrentDir(lock: FileLock): FileLock;
+(*
+   Make a directory associated with a lock the current working directory.
+
+   lock - BCPL pointer to a lock
+
+   result - BCPL pointer to a lock
+*)
+
+
+PROCEDURE CreateProc(name: ADDRESS; pri: LONGINT; segment: ADDRESS;
+                     stackSize: LONGINT): ProcessID;
+(*
+   Create a new process.
+
+   name - null terminated string
+   pri - priority to be given to process
+   segment - pointer to segment list, as returned by LoadSeg()
+   stackSize - size of root stack in bytes
+
+   result - the ProcessID or 0 if an error occured
+*)
+
+
+PROCEDURE Exit(returnCode: LONGINT);
+(*
+   Exit from a process.
+
+   returnCode - if the process is running under the CLI this will be the
+                return code returned to the CLI. If the program is running
+                as a distinct process, Exit deletes the process and releases
+                the space associated with the stack, segment list, and process
+                structure
+*)
+
+
+PROCEDURE LoadSeg(name: ADDRESS): BPTR;
+(*
+   Load a load module into memory.
+
+   name - null terminated string
+
+   result - pointer to a segment or 0 if the load failed
+*)
+
+
+PROCEDURE UnLoadSeg(segment: BPTR);
+(*
+   Unload a segment previously loaded by LoadSeg.
+
+   segment - pointer to a segment originally returned by LoadSeg
+*)
+
+
+PROCEDURE DeviceProc(name: ADDRESS): ProcessID;
+(*
+   Return the process identifier of the process handling that I/O.
+
+   name - null terminated string
+
+   result - process identifier of the device handler or 0 if not found.
+            If the name refers to a file on a mounted device then a
+            pointer to a directory lock is returned by IOErr()
+*)
+
+
+PROCEDURE SetComment(name, comment: ADDRESS): BOOLEAN;
+(*
+   Set a comment on file or directory.
+
+   name - null terminated string
+   comment - null terminated string of up to 80 characters in length
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE SetProtection(name: ADDRESS; mask: ProtectionSet): BOOLEAN;
+(*
+   Set file or directory protection.
+
+   name - null terminated string
+   mask - protection mask to be set
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE DateStamp(VAR v: DateStampRecord);
+(*
+   Obtain the current date and time in internal format.
+
+   v - pointer to a DateStamp structure (3 long words)
+*)
+
+
+PROCEDURE Delay(ticks: LONGINT);
+(*
+   Delay a process for a specified amount of time.
+
+   ticks - number of ticks to wait (50 ticks/second)
+*)
+
+
+PROCEDURE WaitForChar(file: FileHandle; timeout: LONGINT): BOOLEAN;
+(*
+   Indicates whether characters arrive within a time limit or not.
+
+   file - file handle
+   timeout - amount of time to wait in micro seconds
+
+   result - if character arrived before timeout returns TRUE, else FALSE
+*)
+
+
+PROCEDURE ParentDir(lock: FileLock): FileLock;
+(*
+   Obtain the parent of a directory or file.
+
+   lock - BCPL pointer to a lock
+
+   result - BCPL pointer to a lock
+*)
+
+
+PROCEDURE IsInteractive(file: FileHandle): BOOLEAN;
+(*
+   Test if a file is connected to a virtual terminal or not.
+
+   file - file handle
+
+   result - TRUE = interactive, FALSE = non-interactive
+*)
+
+
+PROCEDURE Execute(cmdString: ADDRESS; input, output: FileHandle): BOOLEAN;
+(*
+   Execute a CLI command.
+
+   cmdString - null terminated string
+   input - file handle
+   output - file handle
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+
+   (* Now for the stuff that only exists in arp.library *)
+
+
+PROCEDURE Printf(string: ADDRESS; args: ADDRESS): LONGINT;
+(*
+   Print formatted data on current output.
+
+   string - null terminated string
+   args - null terminated string
+
+   result - if all goes well, the total count of characters actually written,
+            else -1
+*)
+
+
+PROCEDURE FPrintf(file: FileHandle; string: ADDRESS; args: ADDRESS): LONGINT;
+(*
+   Print formatted data on file.
+
+   file - file handle
+   string - null terminated string
+   args - null terminated string
+
+   result - if all goes well, the total count of characters actually written,
+            else -1 or 0 (if a NIL FileHandle was passed)
+*)
+
+
+PROCEDURE Puts(string: ADDRESS): LONGINT;
+(*
+   Print string with newline on stdout.
+
+   string - a null terminated string
+
+   result - if all goes well, the total count of characters actually written,
+            else -1
+*)
+
+
+PROCEDURE ReadLine(buffer: ADDRESS): LONGINT;
+(*
+   Get a line from current input.
+
+   buffer - pointer to a 256 byte buffer to store the input string in
+
+   result - the actual count of the characters returned
+*)
+
+
+PROCEDURE GADS(line: ADDRESS; len: LONGINT; help: ADDRESS; args: ADDRESS;
+               temp: ADDRESS): LONGINT;
+(*
+   Do standard AmigaDOS command line parsing.
+
+   line - pointer to the command line
+   len - length of command line
+   help - pointer to optional extra help string (displayed when question mark
+          typed after command)
+   args - pointer to an array of longwords which will receive the results of
+          the argoment parse. The must ALWAYS be at least one element in this
+          array
+   temp - pointer to AmigaDOS style template
+
+   result - number of arguments found or -1 if there was an error in the command
+            line
+*)
+
+
+PROCEDURE Atol(string: ADDRESS): LONGINT;
+(*
+   Convert ASCII string to LONGINT.
+
+   string - null terminated string
+
+   result - the binary value of the string
+*)
+
+
+PROCEDURE EscapeString(string: ADDRESS): LONGCARD;
+(*
+   Convert escape characters in string.
+
+   string - null terminated string
+
+   result - new length of the string
+*)
+
+
+PROCEDURE CheckAbort(func: ProcPtr): LONGINT;
+(*
+   Check for CTRL-C.
+
+   func - function to call if signal was received (optional, may be NIL)
+
+   result - either 0 (if signal not received), return value of user function (if
+            func#NIL and signal was received) or signal flag (if func=NIL)
+*)
+
+
+PROCEDURE CheckBreak(mask: SignalSet; func: ProcPtr): LONGINT;
+(*
+   Check for CTRL-C/D/E/F.
+
+   mask - signal set containing the SigBreakCtrlC/D/E/F bits to check for
+   func - (optional) function to call if BREAK occured
+
+   result - either 0 (if none of the signals specified were received), return
+            value of user function (if func#NIL) or passed signal set
+*)
+
+
+PROCEDURE GetEnv(string: ADDRESS; buffer: ADDRESS; size: LONGINT): ADDRESS;
+(*
+   Get the value of an environment variable.
+
+   string - pointer to environment variable name
+   buffer - user allocated area to store the value associated with the
+            environment variable
+   size - size of buffer in bytes
+
+   result - if found, pointer to the start of the value string for that variable
+*)
+
+
+PROCEDURE SetEnv(varName: ADDRESS; value: ADDRESS): BOOLEAN;
+(*
+   Set the value of an environment variable.
+
+   varName - pointer to an environment variable name
+   value - buffer which contains the values to be associated with this
+           environment variable
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE FileRequest(fileRequester: FileRequesterPtr): ADDRESS;
+(*
+   Get filename from user.
+
+   fileRequester - pointer to an initialized FileRequester structure
+
+   result - pointer to the file buffer in your FileRequester structure (if user
+            pressed OK) or NIL (if user pressed CANCEL)
+*)
+
+
+PROCEDURE CloseWindowSafely(window: WindowPtr; moreWindows: ADDRESS);
+(*
+   Close a window without GURUing.
+
+   window - pointer to window to be closed
+   moreWindows - if NIL, the MsgPort for this window will be released
+*)
+
+
+PROCEDURE CreatePort(name: ADDRESS; pri: LONGINT): MsgPortPtr;
+(*
+   Create a message port.
+
+   name - pointer to null terminated string (if MsgPort is to be attached to
+          system MsgPort list) or NIL (if MsgPort is to be private to the
+          caller)
+   pri - priority of this MsgPort
+
+   result - pointer to an initialized MsgPort or NIL (if port could not be
+            allocated)
+*)
+
+
+PROCEDURE DeletePort(port: MsgPortPtr);
+(*
+   Deletes a message port.
+
+   port - pointer to a message port
+*)
+
+
+PROCEDURE SendPacket(action: LONGINT; args: ADDRESS;
+                     handler: MsgPortPtr): LONGINT;
+(*
+   Send a packet to DOS.
+
+   action - the action you wish this packet to cause
+   args - pointer to an array of seven long words specifying the arguments to
+          send with the packet. May be NIL (arguments will be set to zero)
+   handler - address of MsgPort of the handler you wish to receive this packet
+
+   result - dpRes1 field of returned packet
+*)
+
+
+PROCEDURE InitStdPacket(action: LONGINT; args: ADDRESS;
+                        packet: StandardPacketPtr; replyPort: MsgPortPtr);
+(*
+   Initialize a standard packet structure.
+
+   action - the type (action) of packet you need
+   args - pointer to an array of seven long words representing the argument
+          values you wish to send to AmigaDOS. May be NIL (packet arguments will
+          be cleared)
+   packet - pointer to the StandardPacket you wish initialized
+   replyPort - reply port for this packet
+*)
+
+
+PROCEDURE PathName(lock: FileLock; buffer: ADDRESS;
+                   componentCount: LONGINT): LONGCARD;
+(*
+   Find complete pathname of file/directory.
+
+   lock - lock in the file or directory
+   buffer - area of memory to place the filename in
+   componentCount - number of names that can be placed in the destination area
+
+   result - 0 (problem: either buffer overflow or disk error) or length of
+            pathname in characters
+*)
+
+
+PROCEDURE Assign(logical: ADDRESS; physical: ADDRESS): LONGCARD;
+(*
+   Assigns a logical device name.
+
+   logical - pointer to name to give to physical device
+   physical - pointer to name of file or device to assign logical or NIL
+              (existing assignment will be removed)
+
+   result - AssignOk (DeviceInfo has been created) or error (see above)
+*)
+
+
+PROCEDURE DosAllocMem(size: LONGINT): ADDRESS;
+(*
+   AmigaDOS compatible memory allocator.
+
+   size - size of the desired block in bytes
+
+   result - pointer to allocated memory block (will be longword aligned) or
+            NIL (if the allocation failed)
+*)
+
+
+PROCEDURE DosFreeMem(block: ADDRESS);
+(*
+   AmigaDOS compatible memory freer.
+
+   block - pointer to a memory block returned by DosAllocMem()
+*)
+
+
+PROCEDURE BtoCstr(cstr: ADDRESS; bstr: BPTR; maxLength: LONGINT): LONGCARD;
+(*
+   Copy a BSTR to a null terminated string.
+
+   cstr - pointer to a buffer area for the resulting string (should be
+          maxLength+1 in size)
+   bstr - BPTR to the BSTR to convert
+   maxLength - maximum number of characters in buffer (not including null
+               terminator)
+
+   result - actual number of characters copied
+*)
+
+
+PROCEDURE CtoBstr(cstr: ADDRESS; bstr: BPTR; maxLength: LONGINT): LONGCARD;
+(*
+   Copy a null terminated string to a BSTR.
+
+   cstr - pointer to the string to convert
+   bstr - BPTR to the destination string (must be maxLength+1 bytes in size)
+   maxLength - number of characters available in BSTR (not including initial
+               count byte)
+
+   result - actual number of characters transferred
+*)
+
+
+PROCEDURE GetDevInfo(devNode: DeviceListPtr): DeviceListPtr;
+(*
+   Traverse through DevInfo device list.
+
+   devNode - current position in list (or NIL for head)
+
+   result - next node in list or NIL (if at end of list)
+*)
+
+
+PROCEDURE FreeTaskResList(): BOOLEAN;
+(*
+   Free tracked resources for this task.
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE ArpExit(rc: LONGINT; fault: LONGINT);
+(*
+   Exit immediately, closing ARP, freeing resources.
+
+   rc - the value you wish to return (0 means a normal exit)
+   fault - if rc#0, this value is the AmigaDOS error code which is used with
+           the "Why" program (ignored if rc=0)
+*)
+
+
+PROCEDURE ArpAlloc(size: LONGINT): ADDRESS;
+(*
+   Allocate memory and track.
+
+   size - amount of memory required
+
+   result - pointer to a memory block with MemReqSet(MemPuclic,MemClear) or NIL
+            (if an error occurred)
+*)
+
+
+PROCEDURE ArpAllocMem(size: LONGINT; requirements: MemReqSet): ADDRESS;
+(*
+   Allocate and track memory.
+
+   size - amount of memory required
+   requirements - type of memory required
+
+   result - pointer to a memory block of type and size requested or NIL (if an
+            error occurred)
+*)
+
+
+PROCEDURE ArpOpen(name: ADDRESS; mode: LONGINT): FileHandle;
+(*
+   Open a file and track it.
+
+   name - pointer to a null terminated string
+   mode - valid AmigaDOS access mode
+
+   result - file handle or NIL
+*)
+
+
+PROCEDURE ArpDupLock(lock: FileLock): FileLock;
+(*
+   Duplicate a lock and track it.
+
+   lock - pointer to a lock
+
+   result - pointer to a lock or NIL
+*)
+
+
+PROCEDURE ArpLock(name: ADDRESS; mode: LONGINT): FileLock;
+(*
+   Get a lock and track it.
+
+   name - pointer to a null terminated string
+   mode - valid AmigaDOS access value
+
+   result - a lock or NIL
+*)
+
+
+PROCEDURE RListAlloc(resList: ResListPtr; size: LONGINT): ADDRESS;
+(*
+   Allocate and track memory on specific ResList.
+
+   resList - the ResList the allocation will be chained onto
+   size - the size of the memory request
+
+   result - pointer to a block of memory of the requested size or NIL
+*)
+
+
+PROCEDURE FindCLI(cliNum: LONGINT): ProcessPtr;
+(*
+   Get process structure for CLI number.
+
+   cliNum - the CLI task number for the process or 0 (which returns the total
+            number of process slots)
+
+   result - a process structure, NIL or total number of allowable CLI processes
+            (see above)
+*)
+
+
+PROCEDURE QSort(base: ADDRESS; rSize: LONGINT; bSize: LONGINT;
+                comp: ADDRESS): BOOLEAN;
+(*
+   Quickly sort whatever you want.
+
+   base - pointer to the start of a memory region to be sorted
+   rSize - size of region to be sorted
+   bSize - size of a single element in bytes
+   comp - function to be provided by caller, which compares two elements from
+          the set to be sorted.
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE PatternMatch(pattern: ADDRESS; string: ADDRESS): BOOLEAN;
+(*
+   Perform a wildcard match on a string.
+
+   pattern - pointer to the pattern string to match against
+   string - pointer to the string to be matched
+
+   result - success(TRUE) or failure(FALSE)
+*)
+
+
+PROCEDURE FindFirst(pattern: ADDRESS; path: AnchorPathPtr): LONGINT;
+(*
+   Search for multilevel pattern match.
+
+   pattern - pointer to an ASCII string
+   path - pointer to an initialized AnchorPath structure
+
+   result - 0 if success, non-zero for any error (see above)
+*)
+
+
+PROCEDURE FindNext(path: AnchorPathPtr): LONGINT;
+(*
+   Locate next match for a file pattern.
+
+   path - pointer to an AnchorPath structure which has been initialized by a
+          call to FindFirst()
+
+   result - 0 for success, non-zero for any error (see above)
+*)
+
+
+PROCEDURE FreeAnchorChain(path: AnchorPathPtr);
+(*
+   Free an allocated anchor chain.
+
+   path - AnchorPath structure initialized by calls to FindFirst() and/or
+          FindNext()
+*)
+
+
+PROCEDURE CompareLock(lock1: FileLock; lock2: FileLock): LONGINT;
+(*
+   Compares two locks for "equality".
+
+   lock1 - pointer to a lock
+   lock2 - pointer to a lock
+
+   result - return code as documented above
+*)
+
+
+PROCEDURE FindTaskResList(): ResListPtr;
+(*
+   Find a pointer to current task's ResList.
+
+   result - pointer to most recent ResList for your task or NIL (if nothing is
+            being tracked)
+*)
+
+
+PROCEDURE CreateTaskResList(): ResListPtr;
+(*
+   Create a new nested ResList for this task.
+
+   result - pointer to the new list or NIL (if failure)
+*)
+
+
+PROCEDURE FreeResList(freeList: ResListPtr);
+(*
+   NOT DOCUMENTED
+*)
+
+
+PROCEDURE FreeTrackedItem(item: DefaultTrackerPtr);
+(*
+   Free a tracked item from a ResList.
+
+   item - pointer to the tracker for this resource
+*)
+
+
+PROCEDURE GetTracker(): DefaultTrackerPtr;
+(*
+   Get a tracking node for resource tracking.
+
+   result - pointer to a DefaultTracker or NIL (if the allocation failed)
+*)
+
+
+PROCEDURE GetAccess(tracker: DefaultTrackerPtr): TrackedResourcePtr;
+(*
+   Locks access to a tracked resource.
+
+   tracker - the tracker for the resource you want to reclaim
+
+   result - pointer to the resource or NIL (if the resource is gone)
+*)
+
+
+PROCEDURE FreeAccess(tracker: DefaultTrackerPtr);
+(*
+   Decrements use count for a tracked item.
+
+   tracker - pointer to the DefaultTracker for this item
+*)
+
+
+PROCEDURE FreeDAList(node: DirectoryEntryPtr);
+(*
+   Free a DosAllocMem (DA) list.
+
+   node - pointer to the first node to free
+*)
+
+
+PROCEDURE AddDANode(data: ADDRESS; daList: DirectoryEntryPtr; length: LONGINT;
+                    id: LONGINT): DirectoryEntryPtr;
+(*
+   Add a new entry to a DAList.
+
+   data - pointer to the data to be copied to the deName field of the new node.
+          See length parameter
+   daList - address of a DA list header for this node
+   length - if 0, data is assumed to be a null terminated string. Otherwise,
+            length gives the amount of memory to copy to the deName field
+   id - id is the secondary sort key/type code. This will be the deType variable
+        of the new code
+
+   result - a pointer to the node just added to the DAList (or NIL, if an error
+            occurred)
+*)
+
+
+PROCEDURE AddDADevs(daList: DirectoryEntryPtr;
+                    select: DeviceListFlagsSet): LONGCARD;
+(*
+   Get private copy of DevInfo list.
+
+   daList - pointer to a DA list header
+   select - the selection mask which determines which devices will be added to
+            the DA list
+
+   result - the number of entries actually added to the user's DA list
+*)
+
+
+PROCEDURE Strcmp(s1: ADDRESS; s2: ADDRESS): LONGINT;
+(*
+   Compare two strings, ignoring case.
+
+   s1 - pointer to null terminated string
+   s2 - pointer to null terminated string
+
+   result - less than zero if s1<s2, zero if s1=s2 and greater than zero if
+            s1>s2
+*)
+
+
+PROCEDURE Strncmp(s1: ADDRESS; s2: ADDRESS; length: LONGINT): LONGINT;
+(*
+   Compare two strings for n bytes, ignoring case.
+
+   s1 - pointer to null terminated string
+   s2 - pointer to null terminated string
+   length - maximum number of characters to compare
+
+   result - see Strcmp()
+*)
+
+
+PROCEDURE Toupper(char: CHAR): CHAR;
+(*
+   Convert character to uppercase.
+
+   char - a character
+
+   result - an uppercase character
+*)
+
+
+PROCEDURE SyncRun(name: ADDRESS; command: ADDRESS; input: FileHandle;
+                  output: FileHandle): LONGINT;
+(*
+   Load a process and wait for its completion.
+
+   name - a pointer to the filename of the process you wish to load and run
+   command - a pointer to the arguments you wish to pass to this process
+   input - the standard input for the new process (NIL means default)
+   output - the standard output for the new process (NIL means default)
+
+   result - return code of the process executed (if positive or zero) or error
+            (if negative)
+*)
+
+
+
+   (* Added V32 of arp.library *)
+
+PROCEDURE ASyncRun(name: ADDRESS; command: ADDRESS;
+                   pcb: ProcessControlBlockPtr): LONGINT;
+(*
+   Create an ansynchronous process.
+
+   name - pointer to command name. If you do not supply a value on the
+          pcbLoadedCode variable this must be a valid pathname or resident
+          program name. If you provide already loaded code, the name does not
+          need to refer to an actual program file or resident code, of course
+   command - pointer to the commands you wish to pass to this argument. This may
+             be NIL, but it must not exceed 256 characters in length. Note that
+             IO redirection must be performed by the caller. Also note that some
+             programs appear to have bugs in dealing with 0 length or NIL
+             command lines. To safely pass a NIL command line, you should pass
+             a string consisting of a newline and a null, i.e. "\n". This is
+             defined above
+   pcb - only pcbStackSize and pcbPro must be initialized by you
+
+   result - if this function succeeds, a positive value, corresponding to the
+            number of the CLI created will be returned. If no CLI is created,
+            the value returned will be zero. If there is an error, then the
+            return will be negative, and one of the documented error returns
+*)
+
+
+PROCEDURE SpawnShell(name: ADDRESS; command: ADDRESS;
+                     shell: NewShellPtr): LONGINT;
+(*
+   NOT DOCUMENTED
+*)
+
+
+PROCEDURE LoadPrg(name: ADDRESS): BPTR;
+(*
+   Load a program by searching path.
+
+   name - pointer to the null terminated pathname of the command to load
+
+   result - a BPTR to the loaded code, or NIL, of an error occurred
+*)
+
+
+PROCEDURE PreParse(source: ADDRESS; dest: ADDRESS): BOOLEAN;
+(*
+   Create a tokenized string suitable for PatternMatch.
+
+   source - pointer to wildcarded unparsed string
+   dest - pointer to a buffer to place the parsed string in
+
+   result - TRUE if any wildcards at all were encountered, FALSE otherwise
+*)
+
+
+
+   (* Added V33 of arp.library *)
+
+PROCEDURE StampToStr(dateTime: DateTimePtr): BOOLEAN;
+(*
+   Convert DateStamp portion of DateTime structure to string.
+
+   dateTime - a pointer to an initialized DateTime structure
+
+   result - a non-zero return indicates that the DateStamp was invalid. Zero
+            indicates that everything went according to plan
+*)
+
+
+PROCEDURE StrToStamp(dateTime: DateTimePtr): BOOLEAN;
+(*
+   Convert ASCII portion of DateTime structure to a DateStamp.
+
+   dateTime - a pointer to an initialized DateTime structure
+
+   result - see StampToStr()
+*)
+
+
+PROCEDURE ObtainResidentPrg(name: ADDRESS): ResidentProgramNodePtr;
+(*
+   Obtains a resident program for your use.
+
+   name - pointer to a null terminated pathname
+
+   result - pointer to the resident program node for the program. If NIL, an
+            error occurred
+*)
+
+
+PROCEDURE AddResidentPrg(segment: BPTR; name: ADDRESS): ResidentProgramNodePtr;
+(*
+   Add a program to the resident list.
+
+   segment - BPTR as returned by LoadSeg()
+   name - pointer to a null terminated pathname
+
+   result - pointer to the resident program node for the program or NIL (if it
+            could not be added)
+*)
+
+
+PROCEDURE RemResidentPrg(name: ADDRESS): LONGINT;
+(*
+   Remove a program from the resident list, freeing it's node and code segments.
+
+   name - a pointer to a null terminated pathname
+
+   result - zero (everything is O.K.) or non-zero (code is in use)
+*)
+
+
+PROCEDURE UnLoadPrg(segment: BPTR);
+(*
+   Unload a program received from LoadPrg().
+
+   segment - pointer to a segment obtained from LoadPrg()
+*)
+
+
+PROCEDURE LMult(a: LONGINT; b: LONGINT): LONGINT;
+(*
+   Perform a long multiply.
+
+   a - a 32 bit signed number
+   b - a 32 bit signed number
+
+   result - the 32 bit result of a*b
+*)
+
+
+PROCEDURE LDiv(a: LONGINT; b: LONGINT): LONGINT;
+(*
+   Perform a long divide.
+
+   a - a 32 bit signed number
+   b - a 32 bit signed number
+
+   result - the 32 bit result of a/b
+*)
+
+
+PROCEDURE LMod(a: LONGINT; b: LONGINT): LONGINT;
+(*
+   Perform a long modulus, doing canonical thing with sign.
+
+   a - a 32 bit signed number
+   b - a 32 bit signed number
+
+   result - the 32 bit result of a MOD b, with sign of a
+*)
+
+
+PROCEDURE CheckSumPrg(node: ResidentProgramNodePtr): LONGINT;
+(*
+   Calculate the checksum on a resident program.
+
+   node - pointer to a resident program node
+
+   result - a newly calculated checksum
+*)
+
+
+PROCEDURE TackOn(pathname: ADDRESS; filename: ADDRESS);
+(*
+   Correctly add a filename to an existing pathname.
+
+   pathname - pointer to the pathname to be augmented
+   filename - pointer to the filename to augment pathname with
+*)
+
+
+PROCEDURE BaseName(name: ADDRESS): ADDRESS;
+(*
+   Return basename of pathname.
+
+   name - pointer to a valid pathname
+
+   result - pointer to start of basename
+*)
+
+
+PROCEDURE ReleaseResidentPrg(segment: BPTR): ResidentProgramNodePtr;
+(*
+   If segment is resident, decrement usage count.
+
+   segment - pointer to a loaded code segment
+
+   result - the corresponding node if found
+*)
+
+
+
+   (* Added V36 of arp.library *)
+
+PROCEDURE SPrintf(buffer: ADDRESS; string: ADDRESS; stream: ADDRESS): LONGINT;
+(*
+   NOT DOCUMENTED
+*)
+
+
+PROCEDURE GetKeywordIndex(key: ADDRESS; template: ADDRESS): LONGINT;
+(*
+   NOT DOCUMENTED
+*)
+
+
+PROCEDURE ArpOpenLibrary(name: ADDRESS; version: LONGINT): LibraryPtr;
+(*
+   NOT DOCUMENTED
+*)
+
+
+PROCEDURE ArpAllocFReq(): FileRequesterPtr;
+(*
+   NOT DOCUMENTED
+*)
+
+
+
+END ARP.

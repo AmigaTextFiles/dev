@@ -1,0 +1,418 @@
+@database "patch"
+@master "Dixie:home/kyz/dev/src/mine/e/objects/doc/patch.doc"
+
+@Node Main "patch.doc"
+    @{" --overview-- " Link "--overview--"}
+    @{" disable() " Link "disable()"}
+    @{" enable() " Link "enable()"}
+    @{" end() " Link "end()"}
+    @{" install() " Link "install()"}
+    @{" missed() " Link "missed()"}
+    @{" patched_function() " Link "patched_function()"}
+    @{" remove() " Link "remove()"}
+@EndNode
+
+@Node "--overview--" "patch.m/--overview--"
+
+@{b}   PURPOSE@{ub}
+	To allow easy patching of Amiga library and device functions
+	with Amiga E code.
+
+@{b}   OVERVIEW@{ub}
+	The AmigaOS has a facility to change the code called in any of the
+	functions  of  a  library  or  device.  But due to the way Amiga E
+	works, it has been difficult to easily use E code as patches.
+
+	This  object  allows  you  to  perform patches on the system using
+	Amiga E code in the most flexible way, via an assembler wedge.
+
+	Installation:
+
+	You  first  need  to open the library/device that you are going to
+	patch.  You  then  need  to  know the Library Vector Offset of the
+	entry  you  are  going to patch. This is available using the 'lvo'
+	tool  from  the  Developer Kit, or any assembler include file with
+	'LVO'  in the title. You must keep the library/device open for the
+	entire  duration  of  the patch. If you do not, the library may be
+	flushed from memory and loaded somewhere else, indirectly removing
+	the  patch  and  also  causing  a  crash when we try to remove our
+	defunct patch later.
+
+	You  create  a patch object with @{"install()" Link "install()"}, which installs a wedge
+	that calls an E function which you defined like so:
+
+	    PROC patch_code(function, a7,a6,a5,a4,a3,a2,a1,a0,
+	                              d7,d6,d5,d4,d3,d2,d1,d0)
+
+	You  can give alternate names to the 'register' parameters, but do
+	remember  that  they  will  always  be  passed IN THE ABOVE-STATED
+	ORDER, and writing the parameter's names in a different order will
+	NOT cause the registers to be passed to you in a different order.
+
+	See @{"patched_function()" Link "patched_function()"} for more about this.
+
+	Your patch in operation:
+
+	This  E  function is called 'as' the function you have patched, by
+	absolutely  any  task  and  program  that  could call the original
+	function.  Also,  the  function  may  be  called  by more than one
+	program  at  once,  so  use a Semaphore or similar protection when
+	using global variables.
+
+	You are given all the registers as set when the patch was called -
+	do  NOT modify them unless it is documented that the function does
+	this.  That said, you can always modify the 'd0' variable as it is
+	ignored  on exit, the return value of your function is returned in
+	D0 rather than the stack-based copy.
+
+	Occasionally  you  can modify the 'scratch register' variables d0,
+	d1,  a0  and  a1,  but  you  must  check  the documentation of the
+	function  you  are  patching,  to  ensure  it  does not promise to
+	preserve any of these registers.
+
+	The result of your function call is always returned in D0, but E's
+	multiple return values (in D1 and D2) are ignored, and restored to
+	their original values.
+
+	Calling the original function:
+
+	You  are  also  given  a pointer to the original function you have
+	patched.  In  most  patches,  you  will  have to call the original
+	function sometime, so you would set up the registers appropriately
+	from  the parameters, including A6 as the library/device base, and
+	call  the  original  function.  Do  NOT  do  this by writing the E
+	construct "function()", as this will use an unspecified A-register
+	to  make  the  call. Instead, do it yourself with another register
+	that  you choose. If you need to pass A0 to A3 as parameters, then
+	you will have to preserve and use A4 or A5.
+
+	Patch removal:
+
+	Your  patch  can be either enabled or disabled. When disabled, the
+	assembler  wedge  simply  hops  to  the  original function, adding
+	nothing  to  the  stack. Simply exiting your program at this point
+	without  ENDing  the  object would free the object instance itself
+	but would leave the working wedge in place, consuming 136 bytes of
+	memory and adding 3 instructions to the function.
+
+	Some  people  would  advocate  exiting your program with the wedge
+	still in place, as the user is unlikely to do that often, but when
+	they do there will be no problem with exiting correctly.
+
+	Others  would always recommend total removal of the patch, even if
+	that  means  waiting. Unlike other wedges, the removal method used
+	by  this  object is very safe, only removes the patch if it is not
+	being  used,  and understands programs like SetFunction Manager or
+	SaferPatches which allow removal of patches in any order.
+
+	My  advice  is to always @{"disable()" Link "disable()"} the patch, then try to @{"remove()" Link "remove()"}
+	the  patch. If that fails, ask the user if you should keep trying,
+	or just exit.
+
+@{b}   NOTES@{ub}
+	You  must NOT use Amiga E's 'debug' mode and EDBG on the code that
+	contains  the  patch you will be making. E introduces NOP commands
+	into  the  code,  which  EDBG turns to ILLEGAL commands, so it can
+	run the E code in the normal way, then give control back to itself
+	after  each  line.  However,  when  the  E code is called by other
+	tasks,  these  ILLEGALs  are not trapped by EDBG, and simply crash
+	the  task  involved.  A  simple  fix is to put the patch code in a
+	seperate module, and compile this without debug mode.
+
+	Exceptions  should never be thrown out of patches. If there is the
+	possibility  of an exception being raised, make the patch function
+	HANDLE it, not throw it out.
+
+	Some functions are marked as safe to be called from interrupts. If
+	this  is  the  case, you have to handle the possible deadlock that
+	may  occur  -  interrupt blocks a task, then goes into a loop that
+	waits for the blocked task to finish, which it will never do.
+
+	If  the function you are patching is part of the AmigaOS, remember
+	to check the function's autodocs for defined side effects that you
+	must emulate.
+
+	You  obviously  cannot  call  the function you patched through the
+	usual way, but you also cannot call a system/library function that
+	calls your patched function as part of its operation.
+
+	You cannot perform I/O on _your_ streams from another process, and
+	tasks  can't  even  call any DOS functions. Therefore, WriteF() in
+	your patch is out of the question. Use debug.m/kPrintF and Sushi.
+
+@{b}   WARNING@{ub}
+	When your patch is enabled, the combination of assembler wedge and
+	E code will add a MINIMUM of 80 bytes - THEN extra bytes are added
+	for the variables in your patch!
+
+	You should minimise local variable usage - even register variables
+	add to stack usage - and avoid defining entire structures, STRINGs
+	or LISTs as local variables.
+
+@EndNode
+
+@Node "disable()" "patch.m/disable"
+
+@{b}   NAME@{ub}
+	patch.disable() -- prevent further execution of the patch.
+
+@{b}   SYNOPSIS@{ub}
+	disable()
+
+@{b}   FUNCTION@{ub}
+	Stops the patch from being invoked again. All calls to the patched
+	function  will be passed directly to the original function, not to
+	your patch.
+
+	There  may,  however, still be invocations of the patch running at
+	the time this call returns.
+
+@{b}   SEE ALSO@{ub}
+	@{"enable()" Link "enable()"}
+
+@EndNode
+
+@Node "enable()" "patch.m/enable"
+
+@{b}   NAME@{ub}
+	patch.enable() -- allow execution of the patch.
+
+@{b}   SYNOPSIS@{ub}
+	enable()
+
+@{b}   FUNCTION@{ub}
+	Toggles a switch in the assembler wedge which stops it passing all
+	calls of the patched function to the original function, and starts
+	passing them to your patch.
+
+	Your  patch  should  be ready to run at any time from the start of
+	the call to this method.
+
+@{b}   SEE ALSO@{ub}
+	@{"disable()" Link "disable()"}
+
+@EndNode
+
+@Node "end()" "patch.m/end"
+
+@{b}   NAME@{ub}
+	patch.end() -- Destructor.
+
+@{b}   SYNOPSIS@{ub}
+	end()
+
+@{b}   FUNCTION@{ub}
+	Frees  resources  used  by an instance of the patch class. It will
+	first  @{"disable()" Link "disable()"} the patch, then it will busy loop until the patch
+	is successfully removed.
+
+@{b}   SEE ALSO@{ub}
+	@{"disable()" Link "disable()"}, @{"remove()" Link "remove()"}, @{"install()" Link "install()"}
+
+@EndNode
+
+@Node "install()" "patch.m/install"
+
+@{b}   NAME@{ub}
+	patch.install() -- Constructor.
+
+@{b}   SYNOPSIS@{ub}
+	install(base, offset, patchfunc)
+	install(base, offset, patchfunc, userdata)
+	install(base, offset, patchfunc, userdata, stackuse)
+
+@{b}   FUNCTION@{ub}
+	Initialises  an  instance of the patch class, and installs a patch
+	in the system. The patch will not be enabled to begin with, so you
+	must  call  @{"enable()" Link "enable()"}  on  the  patch  for it to start working. The
+	exception "MEM" will be raised if there is no memory for a wedge.
+
+	Read @{"patched_function()" Link "patched_function()"} to see how this patch is called.
+
+@{b}   INPUTS@{ub}
+	base      - the  base  of  the library or device of whose function
+	            you  will  be  patching. It should remain open for the
+	            entire  life of the patch, otherwise it may be flushed
+	            from memory, rendering the patch useless.
+
+	offset    - This  is the Library Vector Offset of the function you
+	            are patching. The appropriate number is available from
+	            LVO files or the 'lvo' tool.
+
+	patchfunc - The address of the Amiga E function which will replace
+	            the specified device/library function.
+
+	userdata  - An optional parameter that can be anything you want it
+	            to be. It will be passed to your E function as a LONG,
+	            whether or not you define or use it. The default value
+	            for this parameter is zero.
+
+	stackuse  - An  optional  parameter to state the minimum amount of
+	            stack space your function will use. This does not need
+	            to include the 80 byte overhead of the assembler wedge
+	            that calls your function, as this is already included.
+
+@{b}   NOTE@{ub}
+	The stack used by your function can be calculated as follows:
+	- the size of your local variables
+	- if you call any functions, add 8 bytes plus the size of its
+	  local variables only for the function with the largest stack use
+	- if you call a system/library function, add ????? bytes
+
+	Local Variable stack usage calculations:
+	- 4 bytes for every defined local variable (that means _every_
+	  variable - includes REGs, ARRAYs, STRINGs and LISTs)
+	- for a variable defined thus:,   add this many bytes:
+	  xx[size_x]:STRING               size_x + 1 (add 1 IF Odd(size_x+1))
+	  yy[size_x]:LIST                 size_x * 4
+	  zz:[size_x]:ARRAY OF blah       size_x * (SIZEOF blah + 4)
+	  zz:blah                         SIZEOF blah
+
+@{b}   SEE ALSO@{ub}
+	@{"end()" Link "end()"}, @{"enable()" Link "enable()"}, @{"missed()" Link "missed()"}, @{"patched_function()" Link "patched_function()"}
+
+@EndNode
+
+@Node "missed()" "patch.m/missed"
+
+@{b}   NAME@{ub}
+	patch.missed() -- return number of missed calls.
+
+@{b}   SYNOPSIS@{ub}
+	number := missed()
+
+@{b}   FUNCTION@{ub}
+	When tasks and processes do not have enough stack space to allow a
+	call  to your patch function, the assembler wedge will skip to the
+	original function and increment a 'missed' count.
+
+	When  you call this function, you discover how many calls you have
+	missed  due  to stack restrictions, and - at the same time - reset
+	the missed count back to 0.
+
+@{b}   SEE ALSO@{ub}
+	@{"install()" Link "install()"}
+
+@EndNode
+
+@Node "patched_function()" "patch.m/patched_function"
+
+@{b}   NAME@{ub}
+	patched_function() -- how your installed patch is called.
+
+@{b}   SYNOPSIS@{ub}
+	result := patched_function(
+	            original_function,
+	            a7,a6,a5,a4,a3,a2,a1,a0,d7,d6,d5,d4,d3,d2,d1,d0
+	          )
+
+	result := patched_function(
+	            userdata, original_function,
+	            a7,a6,a5,a4,a3,a2,a1,a0,d7,d6,d5,d4,d3,d2,d1,d0
+	          )
+
+@{b}   FUNCTION@{ub}
+	When  you  @{"install()" Link "install()"}  a  patch, your patch function will be called
+	instead  of  the original function. Rather than your function code
+	being  installed  directly as the new patch, an assembler wedge is
+	instead used. This allows for the patch to be enabled and disabled
+	with  ease, and also prepares the correct environment for an Amiga
+	E function to operate.
+
+	The  wedge  prepares a set of arguments on the stack for the patch
+	function,  so  that it can know everything neccessary to implement
+	the patch.
+
+	However,  the  wedge  also  makes a check that a minimum amount of
+	bytes are available on the calling task's stack before going on to
+	call  your patch. If there is insufficient stack space, your patch
+	will  not  be  called  and  instead  the original function will be
+	called. In this case, a 'missed' count will be incremented.
+
+@{b}   INPUTS@{ub}
+	userdata          - this  value  was chosen by the programmer when
+	                    installing the patch.
+
+	                    This  userdata  value is passed whether or not
+	                    it  was requested in the installation, and the
+	                    way Amiga E handles function parameters allows
+	                    you  to either define your function so that it
+	                    knows  the  userdata  value, or it doesn't (as
+	                    shown above).
+
+	                    The userdata value can allow you to write only
+	                    one   function   to   patch  multiple  library
+	                    functions  - each patch would have a different
+	                    userdata  parameter,  and the patch code would
+	                    use  this  to  recognise which function it was
+	                    patching when called.
+
+	original_function - this  is  a  pointer  to  the  code that would
+	                    normally  be  executed,  if your patch was not
+	                    installed. In most patches, you do not replace
+	                    the  entire  functionality  of  the patch, and
+	                    therefore have to use this pointer to call the
+	                    original  function. Remember to initialise all
+	                    required   parameters  (including  A6)  before
+	                    calling this function.
+
+	a7, a6, a5, a4,   - these  are  the  68000 registers as set before
+	a3, a2, a1, a0,     your  patch  was called. Some of these will be
+	d7, d6, d5, d4,     parameters to your patch, others will be of no
+	d3, d2, d1, d0      use,  but  you  can  NOT remove them from your
+	                    function  declaration.  You  may  assign names
+	                    other  than their real register names to them,
+	                    perhaps  to  mirror  the  declaration  of  the
+	                    patched function - but be warned that you must
+	                    NOT  modify  these  variables, as they will be
+	                    restored  to  the  registers  on  exit of your
+	                    function.  The  only  parameter you can safely
+	                    alter  is  the 'd0' parameter, as its contents
+	                    are ignored on your function exit, instead the
+	                    function's return value is used for D0.
+
+	                    These  parameters  are  always  defined in the
+	                    same order - from A7 to A0, then D7 to D0.
+
+@{b}   RESULT@{ub}
+	The  value  you return from your patch function is always returned
+	in  D0 by normal E standards. The assembler wedge avoids restoring
+	the  original  value  of  D0 it picked up on entry, so this result
+	stays.   Some  functions  declare  that  they  return  results  in
+	registers  other  than  D0,  so you will have to store those other
+	results  in the appropriate 'register' parameters that were passed
+	in  to  your function. On return, those variables will be restored
+	into the appropriate 68000 registers.
+
+	Some functions promise (or are expected) to return with the Z flag
+	set  when D0 = NIL. For this, D0 is tested as the last instruction
+	before return to the calling program, and Z will be set or cleared
+	depending if D0 = 0 or not.
+
+@EndNode
+
+@Node "remove()" "patch.m/remove"
+
+@{b}   NAME@{ub}
+	patch.remove() -- attempt to remove the patch.
+
+@{b}   SYNOPSIS@{ub}
+	removed := remove()
+
+@{b}   FUNCTION@{ub}
+	Attempts  to  remove  the  patch  from the system, and restore the
+	original  function. If the patch is successfully removed, there is
+	nothing you can do but END the patch.
+
+@{b}   RESULT@{ub}
+	removed - TRUE if removal of the patch was successful.
+
+@{b}   NOTE@{ub}
+	You  may  have a greater chance of successful removal of the patch
+	if you @{"disable()" Link "disable()"} it first.
+
+@{b}   SEE ALSO@{ub}
+	@{"end()" Link "end()"}, @{"disable()" Link "disable()"}
+
+@EndNode
+

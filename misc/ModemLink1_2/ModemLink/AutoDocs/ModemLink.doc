@@ -1,0 +1,1044 @@
+
+
+TABLE OF CONTENTS
+
+modemlink.device/AbortIO
+modemlink.device/CMD_CLEAR
+modemlink.device/CMD_READ
+modemlink.device/CMD_WRITE
+modemlink.device/MLCMD_INIT
+modemlink.device/MLCMD_QUERY
+modemlink.device/MLCMD_READ
+modemlink.device/MLCMD_WRITE
+modemlink.device/ML_AllocPkt
+modemlink.device/ML_AnswerTagList
+modemlink.device/ML_DePacketizeData
+modemlink.device/ML_DialTagList
+modemlink.device/ML_EstablishTagList
+modemlink.device/ML_FreePkt
+modemlink.device/ML_FreePktList
+modemlink.device/ML_PacketDataSize
+modemlink.device/ML_PacketizeData
+modemlink.device/ML_SendModemCMDTagList
+modemlink.device/ML_Terminate
+modemlink.lib/ML_AbortIO (lib)
+modemlink.lib/ML_DoIO (lib)
+modemlink.lib/ML_SendIO (lib)
+
+
+modemlink.device/AbortIO                              modemlink.device/AbortIO
+
+
+   NAME
+       AbortIO -- abort an I/O request
+
+   SYNOPSIS
+       AbortIO( IORequest )
+                A1
+
+       void AbortIO(struct IORequest * );
+
+   FUNCTION
+       This is an exec.library call.
+
+       This function attempts to abort a specified read or write request.
+       If the request being aborted is a WRITE request and is currently
+       active, the IO request will NOT be aborted and will be completed
+       as normal.  If the request is queued, it is painlessly removed.
+       The request will be returned in the same way any completed request
+       is.
+
+       After AbortIO(), you must generally do a WaitIO().
+
+   NOTE
+       This can only be called when using the modemlink.device.  If you are
+       using ModemLink.lib use ML_AbortIO() instead.  This is because exec
+       call to AbortIO expects to be dealing with a real device, and if it's
+       not there may crash the system.
+
+   INPUTS
+       IORequest -- pointer to the IORequest struct that is to be aborted.
+
+   RESULTS
+       io_Error -- is always set to IOERR_ABORT, even if the request
+                   finished successfully.
+
+   SEE ALSO
+       ML_AbortIO, exec.library/SendIO, exec.library/CheckIO,
+       exec.libary/WaitIO
+
+   BUGS
+       AbortIO() has very little information about the IO request and what
+       the handler task is doing with it.  It can check to see if the
+       IO request is queued, and if so, removes it.  However, if it's not
+       queued, all it can do is set the io_Error flag to IOERR_ABORTED and
+       hope the handler task realizes this before it's too late.  This is
+       why once the handler task has started servicing an IO request it must
+       finish it before it aborts it.
+
+modemlink.device/CMD_CLEAR                          modemlink.device/CMD_CLEAR
+
+
+   NAME
+       Clear -- Clears all buffered incomming packets
+
+   FUNCTION
+       This command will dispose any packets which have been internally
+       bufferd AND have not been used to satisfy a user read request
+       (CMD_READ or MLCMD_READ).
+
+   IO REQUEST
+       io_Message      mn_ReplyPort initialized
+       io_Device       set by OpenDevice
+       io_Unit         set by OpenDevice
+       io_Command      CMD_CLEAR
+
+   RESULTS
+       Error -- If the Clear succeeded, then io_Error will be null.  If the
+                Clear failed, then the io_Error will be non-zero.  io_Error
+                is used to indicate errors such as modem and handler task
+                problems.
+
+
+modemlink.device/CMD_READ                            modemlink.device/CMD_READ
+
+
+   NAME
+       Read -- Read a packet's worth of data
+
+   FUNCTION
+       This command is used to read a packet's worth of data.  A pointer to
+       the packet data is kept in io_Data, while the length of the data
+       is in io_Length.
+
+       Notice that there is no actual LinkPkt being used.  The data is
+       stripped from the incomming packet and stored in the IOReq
+       structure.  Since the device will allocate the memory for the data,
+       it is important to deallocate the data (io_Data) once it is no longer
+       needed, as it won't do it for you.
+
+       Before the program exits, be sure to AbortIO() then WaitIO() any
+       outstanding ioRequests.
+
+   IO REQUEST
+       io_Message      mn_ReplyPort initialized
+       io_Device       set by OpenDevice
+       io_Unit         set by OpenDevice
+       io_Command      CMD_READ
+
+   RESULTS
+       io_Length       number of bytes in block of data pointed to by
+                       io_Data
+       io_Data         pointer to block of data received
+
+       Error -- If the Read succeded, then io_Error will be null.
+                If the Read failed, then the io_Error will be non-zero.
+                io_Error is used to indicate errors such as modem and
+                handler task problems.
+
+modemlink.device/CMD_WRITE                          modemlink.device/CMD_WRITE
+
+
+   NAME
+       Write -- Write a block of data as a single packet
+
+   FUNCTION
+       This command causes a block of characters to be written out
+       as a single packet through the modem-link protocol.  If the
+       io_Length field is less then zero it will calculate the length
+       of the data block by counting all characters until it encounters
+       a NULL.
+
+       The modem link protocol makes sure that the data sent is received
+       by the receiving end.  How this is determined is specific to the
+       protocol being used.  However, if an error (CRC32 check) does occur
+       it is up to the the protocol to make sure it resends the packet.
+       Only if a serious error (dropped carrier) occurs will the protocol
+       give up and abort the write request.
+
+       The modem link handler task which manages out-going packets will not
+       reply the IO request until it is sure the receiving end has got it.
+       It is therefore recommended to use Asyncronous IO requests if high
+       speed communications are important.
+
+   IO REQUEST
+       io_Message      mn_ReplyPort initialized
+       io_Device       set by OpenDevice
+       io_Unit         set by OpenDevice
+       io_Command      CMD_WRITE
+       io_Length       number of characters to be sent, or if set to
+                       -1 transmit until NULL encountered in Data
+       io_Data         pointer to block of data to transmit
+
+   RESULTS
+       Error -- If the Write succeded, then io_Error will be null.
+                If the Write failed, then the io_Error will be non-zero.
+                io_Error is used to indicate errors such as modem and
+                handler task problems.
+
+modemlink.device/MLCMD_INIT                        modemlink.device/MLCMD_INIT
+
+
+   NAME
+       Init -- Initializes data in handler task
+
+   FUNCTION
+       This command is used to pass important initialization data to the
+       handler task spawned by the device.  This includes a pointer to
+       an initialized IOExtSer structure, as well as the device base address
+       stored in io_Device.
+
+       The handler task makes it's own private copies of the IOExtSer
+       struct, so it may be deallocated once it has been initialized.
+       However, the device/unit that was associated with that IOExtSer must
+       not be closed until after the handler task has been shut down.
+
+   NOTE
+       The Init command must only be used just after the handler task has
+       been spawned, and this is usually done by the device itself.
+       Therefore this command should never be called by a user program as it
+       will have undefined results if not used properly.  The reason it's
+       documented here at all is for those who wish to write new handler tasks.
+       A new handler task implementing a new protocol can use this command to
+       receive important information about the serial device.
+
+   IO REQUEST
+       io_Message      mn_ReplyPort initialized
+       io_Device       set by OpenDevice
+       io_Unit         set by OpenDevice
+       io_Command      MLCMD_INIT
+       io_Data         pointer to an initialized IOExtSer struct.
+
+   RESULTS
+       Error -- If the Init succeded, then io_Error will be null.
+                If the Init failed, then the io_Error will be non-zero.
+                io_Error is used to indicate errors such as modem and
+                handler task problems.
+
+modemlink.device/MLCMD_QUERY                      modemlink.device/MLCMD_QUERY
+
+
+   NAME
+       Query -- ask the device for some very minor info about itself
+
+   FUNCTION
+       This command is used to check to make sure the handler task is
+       still up and running.  It is possible that the handler task which
+       was spawned by the device has quit on it's own.  This can be caused
+       by loss of carrier or it received a shut down command from the remote
+       site.  A shut down command is automatically sent when the remote site
+       shuts down for any (system friendly) reason.
+
+       This command may become more usefull later on...
+
+   IO REQUEST
+       io_Message      mn_ReplyPort initialized
+       io_Device       set by OpenDevice
+       io_Unit         set by OpenDevice
+       io_Command      MLCMD_QUERY
+
+   RESULTS
+       Error -- NULL if everything is fine, non-NULL otherwise.
+                io_Error is used to indicate errors such as modem and
+                handler task problems.
+
+modemlink.device/MLCMD_READ                        modemlink.device/MLCMD_READ
+
+
+   NAME
+       Read -- Read a packet of data
+
+   FUNCTION
+       This command will read a packet.  io_Data points to a LinkPkt
+       structure which contains all packet information.  io_Length is
+       not used, however the length of the data segment of the packet
+       is stored in the packet itself.  The LinkPkt fields that contain
+       useful information are:
+
+         Length     -  size of data block
+         Socket     -  Socket (not really implemeted, set it to zero)
+         Data       -  a pointer to the data block
+         Flags      -  flags that affect the modem link protocol
+
+       Once the packet returned by the MLCMD_READ command is no longer
+       needed it should be deallocated using FreePkt().  This is necessary
+       because the handler task allocates memory for each packet as it
+       comes in, and then it simply sends it to the user program when
+       satisfying a read request.  So, it is up the the user program
+       to free up all read packets, otherwise memory will be leaked.
+
+   IO REQUEST
+       io_Message      mn_ReplyPort initialized
+       io_Device       set by OpenDevice
+       io_Unit         set by OpenDevice
+       io_Command      MLCMD_READ
+       io_Data         pointer to an initialized LinkPkt structure
+
+   RESULTS
+       Error -- If the Read succeded, then io_Error will be null.
+                If the Read failed, then the io_Error will be non-zero.
+                io_Error is used to indicate errors such as modem and
+                handler task problems.
+
+
+modemlink.device/MLCMD_WRITE                      modemlink.device/MLCMD_WRITE
+
+
+   NAME
+       Write -- Write a packet of data
+
+   FUNCTION
+       This command will send a packet via the modem link protocol.
+       io_Data points to the LinkPkt struct that is to be transmitted.
+       It is important that all fields of the LinkPkt struct are
+       properly set.  The LinkPkt fields that are used by this command are:
+
+         Length     -  size of data block
+         Socket     -  Socket (not really implemeted, set it to zero)
+         Data       -  a pointer to the data block
+         Flags      -  flags that affect the modem link protocol
+
+       The modem link protocol makes sure that the data sent is received
+       by the receiving end.  How this is determined is specific to the
+       protocol being used.  However, if an error (CRC32 check) does occur
+       it is up to the the protocol to make sure it resends the packet.
+       Only if a serious error (dropped carrier) occurs will the handler
+       task give up and abort the write request.
+
+       The modem link handler task which manages out-going packets will not
+       reply the IO request until it is sure the receiving end has got it.
+       It is therefore recommended to use Asyncronous IO requests if high
+       speed communications are important.
+
+   IO REQUEST
+       io_Message      mn_ReplyPort initialized
+       io_Device       set by OpenDevice
+       io_Unit         set by OpenDevice
+       io_Command      MLCMD_WRITE
+       io_Data         pointer to a initialized LinkPkt structure
+
+   RESULTS
+       Error -- If the Read succeded, then io_Error will be null.
+                If the Read failed, then the io_Error will be non-zero.
+                io_Error is used to indicate errors such as modem and
+                handler task problems.
+
+
+modemlink.device/ML_AllocPkt                      modemlink.device/ML_AllocPkt
+
+
+   NAME
+       ML_AllocPkt -- Allocate memory for a single packet
+
+   SYNOPSIS
+       Pkt = ML_AllocPkt()
+       D0
+
+       struct LinkPkt *ML_AllocPkt( void );
+
+   FUNCTION
+       This routine correctly allocates memory for a LinkPkt structure and
+       makes sure it is properly initialized.
+
+   INPUTS
+       None
+
+   RESULTS
+       Pkt - A pointer to the newly allocated LinkPkt structure.
+             If there wasn't enough free memory to allocate the packet,
+             then zero will be returned.  The pointer must always be
+             checked for NULL before use.
+
+   WARNING
+       The result of any memory allocation MUST be checked, and a viable
+       error handling path taken.  ANY allocation may fail if memory has
+       been filled.
+
+   NOTE
+	  If the free list is corrupt, the system will panic with alert
+	  AN_MemCorrupt, $01000005.
+
+	  This function may not be called from interrupts.
+
+	  A DOS process will have its pr_Result2 field set to
+	  ERROR_NO_FREE_STORE if the memory allocation fails.
+
+   SEE ALSO
+	  exec.library/AllocMem, exec.library/FreeMem, FreePkt, FreePktList
+
+   BUGS
+       None
+
+modemlink.device/ML_AnswerTagList            modemlink.device/ML_AnswerTagList
+
+
+   NAME
+       ML_AnswerTagList -- Set modem to answer incomming call.
+       ML_AnswerTags -- Varargs stub for ML_AnswerTagList
+
+   SYNOPSIS
+       result = ML_AnswerTagList( SerIO, tagList )
+       D0                         A0     A1
+
+       ULONG ML_AnswerTagList( struct IOExtSer *, struct TagItem * );
+
+       result = ML_AnswerTags( SerIO, Tag1, ... )
+
+       ULONG ML_AnswerTags( struct IOExtSer *, ULONG, ... );
+
+   FUNCTION
+       Sets the modem to auto-answer any incomming calls, and then waits
+       for a connection.  If the modem is not on, or does not respond to
+       the auto-answer command issued, it will drop out with an error.
+       As a safety measure it will only wait for a specified amount of
+       time.  If the modem does not answer an incomming call within that
+       specified amount of time it will timeout and return an error.
+
+       For this routine to work it requires the serial device to be already
+       opened.  It will use the IOExtSer struct initialized by OpenDevice()
+       to communicate with the modem.
+
+   NOTE
+       If the modem is already connected (ie: carrier detected) then it will
+       simply drop out and report modem has connected.
+
+       It Requires a modem with auto-answer (all Hayes compatible modems
+       allow for auto-answer -- ATS0=1)
+
+       Does not turn auto-answer off
+
+   INPUTS
+       SerIO -- pointer to initialized IOExtSer structure (from OpenDevice)
+
+       TagList -- (optional) pointer to (an array of) TagItem structures,
+            terminated by the value of TAG_END.  Here is a list of tag items
+            which may be used:
+
+            ML_AnswerTime - sets the maximum time in seconds to wait for
+                 incomming call (default: 30).  ti_Data contains the new
+                 timeout amount.
+
+            ML_Suffix - sets the new Suffix for all modem commands
+                 (default: "\r").  ti_Data points to an array of char.
+
+            ML_OkText - defines the text the modem will use to indicate
+                 successful completion of command (default: "OK").
+                 ti_Data points to an array of char.
+
+            ML_NoCarrierText - defines the text the modem will use to
+                 indicate there is no carrier (default: "NO CARRIER").
+                 ti_Data points to an array of char.
+
+            ML_NoDialText - defines the text the modem will use to indicate
+                 there is no dial tone on the line (default: "NO DIALTONE").
+                 ti_Data points to an array of char.
+
+            ML_AutoAnsText - sets the command to be used to set the modem
+                 into auto-answer mode (default: "ATS0=1").  ti_Data points
+                 to an array of char.
+
+   RESULTS
+       result -- returns the result code returned by the modem.  See
+            ModemLink.h for a definition of all possible return codes.
+            Make sure to always check the result and plan for all
+            possible results.
+
+   SEE ALSO
+       ML_DialTagList, ML_SendModemCmdTagList
+
+   BUGS
+       None
+
+modemlink.device/ML_DePacketizeData        modemlink.device/ML_DePacketizeData
+
+
+   NAME
+       ML_DePacketizeData -- Merge packets into one memory chunk
+
+   SYNOPSIS
+       size = ML_DePacketizeData( PktList, Data, Length )
+       D0                         A0       A1    D0
+
+       ULONG ML_DePacketizeData( struct MinList *, UBYTE, ULONG );
+
+   FUNCTION
+       Will extract the data block from a list of LinkPkt structures and
+       merge them into a single memory chunk.  It requires a previously
+       allocated piece of memory to copy the data into.  The routine is
+       smart enough to not copy over more data then the Data buffer can
+       hold.  To calculate the correct size of this new memory block
+       make a call to ML_PacketDataSize().
+
+       Be aware that it will NOT deallocate the LinkPkts or their data
+       blocks, so this may not be the most effecient method to do this.
+       Keep in mind that once the data blocks from a LinkPkt are no longer
+       needed, it's best to free the list of LinkPkt.  Therefore, a call to
+       ML_FreePktList() afterwards might be a good idea.
+
+   INPUTS
+       PktList -- A linked list of LinkPkt structures
+
+       Data -- A pointer to an allocated chunk of memory
+
+       Length -- The size of the memory chunk to be written (Data)
+       
+   RESULTS
+       size -- the actual number of bytes copied.
+
+   SEE
+       ML_FreePktList(), ML_PacketDataSize, ML_PacketizeData
+
+   BUGS
+       None
+
+modemlink.device/ML_DialTagList                modemlink.device/ML_DialTagList
+
+
+   NAME
+       ML_DialTagList -- Set modem to dial and connect with other modem
+       ML_DialTags -- Varargs stub for ML_DialTagList
+
+   SYNOPSIS
+       result = ML_DialTagList( SerIO, PhoneNum, tagList )
+       D0                       A0     A1        A2
+
+       ULONG ML_DialTagList( struct IOExtSer *, char *, struct TagItem * );
+
+       result = ML_DialTags( SerIO, PhoneNum, Tag1, ... )
+
+       ULONG ML_DialTags( struct IOExtSer *, char *, ULONG, ... );
+
+   FUNCTION
+       Sets the modem to dial a given number and wait for a connection,
+       timeout or an error.  If the modem is not on, or does not respond to
+       the dial command issued, it will drop out with an error.  As a safety
+       measure it will only wait for a specified amount of time.  If the
+       modem does not connect within that specified amount of time it will
+       timeout and return an error.
+
+       It is assumed that the phone number string contains a valid phone
+       number.  The phone number will be passed along to the modem.  However,
+       DialTagList() will prefix the phone number with the default dial
+       command ("ATDT "), unless it is over-riden by the ML_DialPrefix tag
+       (see below).  It will also append the default Suffix ("\r") to the
+       phone number string before it passes it to the modem, unless it to is
+       over-riden by the ML_Suffix tag (see below).  This means that there is
+       no need to include the modem dial command or carrige return codes in
+       the phone number string since DialTagList() adds them for you.
+
+       For this routine to work it requires the serial device to be already
+       opened.  It will use the IOExtSer struct initialized by OpenDevice()
+       to communicate with the modem.
+
+   INPUTS
+       SerIO -- pointer to initialized IOExtSer structure (from OpenDevice)
+
+       PhoneNum -- number that will be dialed
+
+       TagList -- (optional) pointer to (an array of) TagItem structures,
+            terminated by the value of TAG_END.  Here is a list of tag items
+            which may be used:
+
+            ML_DialTime - sets the timeout in seconds for the dialer
+                 (Default: 45).  ti_Data contains the new timeout amount.
+
+            ML_DialPrefix - sets the new dial prefix (defualt: "ATDT ").
+                 ti_Data points to an array of char.
+
+            ML_Suffix - sets the new sufix string for all modem commands
+                 (default: "\r").  ti_Data points to an array of char.
+
+            ML_OkText - defines the text the modem will use to indicate
+                 successful completion of command (default: "OK").
+                 ti_Data points to an array of char.
+
+            ML_BusyText - defines the text the modem will use to indicate
+                 a busy signal (default: "BUSY").  ti_Data points to an
+                 array of char.
+
+            ML_NoCarrierText - defines the text the modem will use to
+                 indicate there is no carrier (default: "NO CARRIER").
+                 ti_Data points to an array of char.
+
+            ML_NoDialText - defines the text the modem will use to indicate
+                 there is no dial tone on the line (default: "NO DIALTONE").
+                 ti_Data points to an array of char.
+
+   RESULTS
+       result -- returns the result code returned by the modem.  See
+            ModemLink.h for a definition of all possible return codes.
+            Make sure to always check the result and plan for all
+            possibilities.
+
+   SEE ALSO
+       ML_AnswerTagList, ML_SendModemCmdTagList
+
+   BUGS
+       None
+
+modemlink.device/ML_EstablishTagList      modemlink.device/ML_EstablishTagList
+
+
+   NAME
+       ML_EstablishTagList -- establishes a protocol over a serial connection
+       ML_EstablishsTags -- Varargs stub for ML_EstablishTagList
+
+   SYNOPSIS
+       result = ML_EstablishTagList( LinkIO, SerIO, tagList )
+       D0                            A0      A1     A2
+
+       ULONG ML_EstablishTagList( struct IOExtLink *, IOExtSer *,
+            struct TagItem * );
+
+       result = ML_EstablishsTags( LinkIO, SerIO, tagList )
+
+       ULONG ML_EstablishTags( struct IOExtLink *, IOExtSer *,
+            struct TagItem * );
+
+   FUNCTION
+       Will negotiate a ModemLink protocol across a serial connection.
+       This is done by polling the other side with an ENQ (char 0x05) and
+       then waiting for an ACK (char 0x06) from the remote side.  It will
+       return if one of the following occurs:
+
+            1) a. It has sent an ENQ to the remote site AND
+               b. The remote site replied to the ENQ it has receive (ACK) AND
+               c. It has received an ENQ from the remote site AND
+               d. It has replied to the remote site's ENQ with an ACK
+
+            OR
+
+            2) Timeout.  Currently the timeout value is fixed at 5 seconds.
+            In the future there may be a tag item to allow for different
+            timeout values.
+
+            OR
+
+            3) It could not spawn the ModemLink handler task.  Low memory
+            situations may cause this.  Also, there may be another task with
+            the same name (it checks for this).
+
+       If it successfully establishes the protocol, then communications
+       across the protocol may begin immediately.  If it can not connect
+       there is a problem; severe line noise may cause this routine to
+       timeout or think it has connected when it really hasn't.
+
+       Despite the fact that this routine accepts tag items, there are no
+       tag items defined for it yet.  The tag items are only for future
+       expandibility.  The ModemLink device/lib may be expanded to support
+       multiple protocols through the tag items.  So, for now, make sure to
+       just pass TAG_END for future compatibility.
+
+   INPUTS
+       LinkIO -- IOExtLink struct to be initialized.  If using .device make
+            sure it was initialized by OpenDevice() before hand.
+
+       SerIO -- IOExtSer structure initialized by OpenDevice().  This will be
+            used to communicate with the serial.device.  NOTE: A copy of this
+            structre will be made and will be used by the ModemLink protocol.
+            It is therefore perfectly safe to free it's memory, but do NOT
+            close the serial.device until a call to ML_Terminate() is made.
+
+       TagList -- no tag items defined; set to TAG_END.
+
+   RESULTS
+       result -- code indicating success or failure.  Always check the result
+            code and plan for all possibilities.
+
+   WARNING
+       Do NOT close the serial.device associated with SerIO until AFTER a
+       call to ML_Terminate().  This is because the ModemLink protocol will
+       make a copy of the SerIO structure and use the serial.device as if it
+       opened it itself.  So, keep the serial.device open and atleast one
+       copy (or the original) of SerIO until the ModemLink protocol is
+       properly terminated.  Then make a call to CloseDevice() using SerIO.
+
+   BUGS
+
+   SEE ALSO
+       ML_Terminate
+
+modemlink.device/ML_FreePkt                        modemlink.device/ML_FreePkt
+
+
+   NAME
+       ML_FreePkt -- Deallocates memory for a single packet
+
+   SYNOPSIS
+       ML_FreePkt( Pkt )
+                    A0
+
+       void ML_FreePkt( struct LinkPkt * );
+
+   FUNCTION
+       Deallocates all memory associated with a single packet.  This includes
+       the data block pointed to by Pkt->Data.
+
+   INPUTS
+       Pkt -- pointer to LinkPkt struct to be deallocated
+
+   RESULTS
+       None
+
+   WARNING
+       Make sure the Length field of Pkt properly indicates the size of Data.
+       If there is no Data block then set Length and Data to NULL.
+
+   BUGS
+       None
+
+modemlink.device/ML_FreePktList                modemlink.device/ML_FreePktList
+
+
+   NAME
+       ML_FreePktList -- Deallocates a linked list of packets
+
+   SYNOPSIS
+       ML_FreePktList( PktList )
+                       A0
+
+       void ML_FreePktList( struct MinList * );
+
+   FUNCTION
+       Will deallocate all packets in the link list.  This includes the data
+       block for each packet.
+
+   INPUTS
+       PktList -- a linked list of packets
+
+   RESULTS
+       None
+
+   SEE ALSO
+       FreePkt
+
+   BUGS
+       None
+
+modemlink.device/ML_PacketDataSize          modemlink.device/ML_PacketDataSize
+
+
+   NAME
+       ML_PacketDataSize -- derives total amount of data in list of packcets
+
+   SYNOPSIS
+       size = ML_PacketDataSize( PktList )
+       D0                        A0
+
+       ULONG ML_PacketDataSize( struct MinList * );
+
+   FUNCTION
+       Will scan through the linked list of packets and tally up the size
+       of all data blocks.  This does NOT include the size of the packet
+       structures themselves.  This can be very usefull when using
+       ML_DePacketizeData().
+
+   INPUTS
+       PktList -- a linked list of packets
+
+   RESULTS
+       size -- total amount of memory allocated to data blocks in the packets
+            making up the linked list.
+
+   SEE ALSO
+       ML_DePacketizeData, ML_PacketizeData
+
+   BUGS
+       None.
+
+modemlink.device/ML_PacketizeData            modemlink.device/ML_PacketizeData
+
+
+   NAME
+       ML_PacketizeData -- split large memory chunk into multiple packets
+
+   SYNOPSIS
+       result = ML_PacketizeData( PktList, Data, Length, PktSize )
+       D0                         A0       A1    D0      D1
+
+       ULONG ML_PacketizeData( struct MinList *, UBYTE *, ULONG, ULONG );
+
+   FUNCTION
+       Will split the memory chunk pointed to by Data into packets.  Each
+       packet allocated will have a Data block no greater then PktSize.  Be
+       aware that it may allocate a packet with a data block smaller then
+       PktSize.  This happens when PktSize doesn't evenly divide into Length.
+
+       The packets it allocates will be inserted into a linked list.  The
+       MinList structure must be allocated and initialized, but does NOT need
+       to be empty.
+
+       It will not deallocate the memory chunk, but it is safe to deallocate
+       the memory chunk immediatly afterwards.  Note that since it basically
+       makes a second copy of the memory chunk, this can be very memory
+       wastefull.  For large chunks it may be best to manually create packets
+       who's Data pointers point to different positions in the large memory
+       chunk.
+
+       If it can't find enough memory to allocate all packets it will
+       deallocate all packets successfully allocated and return an error.
+
+   INPUTS
+       PktList -- MinList struct initialized by NewList()
+
+       Data -- pointer to memory chunk
+
+       Length -- size of memory chunk (Data)
+
+       PktSize -- maximum size of each packet created
+
+   RESULTS
+       result -- Zero if successful, non-zero otherwise.
+
+   SEE ALSO
+       amiga.lib/NewList
+
+   BUGS
+       None
+
+modemlink.device/ML_SendModemCMDTagList             .../ML_SendModemCMDTagList
+
+
+   NAME
+       ML_SendModemCMDTagList -- Send raw command to modem
+       ML_SendModemCMDTags -- Varargs stub for ML_SendModemCMDTagList
+
+   SYNOPSIS
+       result = ML_SendModemCMDTagList( SerIO, CMD, tagList )
+       D0                               A0     A1   A2
+
+       ULONG ML_SendModemCMDTaglist( struct IOExtSer *, char *,
+            struct TagItem * );
+
+       result = ML_SendModemCMDTags( SerIO, CMD, tag1, ... )
+
+       ULONG ML_SendModemCMDTags( struct IOExtSer *, char *, ULONG, ... );
+
+   FUNCTION
+       This is a general purpose routine designed to issue any modem command.
+       Once the modem command is issued it will wait for a response from the
+       modem.  Valid responses are standard result codes from the modem, PLUS
+       it will check for carrier detect.  Therefore, if the carrier is
+       detected, this routine will return a result code indicating that.
+
+       It is assumed that the command string is a valid modem command.
+       The modem command string (CMD) is passed along to the modem.  However,
+       SendModemCMD() will append the default Suffix ("\r") to the command
+       string before it passes it to the modem, unless it is over-riden by
+       the ML_Suffix tag (see below).  This means that there is no need to
+       include carrige return codes in the command being issued, since
+       SendModemCMD() appends it for you.  To issue a command so that the
+       Suffix is NOT appened to the command use the ML_Suffix tag and set it
+       to NULL.
+
+       For this routine to work it requires the serial device to be already
+       opened.  It will use the IOExtSer struct initialized by OpenDevice()
+       to communicate with the modem.
+
+   INPUTS
+       SerIO -- pointer to initialized IOExtSer structure (from OpenDevice)
+
+       CMD -- pointer to a string containing modem command to issue
+
+       tagList -- (optional) pointer to (an array of) TagItem structures,
+            terminated by the value of TAG_END.  Here is a list of tag items
+            which may be used:
+
+            ML_DialTime - sets the timeout in seconds for ANY modem command
+                 issued, not just dial commands (Default: 45).  ti_Data
+                 contains the new timeout amount.
+
+            ML_Suffix - sets the new Suffix for all modem commands
+                 (default: "\r").  ti_Data points to an array of char.
+
+            ML_OkText - defines the text the modem will use to indicate
+                 successful completion of command (default: "OK").
+                 ti_Data points to an array of char.
+
+            ML_BusyText - defines the text the modem will use to indicate
+                 a busy signal (default: "BUSY").  ti_Data points to an
+                 array of char.
+
+            ML_NoCarrierText - defines the text the modem will use to
+                 indicate there is no carrier (default: "NO CARRIER").
+                 ti_Data points to an array of char.
+
+            ML_NoDialText - defines the text the modem will use to indicate
+                 there is no dial tone on the line (default: "NO DIALTONE").
+                 ti_Data points to an array of char.
+
+   RESULTS
+       result -- returns the result code returned by the modem.  See
+            ModemLink.h for a definition of all possible return codes.
+            Make sure to always check the result and plan for all
+            possibilities.
+
+   SEE ALSO
+       ML_DialTagList, ML_AnswerTagList
+
+   BUGS
+       None
+
+modemlink.device/ML_Terminate                    modemlink.device/ML_Terminate
+
+
+   NAME
+       ML_Terminate -- terminate ModemLink protocol
+
+   SYNOPSIS
+       ML_Terminate( LinkIO )
+                     A0
+
+       void ML_Terminate( struct IOExtLink * );
+
+   FUNCTION
+       This will shut down the ModemLink handler task, which in effect shuts
+       down the ModemLink protocol.  Any outstanding IO requests will be
+       aborted.  Any new IO requests will fail.  To re-establish the
+       ModemLink protocol use ML_EstablishTagList().
+
+   NOTE
+       Before the handler task exits, it sends a kill command to the remote
+       site.  This of course shuts down the remote site as well.  This means
+       that the handler task may shut down on you without warning if it gets
+       a kill signal from the remote site.  Always check the io_Error field
+       of every completed IO request.  If the handler task has shut down all
+       IO requests will fail with an error code of LinkErr_NOPROC.
+
+   INPUTS
+       LinkIO -- pointer to a LinkIO request structure (initialized by
+            ML_EstablishTagList)
+
+   RESULTS
+
+   BUGS
+
+   SEE ALSO
+       ML_EstablishTagList
+
+
+modemlink.lib/ML_AbortIO (lib)                        modemlink.lib/ML_AbortIO
+
+
+   NAME
+       ML_AbortIO -- abort ModemLink.lib I/O command
+
+   SYNOPSIS
+       ML_AbortIO( IOReq )
+       void ML_AbortIO( struct IORequest * );
+
+   FUNCTION
+       This is identical to what ModemLink.device/AbortIO() does.  This
+       routine must be used when linking with ModemLink.lib.
+       ModemLink.device/AbortIO() will not work, and may crash the system
+       when linking with ModemLink.lib.  If using the ModemLink.device, make
+       the exec.library call to AbortIO() instead.
+
+      This function attempts to abort a specified read or write request.
+      If the request being aborted is a WRITE request and is currently
+      active, the IO request will NOT be aborted and will be completed
+      as normal.  If the request is queued, it is painlessly removed.
+      The request will be returned in the same way any completed request
+      is.
+
+      After AbortIO(), you must generally do a WaitIO().
+
+   INPUTS
+       IOReq - pointer to a ModemLink IOReq structure
+
+   RESULTS
+       error - a sign-extended copy of the io_Error field of the IOReq.
+            Make sure to always check the error returned.
+
+   SEE ALSO
+       ML_SendIO, ModemLink.device/AbortIO, exec.library/CheckIO,
+       exec.library/WaitIO
+
+   BUGS
+       AbortIO() has very little information about the IO request and what
+       the handler task is doing with it.  It can check to see if the
+       IO request is queued, and if so, removes it.  However, if it's not
+       queued, all it can do is set the io_Error flag to IOERR_ABORTED and
+       hope the handler task realizes this before it's too late.  This is
+       why once the handler task has started servicing an IO request it must
+       finish it before it aborts it.
+
+modemlink.lib/ML_DoIO (lib)                              modemlink.lib/ML_DoIO
+
+
+   NAME
+       ML_DoIO -- perform ModemLink.lib I/O command and wait for completion
+
+   SYNOPSIS
+       error = ML_DoIO( IOReq )
+       BYTE ML_DoIO( struct IORequest * );
+
+   FUNCTION
+       This routine is intended only to be used when using ModemLink.lib
+       (linked at compile time) and is NOT available in the
+       ModemLink.device (link at run time -- use exec.library DoIO routine
+       for that).  It's only purpose is to provide an API similar to that of
+       exec's device IO routine; DoIO.  Therefore, this routine can only be
+       used to send ModemLink IO requests when linking with ModemLink.lib at
+       compile time.
+
+   INPUTS
+       IOReq - pointer to a ModemLink IOReq structure
+
+   RESULTS
+       error - a sign-extended copy of the io_Error field of the IOReq.
+            Make sure to always check the error returned.
+
+   SEE ALSO
+       ML_SendIO, exec.library/AbortIO, exec.library/DoIO,
+       exec.library/CheckIO, exec.library/WaitIO, exec.library/SendIO
+
+   BUGS
+       None
+
+modemlink.lib/ML_SendIO (lib)                          modemlink.lib/ML_SendIO
+
+
+   NAME
+       ML_SendIO -- initiate a ModemLink.lib I/O command
+
+   SYNOPSIS
+       ML_SendIO( IOReq )
+
+       void ML_SendIO( struct IORequest * );
+
+   FUNCTION
+       This routine is intended only to be used when using ModemLink.lib
+       (linked at compile time) and is NOT available in the
+       ModemLink.device (link at run time -- use exec.library SendIO routine
+       for that).  It's only purpose is to provide an API similar to that of
+       exec's device IO routine; SendIO.  Therefore, this routine can only be
+       used to send ModemLink IO requests when linking with ModemLink.lib at
+       compile time.
+
+       This will make an asyncronous request to the ModemLink.lib to be
+       processed.  Control will be returned immediately without waiting for
+       the command to complete.
+
+       Remember that ModemLink.lib is designed to act like a device, so
+       ML_SendIO is indeed an asyncronous call just like the corresponding
+       exec routine, SendIO.  Therefore, you may use exec's CheckIO() and
+       WaitIO() on a dispatched IO request.  To abort a request you MUST use
+       ML_AbortIO() instead of exec's AbortIO().
+
+       The io_Flags field of the IOReq will be set to zero before the request
+       is sent.  See SendIO() in the Amiga RKM Includes and Autodocs for more
+       details.
+
+   INPUTS
+       IOReq -- pointer to an initialized IOExtLink structure
+
+   RESULTS
+       None
+
+   SEE ALSO
+       ML_DoIO, ML_AbortIO, exec.library/DoIO, exec.library/SendIO,
+       exec.library/CheckIO, exec.library/WaitIO
+
+   BUGS
+       None

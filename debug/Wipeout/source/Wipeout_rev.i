@@ -1,0 +1,18 @@
+VERSION		EQU	1
+REVISION	EQU	31
+
+DATE	MACRO
+		dc.b '6.2.2001'
+		ENDM
+
+VERS	MACRO
+		dc.b 'Wipeout 1.31'
+		ENDM
+
+VSTRING	MACRO
+		dc.b 'Wipeout 1.31 (6.2.2001)',13,10,0
+		ENDM
+
+VERSTAG	MACRO
+		dc.b 0,'$VER: Wipeout 1.31 (6.2.2001)',0
+		ENDM

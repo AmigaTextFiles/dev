@@ -1,0 +1,514 @@
+/*
+ *	File:					Menus.c
+ *	Description:	Global menus
+ *
+ *	(C) 1994,1995, Ketil Hunn
+ *
+ */
+
+#ifndef MENUS_C
+#define MENUS_C
+
+/*** PRIVATE INCLUDES ****************************************************************/
+#include "System.h"
+#include "Menus.h"
+#include "ProjectIO.h"
+#include "TASK_Event.h"
+#include "TASK_Text.h"
+#include "TASK_Attrib.h"
+#include "TASK_Date.h"
+#include "TASK_Find.h"
+#include "GUI.h"
+
+
+/*** DEFINES *************************************************************************/
+#define	TOGGLE			CHECKIT|MENUTOGGLE
+
+#define	IDCMP_NEWPROJECT			10
+#define	IDCMP_OPENPROJECT			11
+#define	IDCMP_INCLUDE					12
+#define	IDCMP_IMPORT					13
+#define	IDCMP_SAVEPROJECT			14
+#define	IDCMP_SAVEPROJECTAS		15
+#define	IDCMP_EXPORT					16
+#define	IDCMP_TEST						17
+#define	IDCMP_ICONIFY					18
+#define	IDCMP_ABOUT						19
+#define	IDCMP_QUIT						20
+
+#define	IDCMP_LASTSAVED				21
+
+#define	IDCMP_FIND						24
+#define	IDCMP_FINDNEXT				25
+#define	IDCMP_REPLACE					26
+#define	IDCMP_REPLACENEXT			27
+
+#define	IDCMP_TEXTWINDOW			29
+#define	IDCMP_DATEWINDOW			30
+#define	IDCMP_ATTRIBWINDOW		31
+#define	IDCMP_USESCREEN				32
+#define	IDCMP_CLOSEWB					33
+#define	IDCMP_SELECTSCREEN		34
+#define	IDCMP_SELECTFONT			35
+#define	IDCMP_ADJUSTCOLOR			36
+
+#define	IDCMP_SAVEWHENEXIT		38
+#define	IDCMP_ACKNOWLEDGE			41
+
+#define	IDCMP_OPENPREFS				44
+#define	IDCMP_SAVEPREFS				45
+#define	IDCMP_SAVEPREFSAS			46
+
+#define	IDCMP_OPERATORS				47
+#define	IDCMP_DISPLAYERS			48
+#define	IDCMP_SIMPLEREFRESH		49
+
+#define	IDCMP_AFFECTALL				50
+#define	IDCMP_PARSEDIRS				51
+
+#define	IDCMP_HELP_CONTENTS			60
+#define	IDCMP_HELP_PREFERENCES	61
+#define	IDCMP_HELP_CHECKER			62
+#define	IDCMP_HELP_EVENTS				63
+#define	IDCMP_HELP_TEXTS				64
+#define	IDCMP_HELP_DATES				65
+#define	IDCMP_HELP_ATTRIBUTES		66
+#define	IDCMP_HELP_HELP					67
+
+/*** GLOBALS *************************************************************************/
+struct Menu	*recallMenu;
+struct List *loaders, *savers, *displayers, *operators;
+
+/*** FUNCTIONS ***********************************************************************/
+__stackext struct List *GetModules(STRPTR dir)
+{
+	register struct FileInfoBlock	*fib;
+	register BPTR									lock, oldlock;
+	register struct List					*list;
+
+#ifdef MYDEBUG_H
+	DebugOut("GetModules");
+#endif
+
+	if(list=InitList())
+		if(fib=AllocDosObject(DOS_FIB, TAG_DONE))
+		{
+			if(lock=Lock(dir, SHARED_LOCK))
+			{
+				oldlock=CurrentDir(lock);
+				if(Examine(lock, fib))
+				{
+					while(ExNext(lock, fib))
+						if(!(fib->fib_Protection & FIBF_EXECUTE))
+							if(Stricmp(fib->fib_FileName+MAX(0, strlen(fib->fib_FileName)-5), ".info"))
+								AddNode(list, fib->fib_FileName);
+				}
+				CurrentDir(oldlock);
+				UnLock(lock);
+			}
+			FreeDosObject(DOS_FIB, fib);  
+		}
+		else
+			FailAlert(MSG_OUTOFMEMORY);
+
+	return list;
+}
+
+BYTE AllocRecallMenu(void)
+{
+	UBYTE moduledir[MAXCHARS];
+
+#ifdef MYDEBUG_H
+	DebugOut("AllocRecallMenu");
+#endif
+
+	sprintf(moduledir, "%s/%s/", startdir, LOADERSDIR);
+	loaders=GetModules(moduledir);
+
+	sprintf(moduledir, "%s/%s/", startdir, SAVERSDIR);
+	savers=GetModules(moduledir);
+
+	sprintf(moduledir, "%s/%s/", startdir, DISPLAYERSDIR);
+	displayers=GetModules(moduledir);
+
+	sprintf(moduledir, "%s/%s/", startdir, OPERATORSDIR);
+	operators=GetModules(moduledir);
+
+	return (BYTE)(recallMenu=egCreateMenu(
+			NM_TITLE,		GetString(&li, MSG_PROJECT),		0, 0L, NULL,
+			NM_ITEM,		GetString(&li, MSG_K_NEW),			0, 0L, IDCMP_NEWPROJECT,
+			NM_ITEM,		NM_BARLABEL,										0, 0L, NULL,
+			NM_ITEM,		GetString(&li, MSG_K_OPEN),			0, 0L, IDCMP_OPENPROJECT,
+			NM_ITEM,		GetString(&li, MSG_K_INCLUDE),	0, 0L, IDCMP_INCLUDE,
+			EG_SUBLIST,	loaders,												0, 0L, LOADERBASE,
+			NM_ITEM,		NM_BARLABEL,										0, 0L, NULL,
+			NM_ITEM,		GetString(&li, MSG_K_SAVE),			0, 0L, IDCMP_SAVEPROJECT,
+			NM_ITEM,		GetString(&li, MSG_K_SAVEAS),		0, 0L, IDCMP_SAVEPROJECTAS,
+			EG_SUBLIST,	savers,													0, 0L, SAVERBASE,
+			NM_ITEM,		NM_BARLABEL,										0, 0L, NULL,
+			NM_ITEM,		GetString(&li, MSG_K_TEST),			0, 0L, IDCMP_TEST,
+			NM_ITEM,		GetString(&li, MSG_K_ICONIFY),	0, 0L, IDCMP_ICONIFY,
+			NM_ITEM,		NM_BARLABEL,										0, 0L, NULL,
+			NM_ITEM,		GetString(&li, MSG_K_QUIT),			0, 0L, IDCMP_QUIT,
+
+			NM_TITLE,		GetString(&li, MSG_EDIT),				0, 0L, NULL,
+			NM_ITEM,		GetString(&li, MSG_K_LASTSAVED),0, 0L, IDCMP_LASTSAVED,
+			EG_SUBLIST,	operators,											0, 0L, OPERATORBASE,
+			NM_ITEM,		NM_BARLABEL,										0, 0L, NULL,
+
+			NM_TITLE,		GetString(&li, MSG_DISPLAYERS),	0, 0L, NULL,
+			EG_LIST,		displayers,											0, 0L, OPERATORBASE,
+
+			NM_TITLE, GetString(&li, MSG_SEARCH),				0, 0L, NULL,
+			NM_ITEM,	GetString(&li, MSG_K_FIND),				0, 0L, IDCMP_FIND,
+			NM_ITEM,	GetString(&li, MSG_K_FINDNEXT),		0, 0L, IDCMP_FINDNEXT,
+			NM_ITEM,	NM_BARLABEL,											0, 0L, NULL,
+
+			NM_ITEM,	GetString(&li, MSG_K_REPLACE),		0, 0L, IDCMP_REPLACE,
+			NM_ITEM,	GetString(&li, MSG_K_REPLACENEXT),0, 0L, IDCMP_REPLACENEXT,
+
+			NM_TITLE,	GetString(&li, MSG_GUI),					0, 0L, NULL,
+			NM_ITEM,	GetString(&li, MSG_K_TEXTS),			TOGGLE, 0L, IDCMP_TEXTWINDOW,
+			NM_ITEM,	GetString(&li, MSG_K_DATES),			TOGGLE, 0L, IDCMP_DATEWINDOW,
+			NM_ITEM,	GetString(&li, MSG_K_ATTRIBUTES), TOGGLE, 0L, IDCMP_ATTRIBWINDOW,
+			NM_ITEM,	NM_BARLABEL,											0, 0L, NULL,
+			NM_ITEM,	GetString(&li, MSG_USESCREEN),		TOGGLE, 0L, IDCMP_USESCREEN,
+			NM_ITEM,	GetString(&li, MSG_SIMPLEREFRESH),TOGGLE, 0L, IDCMP_SIMPLEREFRESH,
+			NM_ITEM,	GetString(&li, MSG_CLOSEWB),			TOGGLE, 0L, IDCMP_CLOSEWB,
+			NM_ITEM,	NM_BARLABEL,											0, 0L, NULL,
+
+			NM_ITEM,	GetString(&li, MSG_SELECTSCREENMODE),0, 0L, IDCMP_SELECTSCREEN,
+			NM_ITEM,	GetString(&li, MSG_SELECTFONT),		0, 0L, IDCMP_SELECTFONT,
+			NM_ITEM,	GetString(&li, MSG_ADJUSTCOLORS), 0, 0L, IDCMP_ADJUSTCOLOR,
+
+			NM_TITLE,	GetString(&li, MSG_SETTINGS),			0, 0L, NULL,
+			NM_ITEM,	GetString(&li, MSG_SAVEWHENEXIT), TOGGLE, 0L, IDCMP_SAVEWHENEXIT,
+			NM_ITEM,	GetString(&li, MSG_ACKNOWLEDGE),	TOGGLE, 0L, IDCMP_ACKNOWLEDGE,
+
+			NM_ITEM,	GetString(&li, MSG_MODULES),			0, 0L, 0,
+			NM_SUB,		GetString(&li, MSG_AFFECTALL),		TOGGLE, 0L, IDCMP_AFFECTALL,
+			NM_SUB,		GetString(&li, MSG_PARSEDIRS),		TOGGLE, 0L, IDCMP_PARSEDIRS,
+			NM_ITEM,	NM_BARLABEL,											0, 0L, NULL,
+
+			NM_ITEM,	GetString(&li, MSG_OPEN),					0, 0L, IDCMP_OPENPREFS,
+			NM_ITEM,	GetString(&li, MSG_SAVE),					0, 0L, IDCMP_SAVEPREFS,
+			NM_ITEM,	GetString(&li, MSG_SAVEAS),				0, 0L, IDCMP_SAVEPREFSAS,
+
+			NM_TITLE, GetString(&li, MSG_HELP),					0, 0L, NULL,
+			NM_ITEM,	GetString(&li, MSG_K_ABOUT),				0, 0L, IDCMP_ABOUT,
+			NM_ITEM,	NM_BARLABEL,												0, 0L, NULL,
+
+			NM_ITEM,	GetString(&li, MSG_K_CONTENTS),		0, 0L, IDCMP_HELP_CONTENTS,
+			NM_ITEM,	GetString(&li, MSG_HELP),					0, 0L, IDCMP_HELP_HELP,
+			NM_ITEM,	GetString(&li, MSG_K_CHECKER),			0, 0L, IDCMP_HELP_CHECKER,
+			NM_ITEM,	GetString(&li, MSG_K_PREFERENCES),	0, 0L, IDCMP_HELP_PREFERENCES,
+			NM_ITEM,	GetString(&li, MSG_EVENTS),				0, 0L, IDCMP_HELP_EVENTS,
+			NM_ITEM,	GetString(&li, MSG_TEXTS),					0, 0L, IDCMP_HELP_TEXTS,
+			NM_ITEM,	GetString(&li, MSG_DATES),					0, 0L, IDCMP_HELP_DATES,
+			NM_ITEM,	GetString(&li, MSG_ATTRIBUTES),		0, 0L, IDCMP_HELP_ATTRIBUTES,
+			EG_END));
+}
+
+void FreeRecallMenu(void)
+{
+#ifdef MYDEBUG_H
+	DebugOut("FreeRecallMenuData");
+#endif
+	if(loaders)
+		FreeList(loaders);
+	if(savers)
+		FreeList(savers);
+	if(displayers)
+		FreeList(displayers);
+	if(operators)
+		FreeList(operators);
+
+	recallMenu=NULL;
+}
+
+void UpdateMenu(struct Menu *menu)
+{
+	register BOOL 	flag;
+
+#ifdef MYDEBUG_H
+	DebugOut("UpdateMenu");
+#endif
+
+	egSetMenuBit(	eventTask.window, menu, NM_ITEMDISABLED,
+								IDCMP_FINDNEXT,			!(findTask.status==STATUS_OPEN | *(finder.findstring)=='\0' ? TRUE:FALSE),
+								IDCMP_REPLACENEXT,	!(findTask.status==STATUS_OPEN | (*(finder.replacestring)=='\0' | *(finder.findstring)=='\0') ? TRUE:FALSE),
+								IDCMP_NEWPROJECT,		flag=!(IsListEmpty(rootlist) ? TRUE:FALSE),
+								IDCMP_INCLUDE,			flag,
+								IDCMP_SAVEPROJECT,	flag,
+								IDCMP_SAVEPROJECTAS,flag,
+								IDCMP_EXPORT,				flag,
+								IDCMP_TEST,					flag,
+								IDCMP_CLOSEWB,			flag=!(guiconfig.usescreen==TRUE ? FALSE:TRUE),
+								IDCMP_SELECTSCREEN,	flag,
+								IDCMP_SELECTFONT,		flag,
+								IDCMP_ADJUSTCOLOR,	flag,
+								NULL);
+
+	egSetMenuBit(	eventTask.window, menu, CHECKED,
+								IDCMP_AFFECTALL, 		guiconfig.affectall,
+								IDCMP_PARSEDIRS, 		guiconfig.parsedirs,
+								IDCMP_TEXTWINDOW, 	textTask.status,
+								IDCMP_DATEWINDOW,		dateTask.status,
+								IDCMP_ATTRIBWINDOW,	attribTask.status,
+								IDCMP_USESCREEN,		guiconfig.usescreen,
+								IDCMP_SIMPLEREFRESH,guiconfig.simplerefresh,
+								IDCMP_CLOSEWB,			guiconfig.closewb,
+								IDCMP_SAVEWHENEXIT,	guiconfig.savewhenexit,
+								IDCMP_ACKNOWLEDGE,	guiconfig.acknowledge,
+								NULL);
+}
+
+void HandleMenus(struct egTask *task, UWORD menuNumber)
+{
+	struct MenuItem	*item;
+	ULONG itemnum;
+
+#ifdef MYDEBUG_H
+	DebugOut("HandleMenus");
+#endif
+
+	while(menuNumber!=MENUNULL)
+	{
+		item=ItemAddress(recallMenu, menuNumber);
+		itemnum=(ULONG)GTMENUITEM_USERDATA(item);
+		switch(itemnum)
+		{
+			case IDCMP_NEWPROJECT:
+				NewProject(FALSE);
+				break;
+			case IDCMP_OPENPROJECT:
+				if(AttemptSemaphore(eventsemaphore))
+				{
+					OpenProject(rootlist, project, FALSE);
+					ReleaseSemaphore(eventsemaphore);
+				}
+				else
+					SEMAPHOREFAIL();
+				break;
+			case IDCMP_INCLUDE:
+				IncludeProject(eventlist, project);
+				break;
+			case IDCMP_SAVEPROJECT:
+				SaveProject(rootlist, prefsfile);
+				break;
+			case IDCMP_SAVEPROJECTAS:
+				SaveProjectAs(rootlist, project);
+				break;
+			case IDCMP_TEST:
+				TestProject();
+				break;
+			case IDCMP_ICONIFY:
+				SafeToQuit(STATUS_ICONIFY, FALSE);
+				break;
+			case IDCMP_ABOUT:
+				About();
+				break;
+			case IDCMP_QUIT:
+				SafeToQuit(STATUS_CLOSED, FALSE);
+				break;
+
+			case IDCMP_LASTSAVED:
+				LastSaved(FALSE);
+				break;
+			case IDCMP_AFFECTALL:
+				guiconfig.affectall=egIsMenuItemChecked(recallMenu, IDCMP_AFFECTALL);
+				break;
+			case IDCMP_PARSEDIRS:
+				guiconfig.parsedirs=egIsMenuItemChecked(recallMenu, IDCMP_PARSEDIRS);
+				break;
+
+			case IDCMP_FIND:
+				OpenFindTask(FALSE);
+				break;
+			case IDCMP_FINDNEXT:
+				FindReplace();
+				break;
+			case IDCMP_REPLACE:
+				OpenFindTask(TRUE);
+				break;
+			case IDCMP_REPLACENEXT:
+				{
+					BOOL oldmode=finder.replacemode;
+
+					finder.replacemode=TRUE;
+					FindReplace();
+					finder.replacemode=oldmode;
+				}
+				break;
+
+			case IDCMP_TEXTWINDOW:
+				if(egIsMenuItemChecked(recallMenu, IDCMP_TEXTWINDOW) & textTask.status!=STATUS_OPEN)
+					OpenTextTask();
+				else
+				{
+					textTask.status=STATUS_CLOSED;
+					if(task!=&textTask)
+						egCloseTask(&textTask);
+				}
+				break;
+			case IDCMP_DATEWINDOW:
+				if(egIsMenuItemChecked(recallMenu, IDCMP_DATEWINDOW) & dateTask.status!=STATUS_OPEN)
+					OpenDateTask();
+				else
+				{
+					if(task!=&dateTask)
+						CloseDateTask();
+					dateTask.status=STATUS_CLOSED;
+				}
+				break;
+			case IDCMP_ATTRIBWINDOW:
+				if(egIsMenuItemChecked(recallMenu, IDCMP_ATTRIBWINDOW) & attribTask.status!=STATUS_OPEN)
+					OpenAttribTask();
+				else
+				{
+					if(task!=&attribTask)
+						egCloseTask(&attribTask);
+					attribTask.status=STATUS_CLOSED;
+				}
+				break;
+
+			case IDCMP_USESCREEN:
+				if(FALSE==(guiconfig.usescreen=egIsMenuItemChecked(recallMenu, IDCMP_USESCREEN)))
+					SetColors(recallscreen->ViewPort.ColorMap, guiconfig.colors);
+				SafeToQuit(STATUS_RESET, FALSE);
+				break;
+			case IDCMP_SIMPLEREFRESH:
+				guiconfig.simplerefresh=egIsMenuItemChecked(recallMenu, IDCMP_SIMPLEREFRESH);
+				SafeToQuit(STATUS_RESET, FALSE);
+				break;
+			case IDCMP_CLOSEWB:
+				guiconfig.closewb=egIsMenuItemChecked(recallMenu, IDCMP_CLOSEWB);
+				CloseWB(guiconfig.closewb);
+				break;
+
+			case IDCMP_SELECTSCREEN:
+				SleepAll();
+				if(IntuitionBase->LibNode.lib_Version<38)
+				{
+					if(ReqToolsBase==NULL)
+						ReqToolsBase=	(struct ReqToolsBase *)OpenLibrary(REQTOOLSNAME, REQTOOLSVERSION);
+					if(ReqToolsBase)
+						if(RT_SelectScreen(eventTask.window, &guiconfig.system))
+							if(guiconfig.usescreen)
+								SafeToQuit(STATUS_RESET, FALSE);
+					else
+						FailRequest(eventTask.window, MSG_LIBRARYNOTFOUND, (APTR)REQTOOLSNAME, (APTR)REQTOOLSVERSION);
+				}
+				else
+					if(ScreenModeRequest(eventTask.window,
+											MSG_SELECTSCREENMODE,
+											&guiconfig.system,
+											TRUE,
+											MSG_OK))
+						if(guiconfig.usescreen)
+							SafeToQuit(STATUS_RESET, FALSE);
+				WakeAll();
+				break;
+			case IDCMP_SELECTFONT:
+				SleepAll();
+				if(FontRequest(eventTask.window,
+										MSG_SELECTFONT,
+										&guiconfig.screenFont,
+										FOF_DOSTYLE,
+										MSG_OK))
+					if(guiconfig.usescreen)
+						SafeToQuit(STATUS_RESET, FALSE);
+				WakeAll();
+				break;
+			case IDCMP_ADJUSTCOLOR:
+				AdjustPalette(eventTask.window);
+				break;
+
+			case IDCMP_OPENPREFS:
+				if(FileRequest(	eventTask.window,
+												MSG_SELECTGUI,
+												guiname,
+												NULL,
+												NULL,
+												MSG_OK))
+					SafeToQuit(STATUS_RESETGUI, FALSE);
+				break;
+			case IDCMP_SAVEPREFS:
+				WriteGUI(&guiconfig, RECGUIENVARC);
+				WriteGUI(&guiconfig, RECGUIENV);
+				break;
+			case IDCMP_SAVEPREFSAS:
+				SaveGUI(&guiconfig, guiname);
+				break;
+
+			case IDCMP_SAVEWHENEXIT:
+				guiconfig.savewhenexit=egIsMenuItemChecked(recallMenu, IDCMP_SAVEWHENEXIT);
+				break;
+			case IDCMP_ACKNOWLEDGE:
+				guiconfig.acknowledge=egIsMenuItemChecked(recallMenu, IDCMP_ACKNOWLEDGE);
+				break;				
+
+			case IDCMP_HELP_CONTENTS:
+				egShowAmigaGuide(eg, NULL);
+				break;
+
+			case IDCMP_HELP_HELP:
+				egShowAmigaGuide(eg, "Help");
+				break;
+
+			case IDCMP_HELP_PREFERENCES:
+				egShowAmigaGuide(eg, "UsingPrefs");
+				break;
+
+			case IDCMP_HELP_CHECKER:
+				egShowAmigaGuide(eg, "Running");
+				break;
+
+			case IDCMP_HELP_EVENTS:
+				egShowAmigaGuide(eg, "MainWindow");
+				break;
+
+			case IDCMP_HELP_TEXTS:
+				egShowAmigaGuide(eg, "TextWindow");
+				break;
+
+			case IDCMP_HELP_DATES:
+				egShowAmigaGuide(eg, "DateWindow");
+				break;
+
+			case IDCMP_HELP_ATTRIBUTES:
+				egShowAmigaGuide(eg, "AttribWindow");
+				break;
+
+			default:
+				LaunchModule(itemnum);
+				break;
+		}
+		menuNumber=item->NextSelect;
+	}
+}
+
+void About(void)
+{
+	UBYTE count[MAXCHARS], regto[MAXCHARS];
+
+	if(keyok)
+		sprintf(regto, GetString(&li, MSG_REGISTEREDTO), key.name);
+	else
+		strcpy(regto, GetString(&li, MSG_UNREGISTEREDCOPY));
+
+	SleepAll();
+	sprintf(count, GetString(&li, MSG_PROJECTCONTAINSNEVENTS), CountAll(rootlist));
+	egRequest(eventTask.window,
+						PROGTITLE,
+						PROGNAME " " VERS "\n"
+						COPYRIGHT "\n\n"
+						"%s\n\n"
+						"%s",
+						GetString(&li, MSG_OK),
+						regto,
+						count);
+	WakeAll();
+}
+
+#endif

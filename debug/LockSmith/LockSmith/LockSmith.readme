@@ -1,0 +1,283 @@
+Short:    debugging tool to detect semaphore conflicts
+Uploader: thorfdbg@alumni.tu-berlin.de (Thomas Richter)
+Author:	  thorfdbg@alumni.tu-berlin.de (Thomas Richter)
+Type:     dev/debug
+Requires: Os 2.04
+Version:  1.0
+Architecture: m68k-amigaos
+
+-----------------------------------------------------------------------------
+
+This tool help to hunt down semaphore conflicts, or short
+"deadlocks". It is primarily targeted at developers.
+
+What is a semaphore?
+
+A semahore (actually, these structures are called "monitors" outside
+AmigaOs) is a data structure that grants exclusive access to a
+resource, such that only a single task can operate on a data structure
+at a time. Semaphores are a service provided by the exec.library. If a
+task obtains a semaphore, it locks the corresponding resource for
+exclusive access by this task. Any other task also attempting to
+obtain the same semaphore at this time will either block (through
+ObtainSemaphore()) or access will fail (AttemptObtainSemaphore()).
+Any task waiting on a blocked semaphore will be granted access as soon
+as the first task releases the semaphore (ReleaseSemaphore()).
+
+What is a semaphore conflict?
+
+If, in a complex system, at least two semaphores are locked by two
+tasks, though the order in which they are obtained is not defined, a
+situation may appear where the tasks lock out themselves such that the
+program state cannot progress anymore. This is called a
+"deadlock". Depending on the tasks involved in such a deadlock, the
+mouse pointer may freeze, or the disk may freeze, or a program may
+freeze, or a window may freeze...
+
+How do such semaphore conflicts arise?
+
+It takes at least two semaphores (A and B) and two tasks (1 and
+2). Consider that task 1 first obtains semaphore A, then a task switch
+gives task 2 the CPU. Task 2 obtains semaphore B. While holding
+semaphore B, task 2 tries to obtain semaphore A, but is blocked out
+because task 1 holds it already. Hence, the exec scheduler gives task
+1 the CPU again. If task 1 now tries to obtain semaphore B, none of
+the tasks can progress anymore. Task 1 holds semaphore A, and task 2
+holds semaphore B, but none can progress as each requires the
+semaphore of the other task.
+
+How can LockSmith help?
+
+LockSmith will, upon pressing a "magic key", report which semaphores
+are held by which tasks. If you see there a circular dependency as the
+above, something is wrong with your program logic. It is necessary to
+define a strict order in which semaphores are locked. Unfortunately,
+many Os calls, in particular around intuition and layers, obtain locks
+implicitly, and hence require careful consideration of the semaphore
+dependencies.
+
+Locksmith is best combined with SegTracker, such that it can report in
+which hunk and offset of which program the deadlock was triggered.
+
+If the "magic key" is pressed, LockSmith will print for every semaphore:
+
+1) The name of the task that is currently waiting on the semaphore,
+along with its address,
+
+2) The name of the task that created the semaphore, if this
+information is available,
+
+3) The name of the task that is currently holding the semaphore, along
+with its address,
+
+4) A stack dump of the task that is currently blocked at obtaining the
+semaphore. If addresses in the stack dump point to known segments
+tracked by SegTracker, it also prints the hunk number and offset of
+the program within which the address on the stack belongs.
+
+The output of LockSmith reads very much like the output of MuForce,
+see below for an example.
+
+
+Can LockSmith "unlock" the semaphores and let the Amiga continue to
+operate?
+
+No. This would also be dangerous as it is unclear which task is
+allowed to receive which semaphore. LockSmith is a debugging tool
+helping to detect semaphore conflicts in programs, and then resolving
+them by fixing dependency problems of semaphores. It is not a program
+that magically unlocks semaphore locks (despite its name). That is up
+to you to fix the software. It pinpoints at the problem, but it
+doesn't resolve it.
+
+
+-----------------------------------------------------------------------------
+
+Usage:
+
+LockSmith should be run early in the startup-sequence, but after
+SegTracker.  Whether you place LockSmith before or after
+MuForce/MuGuardianAngel does not matter.
+
+In particular, ensure that *no patches* are installed into the
+semaphore calls of exec as otherwise LockSmith cannot operate
+correctly. Such patches can be identified by running "SaferPatches"
+(by the same author) early in the startup-sequence as well, and then
+run "ShowPatches" from the workbench to list the installed
+patches. The only permissible patch into the "Semaphore" calls of exec
+are those coming from LockSmith itself.
+
+LockSmith dumps its output over the serial console, at 9600 baud, 8
+bits, no parity, similar to MuForce and MuGuardianAngle. While it is
+in principle possible to capture the output of the serial port with
+Sashimi or similar tools, it is - in particular for LockSmith - not
+generally advisable. The reason is that the Sashimi output goes
+through the console, and printing through the console requires locking
+some resources by semaphores. Though this is what is to be debugged in
+first place, and obtaining a semaphore in a critical situation may do
+more harm than good.
+
+Hence, it is generally a better idea to connect the Amiga to a serial
+terminal, e.g. a PC running MiniCom, or a second Amiga, by a
+null-modem cable.
+
+
+The following excerpt from the startup-sequence would work:
+
+SetPatch >NIL:
+SegTracker 
+run LockSmith <>NIL:
+
+You can abort LockSmith any time by sending it a Control-C with the
+BREAK command.
+
+------------------------------------------------------------------------------
+
+Synopsis:
+
+LockSmith KEYCODE/N,STACKLINES/N
+
+KEYCODE is the keyboard code (NOT an ASCII code) in decimal of the
+"magic key" upon which LockSmith analyzes semaphores. It defaults to
+69 (hex 0x45), which is the key code of the ESC key on the top left of
+the keyboard.
+
+STACKLINES is the number of stack lines LockSmith is supposed to dump,
+along with checking them through SegTracker. By default, 16 lines are
+analyzed. Each line covers 16 bytes (4 long words to 4 bytes each).
+
+------------------------------------------------------------------------------
+
+How to test LockSmith?
+
+This archive contains a small test-case that provokes a deadlock
+situation through a simple program "LockOut". Simply run(!) it
+*twice*(!) from the shell:
+
+run Lockout
+run Lockout
+
+Then press the "magic key", i.e. ESC by default. The result is a
+LockSmith dump similar to the following:
+
+Task lockout at 08678428 locked on semaphore <lockout> at 085F5A04
+created by lockout, currently owned by lockout at 08676390
+Stck: 0824A936 0824AE3E 085F5A18 085F5A14 08678428 085F5A04 085FEE88 085F5A04
+----> 0867A48C - "lockout" Hunk 00000001 Offset 00000050
+----> 0867A490 - "lockout" Hunk 00000001 Offset 0000004C
+----> 0867A498 - "lockout" Hunk 00000001 Offset 0000003C
+----> 0867A49C - "lockout" Hunk 00000001 Offset 00000000
+----> 0867A4A0 - "lockout" Hunk 00000001 Offset 0000003C
+Stck: 085FEE88 085FEC8C 0867A4B8 00F9FE9E 00FA06D6 00001000 086793B8 0AB64000
+----> 0867A4A4 - "lockout" Hunk 00000001 Offset 00000000
+----> 0867A4A8 - "lockout" Hunk 00000000 Offset 00000044
+----> 0867A4B0 - "ROM - dos 40.3 (1.4.93)" Hunk 00000000 Offset 000002F6
+----> 0867A4B4 - "ROM - dos 40.3 (1.4.93)" Hunk 00000000 Offset 00000B2E
+Stck: 02469B40 003C0014 000442AB 001242AB 000E42AB 0016276F 0014000A 4A866F0E
+Stck: 202C0014 6704220B 6604720E 600E2006 204B226C 00146100 2DEA7200 2E016708
+Stck: 91C82948 00146004 DDAC0014 20074CDF 38C0DEFC 00244E75 9EFC0024 48E7033C
+Stck: 2E007024 2A4841EF 00186100 25F82879 0868F198 60000150 202D0004 670C7200
+Stck: 322C0014 B0816600 013A266C 00082F53 002C2F0D 93C941EF 001C700E 6100FB60
+Stck: 584F2C00 6C067037 60000124 42AF002C 4AAD0014 670000F4 246D0018 200A6700
+Stck: 00EA356C 0014000C 7000302C 001A2540 000841EC 001C43EA 000E7044 6100F2E8
+Stck: 256F0018 00044A86 6F0E202D 00146704 220A6604 720E600E 2006204A 226D0014
+Stck: 61002D20 72004A81 6700009C 20016000 00BE4A87 670E2053 70001028 0001BE80
+Stck: 66000088 2F530030 2F6B0008 0024700C 2F6B0004 00382F0D 93C941EF 001C6100
+Stck: FABE584F 2C006C06 70376000 00824AAD 00146756 226D0018 2009674E 33730162
+Stck: 000C0014 000C7000 302B0018 23400008 236B001C 000E236F 00180004 4A866F0E
+Stck: 202D0014 67042209 6604720E 60102006 206D0018 226D0014 61002C88 72004A81
+Stck: 67042001 6028DDAD 0014266B 0010200B 6600FF60 91C82F48 00382F48 00242F48
+
+This indicates the following: The invocation of the lockout program
+with the task structure at 08678428 is currently blocked at the
+semaphore 085F5A04 whose name is also <lockout>. This is the test semaphore.
+
+The semaphore was created by the program lockout (too, but its first
+invocation), and it is owned (blocked) by the first invocation of
+lockout, whose task structure is located at 08676390. Note that this
+is a different task address than the first, so we are dealing with two
+programs with the same name.
+
+------------------------------------------------------------------------------
+
+                         The THOR-Software Licence (v2, 24th June 1998)
+
+
+This License applies to the computer programs known as the "LockSmith" 
+and "LockOut". The "Program", below, refers to such program. The
+"Archive" refers to the package of distribution, as prepared by the author
+of the Program, Thomas Richter. Each licensee is addressed as "you".
+
+
+
+The Program and the data in the archive are freely distributable
+under the restrictions stated below, but are also Copyright (c)
+Thomas Richter.
+
+Distribution of the Program, the Archive and the data in the Archive by a
+commercial organization without written permission from the author to any
+third party is prohibited if any payment is made in connection with such
+distribution, whether directly (as in payment for a copy of the Program) or
+indirectly (as in payment for some service related to the Program, or
+payment for some product or service that includes a copy of the Program
+"without charge"; these are only examples, and not an exhaustive enumeration
+of prohibited activities).
+
+
+However, the following methods of distribution
+involving payment shall not in and of themselves be a violation of this
+restriction:
+
+
+(i) Posting the Program on a public access information storage and
+retrieval service for which a fee is received for retrieving information
+(such as an on-line service), provided that the fee is not
+content-dependent (i.e., the fee would be the same for retrieving the same
+volume of information consisting of random data).
+
+
+(ii) Distributing the Program on a CD-ROM, provided that
+
+a) the Archive is reproduced entirely and verbatim on such CD-ROM, including
+especially this licence agreement;
+
+b) the CD-ROM is made available to the public for a nominal fee only,
+
+c) a copy of the CD is made available to the author for free except for
+shipment costs, and
+
+d) provided further that all information on such CD-ROM is redistributable
+for non-commercial purposes without charge.
+
+
+Redistribution of a modified version of the Archive, the Program or the
+contents of the Archive is prohibited in any way, by any organization,
+regardless whether commercial or non-commercial. Everything must be kept
+together, in original and unmodified form.
+
+
+
+
+Limitations.
+
+
+THE PROGRAM IS PROVIDED TO YOU "AS IS", WITHOUT WARRANTY. THERE IS NO
+WARRANTY FOR THE PROGRAM, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD PARTY RIGHTS. THE ENTIRE
+RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM IS WITH YOU. SHOULD
+THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECESSARY
+SERVICING, REPAIR OR CORRECTION.
+
+
+IF YOU DO NOT ACCEPT THIS LICENCE, YOU MUST DELETE THE PROGRAM, THE ARCHIVE
+AND ALL DATA OF THIS ARCHIVE FROM YOUR STORAGE SYSTEM. YOU ACCEPT THIS
+LICENCE BY USING OR REDISTRIBUTING THE PROGRAM.
+
+
+                                                        Thomas Richter
+
+-----------------------------------------------------------------------------
+
+So long,
+	Thomas			(May 2018)

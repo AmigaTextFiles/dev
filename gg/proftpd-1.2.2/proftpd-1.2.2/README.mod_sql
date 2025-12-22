@@ -1,0 +1,1080 @@
+******************************************************************************
+IMPORTANT UPGRADE INFORMATION
+
+If you're moving from the mod_sqlpw which was included with
+versions of ProFTPD prior to 1.2rc3, and all you want to do is
+maintain your current setup, you MUST set the following two
+directives:
+
+'SQLDoGroupAuth' to OFF.
+'SQLEncryptedPasswords' to ON unless you've specified it as OFF.
+
+If you use the Postgres backend, and you depend on the PostgresPort to
+default to 0, you now need to make that explicit by setting:
+
+'PostgresPort' to 0.
+
+Please read the 'Setup Notes' section, or at least check the directive
+documentation for 'SQLProcessGrEnt' and 'SQLProcessPwEnt'.  These
+directives can have a significant effect on the way mod_sql plays with
+your database.
+
+Please read the section on Deprecated Directives.  This will effect
+EVERYONE for all versions of ProFTPD > 1.2 final.
+
+New Directives:
+
+SQLAuthTypes, SQLConnectInfo, SQLDefaultGID, SQLDefaultUID, SQLDoAuth,
+SQLDoGroupAuth, SQLGroupGIDField, SQLGroupMembersField, SQLGroupTable,
+SQLGroupnameField, SQLHomedirOnDemand, SQLMinID, SQLMinUserUID,
+SQLMinUserGID, SQLLog, SQLProcessGrEnt, SQLProcessPwEnt,
+SQLShellField, SQLUserTable, SQLWhereClause
+
+Deprecated Directives:
+
+MySQLInfo, PostgresInfo, PostgresPort, SQLEmptyPasswords,
+SQLEncryptedPasswords, SQLKey, SQLKeyField, SQLPlaintextPasswords,
+SQLSSLHashedPasswords, SQLScrambledPasswords 
+
+This header will be removed for all versions of ProFTPD > 1.2 
+******************************************************************************
+
+mod_sql v.3.2.3
+=======
+
+mod_sql is a module that allows ProFTPD to do user authentication and
+name/UID/GID lookups against a SQL database.  Backend modules are
+currently provided for MySQL and Postgres.
+
+Please check the mod_sql homepage for any updates to the source or to this
+file: http://www.lastditcheffort.org/aah/mod_sql.html
+
+Sections:
+
+1. How do I use ProFTPD with mod_sql?
+2. How do I setup my SQL database for use with mod_sql?
+3. Setup Notes
+4. Directives
+5. Deprecated Directives
+6. Changes from mod_sqlpw v.2.0 to mod_sql v.3.0
+7. Thanks
+8. Author
+
+=====================================
+1. How do I use ProFTPD with mod_sql?
+=====================================
+
+The current supported version of mod_sql is distributed with ProFTPD.
+
+Everything in this tarball belongs in the contrib subdirectory of the
+ProFTPD source tree:
+
+# cd contrib
+# tar -xzvf mod_sql-3.2.3.tar.gz
+
+To build ProFTPD with mod_sql support, call configure with the
+following arguments (for example):
+
+If you're using the MySQL backend:
+
+./configure --with-modules=mod_sql:mod_sql_mysql
+
+If you're using the Postgres backend:
+
+./configure --with-modules=mod_sql:mod_sql_postgres
+
+You will need to tell configure how to find your database-specific
+libraries and header files; I use the MySQL backend and call configure 
+like this:
+
+./configure --with-modules=mod_sql:mod_sql_mysql \
+            --with-includes=/usr/local/include \
+            --with-libraries=/usr/local/lib/mysql 
+
+Now, read the Directives section below.
+
+===================================================
+2. How do I setup my database for use with mod_sql?
+===================================================
+
+I'm assuming you know how to use your database system.  
+
+At the minimum, mod_sql must be able to access a table with two
+columns: userid and passwd.  For full functionality, you probably need
+to do more, including creating another database table to hold group
+information.
+
+In the following table headings, 'COLUMN' is the column name, 'TYPE'
+is the datatype expected (text or numeric), 'R' means "required
+column", 'N' means "if this column exists, are NULL values
+allowed". and 'USE' gives a *very* brief description of what goes in
+there.
+
+
+USERTABLE:  This table *MUST* exist in the database.
+
+COLUMN		TYPE	R	N	USE
+---------------------------------------------------------
+userid		text	Y	N	user's login id
+uid		num	N	Y	user's uid
+gid		num	N	Y	user's gid
+passwd		text	Y	N	user's password
+shell		text	N	Y	user's shell
+homedir**	text	N	Y	user's homedir
+count		num	N	N	login counter
+
+**see the description of the directives SQLHomedir and SQLHomedirField
+
+
+
+GROUPTABLE:  For full functionality of this module, this table should
+exist.  If you elect *NOT* to create it, you *MUST* set the
+'SQLDoGroupAuth' directive to 'OFF'.
+
+COLUMN		TYPE	R	N	USE
+---------------------------------------------------------
+groupname	text	Y	N	group's name
+gid		num	Y	N	group's gid
+members		text	Y	Y	group's members
+
+Note: multiple members per group must be separated by commas and
+should not include whitespace.
+
+Note: mod_sql will concatenate all matching group rows -- that is, you
+can have multiple rows for each group with only one member per group,
+or you can have a single row with multiple groups, or you can mix and
+match.
+
+==============
+3. Setup Notes
+==============
+
+A common question on the proftpd-users mailing list is "why does
+mod_sql iterate through every user in the database?"  Here's why.
+
+mod_sql is designed to handle all authentication functions that
+ProFTPD core throws at it.  This includes the functions that iterate
+through all users (setpwent, getpwent, endpwent) and the functions
+that iterate through all groups (setgrent, getgrent, endgrent).
+
+If you see mod_sql iterating through all groups or users, it's doing
+so because it's been asked to do so by ProFTPD core (not because
+of some perverse internal desire).  Since there's no good way to keep
+an open query around without adding more to the various backend
+modules than we already have, mod_sql pre-caches all users when
+setpwent() is called, and pre-caches all groups when setgrent() is
+called.  This allows the getpwent() and getgrent() calls to be simple,
+at the cost of front-loading the time cost.
+
+In simple situations, these functions are never called.  When you
+start limiting access to directories, files, or various FTP commands
+based on user or group, ProFTPD needs to iterate through the users and
+groups to check permissions.  A basic ftp server, including virtual
+and anonymous servers, will never make these (potentially, very)
+expensive calls.
+
+The SQLProcessPwEnt and SQLProcessGrEnt were added to give people a
+way of dumbing-down mod_sql; by default mod_sql will handle the
+various pwent() and grent() calls, when these directives are set to
+off, mod_sql simply passes the request on to whatever auth handlers
+exist in the system.  Keep in mind that using these directives means
+ProFTPD is *not* using the same information to authenticate the user
+as it is to control the users actions during their session.
+
+For those of you who have used mod_sql in the past, these directives
+should probably be set to 'off'.  Versions of mod_sql prior to 3.2.0
+(or thereabouts) didn't handle the {set|get|end}{pw|gr}ent calls at
+all, so by setting these directives to off you lose no functionality.
+Those of you new to mod_sql will need to consider your needs -- is
+the cost of iterating through every user stored in the database worth
+the ability to limit access based on users/groups from the database?
+If not, you'll need to re-evaluate the way you're using the database,
+and where you should be storing your user/group information.
+
+Finally, the cacheing method used is planned to change in the next
+major release of ProFTPD.  By that time, we should have a way to do
+cross-session caches of the database info, so the data won't be
+re-read each time a session is started.
+
+=============
+4. Directives
+=============
+
+Directives are listed here in alphabetical order.  If you're just
+starting with mod_sql, you'll probably be most interested in
+'SQLConnectInfo', 'SQLAuthTypes', and the various directives that
+control which tables and fields to pull data from ('SQLUserTable',
+'SQLUserField', etc).  Most directives have reasonable defaults; in
+the most extreme case you'll only have to set three directives to make
+this module work: 'SQLConnectInfo', 'SQLAuthTypes', and 'SQLHomedir'.
+
+Compatibility refers to the version of ProFTPD, NOT the version of
+mod_sql / mod_sqlpw.
+
+-------------------
+SQLAuthTypes
+
+Syntax: SQLAuthTypes [OpenSSL] [Crypt] [Backend] [Plaintext] [Empty]
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+This directive deprecates 'SQLEmptyPasswords',
+'SQLScrambledPasswords', 'SQLSSLHashedPasswords',
+'SQLPlaintextPasswords', and 'SQLEncryptedPasswords'.
+
+Specifies the allowed authentication types and their check order.  YOU
+MUST SPECIFY AT LEAST ONE AUTHENTICATION METHOD.  
+
+For example:
+
+SQLAuthTypes Crypt Empty
+
+means check whether the password in the database matches in UNIX
+crypt() format; if that fails, check to see if the password in the
+database is empty (matching ANY given password); if that fails,
+mod_sql refuses to authenticate the user.
+
+Current Types
+
+Plaintext: allows passwords in the database to be in plaintext
+
+OpenSSL:   allows passwords in the database to be of the form
+	   '{digestname}hashedvalue'.  This check is only available if
+	   you define 'HAVE_OPENSSL' when you compile proftd and you
+	   link with the OpenSSL 'crypto' library. 
+
+Crypt:     allows passwords in the database to be in UNIX crypt() form
+
+Backend:   a database-specific backend check function.  Not all
+	   backends support this.  Specifically, the MySQL backend
+	   uses this type to authenticate MySQL 'PASSWORD()' encrypted
+	   passwords.  The Postgres backend does nothing.  CAREFUL.
+           If your mysql activity log is world-readable, the user
+           password WILL BE VISIBLE.
+
+Empty:     allows empty passwords in the database, which match against
+	   ANYTHING the user types in.  The database field must be a
+	   truly empty string -- that is, NULL values are never
+	   accepted.  BE VERY CAREFUL WITH THIS AUTHTYPE.
+
+-------------------
+SQLAuthoritative
+
+Syntax: SQLAuthoritative on|off
+Default: off
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+Specifies whether authentication stops with mod_sql, or whether other
+authentication handlers will be tried.  The default is off -- other
+handlers will be tried.
+
+This is a *very* powerful directive.  If SQLAuthoritative is set,
+*all* authorization goes through your SQL database -- group lookups,
+uid lookups, etc.  See the 'SQLDoAuth' and 'SQLDoGroupAuth'
+directives, too. 
+
+-------------------
+SQLConnectInfo
+
+Syntax: SQLConnectInfo connection-info [username] [password]
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+This directive deprecates 'MySQLInfo', 'PostgresInfo', and
+'PostgresPort'.
+
+Specifies connection information.  Connection-info specifies the
+database, host, port, and other backend-specific information.
+username and password specify the username and password to connect as,
+respectively.  Both default to NULL, which the backend will treat in
+some backend-specific manner. If you specify a password, you MUST
+specify a username.
+
+Any given backend has the opportunity (but not the responsibility) to
+check for syntax errors in the connection-info field at proftpd
+startup, but you shouldn't expect semantic errors (i.e., can't connect
+to the database) to be caught until mod_sql attempts to connect for a
+given host. 
+
+The MySQL and Postgres backends connection-info is expected to be of
+the form: 
+
+database[@hostname][:port]
+
+hostname will default to a backend-specific hostname (which happens to
+be 'localhost' for both the MySQL and Postgres backends), and port
+will default to a backend-specific default port (3306 for the MySQL
+backend, 5432 for the Postgres backend).
+
+Examples:
+
+SQLConnectInfo  ftpusers@foo.com
+
+means "Try connecting to the database 'ftpuser' via the default port
+at 'foo.com'.  Use a NULL username and a NULL password."
+
+SQLConnectInfo  ftpusers:3000 admin
+
+means "Try connecting to the database 'ftpuser' via port 3000 at
+'localhost'.  Use the username 'admin' and a NULL password."
+
+SQLConnectInfo  ftpusers@foo.com:3000 admin mypassword
+
+means "Try connecting to the database 'ftpuser' via port 3000 at
+'foo.com'.  Use the username 'admin' and the password 'mypassword'"
+
+Backends may require different information in the connection-info
+field; check your backend module for specifics.
+
+-------------------
+SQLDefaultGID
+
+Syntax: SQLDefaultGID defaultgid
+Default: 65533
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+Sets the default GID for users.  Must be greater than SQLMinUserGID.
+
+-------------------
+SQLDefaultUID
+
+Syntax: SQLDefaultUID defaultuid
+Default: 65533
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+Sets the default UID for users.  Must be greater than SQLMinUserUID.
+
+-------------------
+SQLDoAuth
+
+Syntax: SQLDoAuth on|off
+Default: on
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+Activates SQL authentication.  This overrides all other directives --
+SQLDoGroupAuth and SQLAuthoritative are ineffectual if SQLDoAuth is off.
+
+-------------------
+SQLDoGroupAuth
+
+Syntax: SQLDoGroupAuth on|off
+Default: on
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+This directive causes mod_sql to pretend it has no group information.
+It necessarily breaks ALL CONFIG FILES up to 1.2.0rc2, since mod_sql
+now assumes that group information is available UNLESS this directive
+is set to OFF.
+
+This DOESN'T override SQLAuthoritative -- if SQLAuthoritative is set
+to 'On' but SQLDoGroupAuth is set to 'Off', all group-related queries
+will fail without giving other modules the opportunity to handle them.
+
+Prior to 1.2.0, there was no way to provide group information from the
+database.  This caused a few bugs, and reduced the functionality of
+this module.
+
+-------------------
+SQLGidField
+
+Syntax: SQLGidField fieldname
+Default: gid
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+Specifies the field in the user table that holds the user's GID.  When
+a GID is retrieved from the database it is checked against the value
+of SQLMinUserGID.  If the database has no value (missing column) or the
+retrieved value is less than SQLMinUserGID, the user's GID is set to
+SQLDefaultGID.
+
+-------------------
+SQLGroupGIDField
+
+Syntax: SQLGroupGIDField fieldname
+Default: gid
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+Specifies the field in the group table that holds the group's GID.
+
+-------------------
+SQLGroupMembersField
+
+Syntax: SQLGroupMembersField fieldname
+Default: members
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+Specifies the field in the group table that holds the group's member
+list. 
+
+-------------------
+SQLGroupTable
+
+Syntax: SQLGroupTable tablename
+Default: groups
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+Specifies the name of the table that holds group information.
+
+-------------------
+SQLGroupnameField
+
+Syntax:	SQLGroupnameField fieldname
+Default: groupname
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+Specifies the field in the group table that holds the group name.
+
+-------------------
+SQLHomedir
+
+Syntax: SQLHomedir /path/to/virtual/site
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+Specifies a default homedir for all users authenticated with this
+module, overriding any SQLHomedirField directive.  If no homedir is
+set with either directive, authentication fails.
+
+-------------------
+SQLHomedirField
+
+Syntax: SQLHomedirField fieldname
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+Specifies the field in the user table that holds the user's home
+directory.  The directory can also be defined using the 'SQLHomedir'
+directive. If no homedir is set with either directive, authentication fails.
+
+-------------------
+SQLHomedirOnDemand
+
+Syntax: SQLHomedirOnDemand on|off
+Default: off
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+Specifies whether to automatically create a user's home directory if
+it doesn't exist at login.
+
+-------------------
+SQLLog
+
+Syntax: SQLLog cmd-set {insert | update} tablename query-string
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.1 and later
+
+Logs information to a table accessible via the 'SQLConnectInfo'
+directive.  Multiple SQLLog directives can be in effect for any
+command; for example, a user changing directories can trigger multiple
+logging statements.
+
+It is *strongly* recommended that you read documentation on the
+'LogFormat' and 'ExtendedLog' directives, as the meta-sequences
+available to 'SQLLog' are largely equivalent.
+
+The first argument to SQLLog, the cmd-set, is a comma separated (NO
+SPACES) list of FTP commands for which this log command will trigger.
+The list of commands is too long to list in entirety; commands include
+CWD, DELE, HELP, LIST, MKD, MODE, NLST, PASS, PASV, PORT and many
+more.  For the complete list check the FTP RFCs. 
+
+The second argument is either 'insert' or 'update', depending on
+whether this log command will update a table or add information to a
+table.
+
+The third argument is the name of the table this SQLLog statement will
+effect.  
+
+The fourth argument is the substance of the database query itself;
+this should match the form of the second argument.  The meta-sequence
+accepted are exactly equivalent to the 'LogFormat' directive EXCEPT
+the following ARE NOT accepted:
+
+  %{FOOBAR}e:  for 'LogFormat', this logs the content of environment
+               variable 'FOOBAR'.  This IS NOT available in mod_sql.
+  %{format}t:  these two meta-sequences logged the local server time;
+   and %t   :  They ARE NOT available in mod_sql.  Your database
+               undoubtedly provides another way to get the time; for
+               example, MySQL provides the now() function.
+
+and the following IS IN ADDITION TO the 'LogFormat' meta-sequences:
+
+  %d        :  The current working directory or '-' if none.
+
+Examples:
+
+  SQLLog PASS update users "count=count+1 where userid='%u'"
+
+replicates 'SQLLoginCountField count';  if the current user was 'aah',
+this would translate into the query "update users set count=count+1
+where userid='aah'".  This query would run whenever a user was first
+authenticated.
+
+  SQLLog CWD update users "cwd='%d' where userid='%u'"
+
+replicates the logging side of 'SQLLogDirs cwd';  if the current user
+was 'aah' and my current working directory were '/tmp', this would
+translate into the query "update users set cwd='/tmp' where
+userid='aah'".  This query would run whenever a user was first
+authenticated. 
+
+  SQLLog RETR,STOR insert filehistory "'%f', %b, '%u@%v', now()"
+
+would log the name of any file stored or retrieved, the number of
+bytes transferred, the user and host doing the transfer, and the time
+of transfer (at least in MySQL).  This would translate into the query
+"insert into filehistory values ('whateverfile', 12345,
+'aah@lastditcheffort.org', '21-05-2001 20:01:00')"
+
+
+Notes: 
+
+The second and third arguments could easily have been folded into the
+query-string;  the only reason they're separated is to provide a small
+amount of safety;  otherwise queries like 'DELETE ...' or 'DROP
+TABLE..' or 'SELECT..' or what have you could potentially be passed.
+
+'SQLLog' is intended to become the only method of logging from
+mod_sql; it currently supercedes the 'SQLLoginCountField' directive,
+and with the addition of the (as-yet-unimplemented) 'SQLShowInfo'
+directive, it will replace the 'SQLLogDirs', 'SQLLogHits',
+'SQLLogHosts', and 'SQLLogStats' directives. 
+
+
+
+-------------------
+SQLLogDirs
+
+Syntax: SQLLogDirs on|off
+Default: 
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+Activates logging of the last directory the user changed to. This is
+done after every CHDIR command - the initial login to "/" does not
+count. Also, the last dir is displayed during login in this format: 
+
+230 "/pub/debian/Incoming" was last directory. 
+
+-------------------
+SQLLogHits
+
+Syntax:
+Default:
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility:
+
+-------------------
+SQLLogHosts
+
+Syntax:
+Default:
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility:
+
+-------------------
+SQLLogStats
+
+Syntax:
+Default:
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility:
+
+-------------------
+SQLLoginCountField
+
+Syntax: SQLLoginCountField fieldname
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+Specifies a field in the user table to hold an incremental login
+counter.  Immediately after each successful PASS command, that field
+is incremented.
+
+-------------------
+SQLMinID
+
+Syntax: SQLMinID minimumid
+Default: 999
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+SQLMinID is a quick way of setting both SQLMinUserGID and
+SQLMinUserUID.  These values are checked whenever retrieving a user's
+GID or UID.  See the 'SQLMinUserGID' and 'SQLMinUserUID' directives.
+
+-------------------
+SQLMinUserGID
+
+Syntax: SQLMinUserGID minimumuid
+Default: 999
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+SQLMinUserGID is checked whenever retrieving a user's GID.  If the
+retrieved value for GID is less than the value of SQLMinUserGID,
+it is reported as the value of 'SQLDefaultGID'.
+
+-------------------
+SQLMinUserUID
+
+Syntax: SQLMinUserUID minimumuid
+Default: 999
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+SQLMinUserUID is checked whenever retrieving a user's UID.  If the
+retrieved value for UID is less than the value of SQLMinUserUID,
+it is reported as the value of 'SQLDefaultUID'.
+
+-------------------
+SQLPasswordField
+
+Syntax: SQLPasswordField fieldname
+Default: password
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+Specifies the field in the user table that holds the user's password.
+
+-------------------
+SQLProcessGrEnt
+
+Syntax: SQLProcessGrEnt on|off
+Default: on
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.2 or later
+
+If 'on', mod_sql "correctly" handled setgrent, getgrent, and endgrent
+calls internally. 
+
+If 'off', mod_sql will *not* handle [set|get|end]grent calls
+internally.  For sites with many groups, this will dramatically speed
+login, while removing the ability to control access or control
+functionality by group membership.
+
+-------------------
+SQLProcessPwEnt
+
+Syntax: SQLProcessPwEnt on|off
+Default: on
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.2 or later
+
+If 'on', mod_sql "correctly" handled setpwent, getpwent, and endpwent
+calls internally. 
+
+If 'off', mod_sql will *not* handle [set|get|end]pwent calls
+internally.  For sites with many groups, this will dramatically speed
+login.
+
+-------------------
+SQLRatios
+
+Syntax:
+Default:
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility:
+
+-------------------
+SQLShellField
+
+Syntax: SQLShellField fieldname
+Default: shell
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+Specifies the field in the user table that holds the user's shell.  If
+this field doesn't exist or the result of the query is NULL, the shell
+is reported as "".
+
+-------------------
+SQLUidField
+
+Syntax: SQLUidField fieldname
+Default: uid
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+Specifies the field in the user table that holds the user's UID.  When
+a UID is retrieved from the database it is checked against the value
+of SQLMinUserUID.  If the database has no value (missing column) or the
+retrieved value is less than SQLMinUserUID, the user's UID is set to
+SQLDefaultUID.
+
+-------------------
+SQLUserTable
+
+Syntax: SQLUserTable tablename
+Default: users
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+Specifies the name of the table that holds user information.
+
+-------------------
+SQLUsernameField
+
+Syntax: SQLUsernameField fieldname
+Default: userid
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+Specifies the field in the user table that holds the user's userid.
+
+-------------------
+SQLWhereClause
+
+Syntax: SQLWhereClause whereclause
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+This directive deprecates 'SQLKey' and 'SQLKeyField'.
+
+Specifies a where clause that is added to every user query (this has
+no effect on group queries).  The where clause *must* contain all
+relevant punctuation, and *must not* contain a leading 'and'.
+
+As an example of switching from the old-style 'SQLKey' and
+'SQLKeyField' directives, if you had:
+
+SQLKey           true
+SQLKeyfield      LoginAllowed
+
+You would now use:
+
+SQLWhereClause   "LoginAllowed = 'true'"
+
+This would be appended to every user-related query as the string 
+
+" and (LoginAllowed = 'true')"
+
+-------------------
+
+
+========================
+5. Deprecated Directives
+========================
+
+The following directives are DEPRECATED.  Their functionality has been
+subsumed by one or more of the directives above.  They are presented
+here for historical reasons, but when the ProFTPD 1.3 release cycle
+begins they will no longer be supported.
+
+
+-------------------
+MySQLInfo
+
+Syntax: MySQLInfo hostname sqluser sqlpass dbname
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql ( prior to 1.2.0, mod_mysql )
+Compatibility: 1.2.0rc2 and later
+
+This directive is DEPRECATED.  Please use SQLConnectInfo instead.
+
+Configures the MySQL database driver (the database may be remote). A
+connection isn't made until use of a SQL feature requires it, after
+which it may be held open for the lifetime of the FTP session
+depending on the directives in use. Use `""' to specify a null
+password.
+
+-------------------
+PostgresInfo
+
+Syntax: PostgresInfo hostname [sqluser sqlpass] dbname
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql ( prior to 1.2.0, mod_pgsql )
+Compatibility: 1.2.0rc2 and later
+
+This directive is DEPRECATED.  Please use SQLConnectInfo instead.
+
+Configures the Posgresql database driver (the database may be
+remote). A connection isn't made until use of a SQL feature requires
+it, after which it may be held open for the lifetime of the FTP
+session depending on the directives in use. 
+
+Examples:
+
+PostgresInfo myserver.example.com proftpd wibble ftpusers
+
+PostgresInfo myserver.example.com ftpusers
+
+-------------------
+PostgresPort
+
+Syntax: PostgresPort port-number
+Default: 5432
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql ( prior to 1.2.0, mod_pgsql )
+Compatibility: 1.2.0rc2 and later
+
+This directive is DEPRECATED.  Please use SQLConnectInfo instead.
+
+Specifies which TCP/IP port to use for connecting. Default is 5432, or
+UNIX socket for localhost. 
+
+Example:
+
+PostgresPort 3306
+
+-------------------
+SQLEmptyPasswords
+
+Syntax: SQLEmptyPasswords on|off
+Default: off
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+This directive is DEPRECATED.  Please use SQLAuthTypes instead.
+
+Specifies whether an empty (non-NULL but zero-length) password is
+accepted from the database. Default is no, and truly NULL passwords are
+never accepted. If the retrieved password is empty then whatever
+password the user typed is accepted as valid.
+
+Example:
+
+SQLEmptyPasswords on
+
+-------------------
+SQLEncryptedPasswords
+
+Syntax: SQLEncryptedPasswords on|off
+Default: off
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+This directive is DEPRECATED.  Please use SQLAuthTypes instead.
+
+Specifies whether the password in the database may be in UNIX crypt()
+format. 
+
+-------------------
+SQLKey
+
+Syntax: SQLKey value
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+This directive is DEPRECATED.  Please use SQLWhereClause instead.
+
+Sets the value that the SQLKeyField needs to match for user queries.
+
+-------------------
+SQLKeyField
+
+Syntax: SQLKeyField fieldname
+Default: none
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0.rc2 and later
+
+This directive is DEPRECATED.  Please use SQLWhereClause instead.
+
+Sepcifies the field in the user table used for matching against SQLKey.
+
+-------------------
+SQLPlaintextPasswords
+
+Syntax: SQLPlaintextPasswords on|off
+Default: off
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0rc2 and later
+
+This directive is DEPRECATED.  Please use SQLAuthTypes instead.
+
+Specifies whether to accept plaintext passwords from the database.
+
+-------------------
+SQLSSLHashedPasswords
+
+Syntax: SQLSSLHashedPasswords on|off
+Default: off
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+This directive is DEPRECATED.  Please use SQLAuthTypes instead.
+
+Specifies whether to accept passwords of the form
+{digestname}hashedpassword from the database.  This directive is only
+available if you define 'HAVE_OPENSSL' when you compile proftd and you
+link with the OpenSSL 'crypto' library.  As an example, any of the
+following password entries in the database would match if the user
+typed the password 'testpassword':
+
+{SHA}IoFZRnP0iujh/70lps6DjKPgwkk=
+{SHA1}i7YRj4/Wk1rQh2o740pxfTJwj/0=
+{MD2}nS6iguewvAdrCnOMyQjB1w==
+{MD4}5wsGtJCkyXBzDJoVsQKjSg==
+{MD5}4WsquNEjFL9O+9YgOQbqbA==
+
+-------------------
+SQLScrambledPasswords
+
+Syntax: SQLScrambledPasswords on|off
+Default: off
+Context: server config, <Global>, <VirtualHost>
+Module: mod_sql
+Compatibility: 1.2.0 and later
+
+This directive is DEPRECATED.  Please use SQLAuthTypes instead.
+
+Specifies whether to accept passwords in a backend specific format.
+For the MySQL backend, this means 'PASSWORD()' scrambled passwords.
+For the Postgres backend, this check does nothing.
+
+-------------------
+
+
+================================================
+6. Changes from mod_sqlpw v.2.0 to mod_sql v.3.0
+================================================
+
+2001-02-10: bumped all versions to 3.0
+
+2001-02-09: changed name to mod_sql; reflects the fact we do logging and
+	    a variety of other fun things in here, besides
+	    authentication
+
+2001-02-08: Implemented SQLAuthTypes, new defines for random
+	    encryption schemes, et al.
+
+2001-02-08: Caused all deprecated directives to log messages to debug
+	    and to syslog
+
+2001-02-08: Changed all directives to go through specific handlers
+	    rather than directly through generic handlers
+
+2001-02-08: Created all missing auth functions as no-ops
+
+2001-02-08: Style changes, shifted functions around, added some
+	    comments 
+
+2001-02-08: Added internal #defines for debug logging, and changed all
+	    log_debug calls to use the new #defines.
+
+2001-02-07: Fixed Bug #405 -- "SQLAuthoritative directive is broken"
+
+2001-02-07: Fixed Bug #446 -- "nonstandard C code in mod_sql" 
+
+2001-02-07: Fixed Bug #458 -- "mysql.h requirement breaks module 
+	    independence"
+
+2001-02-07: Fixed Bug #438 -- "MD5 passwords with mod_sql do not work
+	    in latest CVS"
+
+2001-02-07: Fixed Bug #330 -- "Cached passwords are not cleared when user
+	    attempts to change login id"
+
+2001-02-07: Fixed Bug #459 -- "Feature Request: add ability to handle 
+	    {digestname}hashedpassword passwords.."
+
+2001-02-06: <aah@acm.org> took over maintainership
+
+2000-03-16: Added SQLKeyField and SQLKey directive, which should allow
+	    authentication of different logins for different
+	    VirtualHosts to be in the same database table. Jake
+	    Buchholz <jake@execpc.com>
+
+1999-09-19: v2.0: Backend directives split into mod_mysql. Runtime API
+	    added.  Username/passwords now escaped for
+	    SQL. <johnie@netgod.net>
+
+1999-09-16: v1.0: Added documentation, made directives more generic
+	    ("MySQL" -> "SQL" except for MySQLInfo).  Dir part of
+	    SQLLogDirs finally made optional. <johnie@netgod.net>
+
+1999-06-01: v0.3: fixed segfault, changed 'strncmp' typo which
+	    should have been copy.  Made uid/gid support
+	    optional. <johnie@netgod.net>
+   
+1999-05-03: v0.2: Removed dead code, fix bug with interaction with
+	    anon-user support.  Added MySQLLogHits and MySQLHomedir
+	    directives.  Fixed atoi() invocation that could
+	    segfault. Copious debugging code
+	    added. <johnie@netgod.net>
+
+1999-04-09: v0.1: Initial attempt (mod_mysql). <johnie@netgod.net>
+
+=========
+7. Thanks
+=========
+
+* Johnie Ingram <johnie@netgod.net> for the original mod_sqlpw.
+* TJ Saunders && Jesse Sipprell for dealing with my inane questions.
+* John Morrissey for mod_ldap, which lit the way, here and there.
+* Zeev Suraski <bourbon@bourbon.netvision.net.il> for the Apache
+  mod_auth_mysql module, which informed the 'SQLAuthTypes' directive.
+
+=========
+8. Author
+=========
+
+mod_sqlpw was originally written and maintained by Johnie Ingram 
+<johnie@netgod.net>.
+
+mod_sql is based on mod_sqlpw and shares much of the same code.  It
+is being developed and maintained by Andrew Houghton <aah@acm.org>
+
+Please file any bug reports/suggestions/feature requests with the ProFTPD 
+bug database at http://www.ProFTPD.org
+

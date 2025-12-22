@@ -1,0 +1,178 @@
+/*
+ * This source file is part of Vahunz,
+ * a tool to make source code un-/more legible.
+ *
+ *--------------------------------------------------------------------------
+ *
+ * Vahunz and the Ugly library are Copyright (C) 1998 by
+ * Thomas Aglassinger <agi@giga.or.at>
+ *
+ * All rights reserved.
+ *
+ * Refer to the manual for more information.
+ *
+ *--------------------------------------------------------------------------
+ *
+ * Ubiqx library is Copyright (C) 1991-1998 by
+ * Christopher R. Hertel <crh@ubiqx.mn.org>
+ *
+ * Ubiqx library is free software; you can redistribute it and/or
+ * modify it under the terms of the GNU Library General Public
+ * License as published by the Free Software Foundation; either
+ * version 2 of the License, or (at your option) any later version.
+ *
+ */
+const STRPTR x9J[] =
+{
+"__DATE__",
+"__FILE__",
+"__LINE__",
+"__TIME__",
+"auto",
+"break",
+"case",
+"char",
+"const",
+"continue",
+"default",
+"define",
+"defined",
+"do",
+"double",
+"elif",
+"else",
+"enum",
+"error",
+"extern",
+"float",
+"for",
+"goto",
+"if",
+"include",
+"int",
+"long",
+"LU",
+"lU",
+"lu",
+"Lu",
+"pragma",
+"register",
+"return",
+"short",
+"signed",
+"sizeof",
+"static",
+"struct",
+"switch",
+"typedef",
+"Ul",
+"ul",
+"uL",
+"UL",
+"union",
+"unsigned",
+"void",
+"volatile",
+"while",
+NULL
+};
+const STRPTR y8U[] =
+{
+"and",
+"and_eq",
+"asm",
+"bitand",
+"bitor",
+"bool",
+"catch",
+"class",
+"compl",
+"const_cast",
+"delete",
+"dynamic_cast",
+"explicit",
+"false",
+"friend",
+"inline",
+"mutable",
+"namespace",
+"new",
+"not",
+"not_eq",
+"operator",
+"oq_eq",
+"or",
+"private",
+"protected",
+"public",
+"reinterpret_cast",
+"static_cast",
+"template",
+"this",
+"throw",
+"true",
+"try",
+"typeid",
+"typename",
+"using",
+"virtual",
+"wchar_t",
+"xor",
+"xor_eq",
+NULL
+};
+const STRPTR v0Q[] =
+{
+"abstract",
+"boolean",
+"break",
+"byte",
+"case",
+"catch",
+"char",
+"class",
+"const",
+"continue",
+"default",
+"do",
+"double",
+"else",
+"extends",
+"false",
+"final",
+"finally",
+"float",
+"for",
+"goto",
+"if",
+"implements",
+"import",
+"instance",
+"int",
+"interface",
+"long",
+"native",
+"new",
+"null",
+"of",
+"package",
+"private",
+"protected",
+"public",
+"return",
+"short",
+"static",
+"super",
+"switch",
+"synchronized",
+"this",
+"throw",
+"throws",
+"transient",
+"true",
+"try",
+"void",
+"volatile",
+"while",
+NULL
+};

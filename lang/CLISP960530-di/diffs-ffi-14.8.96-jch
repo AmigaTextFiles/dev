@@ -1,0 +1,718 @@
+Only in dh0:source/clisptmp/ffcall/autoconf: CVS
+Only in ffcall/avcall: avcall-m68k-amiga-orig.c
+diff -rc2 dh0:source/clisptmp/ffcall/avcall/avcall-m68k-amiga.c ffcall/avcall/avcall-m68k-amiga.c
+*** dh0:source/clisptmp/ffcall/avcall/avcall-m68k-amiga.c	Mon Apr 15 16:25:42 1996
+--- ffcall/avcall/avcall-m68k-amiga.c	Thu Jun 20 23:04:44 1996
+***************
+*** 33,40 ****
+    register variables, or use the assembler version.
+    ----------------------------------------------------------------------*/
+! #include "avcall.h.in"
+  
+  #define RETURN(TYPE,VAL)	(*(TYPE*)l->raddr = (TYPE)(VAL))
+  
+  int
+  __builtin_avcall(av_alist* l)
+--- 33,43 ----
+    register variables, or use the assembler version.
+    ----------------------------------------------------------------------*/
+! #include "avcall.h"
+  
+  #define RETURN(TYPE,VAL)	(*(TYPE*)l->raddr = (TYPE)(VAL))
+  
++ #define NUM_SAVED_REGS	(6+7)	/* save d2-d7/a0-a6 */
++ #define SAVED_REGS_MASK 0x7ffc
++ 
+  int
+  __builtin_avcall(av_alist* l)
+***************
+*** 47,60 ****
+    register double	dret	__asm__("d0");	/* d0,d1 */
+  
+!   __avword regspace[3+4];		/* temp space for saving registers */
+!   __avword space[__AV_ALIST_WORDS];	/* space for callee's stack frame */
+    __avword* argframe = sp;		/* stack offset for argument list */
+    int arglen = l->aptr - l->args;
+!   int i;
+  
+    for (i = 0; i < arglen; i++)		/* push function args onto stack */
+      argframe[i] = l->args[i];
+  
+!   if (l->rtype == __AVstruct)		/* push struct return address */
+      l->regargs[8+1] = (__avword)(l->raddr);
+  
+--- 50,66 ----
+    register double	dret	__asm__("d0");	/* d0,d1 */
+  
+!   /* space for callee's stack frame and temp space for saving registers */
+!   sp -= __AV_ALIST_WORDS+NUM_SAVED_REGS;
+!   #define regspace0       sp[__AV_ALIST_WORDS]	/* stack offset for saved registers */
+!  {
+    __avword* argframe = sp;		/* stack offset for argument list */
+    int arglen = l->aptr - l->args;
+!   short i;
+  
+    for (i = 0; i < arglen; i++)		/* push function args onto stack */
+      argframe[i] = l->args[i];
++  }
+  
+!   if (l->rtype == __AVstruct)		/* push struct return address into a1 */
+      l->regargs[8+1] = (__avword)(l->raddr);
+  
+***************
+*** 62,67 ****
+     * they are clobbered by the big moveml below.
+     */
+!   __asm__("moveml #x470f,%0" /* 0x470f == d0-d3/a0-a2/a6 */
+!           : "=m" (regspace[0]) : );
+  
+    __asm__("movel %0,sp@-" : : "g" (&&return_here)); /* prepare function call */
+--- 68,73 ----
+     * they are clobbered by the big moveml below.
+     */
+!   __asm__("moveml %1,%0			| 0x7ffc == a6-a0/d7-d2"
+!           : "=m" (regspace0) : "n" (SAVED_REGS_MASK));
+  
+    __asm__("movel %0,sp@-" : : "g" (&&return_here)); /* prepare function call */
+***************
+*** 69,87 ****
+  
+  					/* put some arguments into registers */
+!   __asm__("moveml %0,#0x7fff" /* 0x7fff == d0-d7/a0-a6 */
+!           :
+!           : "m" (l->regargs[0])
+!           : /*"d0","d1","d2","d3",*/"d4","d5","d6","d7",/*"a0","a1","a2",*/"a3","a4","a5"/*,"a6"*/
+! 	    /* This long clobber list ensures that the function prologue
+! 	     * contains a                 "moveml #0x3f3e,sp@-"  d2-d7/a2-a6
+! 	     * and the epilogue contains  "moveml sp@+,#0x7cfc"  d2-d7/a2-a6
+! 	     */
+           );
+  
+!   __asm__("rts");		/* call function */
+!   return_here:			/* function returns here */
+  
+!   __asm__("moveml %0,#x470f" /* 0x470f == d0-d3/a0-a2/a6 */
+!           : : "m" (regspace[0]) );	/* restore some registers */
+  
+    switch (l->rtype)			/* save return value */
+--- 75,89 ----
+  
+  					/* put some arguments into registers */
+!   __asm__("moveml %0,#0x7fff		| 0x7fff == a6-a0/d7-d0"
+!           : : "m" (l->regargs[0])	/* don't set clobber list as we restore ourselves */
+           );
+  
+!   __asm__("rts" : "=d" (iret) :  : "d1" );	/* call function */
+!   return_here:				/* function returns here */
+! 
+!   __asm__("moveml %0,%1"		/* restore all registers */
+!           : : "m" (regspace0), "n" (SAVED_REGS_MASK) );
+  
+!   sp += __AV_ALIST_WORDS+NUM_SAVED_REGS;	/* restore stack pointer */
+  
+    switch (l->rtype)			/* save return value */
+diff -rc2 dh0:source/clisptmp/ffcall/avcall/avcall-m68k-amiga.s ffcall/avcall/avcall-m68k-amiga.s
+*** dh0:source/clisptmp/ffcall/avcall/avcall-m68k-amiga.s	Mon Apr 15 16:25:42 1996
+--- ffcall/avcall/avcall-m68k-amiga.s	Thu Jun 20 23:05:11 1996
+***************
+*** 6,72 ****
+  .globl ___builtin_avcall
+  ___builtin_avcall:
+! 	moveml #0x3f3e,sp@-
+! 	addw #-1056,sp
+! 	movel sp@(1104),a6
+! 	moveq #-32,d2
+! 	addl a6@(20),d2
+! 	subl a6,d2
+! 	asrl #2,d2
+! 	moveq #0,d4
+! 	cmpl d4,d2
+  	jle L3
+- 	movel sp,a0
+- 	movel a6,a1
+  L5:
+! 	movel a1@(32),a0@+
+! 	addqw #4,a1
+! 	addql #1,d4
+! 	cmpl d4,d2
+  	jgt L5
+  L3:
+  	moveq #14,d3
+! 	cmpl a6@(12),d3
+! 	jne L7
+! 	movel a6@(8),a6@(1092)
+! L7:
+  #APP
+! 	moveml #x470f,sp@(1068)
+! 	movel #L8,sp@-
+! 	movel a6@,sp@-
+! 	moveml a6@(1056),#0x7fff
+  	rts
+  #NO_APP
+! L8:
+  #APP
+! 	moveml sp@(1068),#x470f
+  #NO_APP
+  	moveq #14,d3
+! 	cmpl a6@(12),d3
+! 	jcs L9
+! 	movel a6@(12),d2
+! 	addl d2,d2
+! LI51:
+! 	movew pc@(L51-LI51-2:b,d2:l),d2
+  	jmp pc@(2,d2:w)
+! L51:
+! 	.word L45-L51
+! 	.word L9-L51
+! 	.word L43-L51
+! 	.word L43-L51
+! 	.word L43-L51
+! 	.word L44-L51
+! 	.word L44-L51
+! 	.word L45-L51
+! 	.word L45-L51
+! 	.word L45-L51
+! 	.word L45-L51
+! 	.word L21-L51
+! 	.word L24-L51
+! 	.word L45-L51
+! 	.word L26-L51
+! L21:
+! 	btst #4,a6@(7)
+! 	jeq L22
+! 	movel a6@(8),a0
+  	movel d1,sp@-
+  	movel d0,sp@-
+--- 6,72 ----
+  .globl ___builtin_avcall
+  ___builtin_avcall:
+! 	moveml #0x3030,sp@-
+! 	movel sp@(20),a1
+! 	addw #-1076,sp
+! 	movel sp,a2
+! 	moveq #-32,d0
+! 	addl a1@(20),d0
+! 	subl a1,d0
+! 	asrl #2,d0
+! 	clrw d1
+! 	tstl d0
+  	jle L3
+  L5:
+! 	movew d1,a0
+! 	movel a1@(32,a0:l:4),a2@(a0:l:4)
+! 	addqw #1,d1
+! 	movew d1,a0
+! 	cmpl a0,d0
+  	jgt L5
+  L3:
+  	moveq #14,d3
+! 	cmpl a1@(12),d3
+! 	jne L6
+! 	movel a1@(8),a1@(1092)
+! L6:
+  #APP
+! 	moveml #32764,sp@(1024)			| 0x7ffc == a6-a0/d7-d2
+! 	movel #L7,sp@-
+! 	movel a1@,sp@-
+! 	moveml a1@(1056),#0x7fff		| 0x7fff == a6-a0/d7-d0
+  	rts
+  #NO_APP
+! L7:
+  #APP
+! 	moveml sp@(1024),#32764
+  #NO_APP
++ 	addw #1076,sp
+  	moveq #14,d3
+! 	cmpl a1@(12),d3
+! 	jcs L8
+! 	movel a1@(12),d2
+! LI49:
+! 	movew pc@(L49-LI49-2:b,d2:l:2),d2
+  	jmp pc@(2,d2:w)
+! L49:
+! 	.word L43-L49
+! 	.word L8-L49
+! 	.word L41-L49
+! 	.word L41-L49
+! 	.word L41-L49
+! 	.word L42-L49
+! 	.word L42-L49
+! 	.word L43-L49
+! 	.word L43-L49
+! 	.word L43-L49
+! 	.word L43-L49
+! 	.word L20-L49
+! 	.word L23-L49
+! 	.word L43-L49
+! 	.word L25-L49
+! L20:
+! 	btst #4,a1@(7)
+! 	jeq L21
+! 	movel a1@(8),a0
+  	movel d1,sp@-
+  	movel d0,sp@-
+***************
+*** 73,131 ****
+  	fmoved sp@+,fp0
+  	fmoves fp0,a0@
+! 	jra L9
+! L22:
+! 	movel a6@(8),a0
+  	movel d0,a0@
+! 	jra L9
+! L24:
+! 	movel a6@(8),a0
+  	movel d0,a0@
+  	movel d1,a0@(4)
+! 	jra L9
+! L26:
+! 	btst #0,a6@(7)
+! 	jeq L27
+! 	movel a6@(16),d1
+  	moveq #2,d3
+  	cmpl d1,d3
+! 	jeq L30
+! 	jcs L39
+  	moveq #1,d3
+  	cmpl d1,d3
+! 	jeq L29
+! 	jra L33
+! L39:
+  	moveq #4,d3
+  	cmpl d1,d3
+! 	jeq L31
+  	moveq #8,d3
+  	cmpl d1,d3
+! 	jeq L32
+! 	jra L33
+! L29:
+! 	movel a6@(8),a1
+  	movel d0,a0
+  	moveb a0@,a1@
+! 	jra L9
+! L30:
+! 	movel a6@(8),a1
+  	movel d0,a0
+  	movew a0@,a1@
+! 	jra L9
+! L31:
+! 	movel a6@(8),a1
+  	movel d0,a0
+  	movel a0@,a1@
+! 	jra L9
+! L32:
+! 	movel a6@(8),a0
+  	movel d0,a2
+  	movel a2@,a0@
+! 	movel a6@(8),a1
+  	movew #4,a0
+  	movel a0@(a2:l),a1@(4)
+! 	jra L9
+! L33:
+! 	movel a6@(16),d1
+  	addql #3,d1
+  	movel d1,d2
+--- 73,131 ----
+  	fmoved sp@+,fp0
+  	fmoves fp0,a0@
+! 	jra L8
+! L21:
+! 	movel a1@(8),a0
+  	movel d0,a0@
+! 	jra L8
+! L23:
+! 	movel a1@(8),a0
+  	movel d0,a0@
+  	movel d1,a0@(4)
+! 	jra L8
+! L25:
+! 	btst #0,a1@(7)
+! 	jeq L26
+! 	movel a1@(16),d1
+  	moveq #2,d3
+  	cmpl d1,d3
+! 	jeq L29
+! 	jcs L37
+  	moveq #1,d3
+  	cmpl d1,d3
+! 	jeq L28
+! 	jra L32
+! L37:
+  	moveq #4,d3
+  	cmpl d1,d3
+! 	jeq L30
+  	moveq #8,d3
+  	cmpl d1,d3
+! 	jeq L31
+! 	jra L32
+! L28:
+! 	movel a1@(8),a1
+  	movel d0,a0
+  	moveb a0@,a1@
+! 	jra L8
+! L29:
+! 	movel a1@(8),a1
+  	movel d0,a0
+  	movew a0@,a1@
+! 	jra L8
+! L30:
+! 	movel a1@(8),a1
+  	movel d0,a0
+  	movel a0@,a1@
+! 	jra L8
+! L31:
+! 	movel a1@(8),a0
+  	movel d0,a2
+  	movel a2@,a0@
+! 	movel a1@(8),a1
+  	movew #4,a0
+  	movel a0@(a2:l),a1@(4)
+! 	jra L8
+! L32:
+! 	movel a1@(16),d1
+  	addql #3,d1
+  	movel d1,d2
+***************
+*** 132,187 ****
+  	lsrl #2,d2
+  	subql #1,d2
+! 	jmi L9
+! L36:
+! 	movel a6@(8),a0
+  	movel d2,d1
+  	asll #2,d1
+! 	movel d1,a2
+! 	movel a2@(d0:l),a0@(d1:l)
+! 	dbra d2,L36
+  	clrw d2
+  	subql #1,d2
+! 	jcc L36
+! 	jra L9
+! L27:
+! 	btst #0,a6@(6)
+! 	jeq L9
+! 	movel a6@(16),d2
+  	moveq #2,d3
+  	cmpl d2,d3
+! 	jeq L44
+! 	jcs L49
+  	moveq #1,d3
+  	cmpl d2,d3
+! 	jeq L43
+! 	jra L9
+! L49:
+  	moveq #4,d3
+  	cmpl d2,d3
+! 	jeq L45
+  	moveq #8,d3
+  	cmpl d2,d3
+! 	jeq L46
+! 	jra L9
+! L43:
+! 	movel a6@(8),a0
+  	moveb d0,a0@
+! 	jra L9
+! L44:
+! 	movel a6@(8),a0
+  	movew d0,a0@
+! 	jra L9
+! L45:
+! 	movel a6@(8),a0
+  	movel d0,a0@
+! 	jra L9
+! L46:
+! 	movel a6@(8),a0
+  	movel d0,a0@
+! 	movel a6@(8),a0
+  	movel d1,a0@(4)
+! L9:
+! 	moveq #0,d0
+! 	addw #1056,sp
+! 	moveml sp@+,#0x7cfc
+  	rts
+--- 132,186 ----
+  	lsrl #2,d2
+  	subql #1,d2
+! 	jmi L8
+! L35:
+! 	movel a1@(8),a0
+  	movel d2,d1
+  	asll #2,d1
+! 	movel d1,a3
+! 	movel a3@(d0:l),a0@(d2:l:4)
+! 	dbra d2,L35
+  	clrw d2
+  	subql #1,d2
+! 	jcc L35
+! 	jra L8
+! L26:
+! 	btst #0,a1@(6)
+! 	jeq L8
+! 	movel a1@(16),d2
+  	moveq #2,d3
+  	cmpl d2,d3
+! 	jeq L42
+! 	jcs L47
+  	moveq #1,d3
+  	cmpl d2,d3
+! 	jeq L41
+! 	jra L8
+! L47:
+  	moveq #4,d3
+  	cmpl d2,d3
+! 	jeq L43
+  	moveq #8,d3
+  	cmpl d2,d3
+! 	jeq L44
+! 	jra L8
+! L41:
+! 	movel a1@(8),a0
+  	moveb d0,a0@
+! 	jra L8
+! L42:
+! 	movel a1@(8),a0
+  	movew d0,a0@
+! 	jra L8
+! L43:
+! 	movel a1@(8),a0
+  	movel d0,a0@
+! 	jra L8
+! L44:
+! 	movel a1@(8),a0
+  	movel d0,a0@
+! 	movel a1@(8),a0
+  	movel d1,a0@(4)
+! L8:
+! 	clrl d0
+! 	moveml sp@+,#0xc0c
+  	rts
+Only in ffcall/avcall: avcall-m68k-std.c
+Only in ffcall/avcall: avcall-m68k-std.s
+Only in ffcall/avcall: avcall-m68k-test.c
+Only in dh0:source/clisptmp/ffcall/avcall: avcall-m68k.c
+Only in ffcall/avcall: avcall-m68k.o
+Only in dh0:source/clisptmp/ffcall/avcall: avcall-m68k.s
+Only in ffcall/avcall: avcall.h
+Only in ffcall/avcall: avcall.o
+Only in ffcall/avcall: config.log
+Only in ffcall/avcall: config.status
+diff -rc2 dh0:source/clisptmp/ffcall/avcall/configure ffcall/avcall/configure
+*** dh0:source/clisptmp/ffcall/avcall/configure	Fri May 17 06:46:00 1996
+--- ffcall/avcall/configure	Wed Jun 12 21:20:05 1996
+***************
+*** 1,3 ****
+--- 1,4 ----
+  #! /bin/sh
++ unalias echo
+  
+  # Guess values for system-dependent variables and create Makefiles.
+Only in dh0:source/clisptmp/ffcall/avcall: CVS
+Only in ffcall/avcall: libavcall.a
+Only in ffcall/avcall: Makefile
+Only in ffcall/avcall: structcpy.o
+Only in ffcall/avcall: tests
+diff -rc2 dh0:source/clisptmp/ffcall/avcall/tests.c ffcall/avcall/tests.c
+*** dh0:source/clisptmp/ffcall/avcall/tests.c	Mon Apr 15 16:25:56 1996
+--- ffcall/avcall/tests.c	Wed Jun 12 22:31:01 1996
+***************
+*** 21,24 ****
+--- 21,28 ----
+  #include <stdio.h>
+  #include <string.h>
++ #if defined(AMIGA)
++ /* We don't test passing arguments in registers yet */
++ #define AV_ARG_REGNUM -1
++ #endif
+  #include "avcall.h"
+  FILE* out;
+Only in ffcall/avcall: tests.o
+Only in ffcall/avcall: tests.out
+Only in dh0:source/clisptmp/ffcall/avcall/tests.output: CVS
+Only in ffcall/avcall: tests.output.m68k-cbm-amigados
+Only in ffcall/: config.cache
+Only in ffcall/: config.log
+Only in ffcall/: config.status
+Only in dh0:source/clisptmp/ffcall/configurations: CVS
+diff -rc2 dh0:source/clisptmp/ffcall/configure ffcall/configure
+*** dh0:source/clisptmp/ffcall/configure	Fri May 17 06:45:36 1996
+--- ffcall/configure	Wed Jun 12 21:05:07 1996
+***************
+*** 1,3 ****
+--- 1,4 ----
+  #! /bin/sh
++ unalias echo
+  
+  # Guess values for system-dependent variables and create Makefiles.
+Only in dh0:source/clisptmp/ffcall/: CVS
+Only in ffcall/: Makefile
+Only in ffcall/trampoline: config.h
+Only in ffcall/trampoline: config.log
+Only in ffcall/trampoline: config.status
+diff -rc2 dh0:source/clisptmp/ffcall/trampoline/configure ffcall/trampoline/configure
+*** dh0:source/clisptmp/ffcall/trampoline/configure	Fri May 17 06:46:44 1996
+--- ffcall/trampoline/configure	Wed Jun 12 21:21:01 1996
+***************
+*** 1,3 ****
+--- 1,4 ----
+  #! /bin/sh
++ unalias echo
+  
+  # Guess values for system-dependent variables and create Makefiles.
+Only in dh0:source/clisptmp/ffcall/trampoline: CVS
+Only in ffcall/trampoline: libtrampoline.a
+Only in ffcall/trampoline: Makefile
+Only in ffcall/trampoline: test1
+Only in ffcall/trampoline: test1.o
+Only in ffcall/trampoline: test2
+Only in ffcall/trampoline: test2.o
+Only in dh0:source/clisptmp/ffcall/trampoline/tests.passed: CVS
+Only in ffcall/trampoline: tests.passed.m68k-cbm-amigados
+diff -rc2 dh0:source/clisptmp/ffcall/trampoline/trampoline.c ffcall/trampoline/trampoline.c
+*** dh0:source/clisptmp/ffcall/trampoline/trampoline.c	Mon Apr 15 16:26:58 1996
+--- ffcall/trampoline/trampoline.c	Tue Jun 25 00:04:24 1996
+***************
+*** 28,31 ****
+--- 28,43 ----
+  #endif
+  
++ #if defined(AMIGA)
++ #include <exec/types.h>
++ #include <exec/execbase.h>
++ #include <proto/exec.h>
++ /* We just need to clear the caches to make the code executable.
++  * No need for EXECUTABLE_VIA_ kludges, CODE_EXECUTABLE comes closest.
++  */
++ #ifndef CODE_EXECUTABLE
++ #define CODE_EXECUTABLE
++ #endif
++ #endif
++ 
+  #ifndef CODE_EXECUTABLE
+  /* How do we make the trampoline's code executable? */
+***************
+*** 55,59 ****
+--- 67,78 ----
+  #endif
+  
++ #ifndef FOR_AMIGA_CLISP
+  #include <stdio.h> /* declares fprintf() */
++ #else
++ extern BPTR Input_handle;
++ extern struct ExecBase * const SysBase;
++ #define stderr Input_handle
++ #define fprintf BPTRfprintf
++ #endif
+  
+  #include <sys/types.h>
+***************
+*** 260,263 ****
+--- 279,288 ----
+  #endif
+  
++ #ifdef FOR_AMIGA_CLISP
++ #define malloc(c) 0
++ #define free(a)
++ #define abort() fehler_sint64(0)	/* do anything */
++ #endif
++ 
+  #if !defined(CODE_EXECUTABLE) && !defined(EXECUTABLE_VIA_MPROTECT)
+  /* AIX doesn't support mprotect() in malloc'ed memory. Must get pages of
+***************
+*** 797,800 ****
+--- 822,829 ----
+  #ifdef NeXT
+    asm volatile ("trap #2");
++ #else
++ #ifdef AMIGA
++   CacheClearE(function,TRAMP_LENGTH,CACRF_ClearI|CACRF_ClearD);
++ #endif
+  #endif
+  #endif
+Only in ffcall/trampoline: trampoline.h
+Only in ffcall/trampoline: trampoline.o
+Only in ffcall/vacall: config.h
+Only in ffcall/vacall: config.log
+Only in ffcall/vacall: config.status
+diff -rc2 dh0:source/clisptmp/ffcall/vacall/configure ffcall/vacall/configure
+*** dh0:source/clisptmp/ffcall/vacall/configure	Fri May 17 06:46:20 1996
+--- ffcall/vacall/configure	Wed Jun 12 21:20:47 1996
+***************
+*** 1,3 ****
+--- 1,4 ----
+  #! /bin/sh
++ unalias echo
+  
+  # Guess values for system-dependent variables and create Makefiles.
+Only in dh0:source/clisptmp/ffcall/vacall: CVS
+Only in ffcall/vacall: libvacall.a
+Only in ffcall/vacall: Makefile
+diff -rc2 dh0:source/clisptmp/ffcall/vacall/misc.c ffcall/vacall/misc.c
+*** dh0:source/clisptmp/ffcall/vacall/misc.c	Mon Apr 15 16:27:20 1996
+--- ffcall/vacall/misc.c	Tue Jun 25 00:16:55 1996
+***************
+*** 8,12 ****
+--- 8,20 ----
+   */
+  
++ #ifndef FOR_AMIGA_CLISP
+  #include <stdio.h>
++ #else
++ #include <exec/types.h>
++ #include <exec/execbase.h>
++ #include <proto/exec.h>
++ extern BPTR Input_handle;
++ extern struct ExecBase * const SysBase;
++ #endif
+  
+  #include "vacall.h"
+***************
+*** 31,37 ****
+--- 39,51 ----
+  {
+    /* If you see this, fix your code. */
++ #ifndef FOR_AMIGA_CLISP
+    fprintf (stderr, "vacall: va_start type %d and va_return type %d disagree.\n",
+                     (int)start_type, (int)return_type);
+    abort();
++ #else
++   BPTRfprintf (Input_handle, "vacall: va_start type %ld and va_return type %ld disagree.\n",
++                    (long)start_type, (long)return_type);
++   fehler_sint64(0);	/* do anything */
++ #endif
+  }
+  
+***************
+*** 41,46 ****
+--- 55,76 ----
+  {
+    /* If you see this, increase __VA_ALIST_WORDS: */
++ #ifndef FOR_AMIGA_CLISP
+    fprintf (stderr, "vacall: struct of size %u too large for pcc struct return.\n",
+                     size);
+    abort();
++ #else
++   BPTRfprintf (Input_handle, "vacall: struct of size %lu too large for pcc struct return.\n",
++                    (unsigned long)size);
++   fehler_sint64(0);	/* do anything */
++ #endif
++ }
++ 
++ #ifdef FOR_AMIGA_CLISP
++ /* they come from foreign.o and I have to find a libgcc for them */
++ void __extendsfdf2()
++ { fehler_uint64(0);
+  }
++ void __truncdfsf2()
++ { fehler_uint64(0);
++ }
++ #endif
+Only in ffcall/vacall: misc.o
+Only in ffcall/vacall: structcpy.o
+Only in ffcall/vacall: tests
+Only in ffcall/vacall: tests.o
+Only in ffcall/vacall: tests.out
+Only in dh0:source/clisptmp/ffcall/vacall/tests.output: CVS
+Only in ffcall/vacall: tests.output.m68k-cbm-amigados
+Only in ffcall/vacall: vacall-m68k.o
+Only in ffcall/vacall: vacall.h
+Only in ffcall/vacall: vacall.o

@@ -1,0 +1,918 @@
+dialog.lib release 1.0 alpha - preliminary documentation
+
+=========
+Copyright
+=========
+The material published in this distribution is Freeware.
+Copyright © 1993 remains at the author, Stefan Reisner.
+
+It may only be re-distributed unmodified and in its present
+composition. In particular, this copyright notice must be
+included and must be intact.
+
+The library "dialog.lib" may be used freely in any application.
+When using it in a commercial project, please include a statement
+of this copyright in the electronic or printed documentation.
+
+=======
+Contact
+=======
+Please report any bugs you find to:
+	Stefan Reisner
+>>>	sr@ph-cip.uni-koeln.de
+	Aachener Str. 399
+	5000 Cologne 41
+	Germany
+
+==========
+Disclaimer
+==========
+   THERE IS   NO  WARRANTY  FOR  THE  SOFTWARE,  TO  THE  EXTENT
+PERMITTED  BY  APPLICABLE  LAW.  EXCEPT WHEN OTHERWISE STATED IN
+WRITING  THE  COPYRIGHT HOLDERS AND/OR OTHER PARTIES PROVIDE THE
+SOFTWARE  "AS IS" WITHOUT WARRANTY OF ANY KIND, EITHER EXPRESSED
+OR   IMPLIED,   INCLUDING,  BUT  NOT  LIMITED  TO,  THE  IMPLIED
+WARRANTIES  OF  MERCHANTABILITY  AND  FITNESS  FOR  A PARTICULAR
+PURPOSE.   THE  ENTIRE RISK AS TO THE QUALITY AND PERFORMANCE OF
+THE  SOFTWARE IS WITH YOU.  SHOULD THE SOFTWARE PROVE DEFECTIVE,
+YOU  ASSUME  THE  COST  OF  ALL  NECESSARY  SERVICING, REPAIR OR
+CORRECTION.  
+
+   IN NO  EVENT  UNLESS  REQUIRED BY APPLICABLE LAW OR AGREED TO
+IN  WRITING  WILL  ANY  COPYRIGHT HOLDER, OR ANY OTHER PARTY WHO
+MAY  REDISTRIBUTE  THE SOFTWARE AS PERMITTED ABOVE, BE LIABLE TO
+YOU  FOR  DAMAGES, INCLUDING ANY GENERAL, SPECIAL, INCIDENTAL OR
+CONSEQUENTIAL  DAMAGES  ARISING  OUT  OF THE USE OR INABILITY TO
+USE  THE  SOFTWARE (INCLUDING BUT NOT LIMITED TO LOSS OF DATA OR
+DATA  BEING  RENDERED  INACCURATE  OR LOSSES SUSTAINED BY YOU OR
+THIRD  PARTIES  OR A FAILURE OF THE SOFTWARE TO OPERATE WITH ANY
+OTHER  SOFTWARE),  EVEN  IF  SUCH HOLDER OR OTHER PARTY HAS BEEN
+ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.  
+
+================
+General Concepts
+================
+The dialog library may be considered as an automatic builder for special
+graphical user interfaces, namely what is commonly known as dialog boxes.
+
+It deserves the attribute `automatic' because the client (the application
+that wants to put up a dialog box) only defines the hierarchical relationships
+(presently only in terms of geometry) between the so-called `elements' of the
+dialog.
+
+The gadget classes provided by GadTools form a subset of the set of available
+dialog elements (although at present not all kinds of GadTools gadgets are
+supported).
+
+The system is open-ended in the way that other dialog elements may be added
+without having to change any parts of the library. This means that there may
+be additional linker libraries containing special-purpose dialog elements
+that you simply link to your application and have instant access to them.
+
+The creation and geometrical arrangement of these elements is left to a
+`layout engine'. It layouts the contents of the dialog window in a way
+similar to the way a word processor would layout a page of a document.
+
+The library even provides support for handling the events that the dialog
+window sends to the application, although in its present state this support
+is only rudimentary. Further work has to be committed to defining not only
+geometrical but also functional relationships between the dialog elements.
+
+===========================================
+How to define the structure of a dialog box
+===========================================
+Each dialog element needs to store certain private information during the
+time it is used. To that purpose, the header file <dialog/dialog.h> defines
+a data structure DialogElement.
+
+The client application must define one instance of DialogElement
+for each element it is going to use in the dialog and must initialize it
+prior to the layout process.
+
+The library provides a pair of functions initDialogElement() and
+initDialogElementA() for initializing DialogElement structures:
+
+	VOID initDialogElementA(
+		DialogElement *de,
+		DialogElement *root,
+		DialogCallback dc,
+		ULONG *error,
+		struct TagItem *taglist );
+
+	VOID initDialogElement(
+		DialogElement *de,
+		DialogElement *root,
+		DialogCallback dc,
+		ULONG *error,
+		ULONG first, ... );
+
+The capital `A' at the end of the function name indicates that this function
+expects an actual TagItem vector being passed to it.
+You normally use the function without the capital `A' where you pass the tag list
+conveniently over the stack.
+
+These are the arguments:
+	de		-	a pointer to the DialogElement structure to be initialized
+	root	-	a pointer to the DialogElement structure that serves as
+				the root element of the dialog (see below).
+				When initializing the root element, pass a NULL pointer here
+	dc		-	a pointer to a dispatch function. This function determines
+				the type of the dialog element (there is one dispatch function
+				for each `kind' of GadTools gadgets, for example).
+				The dialog library provides dispatch functions for GadTools
+				gadgets and for elements needed to describe the dialog structure.
+				Clients may implement their own dispatchers (see below).
+				For the root element, pass dispatchRoot here.
+	error	-	a pointer to a ULONG. Before calling initDialogElement() the
+				first time, set *error to DIALOGERR_OK (defined in <dialog/dialog.h>).
+				Then you may call initDialogElement() any number of times and
+				make afterwards one final check if *error still contains
+				DIALOGERR_OK. If not, initialization has failed and you should
+				pass control to the cleanup section of your function.
+
+				Note that DIALOGERR_OK is explicitly defined as zero to make
+				error checking more convenient.
+
+	taglist	-	a tag list describing the properties of the dialog element.
+				The set of recognized tag labels depends on the element type
+				(as determined by the dispatcher you specified).
+
+The following code fragment gives an example:
+
+	DialogElement root, element;
+	ULONG error = DIALOGERR_OK;
+
+	initDialogElement( &root, NULL, dispatchRoot, &error,
+		DA_Screen, myScreen,
+		DA_Member, &element,
+		TAG_DONE );
+	initDialogElement( &element, &root, dispatchButton, &error,
+		NGDA_TextAttr, myTextAttr,
+		NGDA_VisualInfo, myVisualInfo,
+		NGDA_GadgetText, "press here...",
+		DA_Termination, TRUE,
+		TAG_DONE );
+	if( error != DIALOGERR_OK )
+		goto cleanup;
+
+The root element is essential to every dialog. It forms the top of the hierarchy.
+Specify the DA_Member attribute to specify the dialog element that continues the
+hierarchy.
+
+In this example, the hierarchy is continued with a button (a GadTools BUTTON_KIND
+gadget). Since the button has no substructure (is a `leaf' in the hierarchical
+tree), the hierarchy ends here.
+
+Note that all dialog elements that are based on GadTools need the NGDA_TextAttr
+and the NGDA_VisualInfo attributes. There are some other attributes defined in
+<dialog/dialog.h> that relate to fields of the NewGadget structure, too. These
+include NGDA_GadgetText and NGDA_Flags.
+
+The DA_Termination attribute indicates that this element is a `terminal' one:
+activating a terminal element ends the dialog (the build-in function
+runSimpleDialog() respects this rule). There may be several terminal
+elements, for example an `ok' and a `cancel' button.
+
+After this initialization phase, the (geometrical) structure of the dialog box
+is well-defined and the dialog box can be realized.
+
+=============================
+How to realize the dialog box
+=============================
+The easiest way to conduct the dialog that hides away as much fuzz as possible
+is to invoke runSimpleDialog(). runSimpleDialog() will
+-	determine the geometrical space requirements of the dialog
+-	open an appropriately sized Intuition Window
+-	layout the dialog (which creates the gadgets on the run)
+-	attach the gadgets to the window
+-	process incoming IDCMP events until the activation of a terminal element
+	is detected
+-	return the address of the terminating DialogElement structure.
+
+We, however, want to consider this process in detail, since there are many cases
+where runSimpleDialog() does not provide enough flexibility.
+
+You should never find a reason to get involved with the geometrical and layout
+aspects directly. The library provides the functions openDialogWindow() and
+openDialogWindowA() which do this for you:
+
+	ULONG openDialogWindow( DialogElement *root, ULONG first, ... );
+	ULONG openDialogWindowA( DialogElement *root, struct TagItem *taglist );
+
+	error = openDialogWindow( &root, WA_Title, "Dialog", TAG_DONE );
+
+The arguments are
+	root	-	the pointer to the dialog's root element (initialized)
+	taglist	-	a tag list that allows you to control some aspects of the
+				dialog window. Recognized attributes are:
+				WA_Title,		-	the window title
+				WA_Left,
+				WA_Top			-	the window position
+									(default: centered on screen)
+				WA_InnerWidth,
+				WA_InnerHeight	-	the *minimal* dimensions of the window's
+									interior (default: as small as possible)
+				Do not specify other window attributes in this tag list!
+				Note that you may specify other window attributes in the
+				root element's tag list (see dispatchRoot documentation).
+
+The return value is either DIALOGERR_OK (success) or some other error code as
+defined in <dialog/dialog.h>, indicating failure.
+Note that DIALOGERR_OK is explicitly defined as zero to make error checking more
+convenient.
+
+When successful, openDialogWindow() has opened the window, created the gadgets
+and attached them to the window. Note that the window's IDCMP flags are
+automatically determined by ORing together the IDCMP requirements of all dialog
+elements. Never change any IDCMP flags of a dialog window!
+
+The window is always opened on the screen specified by DA_Screen in the root
+element's tag list (as CUSTOMSCREEN). Therefore, you must make sure that the
+screen remains open as long as the window exists (shouldn't pose a problem).
+Note that this proceeding is sanctioned by the RKRM for transient windows.
+
+For event processing we need the Window pointer. It must be obtained using the
+library function getDialogWindow():
+
+	struct Window *getDialogWindow( DialogElement *root );
+
+	window = getDialogWindow( &root );
+
+Simply pass the root DialogElement pointer to it. Note that this function
+will return NULL except when called after openDialogWindow() and before
+closeDialogWindow() (see below).
+
+Having obtained the Window pointer, we can start processing IntuiMessages.
+Note that GT_GetIMsg() and GT_ReplyIMsg() must be used as soon as GadTools
+gadgets have been created (which is probably the case unless you have
+implemented new dispatchers that are based on conventional gadgets or BOOPSI
+classes). The first thing to do with a received IntuiMessage is to pass it
+to mapDialogEvent():
+
+	DialogElement *mapDialogEvent( DialogElement *root, struct IntuiMessage *imsg );
+
+	match = mapDialogEvent( &root, imsg );
+
+The return value is a pointer to a DialogElement structure or NULL. When non-NULL
+it points to the element that `originated' the event. This includes keyboard
+shortcuts and additional events (see below).
+
+A dialog element will respond to additional IDCMP event classes as specified by
+DA_MatchEventClasses in its tag list. Typical example usages include
+IDCMP_CLOSEWINDOW and IDCMP_DISKINSERTED. Note that the attribute DA_MatchEventCode
+and DA_MatchEventQualifier are not supported yet.
+
+You should test then whether the respective element is terminal or not. If it is
+terminal, you should exit the event loop as soon as possible. 
+
+The rest of the event processing is up to you: If some dialog elements are supposed
+to trigger some specific action, this is the place to do it.
+
+When you are done with the event, pass it back to GT_ReplyIMsg().
+
+After leaving the event loop you must close the dialog window again. This is
+accomplished by passing the root element to closeDialogWindow().
+
+You only have to call closeDialogWindow() if openDialogWindow() did succeed.
+
+===============================================
+How to cleanup after having finished the dialog
+===============================================
+initDialogElement() allocates certain data structures dynamically.
+The bound system resources must be freed before the scope of the
+DialogElement instance ends.
+This is done by passing the pointer to the DialogElement to
+clearDialogElement():
+
+	VOID clearDialogElement( DialogElement *de );
+
+To continue the above example, one would write
+
+cleanup:
+	clearDialogElement( &element );
+	clearDialogElement( &root );
+
+=============
+Test examples
+=============
+There are seven small example programs included that demonstrate
+the usage of the library. Almost all currently supported GadTools
+kinds appear (integer and number have been omitted but string and
+text are included).
+
+==============================
+Dialog element class reference
+==============================
+
+The currently implemented dialog element classes are:
+	Root
+	HStack
+	VStack
+	HCons
+	VCons
+	HBumper
+	VBumper
+	HSpring
+	VSpring
+	Button		/* GadTools */
+	CheckBox	/* GadTools */
+	String		/* GadTools */
+	Integer		/* GadTools */
+	ListView	/* GadTools */
+	MX			/* GadTools */
+	Cycle		/* GadTools */
+	Text		/* GadTools */
+	Number		/* GadTools */
+
+The class that a DialogElement instance belongs to is determined by
+the dispatcher callback pointer that is passed to initDialogElement().
+The dispatcher for the class XXX is a C language function with the
+following prototype:
+
+	ULONG dispatchXXX( struct Hook *, DialogElement *, DialogMessage * );
+
+This information is provided just for understanding; you never actually
+call a dispatcher hook directly.
+The subject of implementing new dispatchers is not covered by this document.
+
+The dispatcher must examine the DialogMessage passed to it and take action
+depending on the MethodID that it contains.
+The methods that dispatchers must support include
+- inquiring the element's geometrical structure
+- setup & determination of the element's geometrical space requirements
+- layout
+- cleanup
+- event matching and internal processing (in particular keyboard equivalents)
+
+We are going to discuss the properties of each class now is detail.
+
+For this discussion there is one thing left to explain: a dialog element is
+said to have a `structure'. This structure consists in the existence of non-
+existence of a horizontal and/or a vertical `baseline'. People who have worked
+with the Text section of graphics.library should be familiar with the term
+`baseline'. A single line of text only and always has a horizontal baseline.
+We have extended this conception for dialog elements in that they may also have
+a vertical baseline.
+
+It is in fact quite obvious which structure certain elements have: Consider for
+example a GadTools button. There is a line of text centered on the button.
+Therefore, we let the button inherit the horizontal baseline of the text
+(and no vertical baseline).
+
+Now consider a GadTools string entry gadget with the label placed to the left
+as it is default: Both the label and the text the user enters in the gadget
+have (the same) horizontal baseline. But in addition to that, the gadget is
+obviously divided horizontally into two distinct parts: the label and the
+entry field. Therefore, we say that this element also has a vertical baseline
+(identical to the left edge of the entry field).
+
+What is this good for?
+Note that just as the text baseline allows us to arrange separate words neatly
+on a line, our extended notion of structured dialog elements allows us to
+arrange several (similar) elements in either horizontal or vertical direction
+in a way that looks nice and tidy to the user.
+You can for instance arrange five string entry gadgets (with labels to their left)
+in a vertical `stack'. The layout engine build into the dialog library will then
+by default align the left edges of the entry fields, causing the labels to appear
+on the left and the entry fields on the right of one continuous vertical line in
+the dialog box!
+
+===============================================================================
+
+Class: 		Root
+
+Dispatcher:	dispatchRoot
+
+Purpose:	Anchor to the hierarchy of dialog elements;
+			serves as a handle for many library functions.
+			Parameters that are global to the dialog are
+			passed to this.
+
+Structure:	no baselines
+
+Attributes:
+
+DA_Screen Screen *
+	specifies the screen on which to open the dialog window.
+	Must be specified!
+
+DA_Member DialogElement *
+	specifies the element that goes below the root in the hierarchy.
+
+DA_XSpacing LONG
+	specifies a horizontal spacing.
+	This value determines the width of HBumpers and of the padding
+	between window frame and the dialog imagery.
+	Default: INTERWIDTH (defined in <libraries/gadtools.h>)
+
+DA_YSpacing LONG
+	specifies a vertical spacing.
+	This value determines the height of VBumpers and of the padding
+	between window frame and the dialog imagery.
+	Default: INTERHEIGHT (defined in <libraries/gadtools.h>)
+
+Any window attributes except
+WA_Left,
+WA_Top,
+WA_InnerWidth,
+WA_Width,
+WA_InnerHeight,
+WA_Height,
+WA_IDCMP,
+WA_SimpleRefresh,
+WA_CustomScreen
+	to customize the dialog window's appearance and behaviour.
+
+===============================================================================
+
+Class: 		HStack
+
+Dispatcher:	dispatchHStack
+
+Purpose:	Stack an arbitrary number of elements horizontally (side by side).
+
+Structure:	horizontal baseline if every member has one
+
+Attributes:
+
+DA_Member DialogElement * (multiple)
+	specifies the list of elements to be stacked horizontally. 
+DA_Alignment LONG (-1,0,+1)
+	controls the alignment of the stacked elements in the vertical direction:
+	-1, top alignment:		top edges are aligned
+	0, center alignment:	if all members have a horizontal baseline, these
+	(default)				will be aligned;
+							else each member is centered vertically within the
+							available space
+	+1, bottom alignment:	bottom edges are aligned
+
+===============================================================================
+
+Class: 		VStack
+
+Dispatcher:	dispatchVStack
+
+Purpose:	Stack an arbitrary number of elements vertically (side by side).
+
+Structure:	vertical baseline if every member has one
+
+Attributes:
+
+DA_Member DialogElement * (multiple)
+	specifies the list of elements to be stacked vertically. 
+DA_Alignment LONG (-1,0,+1)
+	controls the alignment of the stacked elements in the horizontal direction:
+	-1, left alignment:		left edges are aligned
+	0, center alignment:	if all members have a vertical baseline, these
+	(default)				will be aligned;
+							else each member is centered horizontally within the
+							available space
+	+1, right alignment:	right edges are aligned
+
+===============================================================================
+
+Class: 		HCons
+
+Dispatcher:	dispatchHCons
+
+Purpose:	Create a pair of a left (car) and a right (cdr) element.
+
+Structure:	vertical baseline; horizontal baseline if car and cdr have one
+
+Attributes:
+
+DA_CAR DialogElement *
+	specifies the left element. May be omitted.
+DA_CDR DialogElement *
+	specifies the right element. May be omitted.
+
+===============================================================================
+
+Class: 		VCons
+
+Dispatcher:	dispatchVCons
+
+Purpose:	Create a pair of a top (car) and a bottom (cdr) element.
+
+Structure:	horizontal baseline; vertical baseline if car and cdr have one
+
+Attributes:
+
+DA_CAR DialogElement *
+	specifies the top element. May be omitted.
+DA_CDR DialogElement *
+	specifies bottom right element. May be omitted.
+
+===============================================================================
+
+Class: 		HBumper
+
+Dispatcher:	dispatchHBumper
+
+Purpose:	Insert a whitespace with fixed width (see Root, DA_XSpacing);
+			this element is typically used in HStacks.
+
+Structure:	horizontal baseline
+
+Attributes:	none
+
+Note:		HBumpers may be re-used!
+			You only have to prepare one DialogElement and can use it any
+			number of times in your dialog.
+
+===============================================================================
+
+Class: 		VBumper
+
+Dispatcher:	dispatchVBumper
+
+Purpose:	Insert a whitespace with fixed height (see Root, DA_YSpacing);
+			this element is typically used in VStacks.
+
+Structure:	vertical baseline
+
+Attributes:	none
+
+Note:		VBumpers may be re-used!
+			You only have to prepare one DialogElement and can use it any
+			number of times in your dialog.
+
+===============================================================================
+
+Class: 		HSpring
+
+Dispatcher:	dispatchHSpring
+
+Purpose:	Balance arbitrarily extensible elements in HStacks.
+
+Structure:	horizontal baseline
+
+Attributes:	none
+
+Note:		HSprings may be re-used!
+			You only have to prepare one DialogElement and can use it any
+			number of times in your dialog.
+
+===============================================================================
+
+Class: 		VSpring
+
+Dispatcher:	dispatchVSpring
+
+Purpose:	Balance arbitrarily extensible elements in VStacks.
+
+Structure:	vertical baseline
+
+Attributes:	none
+
+Note:		VSprings may be re-used!
+			You only have to prepare one DialogElement and can use it any
+			number of times in your dialog.
+
+Springs are very versatile elements that give you great freedom in designing
+stacks. In particular, consider what happens when a spring is placed at one
+or both ends of a stack. If you find that the effect of one spring on a stack
+is insufficient, simply double the spring (doubles the effect).
+
+===============================================================================
+
+Class: 		Button (GadTools)
+
+Dispatcher:	dispatchButton
+
+Purpose:	Realize a GadTools button with label and
+			optional keyboard equivalent
+
+Structure:	horizontal baseline
+
+Attributes:
+
+NGDA_TextAttr struct TextAttr *
+	pointer to a TextAttr structure.
+	This goes into the ng_TextAttr field of the NewGadget structure.
+
+NGDA_VisualInfo APTR
+	APTR to the private VisualInfo structure.
+	This goes into the ng_VisualInfo field of the NewGadget structure.
+
+NGDA_GadgetText STRPTR
+	Button label.
+	This goes into the ng_GadgetText field of the NewGadget structure.
+
+NGDA_Flags ULONG
+	Flags. This goes into the ng_Flags field of the NewGadget structure.
+
+DA_EquivalentKey UBYTE
+	specifies the keyboard shortcut (case-insensitive).
+
+plus other GadTools or Intuition gadget
+attributes as they apply to a button.
+
+===============================================================================
+
+Class: 		CheckBox (GadTools)
+
+Dispatcher:	dispatchCheckBox
+
+Purpose:	Realize a GadTools checkbox with label and
+			optional keyboard equivalent
+
+Structure:	horizontal baseline if PLACETEXT_ABOVE or PLACETEXT_BELOW,
+			vertical baseline if PLACETEXT_LEFT or PLACETEXT_RIGHT
+
+Attributes:
+
+NGDA_TextAttr struct TextAttr *
+	pointer to a TextAttr structure.
+	This goes into the ng_TextAttr field of the NewGadget structure.
+
+NGDA_VisualInfo APTR
+	APTR to the private VisualInfo structure.
+	This goes into the ng_VisualInfo field of the NewGadget structure.
+
+NGDA_GadgetText STRPTR
+	CheckBox label.
+	This goes into the ng_GadgetText field of the NewGadget structure.
+
+NGDA_Flags ULONG
+	Flags. This goes into the ng_Flags field of the NewGadget structure.
+	The label placement flags determine the element's structure.
+
+DA_EquivalentKey UBYTE
+	specifies the keyboard shortcut (case-insensitive).
+
+plus other GadTools or Intuition gadget
+attributes as they apply to a checkbox.
+
+===============================================================================
+
+Class: 		String (GadTools)
+
+Dispatcher:	dispatchString
+
+Purpose:	Realize a GadTools string entry gadget with label and
+			optional keyboard equivalent
+
+Structure:	horizontal baseline, vertical baseline if PLACETEXT_LEFT
+			or PLACETEXT_RIGHT
+
+Attributes:
+
+NGDA_TextAttr struct TextAttr *
+	pointer to a TextAttr structure.
+	This goes into the ng_TextAttr field of the NewGadget structure.
+
+NGDA_VisualInfo APTR
+	APTR to the private VisualInfo structure.
+	This goes into the ng_VisualInfo field of the NewGadget structure.
+
+NGDA_GadgetText STRPTR
+	String label.
+	This goes into the ng_GadgetText field of the NewGadget structure.
+
+NGDA_Flags ULONG
+	Flags. This goes into the ng_Flags field of the NewGadget structure.
+	The label placement flags determine the element's structure.
+
+DA_EquivalentKey UBYTE
+	specifies the keyboard shortcut (case-insensitive).
+
+DA_Storage STRPTR
+	pointer to a buffer that must can take as much characters as is specified
+	by GTST_MaxChars. The text entered by the user is copied there each time
+	a IDCMP_GADGETUP is heard from the gadget.
+
+plus other GadTools or Intuition gadget attributes
+as they apply to a string entry gadget.
+
+===============================================================================
+
+Class: 		Integer (GadTools)
+
+Dispatcher:	dispatchInteger
+
+Purpose:	Realize a GadTools integer entry gadget with label and
+			optional keyboard equivalent
+
+Structure:	horizontal baseline, vertical baseline if PLACETEXT_LEFT
+			or PLACETEXT_RIGHT
+
+Attributes:
+
+NGDA_TextAttr struct TextAttr *
+	pointer to a TextAttr structure.
+	This goes into the ng_TextAttr field of the NewGadget structure.
+
+NGDA_VisualInfo APTR
+	APTR to the private VisualInfo structure.
+	This goes into the ng_VisualInfo field of the NewGadget structure.
+
+NGDA_GadgetText STRPTR
+	Integer label.
+	This goes into the ng_GadgetText field of the NewGadget structure.
+
+NGDA_Flags ULONG
+	Flags. This goes into the ng_Flags field of the NewGadget structure.
+	The label placement flags determine the element's structure.
+
+DA_EquivalentKey UBYTE
+	specifies the keyboard shortcut (case-insensitive).
+
+DA_Storage LONG *
+	The integer that the user has entered is copied to this memory location
+	each time a IDCMP_GADGETUP comes in.
+
+plus other GadTools or Intuition gadget attributes
+as they apply to a integer entry gadget.
+
+===============================================================================
+
+Class: 		ListView (GadTools)
+
+Dispatcher:	dispatchListView
+
+Purpose:	Realize a GadTools list view gadget with label and
+			optional keyboard equivalent
+
+Structure:	horizontal baseline if PLACETEXT_ABOVE or PLACETEXT_BELOW,
+			vertical baseline if PLACETEXT_LEFT or PLACETEXT_RIGHT
+
+Attributes:
+
+NGDA_TextAttr struct TextAttr *
+	pointer to a TextAttr structure.
+	This goes into the ng_TextAttr field of the NewGadget structure.
+
+NGDA_VisualInfo APTR
+	APTR to the private VisualInfo structure.
+	This goes into the ng_VisualInfo field of the NewGadget structure.
+
+NGDA_GadgetText STRPTR
+	ListView label.
+	This goes into the ng_GadgetText field of the NewGadget structure.
+
+NGDA_Flags ULONG
+	Flags. This goes into the ng_Flags field of the NewGadget structure.
+	The label placement flags determine the element's structure.
+
+DA_EquivalentKey UBYTE
+	specifies the keyboard shortcut. This is only functional if an item
+	is already selected. The unshifted keystroke selects the next item,
+	the shifted keystroke selects the previous item.
+	Note that this is only functional if DA_Storage specifies a valid
+	memory location where to store the currently selected item.
+
+DA_Storage LONG *
+	memory location where to store the currently selected item.
+	If this is omitted, the gadget will still work (except for keyboard
+	shortcut), but the client will never know which item the user
+	selected.
+
+plus other GadTools or Intuition gadget attributes
+as they apply to a list view gadget.
+
+===============================================================================
+
+Class: 		MX (GadTools)
+
+Dispatcher:	dispatchMX
+
+Purpose:	Realize a GadTools mutually exclusive gadget with
+			optional keyboard equivalent
+
+Structure:	vertical baseline
+
+Attributes:
+
+NGDA_TextAttr struct TextAttr *
+	pointer to a TextAttr structure.
+	This goes into the ng_TextAttr field of the NewGadget structure.
+
+NGDA_VisualInfo APTR
+	APTR to the private VisualInfo structure.
+	This goes into the ng_VisualInfo field of the NewGadget structure.
+
+NGDA_Flags ULONG
+	Flags. This goes into the ng_Flags field of the NewGadget structure.
+
+DA_EquivalentKey UBYTE
+	specifies the keyboard shortcut.
+	The unshifted keystroke activates the next choice (with wrap-around),
+	the shifted keystroke activates the previous choice (with wrap-around).
+	Note that this is only functional if DA_Storage specifies a valid
+	memory location where to store the currently active choice.
+
+DA_Storage LONG *
+	memory location where to store the currently active choice.
+	If this is omitted, the gadget will still work (except for keyboard
+	shortcut), but the client will never know which choice the user
+	activated.
+
+plus other GadTools or Intuition gadget attributes
+as they apply to a mutually exclusive gadget.
+
+===============================================================================
+
+Class: 		Cycle (GadTools)
+
+Dispatcher:	dispatchCycle
+
+Purpose:	Realize a GadTools cycle gadget with optional keyboard equivalent
+
+Structure:	horizontal baseline, vertical baseline if PLACETEXT_LEFT or
+			PLACETEXT_RIGHT
+
+Attributes:
+
+NGDA_TextAttr struct TextAttr *
+	pointer to a TextAttr structure.
+	This goes into the ng_TextAttr field of the NewGadget structure.
+
+NGDA_VisualInfo APTR
+	APTR to the private VisualInfo structure.
+	This goes into the ng_VisualInfo field of the NewGadget structure.
+
+NGDA_GadgetText STRPTR
+	Cycle label.
+	This goes into the ng_GadgetText field of the NewGadget structure.
+
+NGDA_Flags ULONG
+	Flags. This goes into the ng_Flags field of the NewGadget structure.
+
+DA_EquivalentKey UBYTE
+	specifies the keyboard shortcut.
+	The unshifted keystroke activates the next choice (with wrap-around),
+	the shifted keystroke activates the previous choice (with wrap-around).
+	Note that this is only functional if DA_Storage specifies a valid
+	memory location where to store the currently active choice.
+
+DA_Storage LONG *
+	memory location where to store the currently active choice.
+	If this is omitted, the gadget will still work (except for keyboard
+	shortcut), but the client will never know which choice the user
+	activated.
+
+plus other GadTools or Intuition gadget attributes
+as they apply to a cycle gadget.
+
+===============================================================================
+
+Class: 		Text (GadTools)
+
+Dispatcher:	dispatchText
+
+Purpose:	Realize a GadTools text display gadget
+
+Structure:	horizontal baseline, vertical baseline if PLACETEXT_LEFT or
+			PLACETEXT_RIGHT
+
+Attributes:
+
+NGDA_TextAttr struct TextAttr *
+	pointer to a TextAttr structure.
+	This goes into the ng_TextAttr field of the NewGadget structure.
+
+NGDA_VisualInfo APTR
+	APTR to the private VisualInfo structure.
+	This goes into the ng_VisualInfo field of the NewGadget structure.
+
+NGDA_GadgetText STRPTR
+	Text label.
+	This goes into the ng_GadgetText field of the NewGadget structure.
+
+NGDA_Flags ULONG
+	Flags. This goes into the ng_Flags field of the NewGadget structure.
+
+plus other GadTools or Intuition gadget attributes
+as they apply to a text gadget.
+
+===============================================================================
+
+Class: 		Number (GadTools)
+
+Dispatcher:	dispatchNumber
+
+Purpose:	Realize a GadTools number display gadget
+
+Structure:	horizontal baseline, vertical baseline if PLACETEXT_LEFT or
+			PLACETEXT_RIGHT
+
+Attributes:
+
+NGDA_TextAttr struct TextAttr *
+	pointer to a TextAttr structure.
+	This goes into the ng_TextAttr field of the NewGadget structure.
+
+NGDA_VisualInfo APTR
+	APTR to the private VisualInfo structure.
+	This goes into the ng_VisualInfo field of the NewGadget structure.
+
+NGDA_GadgetText STRPTR
+	Number label.
+	This goes into the ng_GadgetText field of the NewGadget structure.
+
+NGDA_Flags ULONG
+	Flags. This goes into the ng_Flags field of the NewGadget structure.
+
+plus other GadTools or Intuition gadget attributes
+as they apply to a number gadget.

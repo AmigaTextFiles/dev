@@ -1,0 +1,254 @@
+% Draw Compound terms as a Packed Tree
+%
+% Andrew Nicholson - October 86.
+
+%******		maketree(Compound_term)
+%
+% creates and prints the tree.
+
+maketree(Tree):-			% create the tree structure.
+	retractall(level(_,_,_)),
+	create(Tree,0,_),
+	fail.
+maketree(_):-				% print the resulting tree.
+	printtree,!.
+
+%******		create(Tree,Level)
+%
+% given a tree or term build the representation starting on Level.
+
+create(N,L,Centre):-
+	atom(N),!, node(N,L,Centre).
+create(I,L,Centre):-
+	integer(I),!, node(I,L,Centre).
+create(R,L,Centre):-
+	real(R),!, node(R,L,Centre).
+create(Tree,Level,New_centre):-
+	Tree =.. [Root,..Children], Below is Level+2,
+	place(Children,Below,Positions), 
+	bridge(Positions,Below,Centre),
+	parent(Root,Level,Centre,New_centre).
+
+%******		place(Children,Level,Positions,Width)
+%
+% place the Children on this Level and return centre positions and Width
+
+place([],L,[]).
+place([First,..Rest],Level,[Centre,..Positions]) :-
+	create(First,Level,Centre),
+	place(Rest,Level,Positions).
+	
+%******		node(Name,Level,Centre)
+%
+% puts the node called Name on Level returns it's centre.
+
+node(Name,Level,Centre) :-
+	getl(Level,Pos,Struct),
+	name(Name,String), length(String,L),
+	New_pos is Pos + L + 1,
+	Centre is Pos + (L - 1)/2,
+	newl(Level,New_pos,[(Pos,Name)|Struct]),
+	Below is Level +1,
+	getl(Below,Pos2,S),
+	max(New_pos,Pos2,P),
+	newl(Below,P,S),!.
+
+%******		bridge(Positions,Level,Centre)
+%
+% places a bridge across these positions on Level-1
+
+bridge(P,Level,Centre) :-
+	first_last(P,Start,End),
+	Above is Level -1,
+	getl(Above,Pos1,Struct),
+	(Pos1 > Start
+		     ->	shift(Start,Pos1,Above),
+			Dist is Pos1 - Start,
+			addn(P,Dist,N_P)
+		     |	N_P = P , Dist = 0
+	),
+	Centre is (Start + End)/2 + Dist,
+	getl(Level,Pos2,_),
+	newl(Above,Pos2,[bridge(N_P)|Struct]),!.
+
+%******		parent(Name,Level,Centre,New_centre)
+%
+% places the parent in position possible shifting the subtree across
+
+parent(Name,Level,Centre,New_centre) :-
+	getl(Level,Pos,Struct),
+	name(Name,String), length(String,L),
+	Middle is Pos + (L-1)/2,
+	(Middle > Centre
+			-> shift(Centre,Middle,Level), Place = Pos
+%			   SHOULD ONLY SHIFT TO MAKE THE LEFT EDGE ALIGN !
+%			   CENTRE IF SACRIFICE IS ONLY 3
+			|  P1 is Centre - (L-1)/2,
+			   P2 is Centre - (L-1), max(P2,Pos,P3),
+			   ( P3 < P1-3 -> Place = P3 | Place = P1 )
+	),
+	New_pos is Place + L + 1,
+	New_centre is Place + (L-1)/2,
+	Below is Level +1,
+	getl(Below,_,[bridge(Bridge)|Others]),
+	first_last(Bridge,_,Last), Pos2 is Last +2,
+	max(New_pos,Pos2,P),
+	newl(Level,P,[(Place,Name)|Struct]),
+	newl(Below,P,[bridge(Bridge)|Others]),!.
+	
+%% MAINTAIN LEVEL STRUCTURE %%==============================================
+%fetch the required level creating if doesn't exist
+
+getl(L,P,Struct) :-
+	level(L,P,Struct),!.
+getl(L,0,[]) :-
+	assert(level(L,0,[])).
+
+% update level to have these new values
+
+newl(L,P,S) :-
+	retract(level(L,_,_)),
+	assert(level(L,P,S)).
+
+% shift subtree across
+
+shift(From,To,Level) :-
+	D is To - From, D>0,
+	Below is Level +1,
+	movel(Below,From,D).
+shift(_,_,_).
+
+movel(Level,From,D) :-
+	getl(Level,Pos,Struct), endl(From,Struct),
+	shift_line(Struct,From,D,Left,New_struct),
+	New_pos is Pos + D,
+	newl(Level,New_pos,New_struct),
+	Below is Level +1,
+	!, movel(Below,Left,D).
+
+endl(_,[]) :- !, fail.
+endl(From,[(Pos,Name)|_]) :-
+	name(Name,L),length(L,Len),
+	(Pos + Len) < From, !, fail.
+endl(From,[bridge(Bridge)|Rest]) :-
+	first_last(Bridge,_,Last), Last < From, !, fail.
+endl(_,_).
+	
+
+shift_line([],F,_,0,[]):- !.
+shift_line([(Pos,Name)|Rest],From,Dist,From,[(Pos,Name)|Rest]) :-
+	name(Name,L),length(L,Len),
+	(Pos + Len) < From, !.
+shift_line([(Pos,Name)|Rest],From,Dist,Left,[(New_pos,Name)|New_rest]) :-
+	New_pos is Pos + Dist,
+	shift_line(Rest,From,Dist,Left,New_rest).
+shift_line([bridge(Bridge)|Rest],From,Dist,From,[bridge(Bridge)|Rest]) :-
+	first_last(Bridge,_,Last), Last < From, !.
+shift_line([bridge(Links)|Rest],From,Dist,Left,[bridge(New_links)|New_rest]) :-
+	addn(Links,Dist,New_links),
+	shift_line(Rest,From,Dist,Left,New_rest).
+
+addn([],_,[]).
+addn([Pos|Rest],Dist,[New_pos|New_Rest]) :-
+	New_pos is Pos + Dist,
+	addn(Rest,Dist,New_Rest).
+
+%% PRINT TREE ==============================================================
+
+printtree :-
+	line(Level),
+	printline(Level),
+	level(Level,_,[]).
+printtree.
+
+printline(Line) :-
+	level(Line,_,Struct), Struct /= [],
+	printstruct(_,Struct), !, nl.
+printline(_).
+
+printstruct(0,[]).
+printstruct(Finished_at,[Element|Rest]) :-
+	printstruct(Upto,Rest),
+	printelement(Upto,Element,Finished_at).
+
+printelement(At,bridge(Pos),Next) :-
+	makebridge(Pos,Start,Next,Bridge),
+	movec(At,Start),prin(Bridge).
+printelement(At,(Pos,Name),Next) :-
+	movec(At,Pos),
+	prin(Name),
+	name(Name,L),length(L,D),
+	Next is Pos+D.
+
+makebridge([Pos],Pos,Next,"|") :- Next is Pos + 1.
+makebridge(Pos,Start,Next,Bridge) :-
+	first_last(Pos,Start,Last), Next is Last + 1,
+	Centre is (Start + Last)/2,
+	formbridge(Centre,Pos,Bridge).
+
+formbridge(_,[_],"+").
+formbridge(Centre,[From,To,..Rest],Bridge) :-
+	Centre < To, Centre > From,
+	line(From,Centre,L1),
+	line(Centre,To,L2),
+	formbridge(Centre,[To|Rest],Part),
+	concat(['+',L1,"^",L2,Part],Bridge).
+formbridge(Centre,[From,To,..Rest],Bridge) :-
+	line(From,To,Line),
+	formbridge(Centre,[To|Rest],Part),
+	concat(['+',Line,Part],Bridge).
+
+line(From,To,Line) :-
+	Dist is To - From - 1, Dist > 0,
+	draw(Dist,Line).
+line(From,To,'').
+
+
+draw(0,'').
+draw(1,'-').
+draw(2,'--').
+draw(3,'---').
+draw(4,'----').
+draw(8,'--------').
+draw(16,'----------------').
+draw(32,'--------------------------------').
+draw(X,L) :-
+	Half is X/2, Rest is X - Half - Half,
+	draw(Half,Halfline),
+	draw(Rest,Restline),
+	concat([Halfline,Halfline,Restline],L).
+
+%% UTILITIES ================================================================
+
+min(A,B,A) :- A <= B, !.
+min(A,B,B).
+
+max(A,B,A) :- A >= B, !.
+max(_,B,B).
+
+first_last([First],First,First).
+first_last([First|Rest],First,Last) :-
+	last(Rest,Last).
+last([Last],Last).
+last([_,..Rest],Last) :- last(Rest,Last).
+
+line(0).
+line(L) :- line(O), L is O + 1.
+
+movec(From,From) :-!.
+movec(From,To) :-
+	Dist is To - From,
+	tab(Dist).
+
+
+%% A BIT OF FUN - to make it sign on then 'assert(noise)'
+%%                before loading package.
+
+noise,nl,
+maketree('trees'(
+		author('Andrew','Nicholson'),
+		version('1.01'),
+		date('5th','October', 1986)
+	 )
+)!
+

@@ -1,0 +1,677 @@
+
+#include <exec/types.h>
+#include <inline/wild.h>
+#include <inline/exec.h>
+#include <inline/dos.h>
+#include <wild/wild.h>
+#include <wild/tdcore.h>
+#include <exec/execbase.h>
+#include <gcc/compiler.h>
+#include <utility/hooks.h>
+#include <gcc/debug.h>
+#include <debugoutput.h>
+#include <wild/objects.h>
+
+extern struct WildBase 	*WildBase;
+extern struct WildScene	*KubeScene;
+extern struct WildApp	*KubeApp;
+extern	ULONG		*debugfh;
+
+struct	WildSector	*KubeSector;
+
+#define DOSBase		WildBase->wi_DOSBase
+
+static const char	tiger_chu[]=	{"images/tiger.chu24\0"};
+static const char	eagle_chu[]=	{"images/eagle.chu24\0"};
+static const char	py_chu[]=	{"images/py.chu24\0"};
+static const char	wild_chu[]=	{"images/wild.chu24\0"};
+static const char	sunset_chu[]=	{"images/sunset.chu24\0"};
+static const char	canyon_chu[]=	{"images/canyon.chu24\0"};
+static const char	kube_pal[]=	{"images/kube.pal\0"};
+
+void	KubeTextureHook(LIB_FCT(struct WildTexture,*tex,a2),LIB_FCT(ULONG,action,a1),LIB_FCT(struct Hook,*hook,a0))
+{
+ switch (action)
+  {
+   case TEXACTION_Load:
+    {
+     tex->tex_Raw=LoadFile(NULL,hook->h_Data,0);
+     break;
+    }
+   case TEXACTION_Free:
+    {
+     FreeVecPooled(tex->tex_Raw);
+     break;
+    }
+  }
+}
+
+void InitScene()
+{
+ static ULONG	normal[]={	0,0,0,
+ 				1<<16,0,0,
+ 				0,1<<16,0,
+ 				0,0,1<<16};	// normal ref in O(0,0,0)
+ static ULONG	camera[]={	0,0,-200,
+ 				1<<16,0,0,
+ 				0,1<<16,0,
+ 				0,0,1<<16};	// normal ref in O(0,0,-200)
+ static ULONG	pointA[]={	 100, 100,-100};
+ static ULONG	pointB[]={	 100, 100, 100};
+ static ULONG	pointC[]={	-100, 100, 100};
+ static ULONG	pointD[]={	-100, 100,-100};
+ static ULONG	pointE[]={	 100,-100,-100};
+ static ULONG	pointF[]={	 100,-100, 100};
+ static ULONG	pointG[]={	-100,-100, 100};
+ static ULONG	pointH[]={	-100,-100,-100};
+ static ULONG	pointLight[]={	 -100,-300, -100};
+ 
+ static ULONG	hook[]={	0,0,&KubeTextureHook,0,0};
+
+ static ULONG 	*world,*arena,*alien,*pa,*pb,*pc,*pd,*pe,*pf,*pg,*ph,
+	 	*ea,*eb,*ec,*ed,*ee,*ef,*eg,*eh,*ei,*ej,*ek,*el,*em,*en,*eo,*ep,*eq,*er,
+	 	*fa,*fb,*fc,*fd,*fe,*ff,*fg,*fh,*fi,*fj,*fk,*fl,
+	 	*tiger,*eagle,*py,*wild,*sunset,*canyon,
+		*kube_palette,*light,*lightsector,*lightpoint;
+
+ kube_palette=LoadFile(NULL,kube_pal,0);
+DebugOut("Loaded kube palette.\n\0");
+ if (KubeScene=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Scene,
+ 					WIBU_BuildObject,TRUE,
+ 					WIBU_WildApp,KubeApp,
+ 					ATTR_SCENE_PALETTE,kube_palette,
+ 					ATTR_SCENE_CAMERA,&camera,0,0))
+  {
+DebugOut("Made scene.\n\0");
+   if (world=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_World,
+   					WIBU_BuildObject,TRUE,
+   					WIBU_WildApp,KubeApp,
+   					FRIEND_WORLD_SCENE,KubeScene,0,0))
+    {
+DebugOut("Made world.\n\0");
+     if (arena=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Arena,
+     					WIBU_BuildObject,TRUE,
+     					WIBU_WildApp,KubeApp,
+     					FRIEND_ARENA_WORLD,world,
+     					ATTR_ENTITY_REF,&normal,0,0))
+      {
+DebugOut("Made arena.\n\0");
+       if (alien=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Alien,
+       					WIBU_BuildObject,TRUE,
+       					WIBU_WildApp,KubeApp,
+       					FRIEND_ALIEN_ARENA,arena,
+       					ATTR_ENTITY_REF,&normal,0,0))
+        {
+DebugOut("Made alien.\n\0");
+         if (KubeSector=BuildWildObjectTags(WIBU_ObjectType,OBJECT_Sector,
+         				WIBU_BuildObject,TRUE,
+         				WIBU_WildApp,KubeApp,
+         				FRIEND_SECTOR_ALIEN,alien,
+         				FRIEND_ENTITY_PARENT,alien,
+         				ATTR_ENTITY_REF,&normal,0,0))
+          {
+DebugOut("Made KubeSector.\n\0");
+           pa=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Point,
+           				WIBU_BuildObject,TRUE,
+           				WIBU_WildApp,KubeApp,
+           				FRIEND_POINT_SECTOR,KubeSector,
+           				ATTR_POINT_COLOR,0xff0000,
+           				ATTR_POINT_VEK,&pointA,0,0);	// No more checking!! Boring !!
+
+           pb=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Point,
+           				WIBU_BuildObject,TRUE,
+           				WIBU_WildApp,KubeApp,
+           				FRIEND_POINT_SECTOR,KubeSector,
+           				ATTR_POINT_COLOR,0xff0000,
+           				ATTR_POINT_VEK,&pointB,0,0);	// No more checking!! Boring !!
+           			
+           pc=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Point,
+           				WIBU_BuildObject,TRUE,
+           				WIBU_WildApp,KubeApp,
+           				FRIEND_POINT_SECTOR,KubeSector,
+           				ATTR_POINT_COLOR,0xff0000,
+           				ATTR_POINT_VEK,&pointC,0,0);	// No more checking!! Boring !!
+
+           pd=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Point,
+           				WIBU_BuildObject,TRUE,
+           				WIBU_WildApp,KubeApp,
+           				FRIEND_POINT_SECTOR,KubeSector,
+           				ATTR_POINT_COLOR,0xff0000,
+           				ATTR_POINT_VEK,&pointD,0,0);	// No more checking!! Boring !!
+
+           pe=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Point,
+           				WIBU_BuildObject,TRUE,
+           				WIBU_WildApp,KubeApp,
+           				FRIEND_POINT_SECTOR,KubeSector,
+           				ATTR_POINT_COLOR,0xff0000,
+           				ATTR_POINT_VEK,&pointE,0,0);	// No more checking!! Boring !!
+
+           pf=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Point,
+           				WIBU_BuildObject,TRUE,
+           				WIBU_WildApp,KubeApp,
+           				FRIEND_POINT_SECTOR,KubeSector,
+           				ATTR_POINT_COLOR,0xff0000,
+           				ATTR_POINT_VEK,&pointF,0,0);	// No more checking!! Boring !!
+
+           pg=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Point,
+           				WIBU_BuildObject,TRUE,
+           				WIBU_WildApp,KubeApp,
+           				FRIEND_POINT_SECTOR,KubeSector,
+           				ATTR_POINT_COLOR,0xff0000,
+           				ATTR_POINT_VEK,&pointG,0,0);	// No more checking!! Boring !!
+
+           ph=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Point,
+           				WIBU_BuildObject,TRUE,
+           				WIBU_WildApp,KubeApp,
+           				FRIEND_POINT_SECTOR,KubeSector,
+           				ATTR_POINT_COLOR,0xff0000,
+           				ATTR_POINT_VEK,&pointH,0,0);
+
+DebugOut("Made points. :)\n\0");
+
+           lightsector=BuildWildObjectTags(WIBU_ObjectType,OBJECT_Sector,
+         				WIBU_BuildObject,TRUE,
+         				WIBU_WildApp,KubeApp,
+         				FRIEND_SECTOR_ALIEN,alien,
+         				FRIEND_ENTITY_PARENT,alien,
+         				ATTR_ENTITY_REF,&normal,0,0);
+         				
+           lightpoint=BuildWildObjectTags(WIBU_ObjectType,OBJECT_Point,
+           				WIBU_BuildObject,TRUE,
+           				WIBU_WildApp,KubeApp,
+           				FRIEND_POINT_SECTOR,lightsector,
+           				ATTR_POINT_VEK,&pointLight,0,0);
+
+	   light=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Light,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_LIGHT_ARENA,arena,
+	   				ATTR_LIGHT_COLOR,0xffffff,
+	   				ATTR_LIGHT_INTENSITY,203,
+	   				FRIEND_LIGHT_POINT,lightpoint,0,0);
+
+DebugOut("Made light and his own sector.\n\0");
+ 
+
+	   ea=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pa,
+	   				FRIEND_EDGE_POINTB,pd,0,0);
+	   				
+	   eb=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pa,
+	   				FRIEND_EDGE_POINTB,pb,0,0);
+
+	   ec=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pb,
+	   				FRIEND_EDGE_POINTB,pc,0,0);
+
+	   ed=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pc,
+	   				FRIEND_EDGE_POINTB,pd,0,0);
+
+	   ee=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pe,
+	   				FRIEND_EDGE_POINTB,ph,0,0);
+
+	   ef=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pe,
+	   				FRIEND_EDGE_POINTB,pf,0,0);
+
+	   eg=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pf,
+	   				FRIEND_EDGE_POINTB,pg,0,0);
+
+	   eh=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pg,
+	   				FRIEND_EDGE_POINTB,ph,0,0);
+
+	   ei=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pa,
+	   				FRIEND_EDGE_POINTB,pe,0,0);
+
+	   ej=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pf,
+	   				FRIEND_EDGE_POINTB,pb,0,0);
+
+	   ek=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pg,
+	   				FRIEND_EDGE_POINTB,pc,0,0);
+
+	   el=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,ph,
+	   				FRIEND_EDGE_POINTB,pd,0,0);
+
+	   em=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pe,
+	   				FRIEND_EDGE_POINTB,pg,0,0);
+
+	   en=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pe,
+	   				FRIEND_EDGE_POINTB,pb,0,0);
+
+	   eo=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pb,
+	   				FRIEND_EDGE_POINTB,pd,0,0);
+
+	   ep=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pd,
+	   				FRIEND_EDGE_POINTB,pg,0,0);
+
+	   eq=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pf,
+	   				FRIEND_EDGE_POINTB,pc,0,0);
+
+	   er=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Edge,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_EDGE_SECTOR,KubeSector,
+	   				FRIEND_EDGE_POINTA,pe,
+	   				FRIEND_EDGE_POINTB,pd,0,0);
+DebugOut("Made edges.\n\0");
+
+	   hook[4]=&eagle_chu;
+	   eagle=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Texture,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+					ATTR_TEXTURE_HOOK,hook,		//check
+					FRIEND_TEXTURE_WORLD,world,
+					ATTR_TEXTURE_WIDTH,256,
+					ATTR_TEXTURE_HEIGHT,256,0,0);
+					
+	   hook[4]=&py_chu;
+	   py=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Texture,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+					ATTR_TEXTURE_HOOK,hook,		//check
+					FRIEND_TEXTURE_WORLD,world,
+					ATTR_TEXTURE_WIDTH,256,
+					ATTR_TEXTURE_HEIGHT,256,0,0);
+
+	   hook[4]=&wild_chu;
+	   wild=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Texture,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+					ATTR_TEXTURE_HOOK,hook,		//check
+					FRIEND_TEXTURE_WORLD,world,
+					ATTR_TEXTURE_WIDTH,256,
+					ATTR_TEXTURE_HEIGHT,256,0,0);
+
+	   hook[4]=&sunset_chu;
+	   sunset=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Texture,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+					ATTR_TEXTURE_HOOK,hook,		//check
+					FRIEND_TEXTURE_WORLD,world,
+					ATTR_TEXTURE_WIDTH,256,
+					ATTR_TEXTURE_HEIGHT,256,0,0);
+
+	   hook[4]=&canyon_chu;
+	   canyon=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Texture,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+					ATTR_TEXTURE_HOOK,hook,		//check
+					FRIEND_TEXTURE_WORLD,world,
+					ATTR_TEXTURE_WIDTH,256,
+					ATTR_TEXTURE_HEIGHT,256,0,0);
+					
+	   hook[4]=&tiger_chu;
+	   tiger=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Texture,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+					ATTR_TEXTURE_HOOK,hook,		//check
+					FRIEND_TEXTURE_WORLD,world,
+					ATTR_TEXTURE_WIDTH,256,
+					ATTR_TEXTURE_HEIGHT,256,0,0);
+DebugOut("Loaded texture and palettes.\n\0");
+	   
+	   fa=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,pe,
+	   				FRIEND_FACE_POINTB,pa,
+	   				FRIEND_FACE_POINTC,pd,
+	   				FRIEND_FACE_EDGEA,ei,
+	   				FRIEND_FACE_EDGEB,er,
+	   				FRIEND_FACE_EDGEC,ea,
+	   				FRIEND_FACE_TEXTURE,tiger,
+	   				ATTR_FACE_TXA,255,
+	   				ATTR_FACE_TYA,0,
+	   				ATTR_FACE_TXB,255,
+	   				ATTR_FACE_TYB,255,
+	   				ATTR_FACE_TXC,0,
+	   				ATTR_FACE_TYC,255,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   fb=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,ph,
+	   				FRIEND_FACE_POINTB,pe,
+	   				FRIEND_FACE_POINTC,pd,
+	   				FRIEND_FACE_EDGEA,el,
+	   				FRIEND_FACE_EDGEB,ee,
+	   				FRIEND_FACE_EDGEC,er,
+	   				FRIEND_FACE_TEXTURE,tiger,
+	   				ATTR_FACE_TXA,0,
+	   				ATTR_FACE_TYA,0,
+	   				ATTR_FACE_TXB,255,
+	   				ATTR_FACE_TYB,0,
+	   				ATTR_FACE_TXC,0,
+	   				ATTR_FACE_TYC,255,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   fc=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,pf,
+	   				FRIEND_FACE_POINTB,pc,
+	   				FRIEND_FACE_POINTC,pb,
+	   				FRIEND_FACE_EDGEA,ej,
+	   				FRIEND_FACE_EDGEB,ec,
+	   				FRIEND_FACE_EDGEC,eq,
+	   				FRIEND_FACE_TEXTURE,eagle,
+	   				ATTR_FACE_TXA,0,
+	   				ATTR_FACE_TYA,0,
+	   				ATTR_FACE_TXB,255,
+	   				ATTR_FACE_TYB,255,
+	   				ATTR_FACE_TXC,0,
+	   				ATTR_FACE_TYC,255,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   fd=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,pg,
+	   				FRIEND_FACE_POINTB,pc,
+	   				FRIEND_FACE_POINTC,pf,
+	   				FRIEND_FACE_EDGEA,ek,
+	   				FRIEND_FACE_EDGEB,eg,
+	   				FRIEND_FACE_EDGEC,eq,
+	   				FRIEND_FACE_TEXTURE,eagle,
+	   				ATTR_FACE_TXA,255,
+	   				ATTR_FACE_TYA,0,
+	   				ATTR_FACE_TXB,255,
+	   				ATTR_FACE_TYB,255,
+	   				ATTR_FACE_TXC,0,
+	   				ATTR_FACE_TYC,0,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   fe=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,pe,
+	   				FRIEND_FACE_POINTB,ph,
+	   				FRIEND_FACE_POINTC,pg,
+	   				FRIEND_FACE_EDGEA,eh,
+	   				FRIEND_FACE_EDGEB,ee,
+	   				FRIEND_FACE_EDGEC,em,
+	   				FRIEND_FACE_TEXTURE,py,
+	   				ATTR_FACE_TXA,255,
+	   				ATTR_FACE_TYA,255,
+	   				ATTR_FACE_TXB,0,
+	   				ATTR_FACE_TYB,255,
+	   				ATTR_FACE_TXC,0,
+	   				ATTR_FACE_TYC,0,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   ff=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,pe,
+	   				FRIEND_FACE_POINTB,pg,
+	   				FRIEND_FACE_POINTC,pf,
+	   				FRIEND_FACE_EDGEA,eg,
+	   				FRIEND_FACE_EDGEB,ef,
+	   				FRIEND_FACE_EDGEC,em,
+	   				FRIEND_FACE_TEXTURE,py,
+	   				ATTR_FACE_TXA,255,
+	   				ATTR_FACE_TYA,255,
+	   				ATTR_FACE_TXB,0,
+	   				ATTR_FACE_TYB,0,
+	   				ATTR_FACE_TXC,255,
+	   				ATTR_FACE_TYC,0,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   fg=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,pb,
+	   				FRIEND_FACE_POINTB,pd,
+	   				FRIEND_FACE_POINTC,pa,
+	   				FRIEND_FACE_EDGEA,ea,
+	   				FRIEND_FACE_EDGEB,eb,
+	   				FRIEND_FACE_EDGEC,eo,
+	   				FRIEND_FACE_TEXTURE,wild,
+	   				ATTR_FACE_TXA,0,
+	   				ATTR_FACE_TYA,0,
+	   				ATTR_FACE_TXB,255,
+	   				ATTR_FACE_TYB,255,
+	   				ATTR_FACE_TXC,255,
+	   				ATTR_FACE_TYC,0,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   fh=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,pd,
+	   				FRIEND_FACE_POINTB,pb,
+	   				FRIEND_FACE_POINTC,pc,
+	   				FRIEND_FACE_EDGEA,eo,
+	   				FRIEND_FACE_EDGEB,ec,
+	   				FRIEND_FACE_EDGEC,ed,
+	   				FRIEND_FACE_TEXTURE,wild,
+	   				ATTR_FACE_TXA,0,
+	   				ATTR_FACE_TYA,0,
+	   				ATTR_FACE_TXB,255,
+	   				ATTR_FACE_TYB,255,
+	   				ATTR_FACE_TXC,0,
+	   				ATTR_FACE_TYC,255,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   fi=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,pe,
+	   				FRIEND_FACE_POINTB,pf,
+	   				FRIEND_FACE_POINTC,pb,
+	   				FRIEND_FACE_EDGEA,ej,
+	   				FRIEND_FACE_EDGEB,ef,
+	   				FRIEND_FACE_EDGEC,en,
+	   				FRIEND_FACE_TEXTURE,canyon,
+	   				ATTR_FACE_TXA,0,
+	   				ATTR_FACE_TYA,0,
+	   				ATTR_FACE_TXB,255,
+	   				ATTR_FACE_TYB,0,
+	   				ATTR_FACE_TXC,255,
+	   				ATTR_FACE_TYC,255,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   fj=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,pe,
+	   				FRIEND_FACE_POINTB,pb,
+	   				FRIEND_FACE_POINTC,pa,
+	   				FRIEND_FACE_EDGEA,ei,
+	   				FRIEND_FACE_EDGEB,eb,
+	   				FRIEND_FACE_EDGEC,en,
+	   				FRIEND_FACE_TEXTURE,canyon,
+	   				ATTR_FACE_TXA,0,
+	   				ATTR_FACE_TYA,0,
+	   				ATTR_FACE_TXB,255,
+	   				ATTR_FACE_TYB,255,
+	   				ATTR_FACE_TXC,0,
+	   				ATTR_FACE_TYC,255,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   fk=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,ph,
+	   				FRIEND_FACE_POINTB,pd,
+	   				FRIEND_FACE_POINTC,pg,
+	   				FRIEND_FACE_EDGEA,ep,
+	   				FRIEND_FACE_EDGEB,eh,
+	   				FRIEND_FACE_EDGEC,el,
+	   				FRIEND_FACE_TEXTURE,sunset,
+	   				ATTR_FACE_TXA,255,
+	   				ATTR_FACE_TYA,0,
+	   				ATTR_FACE_TXB,255,
+	   				ATTR_FACE_TYB,255,
+	   				ATTR_FACE_TXC,0,
+	   				ATTR_FACE_TYC,0,
+	   				ATTR_FACE_FLAGS,0,0,0);
+
+	   fl=BuildWildObjectTags(	WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_BuildObject,TRUE,
+	   				WIBU_WildApp,KubeApp,
+	   				FRIEND_FACE_SECTOR,KubeSector,
+	   				FRIEND_FACE_POINTA,pd,
+	   				FRIEND_FACE_POINTB,pc,
+	   				FRIEND_FACE_POINTC,pg,
+	   				FRIEND_FACE_EDGEA,ed,
+	   				FRIEND_FACE_EDGEB,ek,
+	   				FRIEND_FACE_EDGEC,ep,
+	   				FRIEND_FACE_TEXTURE,sunset,
+	   				ATTR_FACE_TXA,255,
+	   				ATTR_FACE_TYA,255,
+	   				ATTR_FACE_TXB,0,
+	   				ATTR_FACE_TYB,255,
+	   				ATTR_FACE_TXC,0,
+	   				ATTR_FACE_TYC,0,
+	   				ATTR_FACE_FLAGS,0,0,0);
+DebugOut("Made faces.\n\0");
+	   
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fa,
+	   				FRIEND_FACE_MINUS,fb,
+	   				FRIEND_FACE_PLUS,fc,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fb,
+	   				FRIEND_FACE_MINUS,0,
+	   				FRIEND_FACE_PLUS,0,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fc,
+	   				FRIEND_FACE_MINUS,fd,
+	   				FRIEND_FACE_PLUS,fe,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fd,
+	   				FRIEND_FACE_MINUS,0,
+	   				FRIEND_FACE_PLUS,0,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fe,
+	   				FRIEND_FACE_MINUS,ff,
+	   				FRIEND_FACE_PLUS,fg,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,ff,
+	   				FRIEND_FACE_MINUS,0,
+	   				FRIEND_FACE_PLUS,0,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fg,
+	   				FRIEND_FACE_MINUS,fh,
+	   				FRIEND_FACE_PLUS,fi,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fh,
+	   				FRIEND_FACE_MINUS,0,
+	   				FRIEND_FACE_PLUS,0,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fi,
+	   				FRIEND_FACE_MINUS,fj,
+	   				FRIEND_FACE_PLUS,fk,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fj,
+	   				FRIEND_FACE_MINUS,0,
+	   				FRIEND_FACE_PLUS,0,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fk,
+	   				FRIEND_FACE_MINUS,fl,
+	   				FRIEND_FACE_PLUS,0,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Face,
+	   				WIBU_ModifyObject,fl,
+	   				FRIEND_FACE_MINUS,0,
+	   				FRIEND_FACE_PLUS,0,0,0);
+
+	   BuildWildObjectTags(		WIBU_ObjectType,OBJECT_Sector,
+	   				WIBU_ModifyObject,KubeSector,
+	   				FRIEND_SHELL_ROOT,fa,0,0);
+DebugOut("Made BSP-Tree.\n\0");
+	   				
+          }//Sector
+        }//Alien
+      }//Arena					   
+    }//World
+  }//Scene
+}

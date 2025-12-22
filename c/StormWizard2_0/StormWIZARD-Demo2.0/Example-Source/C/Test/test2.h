@@ -1,0 +1,3 @@
+#define GRADIENT 0x1
+#define WIN_TEST_ID 0x1
+#define WIN_TEST_ID_GADGETS 0x9

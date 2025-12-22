@@ -1,0 +1,1738 @@
+(**************************************************************************)
+(*                                                                        *)
+(* Definition Module (C) Copyright 1994 Marcel Timmermans.                *)
+(* Date     : 06 Feb 1994                                                 *)
+(* Language : Modula-2                                                    *)
+(*                                                                        *)
+(**************************************************************************)
+
+(*$ IMPLEMENTATION- *)
+DEFINITION MODULE GraphicsD;
+
+FROM SYSTEM IMPORT 
+ ADDRESS, SHIFT, BYTE, WORD, SHORTSET, BITSET, LONGSET;
+
+FROM ExecD IMPORT  
+ Node,NodeType,NodePtr,TaskPtr,Interrupt,Message,List,MinList,Library,
+ MsgPortPtr,SignalSemaphore,SignalSemaphorePtr;
+
+FROM UtilityD IMPORT
+ TagItemPtr,tagUser,HookPtr;
+
+FROM Hardware IMPORT
+ BeamConFlags,BeamConFlagSet,BltnodePtr;
+
+(*
+ * All pointers are listed here (sorted), because many records have 
+ * references to all kind of pointers.
+ *)
+
+TYPE
+ AnalogSignalIntervalPtr      = POINTER TO AnalogSignalInterval;
+ AnimCompPtr                  = POINTER TO AnimComp;
+ AnimObPtr                    = POINTER TO AnimOb;
+ AreaInfoPtr                  = POINTER TO AreaInfo;
+ BitMapPtr                    = POINTER TO BitMap;
+ BitScaleArgsPtr              = POINTER TO BitScaleArgs;
+ BobPtr                       = POINTER TO Bob;
+ ClipRectPtr                  = POINTER TO ClipRect;
+ CollTablePtr                 = POINTER TO CollTable;
+ ColorFontColorsPtr           = POINTER TO ColorFontColors;
+ ColorMapPtr                  = POINTER TO ColorMap;
+ ColorTextFontPtr             = POINTER TO ColorTextFont;
+ CopinitPtr                   = POINTER TO Copinit;
+ CopInsPtr                    = POINTER TO CopIns;
+ CopListPtr                   = POINTER TO CopList;
+ CprlistPtr                   = POINTER TO Cprlist;
+ DBufInfoPtr                  = POINTER TO DBufInfo;
+ DBufPacketPtr                = POINTER TO DBufPacket;
+ DimensionInfoPtr             = POINTER TO DimensionInfo;
+ DisplayInfoPtr               = POINTER TO DisplayInfo;
+ ExtendedNodePtr              = POINTER TO ExtendedNode;
+ ExtSpritePtr                 = POINTER TO ExtSprite;
+ GelsInfoPtr                  = POINTER TO GelsInfo;
+ GfxBasePtr                   = POINTER TO GfxBase;
+ IsrvstrPtr                   = POINTER TO Isrvstr;
+ LayerPtr                     = POINTER TO Layer;
+ LayerInfoPtr                 = POINTER TO LayerInfo;
+ MonitorInfoPtr               = POINTER TO MonitorInfo;
+ MonitorSpecPtr               = POINTER TO MonitorSpec;
+ NameInfoPtr                  = POINTER TO NameInfo;
+ PaletteExtraPtr              = POINTER TO PaletteExtra;
+ PointPtr                     = POINTER TO Point;
+ QueryHeaderPtr               = POINTER TO QueryHeader;
+ RasInfoPtr                   = POINTER TO RasInfo;
+ RastPortPtr                  = POINTER TO RastPort;
+ Rect32Ptr                    = POINTER TO Rect32;
+ RectanglePtr                 = POINTER TO Rectangle;
+ RegionPtr                    = POINTER TO Region;
+ RegionRectanglePtr           = POINTER TO RegionRectangle;
+ SimpleSpritePtr              = POINTER TO SimpleSprite;
+ SpecialMonitorPtr            = POINTER TO SpecialMonitor;
+ TextAttrPtr                  = POINTER TO TextAttr;
+ TextExtentPtr                = POINTER TO TextExtent;
+ TextFontExtensionPtr         = POINTER TO TextFontExtension;
+ TextFontPtr                  = POINTER TO TextFont;
+ TmpRasPtr                    = POINTER TO TmpRas;
+ TTextAttrPtr                 = POINTER TO TTextAttr;
+ UCopListPtr                  = POINTER TO UCopList;
+ ViewExtraPtr                 = POINTER TO ViewExtra;
+ ViewPtr                      = POINTER TO View;
+ ViewPortExtraPtr             = POINTER TO ViewPortExtra;
+ ViewPortPtr                  = POINTER TO ViewPort;
+ VSpritePtr                   = POINTER TO VSprite;
+
+(*- gfx.h -*)
+CONST
+ bitSet=08000H;
+ bitClr=0;
+ 
+TYPE
+ Rectangle=RECORD
+  minX,minY:INTEGER;
+  maxX,maxY:INTEGER;
+ END;
+
+ Rect32=RECORD
+  minX,minY:LONGINT;
+  maxX,maxY:LONGINT;
+ END;
+
+ Point=RECORD
+  x,y:INTEGER;
+ END;
+
+ BitMap=RECORD
+  bytesPerRow:CARDINAL;
+  rows:CARDINAL;
+  flags:SHORTCARD;
+  depth:SHORTCARD;
+  pad:CARDINAL;
+  planes:ARRAY [0..7] OF ADDRESS;
+ END;
+
+(* flags for AllocBitMap, etc. *)
+CONST
+ bmClear=0H;
+ bmDisplayable=1H;
+ bmInterleaved=2H;
+ bmStandard=3H;
+ bmMinplanes=4H;
+
+(* the following are for GetBitMapAttr() *)
+ bmaHeight=0;
+ bmaDepth=4;
+ bmaWidth=8;
+ bmaFlags=12;
+
+(*- clip.h -*)
+TYPE
+ Layer=RECORD
+  front:LayerPtr;
+  back:LayerPtr;
+  clipRect:ClipRectPtr;   (* read by roms to find first cliprect *)
+  rp:RastPortPtr;
+  bounds:Rectangle;
+  reserved:ARRAY [0..3] OF BYTE;
+  priority:CARDINAL;      (* system use only *)
+  flags:CARDINAL;         (* obscured ?, Virtual BitMap? *)
+  superBitMap:BitMapPtr;
+  superClipRect:ClipRectPtr;  (* super bitmap cliprects if VBitMap != 0*)
+				                      (* else damage cliprect list for refresh *)
+  window:ADDRESS;             (* reserved for user interface use *)
+  scrollX:INTEGER;
+  scrollY:INTEGER;
+  cr,cr2,crnew:ClipRectPtr;   (* used by dedice *)
+  superSaveClipRects:ClipRectPtr; (* preallocated cr's *)
+  cliprects:ClipRectPtr;      (* system use during refresh *)
+  layerInfo:LayerInfoPtr;     (* points to head of the list *)
+  lock:SignalSemaphore;
+  backFill:HookPtr;
+  reserved1:LONGCARD;
+  clipRegion:RegionPtr;
+  saveClipRects:RegionPtr;    (* used to back out when in trouble*)
+  width,height:INTEGER;       (* system use *)
+  reserved2:ARRAY [0..17] OF BYTE;
+  damageList:RegionPtr;       (* list of rectangles to refresh through *)
+ END;
+
+ ClipRect=RECORD
+  next:ClipRectPtr;   (* roms used to find next ClipRect *)
+  prev:ClipRectPtr;   (* Temp use in layers (private) *)
+  lobs:LayerPtr;      (* Private use for layers *)
+  bitMap:BitMapPtr;   (* Bitmap for layers private use *)
+  bounds:Rectangle;   (* bounds of cliprect *)            
+  p1:ClipRectPtr;     (* Layers private use!!! *)
+  p2:ClipRectPtr;     (* Layers private use!!! *)
+  reserved:LONGINT;   (* system use (Layers private) *)
+  flags:LONGINT;      (* Layers private field for cliprects *)
+				              (* that layers allocates... *)
+ END;                 (* MUST be multiple of 8 bytes to buffer *)
+
+CONST
+(* internal cliprect flags *)
+ needsNoConcealedRasters=01H;
+ needsNoLayerblitDamage=02H;
+
+(* defines for code values for getcode *)
+ isLessX=1;
+ isLessY=2;
+ isGrtrX=4;
+ isGrtrY=8;
+
+(*- coerce.h -*)
+CONST
+(* These flags are passed (in combination) to CoerceMode() to determine the
+ * type of coercion required.
+ *)
+
+(* Ensure that the mode coerced to can display just as many colours as the
+ * ViewPort being coerced.
+ *)
+  preserveColors=0;
+
+(* Ensure that the mode coerced to is not interlaced. *)
+  avoidFlicker=1;
+
+(*- collide.h -*)
+(* These bit descriptors are used by the GEL collide routines.
+ *  These bits are set in the hitMask and meMask variables of
+ *  a GEL to describe whether or not these types of collisions
+ *  can affect the GEL.  BNDRY_HIT is described further below;
+ *  this bit is permanently assigned as the boundary-hit flag.
+ *  The other bit GEL_HIT is meant only as a default to cover
+ *  any GEL hitting any other; the user may redefine this bit.
+ *)
+
+CONST
+ borderHit=0;
+(* These bit descriptors are used by the GEL boundry hit routines.
+ *  When the user's boundry-hit routine is called (via the argument
+ *  set by a call to SetCollision) the first argument passed to
+ *  the user's routine is the address of the GEL involved in the
+ *  boundry-hit, and the second argument has the appropriate bit(s)
+ *  set to describe which boundry was surpassed
+ *)
+ topHit=1;
+ bottomHit=2;
+ leftHit=4;
+ rightHit=8;
+
+(*- copper.h -*)
+CONST
+ copperMove=0;  (* pseude opcode for move #XXXX,dir *)
+ copperWait=1;  (* pseudo opcode for wait y,x *)
+ cprNxtBuf=2;   (* continue processing with next buffer *)
+ cprNtLof=15;   (* copper instruction only for short frames *)
+ cprNtSht=14;   (* copper instruction only for long frames *)
+ cprNtSys=13;   (* copper user instruction only *)              
+
+TYPE
+ CopIns=RECORD
+  CASE opCode:CARDINAL OF (* 0 = move, 1 = wait *)
+  | copperMove:
+   destAddr:INTEGER; (* destination address of copper move *)
+   destData:INTEGER; (* destination immediate data to send *)
+  | copperWait:
+   vWaitPos:INTEGER; (* vertical beam wait *)
+   hWaitPos:INTEGER; (* horizontal beam wait position *)
+  | cprNxtBuf:
+   nxtlist:CopListPtr;
+  END;
+ END;
+
+(* structure of cprlist that points to list that hardware actually executes *)
+ Cprlist=RECORD
+  next:CprlistPtr;
+  start:ADDRESS;      (* start of copper list *)
+  maxCount:INTEGER;   (* number of long instructions *)
+ END;
+
+ CopList=RECORD
+  next:CopListPtr;      (* next block for this copper list *)
+  copList:CopListPtr;   (* system use *)
+  viewPort:ViewPortPtr; (* system use *)
+  copIns:CopInsPtr;     (* start of this block *)
+  copPtr:CopInsPtr;     (* intermediate ptr *)
+  copLStart:ADDRESS;    (* mrgcop fills this in for Long Frame*)
+  copSStart:ADDRESS;    (* mrgcop fills this in for Short Frame*)
+  count:INTEGER;        (* intermediate counter *)
+  maxCount:INTEGER;     (* max # of copins for this block *)
+  dyOffset:INTEGER;     (* offset this copper list vertical waits *) 
+(* V1.3 *)
+  cop2Start:ADDRESS;
+  cop3Start:ADDRESS;
+  cop4Start:ADDRESS;
+  cop5Start:ADDRESS;
+ END;
+
+ UCopList=RECORD
+  next:UCopListPtr;
+  firstCopList:CopListPtr;  (* head node of this copper list *)
+  copList:CopListPtr;       (* node in use *)                   
+ END;
+
+(* Private graphics data structure. This structure has changed in the past,
+ * and will continue to change in the future. Do Not Touch!
+ *)
+ Copinit=RECORD
+  vsyncHBlank:ARRAY [0..1] OF CARDINAL;
+  diagstrt:ARRAY [0..11] OF CARDINAL; (* copper list for first bitplane *)
+  fm0:ARRAY[0..1] OF CARDINAL;
+  diwstart:ARRAY[0..9] OF CARDINAL;
+  bpIcon2:ARRAY[0..1] OF CARDINAL;
+  sprfix:ARRAY[0..(2*8)-1] OF CARDINAL;
+  sprstrtup:ARRAY [0..(2*8*2)-1] OF CARDINAL;
+  wait14:ARRAY [0..1] OF CARDINAL;
+  normHBlank:ARRAY [0..1] OF CARDINAL;
+  jump:ARRAY [0..(2*2)-1] OF CARDINAL;
+  waitForever:ARRAY [0..1] OF CARDINAL;
+  sprstop:ARRAY [0..7] OF CARDINAL;
+ END;
+
+(*- display.h -*)
+CONST
+ m640=08000H;
+ plnCntMsk=7H;  (* how many bit planes? *)
+    				    (* 0 = none, 1->6 = 1->6, 7 = reserved *)
+ plnCntShft=12; (* bits to shift for bplcon0 *)
+ pf2pri=40H;    (* bplcon2 bit *)
+ colorOn=200H;  (* disable color burst *)     
+ dblpf=400H;
+ holdnmodify=800H;
+ interlace=4H;  (* interlace mode for 400 *)
+
+(* bplcon1 defines *)
+ pfafineScroll=0FH;
+ pfbfineScrollShift=04H;
+ pffineScrollMask=0FH;
+
+(* display window start and stop defines *)
+ diwhorizPos=07FH;      (* horizontal start/stop *)
+ diwvrtclPos=01FFH;     (* vertical start/stop *)  
+ diwvrtclPosShift=07H;
+ 
+(* Data fetch start/stop horizontal position *)
+ dftchMask=0FFH;
+
+(* vposr bits *)
+ vposrlof=08000H;
+
+
+(*- displayinfo.h -*)
+TYPE
+ DisplayInfoHandle=ADDRESS;
+
+CONST
+(* datachunk type identifiers *)
+ dtagDisp=080000000H;
+ dtagDims=080001000H;
+ dtagMntr=080002000H;
+ dtagName=080003000H;
+ dtagVec =080004000H; (* internal use only *)
+
+
+TYPE
+ QueryHeader=RECORD
+  structID:LONGCARD;    (* datachunk type identifier *)
+  displayID:LONGCARD;	  (* copy of display record key	*)
+  skipID:LONGCARD;      (* TAG_SKIP -- see tagitems.h *)
+  length:LONGCARD;      (* length of local data in double-longwords *)
+ END;
+
+(* availability *)
+ AvailabilityFlags=(
+  availNochips,availNomonitor,availNotwithgenlock,af3,
+  af4,af5,af6,af7,af8
+ );
+ AvailabilityFlagSet=SET OF AvailabilityFlags;
+
+(* mode properties *)
+ PropertyFlags=(
+  isLace,isDualpf,isPf2pri,isHam,
+  isEcs, (* note: ECS modes (SHIRES, VGA, and **
+					** PRODUCTIVITY) do not support     **
+					** attached sprites.		            **
+					*)
+  isPal,isSprites,isGenlock,
+  isWb,isDraggable,isPanelled,isBeamsync,
+  isExtrahalfbrite,isSpritesAtt,isSpritesChngRes,isSpritesBorder,
+  isAA,isScanDbl,isSpritesChngBase,isSpritesChngPri,
+  isDBuffer,isProgBeam,pf22,pf23,
+  pf24,pf25,pf26,pf27,
+  pf28,pf29,pf30,isForeign
+ );
+ PropertyFlagSet=SET OF PropertyFlags;
+
+ DisplayInfo=RECORD
+  header:QueryHeader;
+  notAvailable:AvailabilityFlagSet;(* if NULL available, else see above   *)
+  propertyFlags:PropertyFlagSet;(* Properties of this mode see above   *)
+  resolution:Point;           (* ticks-per-pixel X/Y		       *)
+  pixelSpeed:CARDINAL;        (* aproximation in nanoseconds	       *)
+  numStdSprites:CARDINAL;	    (* number of standard amiga sprites    *)
+  paletteRange:CARDINAL;      (* OBSOLETE - use Red/Green/Blue bits instead *) 
+  spriteResolution:Point;     (* std sprite ticks-per-pixel X/Y    *)
+  pad:ARRAY [0..3] OF SHORTCARD;(* used internally *)
+  redBits:SHORTCARD;	(* number of Red bits this display supports (V39) *)
+  greenBits:SHORTCARD;(* number of Green bits this display supports (V39) *)
+  blueBits:SHORTCARD; (* number of Blue bits this display supports  (V39) *)
+  pad2:ARRAY[0..4] OF SHORTCARD; (* find some use for this. *)
+  reserved2:ARRAY [0..1] OF LONGCARD; (* terminator *)
+ END;
+
+ DimensionInfo=RECORD
+  header:QueryHeader;
+  maxDepth:CARDINAL;        (* log2( max number of colors ) *)
+  minRasterWidth:CARDINAL;  (* minimum width in pixels      *)
+  minRasterHeight:CARDINAL; (* minimum height in pixels     *)
+  maxRasterWidth:CARDINAL;  (* maximum width in pixels      *)
+  maxRasterHeight:CARDINAL; (* maximum height in pixels     *)
+  nominal:Rectangle;        (* "standard" dimensions	      *)
+  maxOScan:Rectangle;       (* fixed, hardware dependant    *)
+  videoOScan:Rectangle;     (* fixed, hardware dependant    *)
+  txtOScan:Rectangle;       (* editable via preferences     *)
+  stdOScan:Rectangle;       (* editable via preferences     *)
+  pad:ARRAY [0..13] OF SHORTCARD;
+  reserved:ARRAY [0..1] OF LONGCARD; (* terminator *)
+ END;
+
+ MonitorInfo=RECORD
+  header:QueryHeader;
+  mspc:MonitorSpecPtr;      (* pointer to monitor specification  *)
+  viewPosition:Point;       (* editable via preferences	   *)
+  viewResolution:Point;     (* standard monitor ticks-per-pixel  *)
+  viewPositionRange:Rectangle; (* fixed, hardware dependant *)
+  totalRows:CARDINAL;       (* display height in scanlines	   *)
+  totalColorClocks:CARDINAL;(* scanline width in 280 ns units    *) 
+  minRow:CARDINAL;          (* absolute minimum active scanline  *)
+  compatibility:INTEGER;	  (* how this coexists with others	   *)
+  pad:ARRAY [0..35] OF SHORTCARD;
+  defaultViewPosition:Point;         (* original, never changes *)
+  preferredModeID:LONGCARD;          (* for Preference  s *)
+  reserved:ARRAY [0..1] OF LONGCARD; (* terminator *)                
+ END;
+
+CONST
+(* monitor compatibility *)
+ mcompatMixed=0;    (* can share display with other MCOMPAT_MIXED *)
+ mcompatSelf=1;     (* can share only within same monitor *)
+ mcompatNobody=-1;  (* only one viewport at a time *)                
+
+ displayNameLen=32;
+
+TYPE
+ NameInfo=RECORD
+  header:QueryHeader;
+  name:ARRAY [0..displayNameLen-1] OF CHAR;
+  reserved:ARRAY [0..1] OF LONGCARD; (* terminator *)
+ END;
+
+(******************************************************************************)
+
+(* The following VecInfo structure is PRIVATE, for our use only
+ * Touch these, and burn! (V39)
+ *)
+
+ VecInfo=RECORD
+  header:QueryHeader;
+  vec:ADDRESS;
+  data:ADDRESS;
+  type:CARDINAL;
+  pad:ARRAY[0..2] OF CARDINAL;
+  reserved:ARRAY[0..1] OF LONGCARD;
+ END;
+
+(*- gels.h -*)  
+TYPE
+(* VSprite flags *)
+(* user-set VSprite flags: *)
+ VSpriteFlags=(
+  vsprite,saveBack,overlay,mustDraw,vf4,vf5,vf6,vf7,
+  backSaved,bobUpdate,gelGone,vsOverflow,vf12,vf13,vf14,vf15
+ );
+ VSpriteFlagSet=SET OF VSpriteFlags;
+
+(* Bob flags *)
+(* these are the user flag bits *)
+ BobFlags=(
+  saveBob,bobIsComp,bf2,bf3,bf4,bf5,bf6,bf7,
+  bWaiting,bDrawn,bobsAway,bobNix,savePreserve,outStep,bf14,bf15
+ );
+ BobFlagSet=SET OF BobFlags;
+
+CONST
+ suserFlags=VSpriteFlagSet{vsprite..vf7};(* mask of all user-settable VSprite-flags *)
+ buserFlags=BobFlagSet{saveBob..bf7}; (* mask of all user-settable Bob-flags *)
+
+(* defines for the animation procedures *)
+ anfracsize=6H;
+ animhalf=020H;
+ ringtrigger=1H;
+
+(*********************** GEL STRUCTURES ***********************************)
+
+TYPE
+VSprite=RECORD
+(* --------------------- SYSTEM VARIABLES ------------------------------- *)
+(* GEL linked list forward/backward pointers sorted by y,x value *)
+  nextVSprite:VSpritePtr;
+  prevVSprite:VSpritePtr;
+
+(* GEL draw list constructed in the order the Bobs are actually drawn, then
+ *  list is copied to clear list
+ *  must be here in VSprite for system boundary detection
+ *)
+  drawPath:VSpritePtr;    (* pointer of overlay drawing *)
+  clearPath:VSpritePtr;   (* pointer for overlay clearing *)
+
+(* the VSprite positions are defined in (y,x) order to make sorting
+ *  sorting easier, since (y,x) as a long integer
+ *)
+  oldY,oldX:INTEGER;    (* previous position *)
+(* --------------------- COMMON VARIABLES --------------------------------- *)
+  flags:VSpriteFlagSet; (* VSprite flags *)
+(* --------------------- USER VARIABLES ----------------------------------- *)
+(* the VSprite positions are defined in (y,x) order to make sorting
+ *  sorting easier, since (y,x) as a long integer
+ *)
+  y,x:INTEGER;
+  height:INTEGER;
+  width:INTEGER;  (* number of words per row of image data *)
+  depth:INTEGER;  (* number of planes of data *)             
+  meMask:BITSET;  (* which types can collide with this VSprite*)
+  hitMask:BITSET; (* which types this VSprite can collide with*)
+
+  imageData:ADDRESS;  (* pointer to VSprite image *)
+
+(* borderLine is the one-dimensional logical OR of all
+ *  the VSprite bits, used for fast collision detection of edge
+ *)
+
+  borderLine:ADDRESS;   (* logical OR of all VSprite bits *)
+  collMask:ADDRESS;     (* similar to above except this is a matrix *)
+
+(* pointer to this VSprite's color definitions (not used by Bobs) *)
+
+  sprColors:ADDRESS;
+  vsBob:BobPtr; (* points home if this VSprite is part of a Bob *)
+
+(* planePick flag:  set bit selects a plane from image, clear bit selects
+ *  use of shadow mask for that plane
+ * OnOff flag: if using shadow mask to fill plane, this bit (corresponding
+ *  to bit in planePick) describes whether to fill with 0's or 1's
+ * There are two uses for these flags:
+ *	- if this is the VSprite of a Bob, these flags describe how the Bob
+ *	  is to be drawn into memory
+ *	- if this is a simple VSprite and the user intends on setting the
+ *	  MUSTDRAW flag of the VSprite, these flags must be set too to describe
+ *	  which color registers the user wants for the image
+ *)
+  planePick:SHORTCARD;
+  planeOnOff:SHORTCARD;
+ END;
+
+
+(* blitter-objects *)
+
+ Bob=RECORD
+  flags:BobFlagSet;   (* general purpose flags (see definitions above) *)
+  saveBuffer:ADDRESS; (* pointer to the buffer for background save *)
+
+(* used by Bobs for "cookie-cutting" and multi-plane masking *)
+  imageShadow:ADDRESS;
+
+(* pointer to BOBs for sequenced drawing of Bobs
+ *  for correct overlaying of multiple component animations
+ *)
+  before:BobPtr;  (* draw this Bob before Bob pointed to by before *)
+  after:BobPtr;   (* draw this Bob after Bob pointed to by after *)  
+  bobVSprite:VSpritePtr;  (* this Bob's VSprite definition *)
+  bobComp:AnimCompPtr;    (* pointer to this Bob's AnimComp def *)
+  dBuffer:DBufPacketPtr;  (* pointer to this Bob's dBuf packet *)
+ END;
+
+ AnimComp=RECORD
+  flags:INTEGER;        (* AnimComp flags for system & user *)
+
+(* timer defines how long to keep this component active:
+ *  if set non-zero, timer decrements to zero then switches to nextSeq
+ *  if set to zero, AnimComp never switches
+ *)
+  timer:INTEGER;
+
+(* --------------------- USER VARIABLES ----------------------------------- *)
+(* initial value for timer when the AnimComp is activated by the system *)
+  timeSet:INTEGER;
+
+(* pointer to next and previous components of animation object *)
+  nextComp,prevComp:AnimCompPtr;
+
+(* pointer to component component definition of next image in sequence *)
+  nextSeq,prevSeq:AnimCompPtr;
+  animCRoutine:ADDRESS;(* address of special animation procedure *)
+  yTrans:INTEGER;      (* initial y translation (if this is a component) *)
+  xTrans:INTEGER;      (* initial x translation (if this is a component) *)
+  headOb:AnimObPtr;
+  animBob:BobPtr;
+ END;
+
+ AnimOb=RECORD
+  nextOb:AnimObPtr;
+  prevOb:AnimObPtr;
+  clock:LONGINT;    (* number of calls to Animate this AnimOb has endured *)
+  anOldY,anOldX:INTEGER;  (* old y,x coordinates *)
+  anY,anX:INTEGER;        (* y,x coordinates of the AnimOb *)
+  yVel,xVel:INTEGER;      (* velocities of this object *)
+  yAccel,xAccel:INTEGER;  (* accelerations of this object *)
+  ringYTrans,ringXTrans:INTEGER;  (* ring translation values *)
+  animORoutine:ADDRESS;   (* address of special animation procedure *)
+  headComp:AnimCompPtr;   (* pointer to first component *)
+ END;
+
+ DBufPacket=RECORD
+  bufY,bufX:INTEGER;  (* save the other buffers screen coordinates *)
+  bufPath:VSpritePtr; (* carry the draw path over the gap *)
+
+(* these pointers must be filled in by the user *)
+(* pointer to other buffer's background save buffer *)
+  bufBuffer:ADDRESS;
+ END;
+
+CONST
+ b2Norm=0;
+ b2Swap=1;
+ b2Bobber=2;
+
+TYPE
+(* a structure to contain the 16 collision procedure addresses *)
+ CollTable=RECORD
+  collPtrs:ARRAY [0..15] OF ADDRESS
+ END;
+
+(*- gfxnodes.h -*)
+TYPE
+ ExtendedNode=RECORD
+  succ:NodePtr;
+  pred:NodePtr;
+  type:NodeType;
+  pri:SHORTINT;
+  name:ADDRESS;
+  subsystem:SHORTCARD;
+  subtype:SHORTCARD;
+  library:LONGINT;
+  init:PROCEDURE():LONGINT;
+ END;
+
+CONST
+ ssGraphics=2H;
+
+ viewExtraType=1;
+ viewportExtraType=2;
+ specialMonitorType=3;
+ monitorSpecType=4;
+
+(*- monitor.h -*)
+TYPE
+ MonitorSpec=RECORD
+  node:ExtendedNode;
+  flags:BITSET;
+  ratioh:LONGINT;
+  ratiov:LONGINT;
+  totalRows:CARDINAL;
+  totalColorclocks:CARDINAL;
+  deniseMaxDisplayColumn:CARDINAL;
+  beamCon0:CARDINAL;
+  minRow:CARDINAL;
+  special:SpecialMonitorPtr;
+  openCount:CARDINAL;
+  transform:PROCEDURE():LONGINT;
+  translate:PROCEDURE():LONGINT;
+  scale: PROCEDURE():LONGINT;
+  xoffset:CARDINAL;
+  yoffset:CARDINAL;
+  legalView:Rectangle;
+  maxoscan:PROCEDURE():LONGINT;    (* maximum legal overscan *)
+  videoscan:PROCEDURE():LONGINT;   (* video display overscan *)
+  deniseMinDisplayColumn:CARDINAL;
+  displayCompatible:LONGCARD;
+  displayInfoDataBase:List;
+  displayInfoDataBaseSemaphore:SignalSemaphore;
+  mrgCop:PROCEDURE():LONGINT;
+  loadView:PROCEDURE():LONGINT;
+  killView:PROCEDURE():LONGINT;
+ END;
+
+CONST
+ toMonitor=0;
+ fromMonitor=1;
+
+ standardXoffset=9;
+ standardYoffset=0;
+
+ msRequestNtsc=0;
+ msRequestPal=1;
+ msRequestSpecial=2;
+ msRequestA2024=3;
+ msDoubleSprites=4;
+
+ defaultMonitorName="default.monitor";
+ ntscMonitorName="ntsc.monitor";
+ palMonitorName="pal.monitor";
+
+ standardMonitorMask=BITSET{msRequestNtsc,msRequestPal};
+
+ standardNtscRows=262;
+ standardPalRows=312;
+ standardColorclocks=226;
+ standardDeniseMax=455;
+ standardDeniseMin=93;
+ standardNtscBeamcon=0000H;
+ standardPalBeamcon=displayPal;
+
+ specialBeamcon=BeamConFlagSet{varVBlank,lolDis,varVSync,
+                               varBeam,cSBlank,vSyncTrue};
+
+ minNtscRow=21;
+ minPalRow=29;
+
+ standardViewX=81H;
+ standardViewY=2CH;
+ standardHbstrt=6H;
+ standardHsstrt=0BH;
+ standardHsstop=1CH;
+ standardHbstop=2CH;
+ standardVbstrt=122H;
+ standardVsstrt=2A6H;
+ standardVsstop=3AAH;
+ standardVbstop=1066H;
+
+ vgaColorclocks=standardColorclocks DIV 2;
+ vgaTotalRows=standardNtscRows*2;
+ vgaDeniseMin=59;
+
+ minVgaRow=29;
+
+ vgaHbstrt=8H;
+ vgaHsstrt=0EH;
+ vgaHsstop=1CH;
+ vgaHbstop=1EH;
+ vgaVbstrt=0;
+ vgaVsstrt=0153H;
+ vgaVsstop=0235H;
+ vgaVbstop=0CCDH;
+
+ vgaMonitorName="vga.monitor";
+
+(* NOTE: VGA70 definitions are obsolete - a VGA70 monitor has never been
+ * implemented.
+ *)
+ vga70Colorclocks=standardColorclocks DIV 2;
+ vga70TotalRows=449;
+ vga70DeniseMin=59;
+ minVga70Row=35;
+ vga70Hbstrt=8H;
+ vga70Hsstrt=0EH;
+ vga70Hsstop=1CH;
+ vga70Hbstop=1EH;
+ vga70Vbstrt=0;
+ vga70Vsstrt=02A6H;
+ vga70Vsstop=0388H;
+ vga70Vbstop=0F73H;
+
+ vga70Beamcon=specialBeamcon/BeamConFlagSet{vSyncTrue};
+
+ vga70MonitorName="vga70.monitor";
+
+ broadcastHbstrt=1H;
+ broadcastHsstrt=6H;
+ broadcastHsstop=17H;
+ broadcastHbstop=27H;
+ broadcastVbstrt=0;
+ broadcastVsstrt=02A6H;
+ broadcastVsstop=054CH;
+ broadcastVbstop=1C40H;
+ broadcastBeamcon=BeamConFlagSet{lolDis,cSBlank};
+ ratioFixedpart=4;
+(* ratioUnity=SHIFT(LONGCARD(1),ratioFixedpart); !!!!!!!!!!!!!!!!!!!!*)
+
+TYPE
+ AnalogSignalInterval=RECORD
+  strt:CARDINAL;
+  stop:CARDINAL;
+ END;
+
+ SpecialMonitor=RECORD
+  node:ExtendedNode;
+  flags:BITSET;
+  doMonitor:PROCEDURE():LONGINT;
+  reserved1:PROCEDURE():LONGINT;
+  reserved2:PROCEDURE():LONGINT;
+  reserved3:PROCEDURE():LONGINT;
+  hblank:AnalogSignalInterval;
+  vblank:AnalogSignalInterval;
+  hsync:AnalogSignalInterval;
+  vsync:AnalogSignalInterval;
+ END;
+
+(*- gfxbase.h -*)
+TYPE
+ DisplayFlags=(
+   ntsc,genloc,pal,todaSafe,reallyPal,df5,df6,df7,
+   df8,df9,df10,df11,df12,df13,df14,df15
+ );
+ DisplayFlagSet=SET OF DisplayFlags;
+
+(* bits defs for ChipRevBits *)
+
+ ChipRevs=(hrAgnus,hrDenise,aaAlice,aaLisa,aaMLisa,cr5,cr6,cr7);
+ ChipRevSet=SET OF ChipRevs;
+
+CONST
+ bigBlits=hrAgnus;
+
+ blitMsgFault=4;
+
+(* Pass ONE of these to SetChipRev() *)
+ setchiprevA=LONGSET{ORD(hrAgnus)};
+ setchiprevECS=LONGSET{ORD(hrAgnus),ORD(hrDenise)};
+ setchiprevAA=LONGSET{ORD(aaAlice),ORD(aaLisa)}+setchiprevECS;
+ setchiprevBest=LONGSET{0..31};
+
+(* memory type *)
+ bus16=0;
+ nmlCas=0;
+ bus32=1;
+ dblCas=2;
+ bandwidth1x=bus16+nmlCas;
+ bandwidth2xnml=bus32;
+ bandwidth2xdbl=dblCas;
+ bandwidth4x=bus32+dblCas;
+
+ graphicsName="graphics.library";
+
+TYPE
+ GfxBase=RECORD
+  libNode:Library;
+  actiView:ViewPtr;
+  copinit:CopinitPtr; (* ptr to copper start up list *)
+  cia:ADDRESS;        (* for 8520 resource use *)
+  blitter:ADDRESS;    (* for future blitter resource use *)
+  loFlist:ADDRESS;
+  shFlist:ADDRESS;
+  blthd,blttl:BltnodePtr;
+  bsblthd,bsblttl:BltnodePtr;
+  vbsrv,timsrv,bltsrv:Interrupt;
+  textFonts:List;
+  defaultFont:TextFontPtr;
+  modes:BITSET;     (* copy of current first bplcon0 *)
+  vBlank:SHORTCARD;
+  debug:BYTE;
+  beamSync:INTEGER;
+  bplcon0:BITSET;   (* it is ored into each bplcon0 for display *)
+  spriteReserved:SHORTCARD;
+  bytereserved:SHORTCARD;
+  flags:BITSET;
+  blitLock:INTEGER;
+  blitNest:INTEGER;
+  blitWaitQ:List;
+  blitOwner:TaskPtr;
+  waitQ:List;
+  displayFlags:DisplayFlagSet;  (* NTSC PAL GENLOC etc see above *)
+  simpleSprites:ADDRESS;
+  maxDisplayRow:CARDINAL;       (* hardware stuff, do not use *)
+  maxDisplayColumn:CARDINAL;    (* hardware stuff, do not use *)
+  normalDisplayRows:CARDINAL;
+  normalDisplayColumns:CARDINAL;
+  normalDPMX:CARDINAL;          (* Dots per meter on display *)
+  normalDPMY:CARDINAL;          (* Dots per meter on display *)
+  lastChanceMemory:SignalSemaphorePtr;
+  lcMptr:ADDRESS;
+  microsPerLine:CARDINAL;       (* 256 time usec/line *)
+  minDisplayColumn:CARDINAL;
+  chipRevBits0:ChipRevSet;
+  memType:SHORTCARD;
+  reserved:ARRAY [0..3] OF SHORTCARD;
+  monitorId:CARDINAL;
+  hedley:ARRAY [0..7] OF ADDRESS;
+  hedleySprites:ARRAY[0..7]OF ADDRESS; (* sprite ptrs for intuition mouse *)
+  hedleySprites1:ARRAY[0..7]OF ADDRESS;(* sprite ptrs for intuition mouse *)
+  hedleyCount:INTEGER;
+  hedleyFlags:BITSET;
+  hedleyTmp:INTEGER;
+  hashTable:ADDRESS;
+  currentTotRows:CARDINAL;
+  currentTotCclks:CARDINAL;
+  hedleyHint:SHORTCARD;
+  hedleyHint2:SHORTCARD;
+  nreserved:ARRAY [0..3] OF LONGCARD;
+  a2024SyncRaster:ADDRESS;
+  controlDeltaPal:INTEGER;
+  controlDeltaNtsc:INTEGER;
+  currentMonitor:MonitorSpecPtr;
+  monitorList:List;
+  defaultMonitor:MonitorSpecPtr;
+  monitorListSemaphore:SignalSemaphorePtr;
+  displayInfoDataBase:ADDRESS;
+  topLine:CARDINAL;
+  actiViewCprSemaphore:SignalSemaphorePtr;
+  utilityBase:ADDRESS;  (* for hook and tag utilities. had to change because of name clash	*)
+  execBase:ADDRESS;     (* to link with rom.lib	*)                                             
+  bwshifts:ADDRESS;
+  strtFetchMasks:ADDRESS;
+  stopFetchMasks:ADDRESS;
+  overrun:ADDRESS;
+  realStops:ADDRESS;
+  spriteWidth:CARDINAL; (* current width (in words) of sprites *)
+  spriteFMode:BITSET;   (* current sprite fmode bits	*)
+  softSprites:SHORTINT; (* bit mask of size change knowledgeable sprites *)
+  arraywidth:SHORTINT;
+  defaultSpriteWidth:CARDINAL; (* what width intuition wants *)
+  sprMoveDisable:SHORTINT;
+  wantChips:SHORTCARD;
+  boardMemType:SHORTCARD;
+  bugs:SHORTCARD;
+  layersBase:ADDRESS;
+  colorMask:LONGCARD;
+  iVector:ADDRESS;
+  iData:ADDRESS;
+  specialCounter:LONGCARD;  (* special for double buffering *)
+  dBList:ADDRESS;
+  monitorFlags:BITSET;
+  scanDoubledSprites:SHORTCARD;
+  bP3Bits:SHORTCARD;
+  monitorVBlank:AnalogSignalInterval;
+  naturalMonitor:MonitorSpecPtr;
+  progData:ADDRESS;
+  extSprites:SHORTCARD;
+ END;
+
+(*- graphint.h -*)
+TYPE
+ Isrvstr=RECORD
+  node:Node;
+  iptr:IsrvstrPtr;  (* passed to srvr by os *)
+  code:ADDRESS;
+  ccode:ADDRESS;
+  carg:LONGINT;
+ END;
+
+(*- layers.h -*)
+TYPE
+ LayerFlags=(
+  layerSimple,layerSmart,layerSuper,lf3,
+  layerUpdating,lf5,layerBackdrop,layerRefresh,
+  layerClipRectsLost,layerIRefresh,layerIRefresh2,lf11,
+  lf12,lf13,lf14,lf15
+ );
+ LayerFlagSet=SET OF LayerFlags;
+
+ LayerInfo=RECORD
+  layer:LayerPtr;
+  lp:LayerPtr;      (* !! Private !! *)
+  obs:ClipRectPtr;
+  freeClipRects:ClipRectPtr;  (* !! Private !! *)
+  privateReserve1,            (* !! Private !! *)
+  privateReserve2:LONGINT;    (* !! Private !! *)
+  lock:SignalSemaphore;       (* !! Private !! *)
+  head:MinList;               (* !! Private !! *)
+  privateReserve3:INTEGER;    (* !! Private !! *)
+  privateReserve4:ADDRESS;    (* !! Private !! *)
+  flags:LayerFlagSet;
+  fattenCount:SHORTINT;       (* !! Private !! *)
+  lockLayersCount:SHORTINT;   (* !! Private !! *)
+  privateReserve5:INTEGER;    (* !! Private !! *)
+  blankHook:ADDRESS;          (* !! Private !! *)
+  layerInfoExtra:ADDRESS;     (* !! Private !! *)
+ END;
+
+CONST
+ newLayerInfoCalled=1;
+(*
+ * LAYERS_NOBACKFILL is the value needed to get no backfill hook
+ * LAYERS_BACKFILL is the value needed to get the default backfill hook
+ *)
+ layersNoBackFill=VAL(HookPtr,LONGINT(1));
+ layersBackFill=VAL(HookPtr,NIL);
+
+(*- modeid.h -*)
+CONST
+ invalidID=0FFFFFFFFH; (* NOT 0 *)
+
+(* normal identifiers *)
+ monitorIDmask=0FFFF1000H;
+
+ defaultMonitorID=00000000H;
+ ntscMonitorID=00011000H;
+ palMonitorID=00021000H;
+
+(* the following 22 composite keys are for Modes on the default Monitor.
+ * NTSC & PAL "flavors" of these particular keys may be made by or'ing
+ * the NTSC or PAL MONITOR_ID with the desired MODE_KEY...
+ *
+ * For example, to specifically open a PAL HAM interlaced ViewPort
+ * (or intuition screen), you would use the modeid of
+ * (PAL_MONITOR_ID | HAMLACE_KEY)
+ *)
+ loresKey=00000000H;
+ hiresKey=00008000H;
+ superKey=00008020H;
+ hamKey=00000800H;
+ loreslaceKey=00000004H;
+ hireslaceKey=00008004H;
+ superlaceKey=00008024H;
+ hamlaceKey=00000804H;
+ loresdpfKey=00000400H;
+ hiresdpfKey=00008400H;
+ superdpfKey=00008420H;
+ loreslacedpfKey=00000404H;
+ hireslacedpfKey=00008404H;
+ superlacedpfKey=00008424H;
+ loresdpf2Key=00000440H;
+ hiresdpf2Key=00008440H;
+ superdpf2Key=00008460H;
+ loreslacedpf2Key=00000444H;
+ hireslacedpf2Key=00008444H;
+ superlacedpf2Key=00008464H;
+ extrahalfbriteKey=00000080H;
+ extrahalfbritelaceKey=00000084H;
+
+(* New for AA ChipSet (V39) *)
+ hireshamKey=00008800H;
+ superhamKey=00008820H;
+ hiresehbKey=00008080H;
+ superehbKey=000080A0H;
+ hireshamlaceKey=00008804H;
+ superhamlaceKey=00008824H;
+ hiresehblaceKey=00008084H;
+ superehblaceKey=000080A4H;
+
+(* VGA identifiers *)
+
+ vgaMonitorID=00031000H;
+
+ vgaextraloresKey=00031004H;
+ vgaloresKey=00039004H;
+ vgaproductKey=00039024H;
+ vgahamKey=00031804H;
+ vgaextraloreslaceKey=00031005H;
+ vgaloreslaceKey=00039005H;
+ vgaproductlaceKey=00039025H;
+ vgahamlaceKey=00031805H;
+ vgaextraloresdpfKey=00031404H;
+ vgaloresdpfKey=00039404H;
+ vgaproductdpfKey=00039424H;
+ vgaextraloreslacedpfKey=00031405H;
+ vgaloreslacedpfKey=00039405H;
+ vgaproductlacedpfKey=00039425H;
+ vgaextraloresdpf2Key=00031444H;
+ vgaloresdpf2Key=00039444H;
+ vgaproductdpf2Key=00039464H;
+ vgaextraloreslacedpf2Key=00031445H;
+ vgaloreslacedpf2Key=00039445H;
+ vgaproductlacedpf2Key=00039465H;
+ vgaextrahalfbriteKey=00031084H;
+ vgaextrahalfbritelaceKey=00031085H;
+ vgaproducthamKey=39824H;
+ vgaloreshamKey=39804H;
+ vgaextraloreshamKey=vgahamKey;
+ vgaproducthamlaceKey=39825H;
+ vgaloreshamlaceKey=39805H;
+ vgaextraloreshamlaceKey=vgahamlaceKey;
+(* New for AA ChipSet (V39) *)
+ vgaextraloresehbKey=vgaextrahalfbriteKey;
+ vgaextraloresehblaceKey=vgaextrahalfbritelaceKey;
+ vgaloresehbKey=39084H;
+ vgaloresehblaceKey=39085H;
+ vgaehbKey=390A4H;
+ vgaehblaceKey=390A5H;
+
+ (* a2024 identifiers *)
+
+ a2024MonitorID=00041000H;
+
+ a2024tenhertzKey=00041000H;
+ a2024fifteenhertzKey=00049000H;
+
+ (* prototype identifiers (private) *)
+
+ protoMonitorID=00051000H;
+
+(* These monitors and modes were added for the V38 release. *)
+ 
+ euro72MonitorID=000061000H;
+
+ euro72extraloresKey=00061004H;
+ euro72loresKey=00069004H;
+ euro72productKey=00069024H;
+ euro72hamKey=00061804H;
+ euro72extraloreslaceKey=00061005H;
+ euro72loreslaceKey=00069005H;
+ euro72productlaceKey=00069025H;
+ euro72hamlaceKey=00061805H;
+ euro72extraloresdpfKey=00061404H;
+ euro72loresdpfKey=00069404H;
+ euro72productdpfKey=00069424H;
+ euro72extraloreslacedpfKey=00061405H;
+ euro72loreslacedpfKey=00069405H;
+ euro72productlacedpfKey=00069425H;
+ euro72extraloresdpf2Key=00061444H;
+ euro72loresdpf2Key=00069444H;
+ euro72productdpf2Key=00069464H;
+ euro72extraloreslacedpf2Key=00061445H;
+ euro72loreslacedpf2Key=00069445H;
+ euro72productlacedpf2Key=00069465H;
+ euro72extrahalfbriteKey=00061084H;
+ euro72extrahalfbritelaceKey=00061085H;
+(* New AA modes (V39) *)
+ euro72producthamKey=00069824H;
+ euro72producthamlaceKey=00069825H;
+ euro72loreshamKey=00069804H;
+ euro72loreshamlaceKey=00069805H;
+ euro72extraloreshamKey=euro72hamKey;
+ euro72extraloreshamlaceKey=euro72hamlaceKey;
+ euro72extraloresehbKey=euro72extrahalfbriteKey;
+ euro72extraloresehblaceKey=euro72extrahalfbritelaceKey;
+ euro72loresehbKey=00069084H;
+ euro72loresehblaceKey=00069085H;
+ euro72ehbKey=000690A4H;
+ euro72ehblaceKey=000690A5H;
+
+ euro36MonitorID=00071000H;
+
+(* Euro36 modeids can be ORed with the default modeids a la NTSC and PAL.
+ * For example, Euro36 SuperHires is
+ * (EURO36_MONITOR_ID | SUPER_KEY)
+ *)
+ super72MonitorID=00081000H;
+
+(* Similarly for Super72 modes. *)
+
+(* These monitors and modes were added for the V39 release. *)
+ dblntscMonitorID=00091000H;
+
+ dblntscloresKey=00091000H;
+ dblntscloresffKey=00091004H;
+ dblntscloreshamKey=00091800H;
+ dblntscloreshamffKey=00091804H;
+ dblntscloresehbKey=00091080H;
+ dblntscloresehbffKey=00091084H;
+ dblntscloreslaceKey=00091005H;
+ dblntscloreshamlaceKey=00091805H;
+ dblntscloresehblaceKey=00091085H;
+ dblntscloresdpfKey=00091400H;
+ dblntscloresdpflaceKey=00091404H;
+ dblntscloresdpf2Key=00091440H;
+ dblntscloresdpf2laceKey=00091444H;
+ dblntschiresKey=00099000H;
+ dblntschiresffKey=00099004H;
+ dblntschireshamKey=00099800H;
+ dblntschireshamffKey=00099804H;
+ dblntschireslaceKey=00099005H;
+ dblntschireshamlaceKey=00099805H;
+ dblntschiresehbKey=00099080H;
+ dblntschiresehbffKey=00099084H;
+ dblntschiresehblaceKey=00099085H;
+ dblntschiresdpfKey=00099400H;
+ dblntschiresdpflaceKey=00099404H;
+ dblntschiresdpf2Key=00099440H;
+ dblntschiresdpf2laceKey=00099444H;
+
+ dblpalMonitorID=000A1000H;
+
+ dblpalloresKey=000A1000H;
+ dblpalloresffKey=000A1004H;
+ dblpalloreshamKey=000A1800H;
+ dblpalloreshamffKey=000A1804H;
+ dblpalloresehbKey=000A1080H;
+ dblpalloresehbffKey=000A1084H;
+ dblpalloreslaceKey=000A1005H;
+ dblpalloreshamlaceKey=000A1805H;
+ dblpalloresehblaceKey=000A1085H;
+ dblpalloresdpfKey=000A1400H;
+ dblpalloresdpflaceKey=000A1404H;
+ dblpalloresdpf2Key=000A1440H;
+ dblpalloresdpf2laceKey=000A1444H;
+ dblpalhiresKey=000A9000H;
+ dblpalhiresffKey=000A9004H;
+ dblpalhireshamKey=000A9800H;
+ dblpalhireshamffKey=000A9804H;
+ dblpalhireslaceKey=000A9005H;
+ dblpalhireshamlaceKey=000A9805H;
+ dblpalhiresehbKey=000A9080H;
+ dblpalhiresehbffKey=000A9084H;
+ dblpalhiresehblaceKey=000A9085H;
+ dblpalhiresdpfKey=000A9400H;
+ dblpalhiresdpflaceKey=000A9404H;
+ dblpalhiresdpf2Key=000A9440H;
+ dblpalhiresdpf2laceKey=000A9444H;
+
+(* Use these tags for passing to BestModeID() (V39) *)
+ specialFlags=PropertyFlagSet{isDualpf,isPf2pri,isHam,isExtrahalfbrite};
+ 
+ bidtagDIPFMustHave=80000001H;    (* mask of the DIPF_ flags the ModeID must have *)
+				(* Default - NULL *)
+ bidtagDIPFMustNotHave=80000002H; (* mask of the DIPF_ flags the ModeID must not have *)
+				(* Default - SPECIAL_FLAGS *)
+ bidtagViewPort=80000003H;        (* ViewPort for which a ModeID is sought. *)
+				(* Default - NULL *)
+ bidtagNominalWidth=80000004H;    (* \ together make the aspect ratio and *)
+ bidtagNominalHeight=80000005H;	  (* / override the vp->Width/Height. *)   
+				(* Default - SourceID NominalDimensionInfo,
+				 * or vp->DWidth/Height, or (640 * 200),
+				 * in that preferred order.
+				 *)
+ bidtagDesiredWidth=80000006H;    (* \ Nominal Width and Height of the *)
+ bidtagDesiredHeight=80000007H;   (* / returned ModeID. *)               
+				(* Default - same as Nominal *)
+ bidtagDepth=80000008H; (* ModeID must support this depth. *)
+				(* Default - vp->RasInfo->BitMap->Depth or 1 *)
+ bidtagMonitorID=80000009H;(* ModeID must use this monitor. *)
+				(* Default - use best monitor available *)
+ bidtagSourceID=8000000AH;(* instead of a ViewPort. *)
+				(* Default - VPModeID(vp) or HIRES_KEY *)
+ bidtagRedBits=8000000BH;   (* \ 				*)
+ bidtagBlueBits=8000000CH;  (*  } Match up from the database *)
+ bidtagGreenBits=8000000DH; (* /				*)                      
+				(* Default - 4 *)
+
+(*- text.h -*)
+TYPE
+(*------ Font Styles ------------------------------------------------*)
+ FontStyles=(
+  underlined,bold,italic,fsextended,fs4,fs5,colorFont,tagged
+ );
+ (*************** ZIET EXTENDED UIT EXECD *********************)
+ FontStyleSet=SET OF FontStyles;
+
+CONST
+ normalFont=FontStyleSet{};
+
+TYPE
+(*------ Font Flags -------------------------------------------------*)
+ FontFlags=(
+  romFont,diskFont,revPath,tallDot,wideDot,proportional,designed,removed
+ );
+ FontFlagSet=SET OF FontFlags;
+
+(****** TextAttr node, matches text attributes in RastPort **********)
+ TextAttr=RECORD
+  name:ADDRESS;       (* name of the font *)
+  ySize:CARDINAL;     (* height of the font *)
+  style:FontStyleSet; (* intrinsic font style *)
+  flags:FontFlagSet;  (* font preferences and flags *)
+ END;
+
+ TTextAttr=RECORD
+  name:ADDRESS;       (* name of the font *)
+  ySize:CARDINAL;     (* height of the font *)
+  style:FontStyleSet; (* intrinsic font style *)
+  flags:FontFlagSet;  (* font preferences and flags *)
+  tags:TagItemPtr;    (* extended attributes *)         
+ END;
+
+(****** Text Tags ***************************************************)
+CONST
+ taDeviceDPI=tagUser+1;(* Tag value is Point union: *)
+					(* Hi word XDPI, Lo word YDPI *)
+ maxFontMatchWeight=32767; (* perfect match from WeighTAMatch *)
+
+(****** TextFonts node **********************************************)
+TYPE
+ TextFont=RECORD
+  message:Message;      (* reply message for font removal *)
+  ySize:CARDINAL;       (* font height		  |    order to best *)
+  style:FontStyleSet;   (* font style		  |    match a font *)
+  flags:FontFlagSet;    (* preferences and flags  /    request. *)
+  xSize:CARDINAL;       (* nominal font width *)
+  baseline:CARDINAL;    (* distance from the top of char to baseline *)
+  boldSmear:CARDINAL;   (* smear to affect a bold enhancement *)
+  accessors:CARDINAL;   (* access count *)
+  loChar:CHAR;          (* the first character described here *)
+  hiChar:CHAR;          (* the last character described here *)
+  charData:ADDRESS;     (* the bit character data *)
+  modulo:CARDINAL;      (* the row modulo for the strike font data *)
+  charLoc:ADDRESS;      (* ptr to location data for the strike font *)
+  charSpace:ADDRESS;    (* ptr to words of proportional spacing data *)
+  charKern:ADDRESS;     (* ptr to words of kerning data *)              
+ END;
+
+CONST
+ noRemFont=0;        (* disallow RemFont for this font *)
+
+TYPE
+ TextFontExtension=RECORD (* this structure is read-only *)
+  matchWord:CARDINAL;     (* a magic cookie for the extension *)       
+  flags0:SHORTSET;        (* (system private flags) *)         
+  flags1:SHORTSET;        (* (system private flags) *)         
+  backPtr:TextFontPtr;    (* validation of compilation *)
+  origReplyPort:MsgPortPtr;(* original value in tf_Extension *)
+  tags:TagItemPtr;        (* Text Tags for the font *)
+  oFontPatchS:ADDRESS;    (* (system private use) *)
+  oFontPatchK:ADDRESS;    (* (system private use) *)             
+    (* this space is reserved for future expansion *)
+ END;
+
+
+(******	ColorTextFont node ******************************************)
+(*-----	ctf_Flags --------------------------------------------------*)
+ ColorTextFontFlags=(
+  colorfont,greyfont,antialias,ctf3,ctf4,ctf5,ctf6,ctf7,
+  ctf8,ctf9,ctf10,ctf11,ctf12,ctf13,ctf14,ctf15
+ );
+ ColorTextFontFlagSet=SET OF ColorTextFontFlags;
+
+CONST
+ mapColor=colorFont;
+ colorMask=ColorTextFontFlagSet{colorfont..ctf3};
+
+(*----- ColorFontColors --------------------------------------------*)
+TYPE
+ ColorFontColors=RECORD
+  reserved:CARDINAL;  (* *must* be zero *)
+  count:CARDINAL;     (* number of entries in cfc_ColorTable *)
+  colorTable:ADDRESS; (* 4 bit per component color map packed xRGB *)
+ END;
+
+(*-----	ColorTextFont ----------------------------------------------*)
+ ColorTextFont=RECORD
+  tf:TextFont;
+  flags:CARDINAL;       (* extended flags *)
+  depth:SHORTCARD;      (* number of bit planes *)
+  fgColor:SHORTCARD;    (* color that is remapped *)
+  low:SHORTCARD;        (* lowest color represented *)
+  high:SHORTCARD;       (* highest color represented *)
+  planePick:SHORTCARD;  (* PlanePick ala Images *)
+  planeOnOff:SHORTCARD; (* PlaneOnOff ala Images *)
+  colorFontColors:ColorFontColorsPtr;(* colors for font *)
+  charData:ARRAY[0..7] OF ADDRESS; (*pointers to bit planes ala tf_CharData *)
+ END;
+
+(****** TextExtent node *********************************************)
+ TextExtent=RECORD
+  width:CARDINAL;     (* same as TextLength *)
+  height:CARDINAL;    (* same as tf_YSize *)
+  extent:Rectangle;   (* relative to CP *)      
+ END;
+
+(*- rastport.h -*)
+TYPE
+ AreaInfo=RECORD
+  vctrTbl:ADDRESS;      (* ptr to start of vector table *)
+  vctrPtr:ADDRESS;      (* ptr to current vertex *)
+  flagTbl:ADDRESS;      (* ptr to start of vector flag table *)
+  flagPtr:ADDRESS;      (* ptrs to areafill flags *)
+  count:INTEGER;        (* number of vertices in list *)
+  maxCount:INTEGER;     (* AreaMove/Draw will not allow Count>MaxCount*)
+  firstX,firstY:INTEGER;(* first point for this polygon *)                
+ END;
+
+ TmpRas=RECORD
+  rasPtr:ADDRESS;
+  size:LONGINT;
+ END;
+
+(* unoptimized for 32bit alignment of pointers *)
+ GelsInfo=RECORD
+  sprRsrvd:SHORTINT;(* flag of which sprites to reserve from vsprite system *)
+  flags:SHORTCARD;  (* system use *)
+  gelHead,gelTail:VSpritePtr; (* dummy vSprites for list management*)
+  (* pointer to array of 8 WORDS for sprite available lines *)
+  nextLine:ADDRESS;
+  (* pointer to array of 8 pointers for color-last-assigned to vSprites *)
+  lastColor:ADDRESS;
+  collHandler:CollTablePtr;  (* addresses of collision routines *)
+  leftmost,rightmost,topmost,bottommost:INTEGER;
+  firstBlissObj,lastBlissObj:ADDRESS; (* system use only *)
+ END;
+
+ DrawModes=(dm0,dmComplement,dmInversvid);
+ DrawModeSet=SET OF DrawModes;
+
+(* these are the flag bits for RastPort flags *)
+ RastPortFlags=(
+  firstDot,oneDot,dBuffer,areaOutline,rpf4,noCrossFill,rpf6,rpf7,rpf8
+ );
+ RastPortFlagSet=SET OF RastPortFlags;
+
+ RastPort=RECORD
+  layer:LayerPtr;
+  bitMap:BitMapPtr;
+  areaPtrn:ADDRESS;   (* ptr to areafill pattern *)
+  tmpRas:TmpRasPtr;
+  areaInfo:AreaInfoPtr;
+  gelsInfo:GelsInfoPtr;
+  mask:SHORTCARD;         (* write mask for this raster *)
+  fgPen:SHORTCARD;        (* foreground pen for this raster *)
+  bgPen:SHORTCARD;        (* background pen  *)
+  aOlPen:SHORTCARD;       (* areafill outline pen *)
+  drawMode:DrawModeSet;   (* drawing mode for fill, lines, and text *)
+  areaPtSz:SHORTCARD;     (* 2^n words for areafill pattern *)
+  linPatCnt:SHORTCARD;    (* current line drawing pattern preshift *)
+  dummy:BYTE;                                                          
+  flags:RastPortFlagSet;  (* miscellaneous control bits *)
+  linePtrn:CARDINAL;      (* 16 bits for textured lines *)
+  x,y:INTEGER;              (* current pen position *)       
+  minterms:ARRAY [0..7] OF SHORTCARD;
+  penWidth:INTEGER;
+  penHeight:INTEGER;
+  font:TextFontPtr;         (* current font address *)
+  algoStyle:FontStyleSet;   (* the algorithmically generated style *)
+  txFlags:FontFlagSet;      (* text specific flags *)
+  txHeight:CARDINAL;        (* text height *)
+  txWidth:CARDINAL;         (* text nominal width *)
+  txBaseline:CARDINAL;      (* text baseline *)
+  txSpacing:INTEGER;        (* text spacing (per character) *)          
+  user:ADDRESS;
+  longreserved:ARRAY [0..1] OF LONGINT;
+  wordreserved:ARRAY [0..6] OF WORD;  (* used to be a node *)
+  reserved:ARRAY [0..7] OF BYTE;  (* for future use *)   
+ END;
+
+CONST
+ jam1=DrawModeSet{};                   (* jam 1 color into raster *)
+ jam2=DrawModeSet{dm0};                (* jam 2 colors into raster *)
+ complement=DrawModeSet{dmComplement}; (* XOR bits into raster *)
+ inversvid=DrawModeSet{dmInversvid};   (* inverse video for drawing modes *) 
+
+(* there is only one style of clipping: raster clipping *)
+(* this preserves the continuity of jaggies regardless of clip window *)
+(* When drawing into a RastPort, if the ptr to ClipRect is nil then there *)
+(* is no clipping done, this is dangerous but useful for speed *)
+
+(*- regions.h -*)
+TYPE
+ RegionRectangle=RECORD
+  next,prev:RegionRectanglePtr;
+  bounds:Rectangle;
+ END;
+
+ Region=RECORD
+  bounds:Rectangle;
+  regionRectangle:RegionRectanglePtr;
+ END;
+
+(*- rpattr.h -*)
+CONST
+(**	tag definitions for GetRPAttr, SetRPAttr **)
+ rptagFont	=80000000H;     (* get/set font *)
+ rptagAPen	=80000002H;     (* get/set apen *)
+ rptagBPen	=80000003H;     (* get/set bpen *)
+ rptagDrMd	=80000004H;     (* get/set draw mode *)
+ rptagOutLinePen=80000005H; (* get/set outline pen *)
+ rptagWriteMask	=80000006H; (* get/set WriteMask *)
+ rptagMaxPen    =80000007H; (* get/set maxpen *)      
+
+ rptagDrawBounds=80000008H; (* get only rastport draw bounds. pass &rect *)
+
+(*- scale.h -*)
+TYPE
+ BitScaleArgs=RECORD
+  srcX,srcY:CARDINAL;                 (* source origin *)
+  srcWidth,srcHeight:CARDINAL;        (* source size *)
+  srcXFactor,srcYFactor:CARDINAL;     (* scale factor denominators *)
+  destX,destY:CARDINAL;               (* destination origin *)
+  destWidth,destHeight:CARDINAL;      (* destination size result *)
+  xDestFactor,yDestFactor:CARDINAL;   (* scale factor numerators *)
+  srcBitMap:BitMapPtr;                (* source BitMap *)
+  destBitMap:BitMapPtr;               (* destination BitMap *)
+  flags:LONGCARD;                     (* reserved.  Must be zero! *)
+  xDDA,yDDA:CARDINAL;                 (* reserved *)
+  reserved1:LONGINT;
+  reserved2:LONGINT;
+ END;
+
+(*- sprite.h -*)
+CONST
+ spriteAttached=80H;
+
+TYPE
+ SimpleSprite=RECORD
+  posctldata:ADDRESS;
+  height:CARDINAL;
+  x,y:CARDINAL;  (* current position *)
+  num:INTEGER;
+ END;
+
+ ExtSprite=RECORD
+  simpleSprite:SimpleSprite;	(* conventional simple sprite structure *)
+  wordwidth:CARDINAL;         (* graphics use only, subject to change *)
+  flags:BITSET;               (* graphics use only, subject to change *)
+ END;
+
+CONST
+(* tags for AllocSpriteData() *)
+ spriteaWidth        =81000000H;
+ spriteaXReplication =81000002H;
+ spriteaYReplication =81000004H;
+ spriteaOutputHeight =81000006H;
+ spriteaAttached     =81000008H;
+ spriteaOldDataFormat=8100000AH;(* MUST pass in outputheight if using this tag *)
+
+(* tags for GetExtSprite() *)
+ gstagSpriteNum =82000020H;
+ gstagAttached  =82000022H;
+ gstagSoftSprite=82000024H;
+
+(* tags valid for either GetExtSprite or ChangeExtSprite *)
+ gstagScanDoubled=83000000H;(* request "NTSC-Like" height if possible. *)
+
+(*- videocontrol.h -*)
+CONST
+ vtagEndCm=0;
+
+TYPE
+ VTags=(
+  vtagChromakeyClr:=tagUser,
+  vtagChromakeySet,
+  vtagBitplanekeyClr,
+  vtagBitplanekeySet,
+  vtagBorderblankClr,
+  vtagBorderblankSet,
+  vtagBordernotransClr,
+  vtagBordernotransSet,
+  vtagChromaPenClr,
+  vtagChromaPenSet,
+  vtagChromaPlaneSet,
+  vtagAttachCmSet,
+  vtagNextbufCm,
+  vtagBatchCmClr,
+  vtagBatchCmSet,
+  vtagNormalDispGet,
+  vtagNormalDispSet,
+  vtagCoerceDispGet,
+  vtagCoerceDispSet,
+  vtagViewportextraGet,
+  vtagViewportextraSet,
+  vtagChromakeyGet,
+  vtagBitplanekeyGet,
+  vtagBorderblankGet,
+  vtagBordernotransGet,
+  vtagChromaPenGet,
+  vtagChromaPlaneGet,
+  vtagAttachCmGet,
+  vtagBatchCmGet,
+  vtagBatchItemsGet,
+  vtagBatchItemsSet,
+  vtagBatchItemsAdd,
+  vtagVpmodeidGet,
+  vtagVpmodeidSet,
+  vtagVpmodeidClr,
+  vtagUserclipGet,
+  vtagUserclipSet,
+  vtagUserclipClr, 
+(* The following tags are V39 specific. They will be ignored (returing error -3) by
+	earlier versions *)
+  vtagPf1BaseGet,
+  vtagPf2BaseGet,
+  vtagSpEvenBaseGet,
+  vtagSpOddBaseGet,
+  vtagPf1BaseSet,
+  vtagPf2BaseSet,
+  vtagSpEvenBaseSet,
+  vtagSpOddBaseSet,
+  vtagBorderSpriteGet,
+  vtagBorderSpriteSet,
+  vtagBorderSpriteClr,
+  vtagSpriteResnSet,
+  vtagSpriteResnGet,
+  vtagPf1ToSpritePriSet,
+  vtagPf1ToSpritePriGet,
+  vtagPf2ToSpritePriSet,
+  vtagPf2ToSpritePriGet,
+  vtagImmediate,
+  vtagFullPaletteSet,
+  vtagFullPaletteGet,
+  vtagFullPaletteClr,
+  vtagDefSpriteResnSet,
+  vtagDefSpriteResnGet 
+ );
+
+(*- view.h -*)
+TYPE
+(* defines used for Modes in IVPargs *)
+ ViewModes=(
+  vm0,genlocVideo,lace,doubleScan,
+  vm4,superHires,pfba,extraHalfbrite,
+  genlocAudio,vm9,dualpf,ham,
+  extendedMode,vpHide,sprites,hires
+ );
+ ViewModeSet=SET OF ViewModes;
+
+ ViewPort=RECORD
+  next:ViewPortPtr;
+  colorMap:ColorMapPtr; (* table of colors for this viewport *)
+  dspIns:CopListPtr;    (* user by MakeView() *)
+  sprIns:CopListPtr;    (* used by sprite stuff *)
+  clrIns:CopListPtr;    (* used by sprite stuff *)
+  uCopIns:UCopListPtr;	(* User copper list *)   
+  dWidth,dHeight:INTEGER;
+  dxOffset,dyOffset:INTEGER;
+  modes:ViewModeSet;
+  spritePriorities:SHORTCARD;	(* used by makevp *)
+  extendedModes:SHORTSET;
+  rasInfo:RasInfoPtr;
+ END;
+
+ View=RECORD
+  viewPort:ViewPortPtr;
+  lofCprList:CprlistPtr;    (* used for interlaced and noninterlaced *)
+  shfCprList:CprlistPtr;    (* only used during interlace *)
+  dyOffset,dxOffset:INTEGER;(* for complete View positioning *)         
+  modes:ViewModeSet;        (* such as INTERLACE, GENLOC *)
+ END;
+
+(* these structures are obtained via GfxNew *)
+(* and disposed by GfxFree *)
+ ViewExtra=RECORD
+  n:ExtendedNode;
+  view:ViewPtr;             (* backwards link *)
+  monitor:MonitorSpecPtr;   (* monitors for this view *)
+  topLine:CARDINAL;
+ END;
+
+(* this structure is obtained via GfxNew *)
+(* and disposed by GfxFree *)
+ ViewPortExtra=RECORD
+  n:ExtendedNode;
+  viewPort:ViewPortPtr;   (* backwards link *)
+  displayClip:Rectangle;;	(* makevp display clipping information *)
+	(* These are added for V39 *)
+  vecTable:ADDRESS; (* Private *)
+  driverData:ARRAY [0..1] OF ADDRESS;
+  flags:BITSET;
+  origin:ARRAY [0..1] OF Point; (* First visible point relative to the DClip.
+					 * One for each possible playfield.
+					 *)
+ END;
+
+CONST
+ vpxbFreeMe=0;    (* private *)
+ vpxbLast=1;
+ vpxbStraddles256=4;
+ vpxbStraddles512=5;
+
+ extendVStruct=extendedMode; (* unused bit in Modes field of View *)
+
+ vpfA2024=040H;	(* VP?_ fields internal only *)
+ vpfTenhz=020H;
+ vpbA2024=6;
+ vpbTenhz=4;
+
+(* defines used for Modes in IVPargs *)
+
+TYPE
+ RasInfo=RECORD   (* used by callers to and InitDspC() *)
+  next:RasInfoPtr;           (* used for dualpf *)
+  bitMap:BitMapPtr;
+  rxOffset,ryOffset:INTEGER; (* scroll offsets in this BitMap *)
+ END;
+
+ ColorMapType=(colorMapTypeV33,colorMapTypeV36,colorMapTypeV39);
+
+ ColorMapFlags=(
+  colormapTransparency,colorPlaneTransparency,borderBlanking,
+  borderNoTransparency,videoControlBatch,userCopperClip,borderSprites,cm7
+ );
+ ColorMapFlagSet=SET OF ColorMapFlags;
+
+ ColorMap=RECORD
+  flags:ColorMapFlagSet;
+  type:ColorMapType;
+  count:CARDINAL;
+  colorTable:ADDRESS;
+  vpe:ViewPortExtraPtr;
+  transparencyBits:ADDRESS;
+  transparencyPlane:SHORTCARD;
+  reserved1:SHORTCARD;
+  reserved2:CARDINAL;
+  vp:ViewPortPtr;
+  normalDisplayInfo:ADDRESS;
+  coerceDisplayInfo:ADDRESS;
+  batchItems:TagItemPtr;
+  vpModeID:LONGCARD;
+  palExtra:PaletteExtraPtr;
+  spriteBaseEven:CARDINAL;
+  spriteBaseOdd:CARDINAL;
+  bp0Base:CARDINAL;
+  bp1Base:CARDINAL;
+ END;
+
+(* if Type == 0 then ColorMap is V1.2/V1.3 compatible *)
+(* if Type != 0 then ColorMap is V38	   compatible *)
+(* the system will never create other than V39 type colormaps when running V39 *)
+
+ PaletteExtra=RECORD      (* structure may be extended so watch out! *)
+        semaphore:SignalSemaphore;  (* shared semaphore for arbitration	*)
+        firstFree:CARDINAL;         (* *private*				*)
+        nFree:CARDINAL;             (* number of free colors		*)
+        firstShared:CARDINAL;			  (* *private*				*)
+        nShared:CARDINAL;	          (* *private*				*)
+        refCnt:ADDRESS;	            (* *private*				*)
+        allocList:ADDRESS;			    (* *private*				*)   
+        viewPort:ViewPortPtr;       (* back pointer to viewport		*)
+        sharableColors:CARDINAL;    (* the number of sharable colors.	*)
+       END;
+
+CONST
+(* flags values for ObtainPen *)
+ penExclusive=0;
+ penNoSetColor=1;
+
+(* precision values for ObtainBestPen : *)
+ precisionExact=-1;
+ precisionImage=0;
+ precisionIcon=16;
+ precisionGui=32;
+
+(* tags for ObtainBestPen: *)
+ opbPrecision=84000000H;
+ opbFailIfBad=84000001H;
+
+(* From V39, MakeVPort() will return an error if there is not enough memory,
+ * or the requested mode cannot be opened with the requested depth with the
+ * given bitmap (for higher bandwidth alignments).
+ *)
+ mvpOk=0;           (* you want to see this one *)
+ mvpNoMem=1;        (* insufficient memory for intermediate workspace *)
+ mvpNoVpe=2;        (* ViewPort does not have a ViewPortExtra, and
+            				 * insufficient memory to allocate a temporary one.
+                     *)
+ mvpNoDspIns=3;     (* insufficient memory for intermidiate copper
+            				 * instructions.
+            				 *)
+ mvpNoDisplay=4;    (* BitMap data is misaligned for this viewport's
+            				 * mode and depth - see AllocBitMapData().
+            				 *)
+
+(* From V39, MrgCop() will return an error if there is not enough memory,
+ * or for some reason MrgCop() did not need to make any copper lists.
+ *)
+ mcopOk=0;    (* you want to see this one *)
+ mcopNoMem=1; (* insufficient memory to allocate the system
+       				 * copper lists.
+			      	 *)
+ mcopNop=2;   (* MrgCop() did not merge any copper lists
+      				 * (eg, no ViewPorts in the list, or all marked as
+      				 * hidden).
+      				 *)
+
+TYPE
+ DBufInfo=RECORD
+  link1:ADDRESS;
+  count1:LONGCARD;
+  safeMessage:Message; (* replied to when safe to write to old bitmap *)
+  userData1:ADDRESS;   (* first user data *)                            
+  link2:ADDRESS;
+  count2:LONGCARD;
+  dispMessage:Message;(* replied to when new bitmap has been displayed at least once *)
+  userData2:ADDRESS;  (* second user data *)
+  matchLong:LONGCARD;
+  copPtr1:ADDRESS;
+  copPtr2:ADDRESS;
+  copPtr3:ADDRESS;
+  beamPos1:CARDINAL;
+  beamPos2:CARDINAL;
+ END;
+
+END GraphicsD.

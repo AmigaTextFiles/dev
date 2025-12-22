@@ -1,0 +1,221 @@
+***********************************************
+*					      *
+*              (C)opyright 1991               *
+*					      *
+*             by  Tomi Blinnikka              *
+*					      *
+*      Don´t try to understand the code       *
+*					      *
+*					      *
+*	This is just a program that turns     *
+*	the on/off the special stuff with     *
+*	a so called digital phoneline	      *
+*					      *
+***********************************************
+
+	INCLUDE	"JMPLibs.i"
+	INCLUDE	"exec/types.i"
+	INCLUDE	"exec/io.i"
+	INCLUDE	"libraries/dos.i"
+	INCLUDE	"devices/serial.i"
+
+	INCLUDE	"dos.xref"
+	INCLUDE	"gfx.xref"
+	INCLUDE	"intuition.xref"
+	INCLUDE	"exec.xref"
+
+	XREF	_CreatePort
+	XREF	_DeletePort
+	XREF	_CreateExtIO
+	XREF	_DeleteExtIO
+	XREF	_printf
+
+	XDEF	_DOSBase
+	XDEF	_SysBase
+	XDEF	_stdout
+
+Start:		move.l	a0,OptionAddress	;Get intputs from user
+		clr.b	-1(a0,d0.l)		;add null to end of text
+		openlib	Dos,ShutDown
+		move.l	_DosBase(pc),_DOSBase
+		move.l	$4,_SysBase
+
+		lib	Dos,Output
+		move.l	d0,_stdout
+
+		move.l	OptionAddress(pc),a0
+		tst.b	(a0)
+		beq	NoCMD
+		cmp.b	#"?",(a0)
+		beq	CommandLineHelp
+		cmp.w	#"-?",(a0)
+		beq	CommandLineHelp
+		cmp.w	#"-h",(a0)
+		beq	CommandLineHelp
+		cmp.w	#"-k",(a0)
+		bne	Start1
+		move.w	#$00,Status
+		jmp	Start_END
+Start1:		cmp.w	#"-t",(a0)
+		bne	CommandLineHelp
+		move.w	#$01,Status
+
+Start_END:
+
+;Create reply port for serial.device (or modem0.device etc.)
+
+		move.l	#0,-(sp)
+		pea	SRPortName		;S(erial)R(eply)PortName
+		jsr	_CreatePort
+		add.l	#8,sp
+		move.l	d0,SRPort
+		beq	ShutDown
+
+;Create IOReq for serial.device (or for other device, but size is EXTSER)
+
+		move.l	#IOEXTSER_SIZE,-(sp)
+		move.l	d0,-(sp)
+		jsr	_CreateExtIO
+ 		add.l	#8,sp
+		move.l	d0,SerDevIO
+		bne	OpenSer
+		print	<"Couldn't get SerialIOReq!",13,10>,_stdout
+		jmp	ShutDown
+
+;open serial.device
+
+OpenSer:	move.w	#$00,SerOpen
+		lea.l	SerName(pc),a0
+		move.l	SerUnit(pc),d0
+		move.l	SerDevIO(pc),a1
+		move.b	#SERF_SHARED,IO_SERFLAGS(a1)
+		move.l	#$00,d1				;no flags
+		lib	Exec,OpenDevice
+		tst.l	d0
+		beq	OpenSer1
+		print	<"Couldn't open requested device!",13,10>,_stdout
+		jmp	ShutDown
+
+OpenSer1:	move.w	#$1,SerOpen		;just to tell if open
+		move.l	SRPort(pc),a1
+		move.l	#00,d1
+		move.b	MP_SIGBIT(a1),d1
+		bset.l	d1,WaitMask
+
+SendCom:	move.l	SerDevIO(pc),a1
+		move.w	#CMD_WRITE,IO_COMMAND(a1)
+		move.l	#-1,IO_LENGTH(a1)
+		cmp.w	#$01,Status
+		bne	SendCom1
+		lea.l	TransferOff(pc),a0
+		jmp	SendCom2
+SendCom1:	lea.l	KnockOff(pc),a0
+SendCom2:	move.l	a0,IO_DATA(a1)
+		lib	Exec,SendIO
+
+		move.l	WaitMask(pc),d0
+		lib	Exec,Wait
+
+		move.l	SerDevIO(pc),a1
+		lib	Exec,CheckIO
+		tst.l	d0
+		bne	SendCom3
+		move.l	SerDevIO(pc),a1
+		lib	Exec,AbortIO
+SendCom3:	move.l	SerDevIO(pc),a1
+		lib	Exec,WaitIO
+
+
+CloseSer:
+		move.l	SerDevIO(pc),a1
+		lib	Exec,CloseDevice
+		move.w	#$00,SerOpen
+ 
+		move.l	#IOEXTSER_SIZE,-(sp)
+		move.l	SerDevIO(pc),-(sp)
+		jsr	_DeleteExtIO
+		add.l	#8,sp
+		move.l	#$00,SerDevIO
+
+		move.l	SRPort(pc),-(sp)
+		jsr	_DeletePort
+		add.l	#4,sp
+		move.l	#$00,SRPort
+		jmp	ShutDown8800
+
+ShutDown:	tst.l	SerOpen
+		beq	ShutDown9000
+		move.l	SerDevIO(pc),a1
+		lib	Exec,CloseDevice
+		
+ShutDown9000:	move.l	SerDevIO(pc),d0
+		tst.l	d0
+		beq	ShutDown8900
+		move.l	#IOEXTSER_SIZE,-(sp)
+		move.l	d0,-(sp)
+		jsr	_DeleteExtIO
+		add.l	#8,sp
+
+ShutDown8900:	move.l	SRPort(pc),d0
+		tst.l	d0
+		beq	ShutDown8800
+		move.l	d0,-(sp)
+		jsr	_DeletePort
+		add.l	#4,sp
+
+ShutDown8800:
+ShutDown8700:
+ShutDown1000:	closlib	Dos
+
+ShutDownOut:	move.l	#RETURN_OK,d0
+		rts
+
+		INCLUDE	"LWF:NBBS/Utilities/DiCommandLineHelp.i"
+
+;bits
+
+WaitMask	dc.l	SIGBREAKF_CTRL_C
+
+;Structures
+
+_DOSBase 	dc.l	0
+_SysBase	dc.l	0
+
+		libnames
+;file stuff
+
+_stdout		dc.l	0			;ex. outfile
+OptionAddress	dc.l	0
+
+;device stuff
+
+SerOpen		dc.w	0			;Equals 1 if open
+SerDevIO	dc.l	0
+SerUnit		dc.l	0
+SerName		dc.b	"modem0.device",0
+		ds.l	0
+
+;port stuff
+
+SRPortName	dc.b	"Digitaline_SerialPort",0
+		ds.l	0
+SRPort		dc.l	0
+
+;other stuff XIV
+
+Status:		dc.w	0		;0=Knock, 1=transfer
+
+;debug stuff
+
+fstr		dc.b	"$%lx",10,0
+		ds.l	0
+KnockOff:	dc.b	"ATDT#43#",13,0
+		ds.l	0
+KnockOn:	dc.b	"ATDT*43#",13,0
+		ds.l	0
+TransferOn:	dc.b	"ATDT*21*4582088#"
+		ds.l	0
+TransferOff:	dc.b	"ATDT#21#",13,0
+		ds.l	0
+
+		END

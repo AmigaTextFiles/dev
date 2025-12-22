@@ -1,0 +1,1872 @@
+/* Generated automatically by the program `gencodes'
+   from the machine description file `md'.  */
+
+#ifndef GCC_INSN_CODES_H
+#define GCC_INSN_CODES_H
+
+enum insn_code {
+  CODE_FOR_nothing = 0,
+
+#define CODE_FOR_adddi3_high CODE_FOR_nothing
+#define CODE_FOR_movdf_low_si CODE_FOR_nothing
+#define CODE_FOR_movdf_low_di CODE_FOR_nothing
+#define CODE_FOR_movdf_low_st_si CODE_FOR_nothing
+#define CODE_FOR_movdf_low_st_di CODE_FOR_nothing
+#define CODE_FOR_movsf_low_si CODE_FOR_nothing
+#define CODE_FOR_movsf_low_di CODE_FOR_nothing
+#define CODE_FOR_movsf_low_st_si CODE_FOR_nothing
+#define CODE_FOR_movsf_low_st_di CODE_FOR_nothing
+#define CODE_FOR_movdi_low CODE_FOR_nothing
+#define CODE_FOR_movsi_low_st CODE_FOR_nothing
+#define CODE_FOR_movdi_low_st CODE_FOR_nothing
+#define CODE_FOR_macho_high_si CODE_FOR_nothing
+#define CODE_FOR_macho_high_di CODE_FOR_nothing
+#define CODE_FOR_macho_low_si CODE_FOR_nothing
+#define CODE_FOR_macho_low_di CODE_FOR_nothing
+#define CODE_FOR_load_macho_picbase_si CODE_FOR_nothing
+#define CODE_FOR_load_macho_picbase_di CODE_FOR_nothing
+#define CODE_FOR_macho_correct_pic_si CODE_FOR_nothing
+#define CODE_FOR_macho_correct_pic_di CODE_FOR_nothing
+#define CODE_FOR_reload_macho_picbase_si CODE_FOR_nothing
+#define CODE_FOR_reload_macho_picbase_di CODE_FOR_nothing
+#define CODE_FOR_nonlocal_goto_receiver CODE_FOR_nothing
+  CODE_FOR_zero_extendqihi2 = 1,
+  CODE_FOR_zero_extendqisi2 = 2,
+  CODE_FOR_zero_extendqidi2 = 3,
+  CODE_FOR_zero_extendhisi2 = 10,
+  CODE_FOR_zero_extendhidi2 = 11,
+  CODE_FOR_zero_extendsidi2 = 16,
+  CODE_FOR_extendqihi2 = 19,
+  CODE_FOR_extendqisi2 = 20,
+  CODE_FOR_extendqidi2 = 21,
+  CODE_FOR_extendsidi2 = 36,
+  CODE_FOR_dlmzb = 69,
+#define CODE_FOR_addsi3_high CODE_FOR_nothing
+  CODE_FOR_addsi3_carry = 80,
+  CODE_FOR_adddi3_carry = 81,
+  CODE_FOR_addsi3_carry_in_0 = 92,
+  CODE_FOR_adddi3_carry_in_0 = 93,
+  CODE_FOR_addsi3_carry_in_m1 = 94,
+  CODE_FOR_adddi3_carry_in_m1 = 95,
+  CODE_FOR_subfsi3_imm = 108,
+  CODE_FOR_subfdi3_imm = 109,
+  CODE_FOR_subfsi3_carry = 110,
+  CODE_FOR_subfdi3_carry = 111,
+  CODE_FOR_subfsi3_carry_in_0 = 118,
+  CODE_FOR_subfdi3_carry_in_0 = 119,
+  CODE_FOR_subfsi3_carry_in_m1 = 120,
+  CODE_FOR_subfdi3_carry_in_m1 = 121,
+  CODE_FOR_subfsi3_carry_in_xx = 122,
+  CODE_FOR_subfdi3_carry_in_xx = 123,
+  CODE_FOR_negsi2 = 124,
+  CODE_FOR_negdi2 = 125,
+  CODE_FOR_clzsi2 = 130,
+  CODE_FOR_clzdi2 = 131,
+  CODE_FOR_popcntbsi2 = 132,
+  CODE_FOR_popcntbdi2 = 133,
+  CODE_FOR_popcntdsi2 = 134,
+  CODE_FOR_popcntddi2 = 135,
+  CODE_FOR_paritysi2_cmpb = 136,
+  CODE_FOR_paritydi2_cmpb = 137,
+  CODE_FOR_bswaphi2_internal = 140,
+  CODE_FOR_bswapdi2_32bit = 145,
+  CODE_FOR_mulsi3 = 146,
+  CODE_FOR_muldi3 = 147,
+  CODE_FOR_smulsi3_highpart_le = 156,
+  CODE_FOR_umulsi3_highpart_le = 157,
+  CODE_FOR_smuldi3_highpart_le = 158,
+  CODE_FOR_umuldi3_highpart_le = 159,
+  CODE_FOR_smulsi3_highpart_64 = 160,
+  CODE_FOR_umulsi3_highpart_64 = 161,
+  CODE_FOR_udivsi3 = 162,
+  CODE_FOR_udivdi3 = 163,
+  CODE_FOR_divsi3_sra = 166,
+  CODE_FOR_divdi3_sra = 167,
+  CODE_FOR_andsi3_imm = 172,
+  CODE_FOR_anddi3_imm = 173,
+  CODE_FOR_andsi3_internal0_nomc = 188,
+  CODE_FOR_insvsi_internal = 212,
+  CODE_FOR_insvdi_internal = 219,
+  CODE_FOR_extzvsi_internal = 222,
+  CODE_FOR_extzvdi_internal = 225,
+  CODE_FOR_rotlsi3 = 228,
+  CODE_FOR_rotldi3 = 229,
+  CODE_FOR_ashlsi3 = 250,
+  CODE_FOR_ashldi3 = 251,
+  CODE_FOR_rlwinm = 257,
+  CODE_FOR_lshrsi3 = 260,
+  CODE_FOR_lshrdi3 = 261,
+  CODE_FOR_sqrtsf2 = 303,
+  CODE_FOR_sqrtdf2 = 304,
+  CODE_FOR_fres = 305,
+  CODE_FOR_fred = 306,
+  CODE_FOR_copysignsf3_fcpsgn = 313,
+  CODE_FOR_copysigndf3_fcpsgn = 314,
+  CODE_FOR_isel_signed_si = 319,
+  CODE_FOR_isel_signed_di = 320,
+  CODE_FOR_isel_unsigned_si = 321,
+  CODE_FOR_isel_unsigned_di = 322,
+  CODE_FOR_lfiwax = 331,
+  CODE_FOR_floatsisf2_lfiwax = 332,
+  CODE_FOR_floatsidf2_lfiwax = 333,
+  CODE_FOR_floatsisf2_lfiwax_mem = 334,
+  CODE_FOR_floatsidf2_lfiwax_mem = 335,
+  CODE_FOR_lfiwzx = 336,
+  CODE_FOR_floatunssisf2_lfiwzx = 337,
+  CODE_FOR_floatunssidf2_lfiwzx = 338,
+  CODE_FOR_floatunssisf2_lfiwzx_mem = 339,
+  CODE_FOR_floatunssidf2_lfiwzx_mem = 340,
+  CODE_FOR_fix_truncsfsi2_stfiwx = 343,
+  CODE_FOR_fix_truncdfsi2_stfiwx = 344,
+  CODE_FOR_fix_truncsfsi2_internal = 345,
+  CODE_FOR_fix_truncdfsi2_internal = 346,
+  CODE_FOR_fixuns_truncsfsi2_stfiwx = 349,
+  CODE_FOR_fixuns_truncdfsi2_stfiwx = 350,
+  CODE_FOR_fctiwz_sf = 353,
+  CODE_FOR_fctiwz_df = 354,
+  CODE_FOR_fctiwuz_sf = 355,
+  CODE_FOR_fctiwuz_df = 356,
+  CODE_FOR_lrintsfdi2 = 362,
+  CODE_FOR_lrintdfdi2 = 363,
+  CODE_FOR_btruncsf2 = 364,
+  CODE_FOR_btruncdf2 = 365,
+  CODE_FOR_ceilsf2 = 366,
+  CODE_FOR_ceildf2 = 367,
+  CODE_FOR_floorsf2 = 368,
+  CODE_FOR_floordf2 = 369,
+  CODE_FOR_roundsf2 = 370,
+  CODE_FOR_rounddf2 = 371,
+  CODE_FOR_stfiwx = 374,
+  CODE_FOR_floatdisf2_fcfids = 379,
+  CODE_FOR_floatdisf2_internal1 = 381,
+  CODE_FOR_floatunsdisf2_fcfidus = 382,
+  CODE_FOR_ashrdi3_no_power = 384,
+  CODE_FOR_ashldi3_internal5 = 408,
+  CODE_FOR_ashldi3_internal8 = 411,
+#define CODE_FOR_movsi_low CODE_FOR_nothing
+  CODE_FOR_movsf_hardfloat = 474,
+  CODE_FOR_movsd_hardfloat = 475,
+  CODE_FOR_extenddftf2_fprs = 493,
+  CODE_FOR_extenddftf2_vsx = 494,
+  CODE_FOR_trunctfdf2_internal1 = 495,
+  CODE_FOR_trunctfdf2_internal2 = 496,
+  CODE_FOR_trunctfsf2_fprs = 497,
+  CODE_FOR_fix_trunc_helper = 498,
+  CODE_FOR_negtf2_internal = 500,
+#define CODE_FOR_p8_fmrgow_di CODE_FOR_nothing
+#define CODE_FOR_p8_fmrgow_df CODE_FOR_nothing
+#define CODE_FOR_p8_fmrgow_dd CODE_FOR_nothing
+#define CODE_FOR_p8_mtvsrwz_1 CODE_FOR_nothing
+#define CODE_FOR_p8_mtvsrwz_2 CODE_FOR_nothing
+#define CODE_FOR_reload_fpr_from_gprdi CODE_FOR_nothing
+#define CODE_FOR_reload_fpr_from_gprdf CODE_FOR_nothing
+#define CODE_FOR_reload_fpr_from_gprdd CODE_FOR_nothing
+#define CODE_FOR_p8_mtvsrd_1 CODE_FOR_nothing
+#define CODE_FOR_p8_mtvsrd_2 CODE_FOR_nothing
+#define CODE_FOR_p8_xxpermdi_ti CODE_FOR_nothing
+#define CODE_FOR_p8_xxpermdi_v16qi CODE_FOR_nothing
+#define CODE_FOR_p8_xxpermdi_v8hi CODE_FOR_nothing
+#define CODE_FOR_p8_xxpermdi_v4si CODE_FOR_nothing
+#define CODE_FOR_p8_xxpermdi_v4sf CODE_FOR_nothing
+#define CODE_FOR_p8_xxpermdi_v2di CODE_FOR_nothing
+#define CODE_FOR_p8_xxpermdi_v2df CODE_FOR_nothing
+#define CODE_FOR_p8_xxpermdi_v1ti CODE_FOR_nothing
+#define CODE_FOR_reload_vsx_from_gprti CODE_FOR_nothing
+#define CODE_FOR_reload_vsx_from_gprv16qi CODE_FOR_nothing
+#define CODE_FOR_reload_vsx_from_gprv8hi CODE_FOR_nothing
+#define CODE_FOR_reload_vsx_from_gprv4si CODE_FOR_nothing
+#define CODE_FOR_reload_vsx_from_gprv4sf CODE_FOR_nothing
+#define CODE_FOR_reload_vsx_from_gprv2di CODE_FOR_nothing
+#define CODE_FOR_reload_vsx_from_gprv2df CODE_FOR_nothing
+#define CODE_FOR_reload_vsx_from_gprv1ti CODE_FOR_nothing
+#define CODE_FOR_reload_vsx_from_gprsf CODE_FOR_nothing
+#define CODE_FOR_p8_mfvsrd_3_ti CODE_FOR_nothing
+#define CODE_FOR_p8_mfvsrd_3_v16qi CODE_FOR_nothing
+#define CODE_FOR_p8_mfvsrd_3_v8hi CODE_FOR_nothing
+#define CODE_FOR_p8_mfvsrd_3_v4si CODE_FOR_nothing
+#define CODE_FOR_p8_mfvsrd_3_v4sf CODE_FOR_nothing
+#define CODE_FOR_p8_mfvsrd_3_v2di CODE_FOR_nothing
+#define CODE_FOR_p8_mfvsrd_3_v2df CODE_FOR_nothing
+#define CODE_FOR_p8_mfvsrd_3_v1ti CODE_FOR_nothing
+#define CODE_FOR_reload_gpr_from_vsxti CODE_FOR_nothing
+#define CODE_FOR_reload_gpr_from_vsxv16qi CODE_FOR_nothing
+#define CODE_FOR_reload_gpr_from_vsxv8hi CODE_FOR_nothing
+#define CODE_FOR_reload_gpr_from_vsxv4si CODE_FOR_nothing
+#define CODE_FOR_reload_gpr_from_vsxv4sf CODE_FOR_nothing
+#define CODE_FOR_reload_gpr_from_vsxv2di CODE_FOR_nothing
+#define CODE_FOR_reload_gpr_from_vsxv2df CODE_FOR_nothing
+#define CODE_FOR_reload_gpr_from_vsxv1ti CODE_FOR_nothing
+#define CODE_FOR_reload_gpr_from_vsxsf CODE_FOR_nothing
+#define CODE_FOR_p8_mfvsrd_4_disf CODE_FOR_nothing
+  CODE_FOR_movdi_si_update = 531,
+  CODE_FOR_movdi_di_update = 532,
+  CODE_FOR_movdi_si_update_stack = 533,
+  CODE_FOR_movdi_di_update_stack = 534,
+  CODE_FOR_movsi_update = 537,
+  CODE_FOR_movsi_update_stack = 538,
+#define CODE_FOR_tls_gd_aix32 CODE_FOR_nothing
+#define CODE_FOR_tls_gd_aix64 CODE_FOR_nothing
+#define CODE_FOR_tls_gd_sysvsi CODE_FOR_nothing
+#define CODE_FOR_tls_gd_sysvdi CODE_FOR_nothing
+#define CODE_FOR_tls_ld_aix32 CODE_FOR_nothing
+#define CODE_FOR_tls_ld_aix64 CODE_FOR_nothing
+#define CODE_FOR_tls_ld_sysvsi CODE_FOR_nothing
+#define CODE_FOR_tls_ld_sysvdi CODE_FOR_nothing
+#define CODE_FOR_tls_dtprel_32 CODE_FOR_nothing
+#define CODE_FOR_tls_dtprel_64 CODE_FOR_nothing
+#define CODE_FOR_tls_dtprel_ha_32 CODE_FOR_nothing
+#define CODE_FOR_tls_dtprel_ha_64 CODE_FOR_nothing
+#define CODE_FOR_tls_dtprel_lo_32 CODE_FOR_nothing
+#define CODE_FOR_tls_dtprel_lo_64 CODE_FOR_nothing
+#define CODE_FOR_tls_got_dtprel_32 CODE_FOR_nothing
+#define CODE_FOR_tls_got_dtprel_64 CODE_FOR_nothing
+#define CODE_FOR_tls_tprel_32 CODE_FOR_nothing
+#define CODE_FOR_tls_tprel_64 CODE_FOR_nothing
+#define CODE_FOR_tls_tprel_ha_32 CODE_FOR_nothing
+#define CODE_FOR_tls_tprel_ha_64 CODE_FOR_nothing
+#define CODE_FOR_tls_tprel_lo_32 CODE_FOR_nothing
+#define CODE_FOR_tls_tprel_lo_64 CODE_FOR_nothing
+#define CODE_FOR_tls_got_tprel_32 CODE_FOR_nothing
+#define CODE_FOR_tls_got_tprel_64 CODE_FOR_nothing
+#define CODE_FOR_tls_tls_32 CODE_FOR_nothing
+#define CODE_FOR_tls_tls_64 CODE_FOR_nothing
+#define CODE_FOR_tls_get_tpointer_internal CODE_FOR_nothing
+#define CODE_FOR_tls_get_addr_internalsi CODE_FOR_nothing
+#define CODE_FOR_tls_get_addr_internaldi CODE_FOR_nothing
+#define CODE_FOR_load_toc_aix_si CODE_FOR_nothing
+#define CODE_FOR_load_toc_aix_di CODE_FOR_nothing
+  CODE_FOR_load_toc_v4_pic_si = 552,
+  CODE_FOR_load_toc_v4_PIC_1_normal = 553,
+#define CODE_FOR_load_toc_v4_PIC_1_476 CODE_FOR_nothing
+  CODE_FOR_load_toc_v4_PIC_1b_normal = 554,
+#define CODE_FOR_load_toc_v4_PIC_1b_476 CODE_FOR_nothing
+  CODE_FOR_load_toc_v4_PIC_2 = 555,
+  CODE_FOR_load_toc_v4_PIC_3b = 556,
+  CODE_FOR_load_toc_v4_PIC_3c = 557,
+  CODE_FOR_elf_base_high = 560,
+  CODE_FOR_elf_base_low = 561,
+  CODE_FOR_elf_high = 562,
+  CODE_FOR_elf_low = 563,
+  CODE_FOR_blockage = 588,
+  CODE_FOR_probe_stack_si = 589,
+  CODE_FOR_probe_stack_di = 590,
+  CODE_FOR_probe_stack_rangesi = 591,
+  CODE_FOR_probe_stack_rangedi = 592,
+  CODE_FOR_stack_protect_setsi = 593,
+  CODE_FOR_stack_protect_setdi = 594,
+  CODE_FOR_stack_protect_testsi = 595,
+  CODE_FOR_stack_protect_testdi = 596,
+#define CODE_FOR_move_from_CR_gt_bit CODE_FOR_nothing
+  CODE_FOR_move_from_CR_ov_bit = 607,
+  CODE_FOR_eqsi3 = 612,
+  CODE_FOR_eqdi3 = 613,
+  CODE_FOR_nesi3 = 614,
+  CODE_FOR_nedi3 = 615,
+  CODE_FOR_jump = 640,
+  CODE_FOR_return = 641,
+  CODE_FOR_simple_return = 642,
+  CODE_FOR_nop = 647,
+  CODE_FOR_group_ending_nop = 648,
+  CODE_FOR_trap = 657,
+  CODE_FOR_movesi_from_cr = 661,
+  CODE_FOR_stack_tie = 676,
+  CODE_FOR_eh_set_lr_si = 704,
+  CODE_FOR_eh_set_lr_di = 705,
+  CODE_FOR_prefetch = 706,
+  CODE_FOR_bpermd_si = 707,
+  CODE_FOR_bpermd_di = 708,
+  CODE_FOR_rs6000_get_timebase_ppc32 = 717,
+  CODE_FOR_rs6000_mftb_si = 718,
+  CODE_FOR_rs6000_mftb_di = 719,
+  CODE_FOR_rs6000_mffs = 720,
+  CODE_FOR_rs6000_mtfsf = 721,
+  CODE_FOR_fusion_gpr_load_qi = 722,
+  CODE_FOR_fusion_gpr_load_hi = 723,
+  CODE_FOR_fusion_gpr_load_si = 724,
+  CODE_FOR_fusion_gpr_load_di = 725,
+  CODE_FOR_addg6s = 726,
+  CODE_FOR_cdtbcd = 727,
+  CODE_FOR_cbcdtd = 728,
+  CODE_FOR_dive_si = 729,
+  CODE_FOR_diveo_si = 730,
+  CODE_FOR_diveu_si = 731,
+  CODE_FOR_diveuo_si = 732,
+  CODE_FOR_dive_di = 733,
+  CODE_FOR_diveo_di = 734,
+  CODE_FOR_diveu_di = 735,
+  CODE_FOR_diveuo_di = 736,
+#define CODE_FOR_unpacktf_dm CODE_FOR_nothing
+#define CODE_FOR_unpacktd_dm CODE_FOR_nothing
+  CODE_FOR_unpacktf_nodm = 737,
+  CODE_FOR_unpacktd_nodm = 738,
+  CODE_FOR_packtf = 739,
+  CODE_FOR_packtd = 740,
+  CODE_FOR_unpackv1ti = 741,
+  CODE_FOR_packv1ti = 742,
+  CODE_FOR_isync = 745,
+  CODE_FOR_loadsync_qi = 746,
+  CODE_FOR_loadsync_hi = 747,
+  CODE_FOR_loadsync_si = 748,
+  CODE_FOR_loadsync_di = 749,
+  CODE_FOR_loadsync_ti = 750,
+  CODE_FOR_load_quadpti = 751,
+  CODE_FOR_store_quadpti = 752,
+  CODE_FOR_load_lockedqi = 753,
+  CODE_FOR_load_lockedhi = 754,
+  CODE_FOR_load_lockedsi = 755,
+  CODE_FOR_load_lockeddi = 756,
+  CODE_FOR_load_lockedqi_si = 757,
+  CODE_FOR_load_lockedhi_si = 758,
+  CODE_FOR_load_lockedpti = 759,
+  CODE_FOR_store_conditionalqi = 760,
+  CODE_FOR_store_conditionalhi = 761,
+  CODE_FOR_store_conditionalsi = 762,
+  CODE_FOR_store_conditionaldi = 763,
+  CODE_FOR_store_conditionalpti = 764,
+  CODE_FOR_vsx_mul_v2di = 804,
+  CODE_FOR_vsx_div_v2di = 807,
+  CODE_FOR_vsx_udiv_v2di = 808,
+  CODE_FOR_vsx_frev4sf2 = 812,
+  CODE_FOR_vsx_frev2df2 = 813,
+  CODE_FOR_vsx_nabsv4sf2 = 818,
+  CODE_FOR_vsx_nabsv2df2 = 819,
+  CODE_FOR_vsx_smaxv4sf3 = 820,
+  CODE_FOR_vsx_smaxv2df3 = 821,
+  CODE_FOR_vsx_eqv4sf = 839,
+  CODE_FOR_vsx_eqv2df = 840,
+  CODE_FOR_vsx_gtv4sf = 841,
+  CODE_FOR_vsx_gtv2df = 842,
+  CODE_FOR_vsx_copysignv4sf3 = 867,
+  CODE_FOR_vsx_copysignv2df3 = 868,
+  CODE_FOR_vsx_floatv4siv4sf2 = 869,
+  CODE_FOR_vsx_floatv2div2df2 = 870,
+  CODE_FOR_vsx_floatunsv4siv4sf2 = 871,
+  CODE_FOR_vsx_floatunsv2div2df2 = 872,
+  CODE_FOR_vsx_fix_truncv4sfv4si2 = 873,
+  CODE_FOR_vsx_fix_truncv2dfv2di2 = 874,
+  CODE_FOR_vsx_fixuns_truncv4sfv4si2 = 875,
+  CODE_FOR_vsx_fixuns_truncv2dfv2di2 = 876,
+  CODE_FOR_vsx_xsrdpi = 877,
+  CODE_FOR_vsx_xvrspi = 878,
+  CODE_FOR_vsx_xvrdpi = 879,
+  CODE_FOR_vsx_xsrdpic = 880,
+  CODE_FOR_vsx_xvrspic = 881,
+  CODE_FOR_vsx_xvrdpic = 882,
+  CODE_FOR_vsx_btruncv4sf2 = 883,
+  CODE_FOR_vsx_btruncv2df2 = 884,
+  CODE_FOR_vsx_floorv4sf2 = 888,
+  CODE_FOR_vsx_floorv2df2 = 889,
+  CODE_FOR_vsx_ceilv4sf2 = 890,
+  CODE_FOR_vsx_ceilv2df2 = 891,
+  CODE_FOR_vsx_xscvdpsp = 892,
+  CODE_FOR_vsx_xvcvspdp = 893,
+  CODE_FOR_vsx_xvcvdpsp = 894,
+  CODE_FOR_vsx_xscvspdp = 895,
+  CODE_FOR_vsx_xscvdpsp_scalar = 896,
+  CODE_FOR_vsx_xscvspdp_scalar2 = 897,
+#define CODE_FOR_vsx_xscvdpspn CODE_FOR_nothing
+#define CODE_FOR_vsx_xscvspdpn CODE_FOR_nothing
+#define CODE_FOR_vsx_xscvdpspn_scalar CODE_FOR_nothing
+#define CODE_FOR_vsx_xscvspdpn_directmove CODE_FOR_nothing
+  CODE_FOR_vsx_xvcvsxddp = 898,
+  CODE_FOR_vsx_xvcvuxddp = 899,
+  CODE_FOR_vsx_xvcvdpsxds = 900,
+  CODE_FOR_vsx_xvcvdpuxds = 901,
+  CODE_FOR_vsx_xvcvdpsxws = 902,
+  CODE_FOR_vsx_xvcvdpuxws = 903,
+  CODE_FOR_vsx_xvcvsxdsp = 904,
+  CODE_FOR_vsx_xvcvuxdsp = 905,
+  CODE_FOR_vsx_xvcvsxwdp = 906,
+  CODE_FOR_vsx_xvcvuxwdp = 907,
+  CODE_FOR_vsx_xvcvspsxds = 908,
+  CODE_FOR_vsx_xvcvspuxds = 909,
+  CODE_FOR_vsx_concat_v2df = 911,
+  CODE_FOR_vsx_concat_v2di = 912,
+  CODE_FOR_vsx_concat_v2sf = 913,
+  CODE_FOR_vsx_set_v2df = 938,
+  CODE_FOR_vsx_set_v2di = 939,
+  CODE_FOR_vsx_extract_v4sf = 946,
+  CODE_FOR_vsx_xxpermdi2_v2df_1 = 947,
+  CODE_FOR_vsx_xxpermdi2_v2di_1 = 948,
+  CODE_FOR_vsx_splat_v2df = 949,
+  CODE_FOR_vsx_splat_v2di = 950,
+  CODE_FOR_vsx_xxspltw_v4sf = 951,
+  CODE_FOR_vsx_xxspltw_v4si = 952,
+  CODE_FOR_vsx_xxspltw_v4sf_direct = 953,
+  CODE_FOR_vsx_xxspltw_v4si_direct = 954,
+  CODE_FOR_vsx_xxspltd_v2df = 955,
+  CODE_FOR_vsx_xxspltd_v2di = 956,
+  CODE_FOR_vsx_xxmrghw_v4sf = 957,
+  CODE_FOR_vsx_xxmrghw_v4si = 958,
+  CODE_FOR_vsx_xxmrglw_v4sf = 959,
+  CODE_FOR_vsx_xxmrglw_v4si = 960,
+  CODE_FOR_vsx_xxsldwi_v16qi = 961,
+  CODE_FOR_vsx_xxsldwi_v8hi = 962,
+  CODE_FOR_vsx_xxsldwi_v4si = 963,
+  CODE_FOR_vsx_xxsldwi_v2di = 964,
+  CODE_FOR_vsx_xxsldwi_v4sf = 965,
+  CODE_FOR_vsx_xxsldwi_v2df = 966,
+  CODE_FOR_vsx_xxsldwi_v1ti = 967,
+  CODE_FOR_vsx_xxsldwi_ti = 968,
+  CODE_FOR_get_vrsave_internal = 989,
+  CODE_FOR_addv4si3 = 999,
+  CODE_FOR_addv8hi3 = 1000,
+  CODE_FOR_addv16qi3 = 1001,
+  CODE_FOR_addv2di3 = 1002,
+  CODE_FOR_altivec_vaddcuw = 1004,
+  CODE_FOR_altivec_vadduws = 1005,
+  CODE_FOR_altivec_vadduhs = 1006,
+  CODE_FOR_altivec_vaddubs = 1007,
+  CODE_FOR_altivec_vaddsws = 1008,
+  CODE_FOR_altivec_vaddshs = 1009,
+  CODE_FOR_altivec_vaddsbs = 1010,
+  CODE_FOR_subv4si3 = 1011,
+  CODE_FOR_subv8hi3 = 1012,
+  CODE_FOR_subv16qi3 = 1013,
+  CODE_FOR_subv2di3 = 1014,
+  CODE_FOR_altivec_vsubcuw = 1016,
+  CODE_FOR_altivec_vsubuws = 1017,
+  CODE_FOR_altivec_vsubuhs = 1018,
+  CODE_FOR_altivec_vsububs = 1019,
+  CODE_FOR_altivec_vsubsws = 1020,
+  CODE_FOR_altivec_vsubshs = 1021,
+  CODE_FOR_altivec_vsubsbs = 1022,
+  CODE_FOR_altivec_vavguw = 1023,
+  CODE_FOR_altivec_vavguh = 1024,
+  CODE_FOR_altivec_vavgub = 1025,
+  CODE_FOR_altivec_vavgsw = 1026,
+  CODE_FOR_altivec_vavgsh = 1027,
+  CODE_FOR_altivec_vavgsb = 1028,
+  CODE_FOR_altivec_vcmpbfp = 1029,
+  CODE_FOR_altivec_vmsumuhm = 1063,
+  CODE_FOR_altivec_vmsumubm = 1064,
+  CODE_FOR_altivec_vmsummhm = 1065,
+  CODE_FOR_altivec_vmsummbm = 1066,
+  CODE_FOR_altivec_vmsumshm = 1067,
+  CODE_FOR_altivec_vmsumuhs = 1068,
+  CODE_FOR_altivec_vmsumshs = 1069,
+  CODE_FOR_umaxv4si3 = 1070,
+  CODE_FOR_umaxv8hi3 = 1071,
+  CODE_FOR_umaxv16qi3 = 1072,
+  CODE_FOR_umaxv2di3 = 1073,
+  CODE_FOR_smaxv4si3 = 1074,
+  CODE_FOR_smaxv8hi3 = 1075,
+  CODE_FOR_smaxv16qi3 = 1076,
+  CODE_FOR_smaxv2di3 = 1077,
+  CODE_FOR_uminv4si3 = 1079,
+  CODE_FOR_uminv8hi3 = 1080,
+  CODE_FOR_uminv16qi3 = 1081,
+  CODE_FOR_uminv2di3 = 1082,
+  CODE_FOR_sminv4si3 = 1083,
+  CODE_FOR_sminv8hi3 = 1084,
+  CODE_FOR_sminv16qi3 = 1085,
+  CODE_FOR_sminv2di3 = 1086,
+  CODE_FOR_altivec_vmhaddshs = 1088,
+  CODE_FOR_altivec_vmhraddshs = 1089,
+  CODE_FOR_altivec_vmladduhm = 1090,
+  CODE_FOR_altivec_vmrghb_direct = 1092,
+  CODE_FOR_altivec_vmrghh_direct = 1094,
+  CODE_FOR_altivec_vmrghw_direct = 1096,
+  CODE_FOR_altivec_vmrglb_direct = 1099,
+  CODE_FOR_altivec_vmrglh_direct = 1101,
+  CODE_FOR_altivec_vmrglw_direct = 1103,
+#define CODE_FOR_p8_vmrgew CODE_FOR_nothing
+#define CODE_FOR_p8_vmrgow CODE_FOR_nothing
+  CODE_FOR_altivec_vmuleub = 1105,
+  CODE_FOR_altivec_vmuloub = 1106,
+  CODE_FOR_altivec_vmulesb = 1107,
+  CODE_FOR_altivec_vmulosb = 1108,
+  CODE_FOR_altivec_vmuleuh = 1109,
+  CODE_FOR_altivec_vmulouh = 1110,
+  CODE_FOR_altivec_vmulesh = 1111,
+  CODE_FOR_altivec_vmulosh = 1112,
+  CODE_FOR_altivec_vpkpx = 1113,
+  CODE_FOR_altivec_vpksdss = 1114,
+  CODE_FOR_altivec_vpkswss = 1115,
+  CODE_FOR_altivec_vpkshss = 1116,
+  CODE_FOR_altivec_vpksdus = 1117,
+  CODE_FOR_altivec_vpkswus = 1118,
+  CODE_FOR_altivec_vpkshus = 1119,
+  CODE_FOR_altivec_vpkudus = 1120,
+  CODE_FOR_altivec_vpkuwus = 1121,
+  CODE_FOR_altivec_vpkuhus = 1122,
+  CODE_FOR_altivec_vpkudum = 1123,
+  CODE_FOR_altivec_vpkuwum = 1124,
+  CODE_FOR_altivec_vpkuhum = 1125,
+  CODE_FOR_altivec_vpkudum_direct = 1126,
+  CODE_FOR_altivec_vpkuwum_direct = 1127,
+  CODE_FOR_altivec_vpkuhum_direct = 1128,
+  CODE_FOR_altivec_vsl = 1133,
+  CODE_FOR_altivec_vslo = 1134,
+  CODE_FOR_altivec_vsr = 1147,
+  CODE_FOR_altivec_vsro = 1148,
+  CODE_FOR_altivec_vsum4ubs = 1149,
+  CODE_FOR_altivec_vsum4shs = 1150,
+  CODE_FOR_altivec_vsum4sbs = 1151,
+  CODE_FOR_altivec_vsum2sws = 1152,
+  CODE_FOR_altivec_vsumsws = 1153,
+  CODE_FOR_altivec_vsumsws_direct = 1154,
+  CODE_FOR_altivec_vspltb_direct = 1156,
+  CODE_FOR_altivec_vsplth_direct = 1158,
+  CODE_FOR_altivec_vspltw_direct = 1160,
+  CODE_FOR_altivec_vspltisw = 1162,
+  CODE_FOR_altivec_vspltish = 1163,
+  CODE_FOR_altivec_vspltisb = 1164,
+  CODE_FOR_altivec_vrfip = 1182,
+  CODE_FOR_altivec_vrfin = 1183,
+  CODE_FOR_altivec_vcfux = 1185,
+  CODE_FOR_altivec_vcfsx = 1186,
+  CODE_FOR_altivec_vctuxs = 1187,
+  CODE_FOR_altivec_vctsxs = 1188,
+  CODE_FOR_altivec_vlogefp = 1189,
+  CODE_FOR_altivec_vexptefp = 1190,
+  CODE_FOR_altivec_vrefp = 1192,
+  CODE_FOR_altivec_vsldoi_v4si = 1193,
+  CODE_FOR_altivec_vsldoi_v8hi = 1194,
+  CODE_FOR_altivec_vsldoi_v16qi = 1195,
+  CODE_FOR_altivec_vsldoi_v4sf = 1196,
+  CODE_FOR_altivec_vsldoi_v2df = 1197,
+  CODE_FOR_altivec_vsldoi_v2di = 1198,
+  CODE_FOR_altivec_vsldoi_v1ti = 1199,
+  CODE_FOR_altivec_vsldoi_ti = 1200,
+  CODE_FOR_altivec_vupkhsw = 1201,
+  CODE_FOR_altivec_vupkhsh = 1202,
+  CODE_FOR_altivec_vupkhsb = 1203,
+  CODE_FOR_altivec_vupklsw = 1207,
+  CODE_FOR_altivec_vupklsh = 1208,
+  CODE_FOR_altivec_vupklsb = 1209,
+  CODE_FOR_altivec_vupkhpx = 1213,
+  CODE_FOR_altivec_vupklpx = 1214,
+  CODE_FOR_altivec_vcmpbfp_p = 1230,
+  CODE_FOR_altivec_mtvscr = 1231,
+  CODE_FOR_altivec_mfvscr = 1232,
+  CODE_FOR_altivec_dssall = 1233,
+  CODE_FOR_altivec_dss = 1234,
+  CODE_FOR_altivec_dst = 1235,
+  CODE_FOR_altivec_dstt = 1236,
+  CODE_FOR_altivec_dstst = 1237,
+  CODE_FOR_altivec_dststt = 1238,
+  CODE_FOR_altivec_lvsl_direct = 1239,
+  CODE_FOR_altivec_lvsr_direct = 1240,
+  CODE_FOR_altivec_lvx_v4si_internal = 1252,
+  CODE_FOR_altivec_lvx_v8hi_internal = 1253,
+  CODE_FOR_altivec_lvx_v16qi_internal = 1254,
+  CODE_FOR_altivec_lvx_v4sf_internal = 1255,
+  CODE_FOR_altivec_lvx_v2df_internal = 1256,
+  CODE_FOR_altivec_lvx_v2di_internal = 1257,
+  CODE_FOR_altivec_lvx_v1ti_internal = 1258,
+  CODE_FOR_altivec_stvx_v4si_internal = 1259,
+  CODE_FOR_altivec_stvx_v8hi_internal = 1260,
+  CODE_FOR_altivec_stvx_v16qi_internal = 1261,
+  CODE_FOR_altivec_stvx_v4sf_internal = 1262,
+  CODE_FOR_altivec_stvx_v2df_internal = 1263,
+  CODE_FOR_altivec_stvx_v2di_internal = 1264,
+  CODE_FOR_altivec_stvx_v1ti_internal = 1265,
+  CODE_FOR_vperm_v8hiv4si = 1277,
+  CODE_FOR_vperm_v16qiv8hi = 1278,
+  CODE_FOR_altivec_lvlx = 1279,
+  CODE_FOR_altivec_lvlxl = 1280,
+  CODE_FOR_altivec_lvrx = 1281,
+  CODE_FOR_altivec_lvrxl = 1282,
+  CODE_FOR_altivec_stvlx = 1283,
+  CODE_FOR_altivec_stvlxl = 1284,
+  CODE_FOR_altivec_stvrx = 1285,
+  CODE_FOR_altivec_stvrxl = 1286,
+#define CODE_FOR_p8v_vgbbd CODE_FOR_nothing
+#define CODE_FOR_altivec_vadduqm CODE_FOR_nothing
+#define CODE_FOR_altivec_vaddcuq CODE_FOR_nothing
+#define CODE_FOR_altivec_vsubuqm CODE_FOR_nothing
+#define CODE_FOR_altivec_vsubcuq CODE_FOR_nothing
+#define CODE_FOR_altivec_vaddeuqm CODE_FOR_nothing
+#define CODE_FOR_altivec_vaddecuq CODE_FOR_nothing
+#define CODE_FOR_altivec_vsubeuqm CODE_FOR_nothing
+#define CODE_FOR_altivec_vsubecuq CODE_FOR_nothing
+#define CODE_FOR_altivec_vbpermq CODE_FOR_nothing
+#define CODE_FOR_bcdadd CODE_FOR_nothing
+#define CODE_FOR_bcdsub CODE_FOR_nothing
+#define CODE_FOR_spe_fixuns_truncdfsi2 CODE_FOR_nothing
+#define CODE_FOR_spe_extendsfdf2 CODE_FOR_nothing
+#define CODE_FOR_spe_fixuns_truncsfsi2 CODE_FOR_nothing
+#define CODE_FOR_spe_fix_truncsfsi2 CODE_FOR_nothing
+#define CODE_FOR_spe_fix_truncdfsi2 CODE_FOR_nothing
+#define CODE_FOR_spe_floatunssisf2 CODE_FOR_nothing
+#define CODE_FOR_spe_floatunssidf2 CODE_FOR_nothing
+#define CODE_FOR_spe_floatsisf2 CODE_FOR_nothing
+#define CODE_FOR_spe_floatsidf2 CODE_FOR_nothing
+#define CODE_FOR_absv2si2 CODE_FOR_nothing
+#define CODE_FOR_spe_evandc CODE_FOR_nothing
+#define CODE_FOR_andv2si3 CODE_FOR_nothing
+#define CODE_FOR_spe_evcmpeq CODE_FOR_nothing
+#define CODE_FOR_spe_evcmpgts CODE_FOR_nothing
+#define CODE_FOR_spe_evcmpgtu CODE_FOR_nothing
+#define CODE_FOR_spe_evcmplts CODE_FOR_nothing
+#define CODE_FOR_spe_evcmpltu CODE_FOR_nothing
+#define CODE_FOR_spe_evfscmpeq CODE_FOR_nothing
+#define CODE_FOR_spe_evfscmpgt CODE_FOR_nothing
+#define CODE_FOR_spe_evfscmplt CODE_FOR_nothing
+#define CODE_FOR_spe_evfststeq CODE_FOR_nothing
+#define CODE_FOR_spe_evfststgt CODE_FOR_nothing
+#define CODE_FOR_spe_evfststlt CODE_FOR_nothing
+#define CODE_FOR_spe_evcntlsw CODE_FOR_nothing
+#define CODE_FOR_spe_evcntlzw CODE_FOR_nothing
+#define CODE_FOR_spe_eveqv CODE_FOR_nothing
+#define CODE_FOR_spe_evextsb CODE_FOR_nothing
+#define CODE_FOR_spe_evextsh CODE_FOR_nothing
+#define CODE_FOR_spe_evlhhesplat CODE_FOR_nothing
+#define CODE_FOR_spe_evlhhesplatx CODE_FOR_nothing
+#define CODE_FOR_spe_evlhhossplat CODE_FOR_nothing
+#define CODE_FOR_spe_evlhhossplatx CODE_FOR_nothing
+#define CODE_FOR_spe_evlhhousplat CODE_FOR_nothing
+#define CODE_FOR_spe_evlhhousplatx CODE_FOR_nothing
+#define CODE_FOR_spe_evlwhsplat CODE_FOR_nothing
+#define CODE_FOR_spe_evlwhsplatx CODE_FOR_nothing
+#define CODE_FOR_spe_evlwwsplat CODE_FOR_nothing
+#define CODE_FOR_spe_evlwwsplatx CODE_FOR_nothing
+#define CODE_FOR_vec_perm00_v2si CODE_FOR_nothing
+#define CODE_FOR_vec_perm01_v2si CODE_FOR_nothing
+#define CODE_FOR_vec_perm11_v2si CODE_FOR_nothing
+#define CODE_FOR_vec_perm10_v2si CODE_FOR_nothing
+#define CODE_FOR_spe_evnand CODE_FOR_nothing
+#define CODE_FOR_negv2si2 CODE_FOR_nothing
+#define CODE_FOR_spe_evnor CODE_FOR_nothing
+#define CODE_FOR_spe_evorc CODE_FOR_nothing
+#define CODE_FOR_spe_evor CODE_FOR_nothing
+#define CODE_FOR_spe_evrlwi CODE_FOR_nothing
+#define CODE_FOR_spe_evrlw CODE_FOR_nothing
+#define CODE_FOR_spe_evrndw CODE_FOR_nothing
+#define CODE_FOR_spe_evsel CODE_FOR_nothing
+#define CODE_FOR_spe_evsel_fs CODE_FOR_nothing
+#define CODE_FOR_spe_evslwi CODE_FOR_nothing
+#define CODE_FOR_spe_evslw CODE_FOR_nothing
+#define CODE_FOR_spe_evsrwis CODE_FOR_nothing
+#define CODE_FOR_spe_evsrwiu CODE_FOR_nothing
+#define CODE_FOR_spe_evsrws CODE_FOR_nothing
+#define CODE_FOR_spe_evsrwu CODE_FOR_nothing
+#define CODE_FOR_xorv2si3 CODE_FOR_nothing
+#define CODE_FOR_xorv4hi3 CODE_FOR_nothing
+#define CODE_FOR_xorv1di3 CODE_FOR_nothing
+#define CODE_FOR_spe_evfsabs CODE_FOR_nothing
+#define CODE_FOR_spe_evfsadd CODE_FOR_nothing
+#define CODE_FOR_spe_evfscfsf CODE_FOR_nothing
+#define CODE_FOR_spe_evfscfsi CODE_FOR_nothing
+#define CODE_FOR_spe_evfscfuf CODE_FOR_nothing
+#define CODE_FOR_spe_evfscfui CODE_FOR_nothing
+#define CODE_FOR_spe_evfsctsf CODE_FOR_nothing
+#define CODE_FOR_spe_evfsctsi CODE_FOR_nothing
+#define CODE_FOR_spe_evfsctsiz CODE_FOR_nothing
+#define CODE_FOR_spe_evfsctuf CODE_FOR_nothing
+#define CODE_FOR_spe_evfsctui CODE_FOR_nothing
+#define CODE_FOR_spe_evfsctuiz CODE_FOR_nothing
+#define CODE_FOR_spe_evfsdiv CODE_FOR_nothing
+#define CODE_FOR_spe_evfsmul CODE_FOR_nothing
+#define CODE_FOR_spe_evfsnabs CODE_FOR_nothing
+#define CODE_FOR_spe_evfsneg CODE_FOR_nothing
+#define CODE_FOR_spe_evfssub CODE_FOR_nothing
+#define CODE_FOR_spe_evldd CODE_FOR_nothing
+#define CODE_FOR_spe_evlddx CODE_FOR_nothing
+#define CODE_FOR_spe_evldh CODE_FOR_nothing
+#define CODE_FOR_spe_evldhx CODE_FOR_nothing
+#define CODE_FOR_spe_evldw CODE_FOR_nothing
+#define CODE_FOR_spe_evldwx CODE_FOR_nothing
+#define CODE_FOR_spe_evlwhe CODE_FOR_nothing
+#define CODE_FOR_spe_evlwhex CODE_FOR_nothing
+#define CODE_FOR_spe_evlwhos CODE_FOR_nothing
+#define CODE_FOR_spe_evlwhosx CODE_FOR_nothing
+#define CODE_FOR_spe_evlwhou CODE_FOR_nothing
+#define CODE_FOR_spe_evlwhoux CODE_FOR_nothing
+#define CODE_FOR_spe_brinc CODE_FOR_nothing
+#define CODE_FOR_spe_evmhegsmfaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmhegsmfan CODE_FOR_nothing
+#define CODE_FOR_spe_evmhegsmiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmhegsmian CODE_FOR_nothing
+#define CODE_FOR_spe_evmhegumiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmhegumian CODE_FOR_nothing
+#define CODE_FOR_spe_evmhesmfaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhesmfanw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhesmfa CODE_FOR_nothing
+#define CODE_FOR_spe_evmhesmf CODE_FOR_nothing
+#define CODE_FOR_spe_evmhesmiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhesmianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhesmia CODE_FOR_nothing
+#define CODE_FOR_spe_evmhesmi CODE_FOR_nothing
+#define CODE_FOR_spe_evmhessfaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhessfanw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhessfa CODE_FOR_nothing
+#define CODE_FOR_spe_evmhessf CODE_FOR_nothing
+#define CODE_FOR_spe_evmhessiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhessianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmheumiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmheumianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmheumia CODE_FOR_nothing
+#define CODE_FOR_spe_evmheumi CODE_FOR_nothing
+#define CODE_FOR_spe_evmheusiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmheusianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhogsmfaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmhogsmfan CODE_FOR_nothing
+#define CODE_FOR_spe_evmhogsmiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmhogsmian CODE_FOR_nothing
+#define CODE_FOR_spe_evmhogumiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmhogumian CODE_FOR_nothing
+#define CODE_FOR_spe_evmhosmfaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhosmfanw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhosmfa CODE_FOR_nothing
+#define CODE_FOR_spe_evmhosmf CODE_FOR_nothing
+#define CODE_FOR_spe_evmhosmiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhosmianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhosmia CODE_FOR_nothing
+#define CODE_FOR_spe_evmhosmi CODE_FOR_nothing
+#define CODE_FOR_spe_evmhossfaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhossfanw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhossfa CODE_FOR_nothing
+#define CODE_FOR_spe_evmhossf CODE_FOR_nothing
+#define CODE_FOR_spe_evmhossiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhossianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhoumiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhoumianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhoumia CODE_FOR_nothing
+#define CODE_FOR_spe_evmhoumi CODE_FOR_nothing
+#define CODE_FOR_spe_evmhousiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmhousianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmmlssfa CODE_FOR_nothing
+#define CODE_FOR_spe_evmmlssf CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhsmfa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhsmf CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhsmia CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhsmi CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhssfa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhusian CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhssf CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhumia CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhumi CODE_FOR_nothing
+#define CODE_FOR_spe_evmwlsmiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmwlsmianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmwlssiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmwlssianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmwlumiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmwlumianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmwlumia CODE_FOR_nothing
+#define CODE_FOR_spe_evmwlumi CODE_FOR_nothing
+#define CODE_FOR_spe_evmwlusiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmwlusianw CODE_FOR_nothing
+#define CODE_FOR_spe_evmwsmfaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwsmfan CODE_FOR_nothing
+#define CODE_FOR_spe_evmwsmfa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwsmf CODE_FOR_nothing
+#define CODE_FOR_spe_evmwsmiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwsmian CODE_FOR_nothing
+#define CODE_FOR_spe_evmwsmia CODE_FOR_nothing
+#define CODE_FOR_spe_evmwsmi CODE_FOR_nothing
+#define CODE_FOR_spe_evmwssfaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwssfan CODE_FOR_nothing
+#define CODE_FOR_spe_evmwssfa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwssf CODE_FOR_nothing
+#define CODE_FOR_spe_evmwumiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwumian CODE_FOR_nothing
+#define CODE_FOR_spe_evmwumia CODE_FOR_nothing
+#define CODE_FOR_spe_evmwumi CODE_FOR_nothing
+#define CODE_FOR_addv2si3 CODE_FOR_nothing
+#define CODE_FOR_spe_evaddusiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evaddumiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evaddssiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evaddsmiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evaddiw CODE_FOR_nothing
+#define CODE_FOR_spe_evsubifw CODE_FOR_nothing
+#define CODE_FOR_subv2si3 CODE_FOR_nothing
+#define CODE_FOR_spe_evsubfusiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evsubfumiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evsubfssiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evsubfsmiaaw CODE_FOR_nothing
+#define CODE_FOR_spe_evmra CODE_FOR_nothing
+#define CODE_FOR_divv2si3 CODE_FOR_nothing
+#define CODE_FOR_spe_evdivwu CODE_FOR_nothing
+#define CODE_FOR_spe_evsplatfi CODE_FOR_nothing
+#define CODE_FOR_spe_evsplati CODE_FOR_nothing
+#define CODE_FOR_spe_evstdd CODE_FOR_nothing
+#define CODE_FOR_spe_evstddx CODE_FOR_nothing
+#define CODE_FOR_spe_evstdh CODE_FOR_nothing
+#define CODE_FOR_spe_evstdhx CODE_FOR_nothing
+#define CODE_FOR_spe_evstdw CODE_FOR_nothing
+#define CODE_FOR_spe_evstdwx CODE_FOR_nothing
+#define CODE_FOR_spe_evstwhe CODE_FOR_nothing
+#define CODE_FOR_spe_evstwhex CODE_FOR_nothing
+#define CODE_FOR_spe_evstwho CODE_FOR_nothing
+#define CODE_FOR_spe_evstwhox CODE_FOR_nothing
+#define CODE_FOR_spe_evstwwe CODE_FOR_nothing
+#define CODE_FOR_spe_evstwwex CODE_FOR_nothing
+#define CODE_FOR_spe_evstwwo CODE_FOR_nothing
+#define CODE_FOR_spe_evstwwox CODE_FOR_nothing
+#define CODE_FOR_mov_sidf_e500_subreg0_be CODE_FOR_nothing
+#define CODE_FOR_mov_siv4hi_e500_subreg0_be CODE_FOR_nothing
+#define CODE_FOR_mov_siv2sf_e500_subreg0_be CODE_FOR_nothing
+#define CODE_FOR_mov_siv1di_e500_subreg0_be CODE_FOR_nothing
+#define CODE_FOR_mov_siv2si_e500_subreg0_be CODE_FOR_nothing
+#define CODE_FOR_mov_sitf_e500_subreg0_be CODE_FOR_nothing
+#define CODE_FOR_mov_sidf_e500_subreg4_le CODE_FOR_nothing
+#define CODE_FOR_mov_siv4hi_e500_subreg4_le CODE_FOR_nothing
+#define CODE_FOR_mov_siv2sf_e500_subreg4_le CODE_FOR_nothing
+#define CODE_FOR_mov_siv1di_e500_subreg4_le CODE_FOR_nothing
+#define CODE_FOR_mov_siv2si_e500_subreg4_le CODE_FOR_nothing
+#define CODE_FOR_mov_sitf_e500_subreg4_le CODE_FOR_nothing
+#define CODE_FOR_spe_truncdfsf2 CODE_FOR_nothing
+#define CODE_FOR_spe_absdf2 CODE_FOR_nothing
+#define CODE_FOR_spe_nabsdf2 CODE_FOR_nothing
+#define CODE_FOR_spe_negdf2 CODE_FOR_nothing
+#define CODE_FOR_spe_adddf3 CODE_FOR_nothing
+#define CODE_FOR_spe_subdf3 CODE_FOR_nothing
+#define CODE_FOR_spe_muldf3 CODE_FOR_nothing
+#define CODE_FOR_spe_divdf3 CODE_FOR_nothing
+#define CODE_FOR_spe_trunctfdf2_internal1 CODE_FOR_nothing
+#define CODE_FOR_spe_trunctfsf2 CODE_FOR_nothing
+#define CODE_FOR_spe_extenddftf2 CODE_FOR_nothing
+#define CODE_FOR_spe_fix_trunctfsi2_internal CODE_FOR_nothing
+#define CODE_FOR_spe_negtf2_internal CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhssfaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhssmaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhsmfaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhsmiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhusiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhumiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhssfan CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhssian CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhsmfan CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhsmian CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhumian CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhgssfaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhgsmfaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhgsmiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhgumiaa CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhgssfan CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhgsmfan CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhgsmian CODE_FOR_nothing
+#define CODE_FOR_spe_evmwhgumian CODE_FOR_nothing
+#define CODE_FOR_spe_mtspefscr CODE_FOR_nothing
+#define CODE_FOR_spe_mfspefscr CODE_FOR_nothing
+#define CODE_FOR_e500_flip_gt_bit CODE_FOR_nothing
+#define CODE_FOR_cmpsfeq_gpr CODE_FOR_nothing
+#define CODE_FOR_tstsfeq_gpr CODE_FOR_nothing
+#define CODE_FOR_cmpsfgt_gpr CODE_FOR_nothing
+#define CODE_FOR_tstsfgt_gpr CODE_FOR_nothing
+#define CODE_FOR_cmpsflt_gpr CODE_FOR_nothing
+#define CODE_FOR_tstsflt_gpr CODE_FOR_nothing
+#define CODE_FOR_cmpdfeq_gpr CODE_FOR_nothing
+#define CODE_FOR_tstdfeq_gpr CODE_FOR_nothing
+#define CODE_FOR_cmpdfgt_gpr CODE_FOR_nothing
+#define CODE_FOR_tstdfgt_gpr CODE_FOR_nothing
+#define CODE_FOR_cmpdflt_gpr CODE_FOR_nothing
+#define CODE_FOR_tstdflt_gpr CODE_FOR_nothing
+#define CODE_FOR_cmptfeq_gpr CODE_FOR_nothing
+#define CODE_FOR_tsttfeq_gpr CODE_FOR_nothing
+#define CODE_FOR_cmptfgt_gpr CODE_FOR_nothing
+#define CODE_FOR_tsttfgt_gpr CODE_FOR_nothing
+#define CODE_FOR_cmptflt_gpr CODE_FOR_nothing
+#define CODE_FOR_tsttflt_gpr CODE_FOR_nothing
+#define CODE_FOR_e500_cr_ior_compare CODE_FOR_nothing
+  CODE_FOR_movsd_store = 1287,
+  CODE_FOR_movsd_load = 1288,
+  CODE_FOR_extendsddd2 = 1289,
+  CODE_FOR_truncddsd2 = 1290,
+  CODE_FOR_extendddtd2 = 1297,
+  CODE_FOR_trunctddd2 = 1298,
+  CODE_FOR_adddd3 = 1299,
+  CODE_FOR_addtd3 = 1300,
+  CODE_FOR_subdd3 = 1301,
+  CODE_FOR_subtd3 = 1302,
+  CODE_FOR_muldd3 = 1303,
+  CODE_FOR_multd3 = 1304,
+  CODE_FOR_divdd3 = 1305,
+  CODE_FOR_divtd3 = 1306,
+  CODE_FOR_floatdidd2 = 1309,
+  CODE_FOR_floatditd2 = 1310,
+  CODE_FOR_ftruncdd2 = 1311,
+  CODE_FOR_fixdddi2 = 1312,
+  CODE_FOR_ftrunctd2 = 1313,
+  CODE_FOR_fixtddi2 = 1314,
+  CODE_FOR_dfp_ddedpd_dd = 1315,
+  CODE_FOR_dfp_ddedpd_td = 1316,
+  CODE_FOR_dfp_denbcd_dd = 1317,
+  CODE_FOR_dfp_denbcd_td = 1318,
+  CODE_FOR_dfp_dxex_dd = 1319,
+  CODE_FOR_dfp_dxex_td = 1320,
+  CODE_FOR_dfp_diex_dd = 1321,
+  CODE_FOR_dfp_diex_td = 1322,
+  CODE_FOR_dfp_dscli_dd = 1323,
+  CODE_FOR_dfp_dscli_td = 1324,
+  CODE_FOR_dfp_dscri_dd = 1325,
+  CODE_FOR_dfp_dscri_td = 1326,
+#define CODE_FOR_paired_negv2sf2 CODE_FOR_nothing
+#define CODE_FOR_sqrtv2sf2 CODE_FOR_nothing
+#define CODE_FOR_paired_absv2sf2 CODE_FOR_nothing
+#define CODE_FOR_nabsv2sf2 CODE_FOR_nothing
+#define CODE_FOR_paired_addv2sf3 CODE_FOR_nothing
+#define CODE_FOR_paired_subv2sf3 CODE_FOR_nothing
+#define CODE_FOR_paired_mulv2sf3 CODE_FOR_nothing
+#define CODE_FOR_resv2sf2 CODE_FOR_nothing
+#define CODE_FOR_paired_divv2sf3 CODE_FOR_nothing
+#define CODE_FOR_paired_madds0 CODE_FOR_nothing
+#define CODE_FOR_paired_madds1 CODE_FOR_nothing
+#define CODE_FOR_selv2sf4 CODE_FOR_nothing
+#define CODE_FOR_paired_stx CODE_FOR_nothing
+#define CODE_FOR_paired_lx CODE_FOR_nothing
+#define CODE_FOR_paired_cmpu0 CODE_FOR_nothing
+#define CODE_FOR_paired_cmpu1 CODE_FOR_nothing
+#define CODE_FOR_paired_merge00 CODE_FOR_nothing
+#define CODE_FOR_paired_merge01 CODE_FOR_nothing
+#define CODE_FOR_paired_merge10 CODE_FOR_nothing
+#define CODE_FOR_paired_merge11 CODE_FOR_nothing
+#define CODE_FOR_paired_sum0 CODE_FOR_nothing
+#define CODE_FOR_paired_sum1 CODE_FOR_nothing
+#define CODE_FOR_paired_muls0 CODE_FOR_nothing
+#define CODE_FOR_paired_muls1 CODE_FOR_nothing
+#define CODE_FOR_crypto_vcipher CODE_FOR_nothing
+#define CODE_FOR_crypto_vncipher CODE_FOR_nothing
+#define CODE_FOR_crypto_vcipherlast CODE_FOR_nothing
+#define CODE_FOR_crypto_vncipherlast CODE_FOR_nothing
+#define CODE_FOR_crypto_vpmsumb CODE_FOR_nothing
+#define CODE_FOR_crypto_vpmsumh CODE_FOR_nothing
+#define CODE_FOR_crypto_vpmsumw CODE_FOR_nothing
+#define CODE_FOR_crypto_vpmsumd CODE_FOR_nothing
+#define CODE_FOR_crypto_vpermxor_v16qi CODE_FOR_nothing
+#define CODE_FOR_crypto_vpermxor_v8hi CODE_FOR_nothing
+#define CODE_FOR_crypto_vpermxor_v4si CODE_FOR_nothing
+#define CODE_FOR_crypto_vpermxor_v2di CODE_FOR_nothing
+#define CODE_FOR_crypto_vsbox CODE_FOR_nothing
+#define CODE_FOR_crypto_vshasigmaw CODE_FOR_nothing
+#define CODE_FOR_crypto_vshasigmad CODE_FOR_nothing
+#define CODE_FOR_htm_mfspr_si CODE_FOR_nothing
+#define CODE_FOR_htm_mfspr_di CODE_FOR_nothing
+#define CODE_FOR_htm_mtspr_si CODE_FOR_nothing
+#define CODE_FOR_htm_mtspr_di CODE_FOR_nothing
+#define CODE_FOR_macho_high CODE_FOR_nothing
+#define CODE_FOR_macho_low CODE_FOR_nothing
+#define CODE_FOR_load_macho_picbase CODE_FOR_nothing
+#define CODE_FOR_macho_correct_pic CODE_FOR_nothing
+#define CODE_FOR_reload_macho_picbase CODE_FOR_nothing
+  CODE_FOR_extendhisi2 = 1345,
+  CODE_FOR_extendhidi2 = 1346,
+  CODE_FOR_strlensi = 1353,
+  CODE_FOR_addsi3 = 1354,
+  CODE_FOR_adddi3 = 1355,
+  CODE_FOR_addsi3_carry_in = 1366,
+  CODE_FOR_adddi3_carry_in = 1367,
+  CODE_FOR_one_cmplsi2 = 1368,
+  CODE_FOR_one_cmpldi2 = 1369,
+  CODE_FOR_subsi3 = 1374,
+  CODE_FOR_subdi3 = 1375,
+  CODE_FOR_subfsi3_carry_in = 1380,
+  CODE_FOR_subfdi3_carry_in = 1381,
+  CODE_FOR_ctzsi2 = 1386,
+  CODE_FOR_ctzdi2 = 1387,
+  CODE_FOR_ffssi2 = 1388,
+  CODE_FOR_ffsdi2 = 1389,
+  CODE_FOR_popcountsi2 = 1390,
+  CODE_FOR_popcountdi2 = 1391,
+  CODE_FOR_paritysi2 = 1392,
+  CODE_FOR_paritydi2 = 1393,
+  CODE_FOR_bswaphi2 = 1394,
+  CODE_FOR_bswapsi2 = 1396,
+  CODE_FOR_bswapdi2 = 1398,
+  CODE_FOR_smulsi3_highpart = 1409,
+  CODE_FOR_umulsi3_highpart = 1410,
+  CODE_FOR_smuldi3_highpart = 1411,
+  CODE_FOR_umuldi3_highpart = 1412,
+  CODE_FOR_mulsidi3 = 1413,
+  CODE_FOR_umulsidi3 = 1414,
+  CODE_FOR_mulditi3 = 1415,
+  CODE_FOR_umulditi3 = 1416,
+  CODE_FOR_divsi3 = 1417,
+  CODE_FOR_divdi3 = 1418,
+  CODE_FOR_modsi3 = 1423,
+  CODE_FOR_moddi3 = 1424,
+  CODE_FOR_andsi3 = 1425,
+  CODE_FOR_anddi3 = 1426,
+  CODE_FOR_iorsi3 = 1440,
+  CODE_FOR_xorsi3 = 1441,
+  CODE_FOR_iordi3 = 1442,
+  CODE_FOR_xordi3 = 1443,
+  CODE_FOR_insv = 1460,
+  CODE_FOR_extzv = 1461,
+  CODE_FOR_ashrsi3 = 1498,
+  CODE_FOR_ashrdi3 = 1499,
+  CODE_FOR_recipsf3 = 1504,
+  CODE_FOR_recipdf3 = 1505,
+  CODE_FOR_recipv4sf3 = 1506,
+  CODE_FOR_recipv2df3 = 1507,
+  CODE_FOR_rsqrtsf2 = 1512,
+  CODE_FOR_rsqrtdf2 = 1513,
+  CODE_FOR_rsqrtv4sf2 = 1514,
+  CODE_FOR_rsqrtv2df2 = 1515,
+  CODE_FOR_abssf2 = 1516,
+  CODE_FOR_absdf2 = 1517,
+  CODE_FOR_negsf2 = 1518,
+  CODE_FOR_negdf2 = 1519,
+  CODE_FOR_addsf3 = 1520,
+  CODE_FOR_adddf3 = 1521,
+  CODE_FOR_subsf3 = 1522,
+  CODE_FOR_subdf3 = 1523,
+  CODE_FOR_mulsf3 = 1524,
+  CODE_FOR_muldf3 = 1525,
+  CODE_FOR_divsf3 = 1526,
+  CODE_FOR_divdf3 = 1527,
+  CODE_FOR_extendsfdf2 = 1528,
+  CODE_FOR_truncdfsf2 = 1530,
+  CODE_FOR_signbittf2 = 1531,
+  CODE_FOR_copysignsf3 = 1532,
+  CODE_FOR_copysigndf3 = 1533,
+  CODE_FOR_smaxsf3 = 1534,
+  CODE_FOR_smaxdf3 = 1535,
+  CODE_FOR_sminsf3 = 1536,
+  CODE_FOR_smindf3 = 1537,
+  CODE_FOR_movsicc = 1541,
+  CODE_FOR_movdicc = 1542,
+  CODE_FOR_movsfcc = 1543,
+  CODE_FOR_movdfcc = 1545,
+  CODE_FOR_floatsidf2 = 1554,
+  CODE_FOR_floatunssisf2 = 1556,
+  CODE_FOR_floatunssidf2 = 1557,
+  CODE_FOR_fix_truncsfsi2 = 1559,
+  CODE_FOR_fix_truncdfsi2 = 1560,
+  CODE_FOR_fix_truncsfdi2 = 1565,
+  CODE_FOR_fix_truncdfdi2 = 1566,
+  CODE_FOR_fixuns_truncsfsi2 = 1567,
+  CODE_FOR_fixuns_truncdfsi2 = 1568,
+  CODE_FOR_fixuns_truncsfdi2 = 1571,
+  CODE_FOR_fixuns_truncdfdi2 = 1572,
+  CODE_FOR_lroundsfdi2 = 1577,
+  CODE_FOR_lrounddfdi2 = 1578,
+  CODE_FOR_floatsisf2 = 1579,
+  CODE_FOR_floatdidf2 = 1580,
+  CODE_FOR_floatunsdidf2 = 1582,
+  CODE_FOR_floatdisf2 = 1584,
+  CODE_FOR_floatdisf2_internal2 = 1587,
+  CODE_FOR_floatunsdisf2 = 1588,
+  CODE_FOR_addti3 = 1590,
+  CODE_FOR_subti3 = 1591,
+  CODE_FOR_andti3 = 1613,
+  CODE_FOR_andpti3 = 1614,
+  CODE_FOR_andv16qi3 = 1615,
+  CODE_FOR_andv8hi3 = 1616,
+  CODE_FOR_andv4si3 = 1617,
+  CODE_FOR_andv4sf3 = 1618,
+  CODE_FOR_andv2di3 = 1619,
+  CODE_FOR_andv2df3 = 1620,
+  CODE_FOR_andv1ti3 = 1621,
+  CODE_FOR_iorti3 = 1622,
+  CODE_FOR_iorpti3 = 1623,
+  CODE_FOR_iorv16qi3 = 1624,
+  CODE_FOR_iorv8hi3 = 1625,
+  CODE_FOR_iorv4si3 = 1626,
+  CODE_FOR_iorv4sf3 = 1627,
+  CODE_FOR_iorv2di3 = 1628,
+  CODE_FOR_iorv2df3 = 1629,
+  CODE_FOR_iorv1ti3 = 1630,
+  CODE_FOR_xorti3 = 1631,
+  CODE_FOR_xorpti3 = 1632,
+  CODE_FOR_xorv16qi3 = 1633,
+  CODE_FOR_xorv8hi3 = 1634,
+  CODE_FOR_xorv4si3 = 1635,
+  CODE_FOR_xorv4sf3 = 1636,
+  CODE_FOR_xorv2di3 = 1637,
+  CODE_FOR_xorv2df3 = 1638,
+  CODE_FOR_xorv1ti3 = 1639,
+  CODE_FOR_one_cmplti2 = 1640,
+  CODE_FOR_one_cmplpti2 = 1641,
+  CODE_FOR_one_cmplv16qi2 = 1642,
+  CODE_FOR_one_cmplv8hi2 = 1643,
+  CODE_FOR_one_cmplv4si2 = 1644,
+  CODE_FOR_one_cmplv4sf2 = 1645,
+  CODE_FOR_one_cmplv2di2 = 1646,
+  CODE_FOR_one_cmplv2df2 = 1647,
+  CODE_FOR_one_cmplv1ti2 = 1648,
+  CODE_FOR_norti3 = 1649,
+  CODE_FOR_norpti3 = 1650,
+  CODE_FOR_norv16qi3 = 1651,
+  CODE_FOR_norv8hi3 = 1652,
+  CODE_FOR_norv4si3 = 1653,
+  CODE_FOR_norv4sf3 = 1654,
+  CODE_FOR_norv2di3 = 1655,
+  CODE_FOR_norv2df3 = 1656,
+  CODE_FOR_norv1ti3 = 1657,
+  CODE_FOR_andcti3 = 1658,
+  CODE_FOR_andcpti3 = 1659,
+  CODE_FOR_andcv16qi3 = 1660,
+  CODE_FOR_andcv8hi3 = 1661,
+  CODE_FOR_andcv4si3 = 1662,
+  CODE_FOR_andcv4sf3 = 1663,
+  CODE_FOR_andcv2di3 = 1664,
+  CODE_FOR_andcv2df3 = 1665,
+  CODE_FOR_andcv1ti3 = 1666,
+  CODE_FOR_eqvti3 = 1667,
+  CODE_FOR_eqvpti3 = 1668,
+#define CODE_FOR_eqvv16qi3 CODE_FOR_nothing
+#define CODE_FOR_eqvv8hi3 CODE_FOR_nothing
+#define CODE_FOR_eqvv4si3 CODE_FOR_nothing
+#define CODE_FOR_eqvv4sf3 CODE_FOR_nothing
+#define CODE_FOR_eqvv2di3 CODE_FOR_nothing
+#define CODE_FOR_eqvv2df3 CODE_FOR_nothing
+#define CODE_FOR_eqvv1ti3 CODE_FOR_nothing
+  CODE_FOR_nandti3 = 1669,
+  CODE_FOR_nandpti3 = 1670,
+#define CODE_FOR_nandv16qi3 CODE_FOR_nothing
+#define CODE_FOR_nandv8hi3 CODE_FOR_nothing
+#define CODE_FOR_nandv4si3 CODE_FOR_nothing
+#define CODE_FOR_nandv4sf3 CODE_FOR_nothing
+#define CODE_FOR_nandv2di3 CODE_FOR_nothing
+#define CODE_FOR_nandv2df3 CODE_FOR_nothing
+#define CODE_FOR_nandv1ti3 CODE_FOR_nothing
+  CODE_FOR_orcti3 = 1671,
+  CODE_FOR_orcpti3 = 1672,
+#define CODE_FOR_orcv16qi3 CODE_FOR_nothing
+#define CODE_FOR_orcv8hi3 CODE_FOR_nothing
+#define CODE_FOR_orcv4si3 CODE_FOR_nothing
+#define CODE_FOR_orcv4sf3 CODE_FOR_nothing
+#define CODE_FOR_orcv2di3 CODE_FOR_nothing
+#define CODE_FOR_orcv2df3 CODE_FOR_nothing
+#define CODE_FOR_orcv1ti3 CODE_FOR_nothing
+  CODE_FOR_movsi_got = 1724,
+  CODE_FOR_movqi = 1729,
+  CODE_FOR_movhi = 1730,
+  CODE_FOR_movsi = 1731,
+  CODE_FOR_movdi = 1732,
+  CODE_FOR_movti = 1733,
+  CODE_FOR_movpti = 1734,
+  CODE_FOR_movcc = 1735,
+  CODE_FOR_movsf = 1736,
+  CODE_FOR_movsd = 1737,
+  CODE_FOR_movdf = 1740,
+  CODE_FOR_movdd = 1741,
+  CODE_FOR_movtf = 1748,
+  CODE_FOR_movtd = 1749,
+  CODE_FOR_extenddftf2 = 1757,
+  CODE_FOR_extendsftf2 = 1760,
+  CODE_FOR_trunctfdf2 = 1761,
+  CODE_FOR_trunctfsf2 = 1763,
+  CODE_FOR_floatsitf2 = 1765,
+  CODE_FOR_fix_trunctfsi2 = 1766,
+  CODE_FOR_fix_trunctfsi2_fprs = 1767,
+  CODE_FOR_negtf2 = 1769,
+  CODE_FOR_abstf2 = 1770,
+  CODE_FOR_abstf2_internal = 1771,
+  CODE_FOR_reload_si_store = 1772,
+  CODE_FOR_reload_di_store = 1773,
+  CODE_FOR_reload_si_load = 1774,
+  CODE_FOR_reload_di_load = 1775,
+  CODE_FOR_reload_v16qi_si_store = 1776,
+  CODE_FOR_reload_v8hi_si_store = 1777,
+  CODE_FOR_reload_v4si_si_store = 1778,
+  CODE_FOR_reload_v2di_si_store = 1779,
+  CODE_FOR_reload_v4sf_si_store = 1780,
+  CODE_FOR_reload_v2df_si_store = 1781,
+  CODE_FOR_reload_v1ti_si_store = 1782,
+  CODE_FOR_reload_sf_si_store = 1783,
+  CODE_FOR_reload_sd_si_store = 1784,
+  CODE_FOR_reload_si_si_store = 1785,
+  CODE_FOR_reload_df_si_store = 1786,
+  CODE_FOR_reload_dd_si_store = 1787,
+  CODE_FOR_reload_di_si_store = 1788,
+  CODE_FOR_reload_ti_si_store = 1789,
+  CODE_FOR_reload_pti_si_store = 1790,
+  CODE_FOR_reload_v16qi_di_store = 1791,
+  CODE_FOR_reload_v8hi_di_store = 1792,
+  CODE_FOR_reload_v4si_di_store = 1793,
+  CODE_FOR_reload_v2di_di_store = 1794,
+  CODE_FOR_reload_v4sf_di_store = 1795,
+  CODE_FOR_reload_v2df_di_store = 1796,
+  CODE_FOR_reload_v1ti_di_store = 1797,
+  CODE_FOR_reload_sf_di_store = 1798,
+  CODE_FOR_reload_sd_di_store = 1799,
+  CODE_FOR_reload_si_di_store = 1800,
+  CODE_FOR_reload_df_di_store = 1801,
+  CODE_FOR_reload_dd_di_store = 1802,
+  CODE_FOR_reload_di_di_store = 1803,
+  CODE_FOR_reload_ti_di_store = 1804,
+  CODE_FOR_reload_pti_di_store = 1805,
+  CODE_FOR_reload_v16qi_si_load = 1806,
+  CODE_FOR_reload_v8hi_si_load = 1807,
+  CODE_FOR_reload_v4si_si_load = 1808,
+  CODE_FOR_reload_v2di_si_load = 1809,
+  CODE_FOR_reload_v4sf_si_load = 1810,
+  CODE_FOR_reload_v2df_si_load = 1811,
+  CODE_FOR_reload_v1ti_si_load = 1812,
+  CODE_FOR_reload_sf_si_load = 1813,
+  CODE_FOR_reload_sd_si_load = 1814,
+  CODE_FOR_reload_si_si_load = 1815,
+  CODE_FOR_reload_df_si_load = 1816,
+  CODE_FOR_reload_dd_si_load = 1817,
+  CODE_FOR_reload_di_si_load = 1818,
+  CODE_FOR_reload_ti_si_load = 1819,
+  CODE_FOR_reload_pti_si_load = 1820,
+  CODE_FOR_reload_v16qi_di_load = 1821,
+  CODE_FOR_reload_v8hi_di_load = 1822,
+  CODE_FOR_reload_v4si_di_load = 1823,
+  CODE_FOR_reload_v2di_di_load = 1824,
+  CODE_FOR_reload_v4sf_di_load = 1825,
+  CODE_FOR_reload_v2df_di_load = 1826,
+  CODE_FOR_reload_v1ti_di_load = 1827,
+  CODE_FOR_reload_sf_di_load = 1828,
+  CODE_FOR_reload_sd_di_load = 1829,
+  CODE_FOR_reload_si_di_load = 1830,
+  CODE_FOR_reload_df_di_load = 1831,
+  CODE_FOR_reload_dd_di_load = 1832,
+  CODE_FOR_reload_di_di_load = 1833,
+  CODE_FOR_reload_ti_di_load = 1834,
+  CODE_FOR_reload_pti_di_load = 1835,
+  CODE_FOR_load_multiple = 1857,
+  CODE_FOR_store_multiple = 1858,
+  CODE_FOR_setmemsi = 1859,
+  CODE_FOR_movmemsi = 1860,
+  CODE_FOR_movmemsi_8reg = 1861,
+  CODE_FOR_movmemsi_6reg = 1862,
+  CODE_FOR_movmemsi_4reg = 1863,
+  CODE_FOR_movmemsi_2reg = 1864,
+  CODE_FOR_movmemsi_1reg = 1865,
+#define CODE_FOR_tls_get_tpointer CODE_FOR_nothing
+#define CODE_FOR_tls_get_addrsi CODE_FOR_nothing
+#define CODE_FOR_tls_get_addrdi CODE_FOR_nothing
+  CODE_FOR_allocate_stack = 1868,
+  CODE_FOR_save_stack_function = 1869,
+  CODE_FOR_restore_stack_function = 1870,
+  CODE_FOR_restore_stack_block = 1871,
+  CODE_FOR_save_stack_nonlocal = 1872,
+  CODE_FOR_restore_stack_nonlocal = 1873,
+  CODE_FOR_load_toc_v4_PIC_1 = 1874,
+  CODE_FOR_load_toc_v4_PIC_1b = 1875,
+  CODE_FOR_builtin_setjmp_receiver = 1876,
+  CODE_FOR_call = 1877,
+  CODE_FOR_call_value = 1878,
+  CODE_FOR_untyped_call = 1883,
+  CODE_FOR_sibcall = 1884,
+  CODE_FOR_sibcall_value = 1885,
+  CODE_FOR_sibcall_epilogue = 1886,
+  CODE_FOR_probe_stack_address = 1887,
+  CODE_FOR_cbranchsi4 = 1888,
+  CODE_FOR_cbranchdi4 = 1889,
+  CODE_FOR_cbranchsf4 = 1890,
+  CODE_FOR_cbranchdf4 = 1891,
+  CODE_FOR_cbranchtf4 = 1892,
+  CODE_FOR_cbranchdd4 = 1893,
+  CODE_FOR_cbranchtd4 = 1894,
+  CODE_FOR_cstoresi4_unsigned = 1895,
+  CODE_FOR_cstoredi4_unsigned = 1896,
+  CODE_FOR_cstoresi4 = 1897,
+  CODE_FOR_cstoredi4 = 1898,
+  CODE_FOR_cstoresf4 = 1899,
+  CODE_FOR_cstoredf4 = 1900,
+  CODE_FOR_cstoretf4 = 1901,
+  CODE_FOR_cstoredd4 = 1902,
+  CODE_FOR_cstoretd4 = 1903,
+  CODE_FOR_stack_protect_set = 1904,
+  CODE_FOR_stack_protect_test = 1905,
+  CODE_FOR_indirect_jump = 1934,
+  CODE_FOR_tablejump = 1935,
+  CODE_FOR_tablejumpsi = 1936,
+  CODE_FOR_tablejumpdi = 1937,
+  CODE_FOR_doloop_end = 1938,
+  CODE_FOR_ctrsi = 1939,
+  CODE_FOR_ctrdi = 1940,
+  CODE_FOR_ctrapsi4 = 1945,
+  CODE_FOR_ctrapdi4 = 1946,
+  CODE_FOR_prologue = 1947,
+  CODE_FOR_epilogue = 1948,
+  CODE_FOR_movsi_to_cr_one = 1949,
+  CODE_FOR_eh_return = 1950,
+  CODE_FOR_fmasf4 = 1952,
+  CODE_FOR_fmadf4 = 1953,
+#define CODE_FOR_fmav2sf4 CODE_FOR_nothing
+  CODE_FOR_fmav4sf4 = 1954,
+  CODE_FOR_fmav2df4 = 1955,
+  CODE_FOR_fmssf4 = 1956,
+  CODE_FOR_fmsdf4 = 1957,
+#define CODE_FOR_fmsv2sf4 CODE_FOR_nothing
+  CODE_FOR_fmsv4sf4 = 1958,
+  CODE_FOR_fmsv2df4 = 1959,
+  CODE_FOR_fnmasf4 = 1960,
+  CODE_FOR_fnmadf4 = 1961,
+  CODE_FOR_fnmav2sf4 = 1962,
+  CODE_FOR_fnmav4sf4 = 1963,
+  CODE_FOR_fnmav2df4 = 1964,
+  CODE_FOR_fnmssf4 = 1965,
+  CODE_FOR_fnmsdf4 = 1966,
+  CODE_FOR_fnmsv2sf4 = 1967,
+  CODE_FOR_fnmsv4sf4 = 1968,
+  CODE_FOR_fnmsv2df4 = 1969,
+  CODE_FOR_nfmasf4 = 1970,
+  CODE_FOR_nfmadf4 = 1971,
+#define CODE_FOR_nfmav2sf4 CODE_FOR_nothing
+  CODE_FOR_nfmav4sf4 = 1972,
+  CODE_FOR_nfmav2df4 = 1973,
+  CODE_FOR_nfmssf4 = 1974,
+  CODE_FOR_nfmsdf4 = 1975,
+#define CODE_FOR_nfmsv2sf4 CODE_FOR_nothing
+  CODE_FOR_nfmsv4sf4 = 1976,
+  CODE_FOR_nfmsv2df4 = 1977,
+  CODE_FOR_rs6000_get_timebase = 1978,
+  CODE_FOR_unpacktf = 1987,
+  CODE_FOR_unpacktd = 1988,
+  CODE_FOR_mem_thread_fence = 1993,
+  CODE_FOR_hwsync = 1994,
+  CODE_FOR_lwsync = 1995,
+  CODE_FOR_atomic_loadqi = 1996,
+  CODE_FOR_atomic_loadhi = 1997,
+  CODE_FOR_atomic_loadsi = 1998,
+  CODE_FOR_atomic_loaddi = 1999,
+  CODE_FOR_atomic_loadti = 2000,
+  CODE_FOR_atomic_storeqi = 2001,
+  CODE_FOR_atomic_storehi = 2002,
+  CODE_FOR_atomic_storesi = 2003,
+  CODE_FOR_atomic_storedi = 2004,
+  CODE_FOR_atomic_storeti = 2005,
+  CODE_FOR_load_lockedti = 2006,
+  CODE_FOR_store_conditionalti = 2007,
+  CODE_FOR_atomic_compare_and_swapqi = 2008,
+  CODE_FOR_atomic_compare_and_swaphi = 2009,
+  CODE_FOR_atomic_compare_and_swapsi = 2010,
+  CODE_FOR_atomic_compare_and_swapdi = 2011,
+  CODE_FOR_atomic_compare_and_swapti = 2012,
+  CODE_FOR_atomic_exchangeqi = 2013,
+  CODE_FOR_atomic_exchangehi = 2014,
+  CODE_FOR_atomic_exchangesi = 2015,
+  CODE_FOR_atomic_exchangedi = 2016,
+  CODE_FOR_atomic_exchangeti = 2017,
+  CODE_FOR_atomic_addqi = 2018,
+  CODE_FOR_atomic_subqi = 2019,
+  CODE_FOR_atomic_orqi = 2020,
+  CODE_FOR_atomic_xorqi = 2021,
+  CODE_FOR_atomic_andqi = 2022,
+  CODE_FOR_atomic_addhi = 2023,
+  CODE_FOR_atomic_subhi = 2024,
+  CODE_FOR_atomic_orhi = 2025,
+  CODE_FOR_atomic_xorhi = 2026,
+  CODE_FOR_atomic_andhi = 2027,
+  CODE_FOR_atomic_addsi = 2028,
+  CODE_FOR_atomic_subsi = 2029,
+  CODE_FOR_atomic_orsi = 2030,
+  CODE_FOR_atomic_xorsi = 2031,
+  CODE_FOR_atomic_andsi = 2032,
+  CODE_FOR_atomic_adddi = 2033,
+  CODE_FOR_atomic_subdi = 2034,
+  CODE_FOR_atomic_ordi = 2035,
+  CODE_FOR_atomic_xordi = 2036,
+  CODE_FOR_atomic_anddi = 2037,
+  CODE_FOR_atomic_addti = 2038,
+  CODE_FOR_atomic_subti = 2039,
+  CODE_FOR_atomic_orti = 2040,
+  CODE_FOR_atomic_xorti = 2041,
+  CODE_FOR_atomic_andti = 2042,
+  CODE_FOR_atomic_nandqi = 2043,
+  CODE_FOR_atomic_nandhi = 2044,
+  CODE_FOR_atomic_nandsi = 2045,
+  CODE_FOR_atomic_nanddi = 2046,
+  CODE_FOR_atomic_nandti = 2047,
+  CODE_FOR_atomic_fetch_addqi = 2048,
+  CODE_FOR_atomic_fetch_subqi = 2049,
+  CODE_FOR_atomic_fetch_orqi = 2050,
+  CODE_FOR_atomic_fetch_xorqi = 2051,
+  CODE_FOR_atomic_fetch_andqi = 2052,
+  CODE_FOR_atomic_fetch_addhi = 2053,
+  CODE_FOR_atomic_fetch_subhi = 2054,
+  CODE_FOR_atomic_fetch_orhi = 2055,
+  CODE_FOR_atomic_fetch_xorhi = 2056,
+  CODE_FOR_atomic_fetch_andhi = 2057,
+  CODE_FOR_atomic_fetch_addsi = 2058,
+  CODE_FOR_atomic_fetch_subsi = 2059,
+  CODE_FOR_atomic_fetch_orsi = 2060,
+  CODE_FOR_atomic_fetch_xorsi = 2061,
+  CODE_FOR_atomic_fetch_andsi = 2062,
+  CODE_FOR_atomic_fetch_adddi = 2063,
+  CODE_FOR_atomic_fetch_subdi = 2064,
+  CODE_FOR_atomic_fetch_ordi = 2065,
+  CODE_FOR_atomic_fetch_xordi = 2066,
+  CODE_FOR_atomic_fetch_anddi = 2067,
+  CODE_FOR_atomic_fetch_addti = 2068,
+  CODE_FOR_atomic_fetch_subti = 2069,
+  CODE_FOR_atomic_fetch_orti = 2070,
+  CODE_FOR_atomic_fetch_xorti = 2071,
+  CODE_FOR_atomic_fetch_andti = 2072,
+  CODE_FOR_atomic_fetch_nandqi = 2073,
+  CODE_FOR_atomic_fetch_nandhi = 2074,
+  CODE_FOR_atomic_fetch_nandsi = 2075,
+  CODE_FOR_atomic_fetch_nanddi = 2076,
+  CODE_FOR_atomic_fetch_nandti = 2077,
+  CODE_FOR_atomic_add_fetchqi = 2078,
+  CODE_FOR_atomic_sub_fetchqi = 2079,
+  CODE_FOR_atomic_or_fetchqi = 2080,
+  CODE_FOR_atomic_xor_fetchqi = 2081,
+  CODE_FOR_atomic_and_fetchqi = 2082,
+  CODE_FOR_atomic_add_fetchhi = 2083,
+  CODE_FOR_atomic_sub_fetchhi = 2084,
+  CODE_FOR_atomic_or_fetchhi = 2085,
+  CODE_FOR_atomic_xor_fetchhi = 2086,
+  CODE_FOR_atomic_and_fetchhi = 2087,
+  CODE_FOR_atomic_add_fetchsi = 2088,
+  CODE_FOR_atomic_sub_fetchsi = 2089,
+  CODE_FOR_atomic_or_fetchsi = 2090,
+  CODE_FOR_atomic_xor_fetchsi = 2091,
+  CODE_FOR_atomic_and_fetchsi = 2092,
+  CODE_FOR_atomic_add_fetchdi = 2093,
+  CODE_FOR_atomic_sub_fetchdi = 2094,
+  CODE_FOR_atomic_or_fetchdi = 2095,
+  CODE_FOR_atomic_xor_fetchdi = 2096,
+  CODE_FOR_atomic_and_fetchdi = 2097,
+  CODE_FOR_atomic_add_fetchti = 2098,
+  CODE_FOR_atomic_sub_fetchti = 2099,
+  CODE_FOR_atomic_or_fetchti = 2100,
+  CODE_FOR_atomic_xor_fetchti = 2101,
+  CODE_FOR_atomic_and_fetchti = 2102,
+  CODE_FOR_atomic_nand_fetchqi = 2103,
+  CODE_FOR_atomic_nand_fetchhi = 2104,
+  CODE_FOR_atomic_nand_fetchsi = 2105,
+  CODE_FOR_atomic_nand_fetchdi = 2106,
+  CODE_FOR_atomic_nand_fetchti = 2107,
+  CODE_FOR_movv16qi = 2108,
+  CODE_FOR_movv8hi = 2109,
+  CODE_FOR_movv4si = 2110,
+  CODE_FOR_movv2di = 2111,
+  CODE_FOR_movv4sf = 2112,
+  CODE_FOR_movv2df = 2113,
+  CODE_FOR_movv1ti = 2114,
+  CODE_FOR_vector_load_v16qi = 2115,
+  CODE_FOR_vector_load_v8hi = 2116,
+  CODE_FOR_vector_load_v4si = 2117,
+  CODE_FOR_vector_load_v2di = 2118,
+  CODE_FOR_vector_load_v4sf = 2119,
+  CODE_FOR_vector_load_v2df = 2120,
+  CODE_FOR_vector_load_v1ti = 2121,
+  CODE_FOR_vector_store_v16qi = 2122,
+  CODE_FOR_vector_store_v8hi = 2123,
+  CODE_FOR_vector_store_v4si = 2124,
+  CODE_FOR_vector_store_v2di = 2125,
+  CODE_FOR_vector_store_v4sf = 2126,
+  CODE_FOR_vector_store_v2df = 2127,
+  CODE_FOR_vector_store_v1ti = 2128,
+  CODE_FOR_vector_altivec_load_v16qi = 2137,
+  CODE_FOR_vector_altivec_load_v8hi = 2138,
+  CODE_FOR_vector_altivec_load_v4si = 2139,
+  CODE_FOR_vector_altivec_load_v2di = 2140,
+  CODE_FOR_vector_altivec_load_v4sf = 2141,
+  CODE_FOR_vector_altivec_load_v2df = 2142,
+  CODE_FOR_vector_altivec_load_v1ti = 2143,
+  CODE_FOR_vector_altivec_store_v16qi = 2144,
+  CODE_FOR_vector_altivec_store_v8hi = 2145,
+  CODE_FOR_vector_altivec_store_v4si = 2146,
+  CODE_FOR_vector_altivec_store_v2di = 2147,
+  CODE_FOR_vector_altivec_store_v4sf = 2148,
+  CODE_FOR_vector_altivec_store_v2df = 2149,
+  CODE_FOR_vector_altivec_store_v1ti = 2150,
+  CODE_FOR_addv4sf3 = 2151,
+  CODE_FOR_addv2df3 = 2152,
+  CODE_FOR_subv4sf3 = 2153,
+  CODE_FOR_subv2df3 = 2154,
+  CODE_FOR_mulv4sf3 = 2155,
+  CODE_FOR_mulv2df3 = 2156,
+  CODE_FOR_divv4sf3 = 2157,
+  CODE_FOR_divv2df3 = 2158,
+  CODE_FOR_negv4sf2 = 2159,
+  CODE_FOR_negv2df2 = 2160,
+  CODE_FOR_absv4sf2 = 2161,
+  CODE_FOR_absv2df2 = 2162,
+  CODE_FOR_sminv4sf3 = 2163,
+  CODE_FOR_sminv2df3 = 2164,
+  CODE_FOR_smaxv4sf3 = 2165,
+  CODE_FOR_smaxv2df3 = 2166,
+  CODE_FOR_sqrtv4sf2 = 2167,
+  CODE_FOR_sqrtv2df2 = 2168,
+  CODE_FOR_rsqrtev4sf2 = 2169,
+  CODE_FOR_rsqrtev2df2 = 2170,
+  CODE_FOR_rev4sf2 = 2171,
+  CODE_FOR_rev2df2 = 2172,
+  CODE_FOR_ftruncv4sf2 = 2173,
+  CODE_FOR_ftruncv2df2 = 2174,
+  CODE_FOR_vector_ceilv4sf2 = 2175,
+  CODE_FOR_vector_ceilv2df2 = 2176,
+  CODE_FOR_vector_floorv4sf2 = 2177,
+  CODE_FOR_vector_floorv2df2 = 2178,
+  CODE_FOR_vector_btruncv4sf2 = 2179,
+  CODE_FOR_vector_btruncv2df2 = 2180,
+  CODE_FOR_vector_copysignv4sf3 = 2181,
+  CODE_FOR_vector_copysignv2df3 = 2182,
+  CODE_FOR_vcondv4sfv4sf = 2183,
+  CODE_FOR_vcondv2dfv2df = 2184,
+  CODE_FOR_vcondv16qiv16qi = 2185,
+  CODE_FOR_vcondv8hiv8hi = 2186,
+  CODE_FOR_vcondv4siv4si = 2187,
+  CODE_FOR_vcondv2div2di = 2188,
+  CODE_FOR_vcondv4sfv4si = 2189,
+  CODE_FOR_vcondv4siv4sf = 2190,
+  CODE_FOR_vconduv16qiv16qi = 2191,
+  CODE_FOR_vconduv8hiv8hi = 2192,
+  CODE_FOR_vconduv4siv4si = 2193,
+  CODE_FOR_vconduv2div2di = 2194,
+  CODE_FOR_vconduv4sfv4si = 2195,
+  CODE_FOR_vector_eqv16qi = 2196,
+  CODE_FOR_vector_eqv8hi = 2197,
+  CODE_FOR_vector_eqv4si = 2198,
+  CODE_FOR_vector_eqv2di = 2199,
+  CODE_FOR_vector_eqv4sf = 2200,
+  CODE_FOR_vector_eqv2df = 2201,
+  CODE_FOR_vector_gtv16qi = 2202,
+  CODE_FOR_vector_gtv8hi = 2203,
+  CODE_FOR_vector_gtv4si = 2204,
+  CODE_FOR_vector_gtv2di = 2205,
+  CODE_FOR_vector_gtv4sf = 2206,
+  CODE_FOR_vector_gtv2df = 2207,
+  CODE_FOR_vector_gev16qi = 2208,
+  CODE_FOR_vector_gev8hi = 2209,
+  CODE_FOR_vector_gev4si = 2210,
+  CODE_FOR_vector_gev2di = 2211,
+  CODE_FOR_vector_gev4sf = 2212,
+  CODE_FOR_vector_gev2df = 2213,
+  CODE_FOR_vector_gtuv16qi = 2214,
+  CODE_FOR_vector_gtuv8hi = 2215,
+  CODE_FOR_vector_gtuv4si = 2216,
+  CODE_FOR_vector_gtuv2di = 2217,
+  CODE_FOR_vector_geuv16qi = 2218,
+  CODE_FOR_vector_geuv8hi = 2219,
+  CODE_FOR_vector_geuv4si = 2220,
+  CODE_FOR_vector_geuv2di = 2221,
+  CODE_FOR_vector_select_v16qi = 2230,
+  CODE_FOR_vector_select_v8hi = 2231,
+  CODE_FOR_vector_select_v4si = 2232,
+  CODE_FOR_vector_select_v2di = 2233,
+  CODE_FOR_vector_select_v4sf = 2234,
+  CODE_FOR_vector_select_v2df = 2235,
+  CODE_FOR_vector_select_v1ti = 2236,
+  CODE_FOR_vector_select_ti = 2237,
+  CODE_FOR_vector_select_v16qi_uns = 2238,
+  CODE_FOR_vector_select_v8hi_uns = 2239,
+  CODE_FOR_vector_select_v4si_uns = 2240,
+  CODE_FOR_vector_select_v2di_uns = 2241,
+  CODE_FOR_vector_select_v4sf_uns = 2242,
+  CODE_FOR_vector_select_v2df_uns = 2243,
+  CODE_FOR_vector_select_v1ti_uns = 2244,
+  CODE_FOR_vector_select_ti_uns = 2245,
+  CODE_FOR_vector_eq_v16qi_p = 2246,
+  CODE_FOR_vector_eq_v8hi_p = 2247,
+  CODE_FOR_vector_eq_v4si_p = 2248,
+  CODE_FOR_vector_eq_v2di_p = 2249,
+  CODE_FOR_vector_eq_v4sf_p = 2250,
+  CODE_FOR_vector_eq_v2df_p = 2251,
+  CODE_FOR_vector_gt_v16qi_p = 2252,
+  CODE_FOR_vector_gt_v8hi_p = 2253,
+  CODE_FOR_vector_gt_v4si_p = 2254,
+  CODE_FOR_vector_gt_v2di_p = 2255,
+  CODE_FOR_vector_gt_v4sf_p = 2256,
+  CODE_FOR_vector_gt_v2df_p = 2257,
+  CODE_FOR_vector_ge_v4sf_p = 2258,
+  CODE_FOR_vector_ge_v2df_p = 2259,
+  CODE_FOR_vector_gtu_v16qi_p = 2260,
+  CODE_FOR_vector_gtu_v8hi_p = 2261,
+  CODE_FOR_vector_gtu_v4si_p = 2262,
+  CODE_FOR_vector_gtu_v2di_p = 2263,
+  CODE_FOR_cr6_test_for_zero = 2264,
+  CODE_FOR_cr6_test_for_zero_reverse = 2265,
+  CODE_FOR_cr6_test_for_lt = 2266,
+  CODE_FOR_cr6_test_for_lt_reverse = 2267,
+#define CODE_FOR_clzv16qi2 CODE_FOR_nothing
+#define CODE_FOR_clzv8hi2 CODE_FOR_nothing
+#define CODE_FOR_clzv4si2 CODE_FOR_nothing
+#define CODE_FOR_clzv2di2 CODE_FOR_nothing
+#define CODE_FOR_popcountv16qi2 CODE_FOR_nothing
+#define CODE_FOR_popcountv8hi2 CODE_FOR_nothing
+#define CODE_FOR_popcountv4si2 CODE_FOR_nothing
+#define CODE_FOR_popcountv2di2 CODE_FOR_nothing
+  CODE_FOR_floatv4siv4sf2 = 2268,
+  CODE_FOR_floatv2div2df2 = 2269,
+  CODE_FOR_floatunsv4siv4sf2 = 2270,
+  CODE_FOR_floatunsv2div2df2 = 2271,
+  CODE_FOR_fix_truncv4sfv4si2 = 2272,
+  CODE_FOR_fix_truncv2dfv2di2 = 2273,
+  CODE_FOR_fixuns_truncv4sfv4si2 = 2274,
+  CODE_FOR_fixuns_truncv2dfv2di2 = 2275,
+  CODE_FOR_vec_initv16qi = 2276,
+  CODE_FOR_vec_initv8hi = 2277,
+  CODE_FOR_vec_initv4si = 2278,
+  CODE_FOR_vec_initv2di = 2279,
+  CODE_FOR_vec_initv4sf = 2280,
+  CODE_FOR_vec_initv2df = 2281,
+  CODE_FOR_vec_setv16qi = 2282,
+  CODE_FOR_vec_setv8hi = 2283,
+  CODE_FOR_vec_setv4si = 2284,
+  CODE_FOR_vec_setv2di = 2285,
+  CODE_FOR_vec_setv4sf = 2286,
+  CODE_FOR_vec_setv2df = 2287,
+  CODE_FOR_vec_extractv16qi = 2288,
+  CODE_FOR_vec_extractv8hi = 2289,
+  CODE_FOR_vec_extractv4si = 2290,
+  CODE_FOR_vec_extractv2di = 2291,
+  CODE_FOR_vec_extractv4sf = 2292,
+  CODE_FOR_vec_extractv2df = 2293,
+  CODE_FOR_vec_pack_trunc_v2df = 2294,
+  CODE_FOR_vec_pack_sfix_trunc_v2df = 2295,
+  CODE_FOR_vec_pack_ufix_trunc_v2df = 2296,
+  CODE_FOR_vec_unpacks_hi_v4sf = 2297,
+  CODE_FOR_vec_unpacks_lo_v4sf = 2298,
+  CODE_FOR_vec_unpacks_float_hi_v4si = 2299,
+  CODE_FOR_vec_unpacks_float_lo_v4si = 2300,
+  CODE_FOR_vec_unpacku_float_hi_v4si = 2301,
+  CODE_FOR_vec_unpacku_float_lo_v4si = 2302,
+  CODE_FOR_vec_realign_load_v16qi = 2303,
+  CODE_FOR_vec_realign_load_v8hi = 2304,
+  CODE_FOR_vec_realign_load_v4si = 2305,
+  CODE_FOR_vec_realign_load_v4sf = 2306,
+  CODE_FOR_movmisalignv4si = 2307,
+  CODE_FOR_movmisalignv4sf = 2308,
+  CODE_FOR_movmisalignv2di = 2309,
+  CODE_FOR_movmisalignv2df = 2310,
+  CODE_FOR_movmisalignv1ti = 2311,
+  CODE_FOR_vec_shr_v16qi = 2312,
+  CODE_FOR_vec_shr_v8hi = 2313,
+  CODE_FOR_vec_shr_v4si = 2314,
+  CODE_FOR_vec_shr_v2di = 2315,
+  CODE_FOR_vec_shr_v4sf = 2316,
+  CODE_FOR_vec_shr_v2df = 2317,
+  CODE_FOR_vec_shr_v1ti = 2318,
+  CODE_FOR_vec_shr_ti = 2319,
+  CODE_FOR_vrotlv16qi3 = 2320,
+  CODE_FOR_vrotlv8hi3 = 2321,
+  CODE_FOR_vrotlv4si3 = 2322,
+  CODE_FOR_vrotlv2di3 = 2323,
+  CODE_FOR_vashlv16qi3 = 2324,
+  CODE_FOR_vashlv8hi3 = 2325,
+  CODE_FOR_vashlv4si3 = 2326,
+  CODE_FOR_vashlv2di3 = 2327,
+  CODE_FOR_vlshrv16qi3 = 2328,
+  CODE_FOR_vlshrv8hi3 = 2329,
+  CODE_FOR_vlshrv4si3 = 2330,
+  CODE_FOR_vlshrv2di3 = 2331,
+  CODE_FOR_vashrv16qi3 = 2332,
+  CODE_FOR_vashrv8hi3 = 2333,
+  CODE_FOR_vashrv4si3 = 2334,
+  CODE_FOR_vashrv2di3 = 2335,
+  CODE_FOR_reduc_splus_v2df = 2336,
+  CODE_FOR_reduc_smin_v2df = 2337,
+  CODE_FOR_reduc_smax_v2df = 2338,
+  CODE_FOR_reduc_splus_v4sf = 2339,
+  CODE_FOR_reduc_smin_v4sf = 2340,
+  CODE_FOR_reduc_smax_v4sf = 2341,
+#define CODE_FOR_absv2sf2 CODE_FOR_nothing
+#define CODE_FOR_negv2sf2 CODE_FOR_nothing
+#define CODE_FOR_addv2sf3 CODE_FOR_nothing
+#define CODE_FOR_subv2sf3 CODE_FOR_nothing
+#define CODE_FOR_mulv2sf3 CODE_FOR_nothing
+#define CODE_FOR_divv2sf3 CODE_FOR_nothing
+  CODE_FOR_vsx_load_v16qi = 2366,
+  CODE_FOR_vsx_load_v8hi = 2367,
+  CODE_FOR_vsx_load_v4si = 2368,
+  CODE_FOR_vsx_load_v2di = 2369,
+  CODE_FOR_vsx_load_v4sf = 2370,
+  CODE_FOR_vsx_load_v2df = 2371,
+  CODE_FOR_vsx_load_v1ti = 2372,
+  CODE_FOR_vsx_store_v16qi = 2373,
+  CODE_FOR_vsx_store_v8hi = 2374,
+  CODE_FOR_vsx_store_v4si = 2375,
+  CODE_FOR_vsx_store_v2di = 2376,
+  CODE_FOR_vsx_store_v4sf = 2377,
+  CODE_FOR_vsx_store_v2df = 2378,
+  CODE_FOR_vsx_store_v1ti = 2379,
+  CODE_FOR_vsx_tdivdf3_fg = 2383,
+  CODE_FOR_vsx_tdivv4sf3_fg = 2384,
+  CODE_FOR_vsx_tdivv2df3_fg = 2385,
+  CODE_FOR_vsx_tdivdf3_fe = 2386,
+  CODE_FOR_vsx_tdivv4sf3_fe = 2387,
+  CODE_FOR_vsx_tdivv2df3_fe = 2388,
+  CODE_FOR_vsx_tsqrtdf2_fg = 2389,
+  CODE_FOR_vsx_tsqrtv4sf2_fg = 2390,
+  CODE_FOR_vsx_tsqrtv2df2_fg = 2391,
+  CODE_FOR_vsx_tsqrtdf2_fe = 2392,
+  CODE_FOR_vsx_tsqrtv4sf2_fe = 2393,
+  CODE_FOR_vsx_tsqrtv2df2_fe = 2394,
+  CODE_FOR_vsx_xvcvsxddp_scale = 2395,
+  CODE_FOR_vsx_xvcvuxddp_scale = 2396,
+  CODE_FOR_vsx_xvcvdpsxds_scale = 2397,
+  CODE_FOR_vsx_xvcvdpuxds_scale = 2398,
+  CODE_FOR_vsx_set_v1ti = 2399,
+  CODE_FOR_vsx_extract_v2df = 2400,
+  CODE_FOR_vsx_extract_v2di = 2401,
+  CODE_FOR_vsx_xxpermdi_v16qi = 2403,
+  CODE_FOR_vsx_xxpermdi_v8hi = 2404,
+  CODE_FOR_vsx_xxpermdi_v4si = 2405,
+  CODE_FOR_vsx_xxpermdi_v2di = 2406,
+  CODE_FOR_vsx_xxpermdi_v4sf = 2407,
+  CODE_FOR_vsx_xxpermdi_v2df = 2408,
+  CODE_FOR_vsx_xxpermdi_v1ti = 2409,
+  CODE_FOR_vsx_xxpermdi_ti = 2410,
+  CODE_FOR_vec_perm_constv2df = 2411,
+  CODE_FOR_vec_perm_constv2di = 2412,
+  CODE_FOR_vsx_mergel_v2df = 2413,
+  CODE_FOR_vsx_mergel_v2di = 2414,
+  CODE_FOR_vsx_mergeh_v2df = 2415,
+  CODE_FOR_vsx_mergeh_v2di = 2416,
+  CODE_FOR_altivec_mulv4sf3 = 2477,
+  CODE_FOR_mulv4si3 = 2478,
+  CODE_FOR_mulv8hi3 = 2479,
+  CODE_FOR_altivec_vmrghb = 2480,
+  CODE_FOR_altivec_vmrghh = 2481,
+  CODE_FOR_altivec_vmrghw = 2482,
+  CODE_FOR_altivec_vmrglb = 2483,
+  CODE_FOR_altivec_vmrglh = 2484,
+  CODE_FOR_altivec_vmrglw = 2485,
+  CODE_FOR_vec_widen_umult_even_v16qi = 2486,
+  CODE_FOR_vec_widen_smult_even_v16qi = 2487,
+  CODE_FOR_vec_widen_umult_even_v8hi = 2488,
+  CODE_FOR_vec_widen_smult_even_v8hi = 2489,
+  CODE_FOR_vec_widen_umult_odd_v16qi = 2490,
+  CODE_FOR_vec_widen_smult_odd_v16qi = 2491,
+  CODE_FOR_vec_widen_umult_odd_v8hi = 2492,
+  CODE_FOR_vec_widen_smult_odd_v8hi = 2493,
+  CODE_FOR_altivec_vspltb = 2494,
+  CODE_FOR_altivec_vsplth = 2495,
+  CODE_FOR_altivec_vspltw = 2496,
+  CODE_FOR_altivec_vspltsf = 2497,
+  CODE_FOR_altivec_vperm_v4si = 2498,
+  CODE_FOR_altivec_vperm_v8hi = 2499,
+  CODE_FOR_altivec_vperm_v16qi = 2500,
+  CODE_FOR_altivec_vperm_v4sf = 2501,
+  CODE_FOR_altivec_vperm_v2df = 2502,
+  CODE_FOR_altivec_vperm_v2di = 2503,
+  CODE_FOR_altivec_vperm_v1ti = 2504,
+  CODE_FOR_altivec_vperm_ti = 2505,
+  CODE_FOR_altivec_vperm_v4si_uns = 2506,
+  CODE_FOR_altivec_vperm_v8hi_uns = 2507,
+  CODE_FOR_altivec_vperm_v16qi_uns = 2508,
+  CODE_FOR_altivec_vperm_v4sf_uns = 2509,
+  CODE_FOR_altivec_vperm_v2df_uns = 2510,
+  CODE_FOR_altivec_vperm_v2di_uns = 2511,
+  CODE_FOR_altivec_vperm_v1ti_uns = 2512,
+  CODE_FOR_altivec_vperm_ti_uns = 2513,
+  CODE_FOR_vec_permv16qi = 2514,
+  CODE_FOR_vec_perm_constv16qi = 2515,
+  CODE_FOR_altivec_copysign_v4sf3 = 2516,
+  CODE_FOR_altivec_lvsl = 2517,
+  CODE_FOR_altivec_lvsr = 2518,
+  CODE_FOR_build_vector_mask_for_load = 2519,
+  CODE_FOR_altivec_lvewx = 2520,
+  CODE_FOR_altivec_lvehx = 2521,
+  CODE_FOR_altivec_lvebx = 2522,
+  CODE_FOR_altivec_lvxl_v4si = 2523,
+  CODE_FOR_altivec_lvxl_v8hi = 2524,
+  CODE_FOR_altivec_lvxl_v16qi = 2525,
+  CODE_FOR_altivec_lvxl_v4sf = 2526,
+  CODE_FOR_altivec_lvxl_v2df = 2527,
+  CODE_FOR_altivec_lvxl_v2di = 2528,
+  CODE_FOR_altivec_lvxl_v1ti = 2529,
+  CODE_FOR_altivec_lvx_v4si = 2530,
+  CODE_FOR_altivec_lvx_v8hi = 2531,
+  CODE_FOR_altivec_lvx_v16qi = 2532,
+  CODE_FOR_altivec_lvx_v4sf = 2533,
+  CODE_FOR_altivec_lvx_v2df = 2534,
+  CODE_FOR_altivec_lvx_v2di = 2535,
+  CODE_FOR_altivec_lvx_v1ti = 2536,
+  CODE_FOR_altivec_stvx_v4si = 2537,
+  CODE_FOR_altivec_stvx_v8hi = 2538,
+  CODE_FOR_altivec_stvx_v16qi = 2539,
+  CODE_FOR_altivec_stvx_v4sf = 2540,
+  CODE_FOR_altivec_stvx_v2df = 2541,
+  CODE_FOR_altivec_stvx_v2di = 2542,
+  CODE_FOR_altivec_stvx_v1ti = 2543,
+  CODE_FOR_altivec_stvxl_v4si = 2544,
+  CODE_FOR_altivec_stvxl_v8hi = 2545,
+  CODE_FOR_altivec_stvxl_v16qi = 2546,
+  CODE_FOR_altivec_stvxl_v4sf = 2547,
+  CODE_FOR_altivec_stvxl_v2df = 2548,
+  CODE_FOR_altivec_stvxl_v2di = 2549,
+  CODE_FOR_altivec_stvxl_v1ti = 2550,
+  CODE_FOR_altivec_stvewx = 2551,
+  CODE_FOR_altivec_stvehx = 2552,
+  CODE_FOR_altivec_stvebx = 2553,
+  CODE_FOR_absv4si2 = 2554,
+  CODE_FOR_absv8hi2 = 2555,
+  CODE_FOR_absv16qi2 = 2556,
+  CODE_FOR_absv2di2 = 2557,
+  CODE_FOR_altivec_absv4sf2 = 2558,
+  CODE_FOR_altivec_abss_v4si = 2559,
+  CODE_FOR_altivec_abss_v8hi = 2560,
+  CODE_FOR_altivec_abss_v16qi = 2561,
+  CODE_FOR_reduc_splus_v8hi = 2562,
+  CODE_FOR_reduc_splus_v16qi = 2563,
+  CODE_FOR_reduc_uplus_v16qi = 2564,
+  CODE_FOR_negv4si2 = 2565,
+  CODE_FOR_negv8hi2 = 2566,
+  CODE_FOR_negv16qi2 = 2567,
+  CODE_FOR_udot_prodv8hi = 2568,
+  CODE_FOR_udot_prodv16qi = 2569,
+  CODE_FOR_sdot_prodv8hi = 2570,
+  CODE_FOR_widen_usumv8hi3 = 2571,
+  CODE_FOR_widen_usumv16qi3 = 2572,
+  CODE_FOR_widen_ssumv16qi3 = 2573,
+  CODE_FOR_widen_ssumv8hi3 = 2574,
+  CODE_FOR_vec_unpacks_hi_v4si = 2575,
+  CODE_FOR_vec_unpacks_hi_v8hi = 2576,
+  CODE_FOR_vec_unpacks_hi_v16qi = 2577,
+  CODE_FOR_vec_unpacks_lo_v4si = 2578,
+  CODE_FOR_vec_unpacks_lo_v8hi = 2579,
+  CODE_FOR_vec_unpacks_lo_v16qi = 2580,
+  CODE_FOR_vec_unpacku_hi_v16qi = 2581,
+  CODE_FOR_vec_unpacku_hi_v8hi = 2582,
+  CODE_FOR_vec_unpacku_lo_v16qi = 2583,
+  CODE_FOR_vec_unpacku_lo_v8hi = 2584,
+  CODE_FOR_vec_widen_umult_hi_v16qi = 2585,
+  CODE_FOR_vec_widen_umult_lo_v16qi = 2586,
+  CODE_FOR_vec_widen_smult_hi_v16qi = 2587,
+  CODE_FOR_vec_widen_smult_lo_v16qi = 2588,
+  CODE_FOR_vec_widen_umult_hi_v8hi = 2589,
+  CODE_FOR_vec_widen_umult_lo_v8hi = 2590,
+  CODE_FOR_vec_widen_smult_hi_v8hi = 2591,
+  CODE_FOR_vec_widen_smult_lo_v8hi = 2592,
+  CODE_FOR_vec_pack_trunc_v2di = 2593,
+  CODE_FOR_vec_pack_trunc_v4si = 2594,
+  CODE_FOR_vec_pack_trunc_v8hi = 2595,
+  CODE_FOR_altivec_negv4sf2 = 2596,
+  CODE_FOR_vec_unpacks_float_hi_v8hi = 2597,
+  CODE_FOR_vec_unpacks_float_lo_v8hi = 2598,
+  CODE_FOR_vec_unpacku_float_hi_v8hi = 2599,
+  CODE_FOR_vec_unpacku_float_lo_v8hi = 2600,
+#define CODE_FOR_bcdadd_eq CODE_FOR_nothing
+#define CODE_FOR_bcdsub_eq CODE_FOR_nothing
+#define CODE_FOR_bcdadd_lt CODE_FOR_nothing
+#define CODE_FOR_bcdsub_lt CODE_FOR_nothing
+#define CODE_FOR_bcdadd_gt CODE_FOR_nothing
+#define CODE_FOR_bcdsub_gt CODE_FOR_nothing
+#define CODE_FOR_bcdadd_unordered CODE_FOR_nothing
+#define CODE_FOR_bcdsub_unordered CODE_FOR_nothing
+#define CODE_FOR_vec_perm_constv2si CODE_FOR_nothing
+#define CODE_FOR_spe_evmergehi CODE_FOR_nothing
+#define CODE_FOR_spe_evmergehilo CODE_FOR_nothing
+#define CODE_FOR_spe_evmergelo CODE_FOR_nothing
+#define CODE_FOR_spe_evmergelohi CODE_FOR_nothing
+#define CODE_FOR_spe_fix_trunctfsi2 CODE_FOR_nothing
+#define CODE_FOR_spe_abstf2_cmp CODE_FOR_nothing
+#define CODE_FOR_spe_abstf2_tst CODE_FOR_nothing
+#define CODE_FOR_movv2si CODE_FOR_nothing
+#define CODE_FOR_movv1di CODE_FOR_nothing
+#define CODE_FOR_movv4hi CODE_FOR_nothing
+#define CODE_FOR_movv2sf CODE_FOR_nothing
+  CODE_FOR_extendsdtd2 = 2601,
+  CODE_FOR_negdd2 = 2602,
+  CODE_FOR_absdd2 = 2603,
+  CODE_FOR_negtd2 = 2604,
+  CODE_FOR_abstd2 = 2605,
+#define CODE_FOR_vec_perm_constv2sf CODE_FOR_nothing
+#define CODE_FOR_vec_initv2sf CODE_FOR_nothing
+#define CODE_FOR_sminv2sf3 CODE_FOR_nothing
+#define CODE_FOR_smaxv2sf3 CODE_FOR_nothing
+#define CODE_FOR_reduc_smax_v2sf CODE_FOR_nothing
+#define CODE_FOR_reduc_smin_v2sf CODE_FOR_nothing
+#define CODE_FOR_reduc_splus_v2sf CODE_FOR_nothing
+#define CODE_FOR_movmisalignv2sf CODE_FOR_nothing
+#define CODE_FOR_vcondv2sfv2sf CODE_FOR_nothing
+#define CODE_FOR_tabort CODE_FOR_nothing
+#define CODE_FOR_tabortwc CODE_FOR_nothing
+#define CODE_FOR_tabortdc CODE_FOR_nothing
+#define CODE_FOR_tabortwci CODE_FOR_nothing
+#define CODE_FOR_tabortdci CODE_FOR_nothing
+#define CODE_FOR_tbegin CODE_FOR_nothing
+#define CODE_FOR_tcheck CODE_FOR_nothing
+#define CODE_FOR_tend CODE_FOR_nothing
+#define CODE_FOR_trechkpt CODE_FOR_nothing
+#define CODE_FOR_treclaim CODE_FOR_nothing
+#define CODE_FOR_tsr CODE_FOR_nothing
+#define CODE_FOR_ttest CODE_FOR_nothing
+  LAST_INSN_CODE = 2607
+};
+
+#endif /* GCC_INSN_CODES_H */

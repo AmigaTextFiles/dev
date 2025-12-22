@@ -1,0 +1,435 @@
+
+#include <math.h>
+#include <proto/exec.h>
+#include <proto/intuition.h>
+#include <proto/dos.h>
+#include <proto/asl.h>
+#include <dos/dos.h>
+#include <libraries/asl.h>
+#include <intuition/intuition.h>
+
+#include "global.h"
+#include "model.h"
+#include "load.h"
+#include "App.bh"
+#include "Mainwin.bh"
+#include "View.bh"
+
+#define fract(n)	(n - floor(n))
+
+static __saveds __asm void IntuiMsgFunc(register __a1 struct IntuiMessage=
+ *,register __a2 struct FileRequester *);
+static char *getfilename(Object *,char *,char *,char *,char);
+
+cleardata Method Mainwin::Mainwin():
+	MUIA_Window_Title,	"Geotto",
+	MUIA_Window_ID,		MAKE_ID('M','A','I','N'),
+	MUIA_Window_NeedsMouseObject, TRUE,
+/*
+	MUIA_Window_CloseGadget, FALSE,
+	MUIA_Window_DepthGadget, FALSE,
+	MUIA_Window_DragBar, FALSE,
+	MUIA_Window_Backdrop, TRUE,
+	MUIA_Window_Borderless, TRUE,
+*/
+	WindowContents, VGroup,
+		Child, HGroup,
+			Child, VGroup,
+				MUIA_Weight, 0,
+				Child, SimpleButton("About"),
+				Child, newobj =3D KeyButton("New",'n'),
+				Child, TextObject,
+					MUIA_Text_Contents, "Fetch",
+					End,
+				Child, loadobj =3D KeyButton("Load",'l'),
+				Child, KeyButton("Save",'s'),
+				Child, KeyButton("Save As",'s'),
+				Child, TextObject,
+					MUIA_Text_Contents, "Zoom",
+					End,
+				Child, zoomin =3D KeyButton("In",'+'),
+				Child, zoomout =3D KeyButton("Out",'-'),
+				Child, HVSpace,
+				Child, VGroup,
+					TextFrame,
+					MUIA_Background, MUII_TextBack,
+					Child, xcoordtxt =3D TextObject, End,
+					Child, ycoordtxt =3D TextObject, End,
+					Child, zcoordtxt =3D TextObject, End,
+					End,
+				End,
+			Child, viewgr =3D ColGroup(2),
+				MUIA_Group_HorizSpacing, 1,
+				MUIA_Group_VertSpacing, 1,
+				Child, view1 =3D ViewObject,
+					VirtualFrame,
+					MUIA_View_Mode, MUIV_View_Mode_Top,
+					MUIA_View_X, f2l(0.0),
+					MUIA_View_Y, f2l(0.0),
+					MUIA_View_Z, f2l(0.0),
+					MUIA_View_Zoom, f2l(0.1),
+					MUIA_View_GridSize, f2l(1.0),
+					End,
+				Child, view2 =3D ViewObject,
+					VirtualFrame,
+					MUIA_View_Mode, MUIV_View_Mode_Persp,
+					MUIA_View_X, f2l(0.0),
+					MUIA_View_Y, f2l(0.0),
+					MUIA_View_Z, f2l(0.0),
+					MUIA_View_Zoom, f2l(0.1),
+					MUIA_View_GridSize, f2l(1.0),
+					End,
+				Child, view3 =3D ViewObject,
+					VirtualFrame,
+					MUIA_View_Mode, MUIV_View_Mode_Face,
+					MUIA_View_X, f2l(0.0),
+					MUIA_View_Y, f2l(0.0),
+					MUIA_View_Z, f2l(0.0),
+					MUIA_View_Zoom, f2l(0.1),
+					MUIA_View_GridSize, f2l(1.0),
+					End,
+				Child, view4 =3D ViewObject,
+					VirtualFrame,
+					MUIA_View_Mode, MUIV_View_Mode_Left,
+					MUIA_View_X, f2l(0.0),
+					MUIA_View_Y, f2l(0.0),
+					MUIA_View_Z, f2l(0.0),
+					MUIA_View_Zoom, f2l(0.1),
+					MUIA_View_GridSize, f2l(1.0),
+					End,
+				End,
+			End,
+		Child, HGroup,
+			Child, gridsizetxt =3D TextObject,
+				TextFrame,
+				MUIA_Background, MUII_TextBack,
+				MUIA_Text_Contents, "Grid:",
+				End,
+			Child, poks =3D SimpleButton("MUI Settings..."),
+			End,
+		End
+{
+	obj->Zoom =3D 0.1;
+
+	poks->_Notify(MUIA_Pressed,FALSE,MUIV_Notify_Application,2,MUIM_Applicat=
+ion_OpenConfigWindow,0);
+
+	newobj->_Notify(MUIA_Pressed,FALSE,obj,1,MUIM_Mainwin_New);
+	loadobj->_Notify(MUIA_Pressed,FALSE,obj,1,MUIM_Mainwin_Load);
+
+	zoomin->_Notify(MUIA_Pressed,FALSE,obj,1,MUIM_Mainwin_ZoomIn);
+	zoomout->_Notify(MUIA_Pressed,FALSE,obj,1,MUIM_Mainwin_ZoomOut);
+
+	ehnode.ehn_Priority =3D 0;
+	ehnode.ehn_Flags =3D 0;
+	ehnode.ehn_Object =3D obj;
+	ehnode.ehn_Class =3D NULL;
+	ehnode.ehn_Events =3D IDCMP_RAWKEY | IDCMP_MOUSEMOVE;
+
+	obj->Window_AddEventHandler(&ehnode);
+
+	objreq =3D MUI_AllocAslRequestTags(ASL_FileRequest,
+		ASLFR_InitialDrawer,	"3D:",
+		ASLFR_InitialPattern,	"#?.(lwo|img)",
+		ASLFR_DoPatterns,		TRUE,
+		ASLFR_RejectIcons,		TRUE,
+		TAG_DONE);
+
+	Model =3D AllocModel();
+
+/*	{
+	vertex_t *v[8];
+	polygon_t *p;
+
+	v[0] =3D AddVertex(Model);	v[0]->x =3D -1.0;	v[0]->y =3D 1.0;		v[0]->z =3D=
+ 1.0;
+	v[1] =3D AddVertex(Model);	v[1]->x =3D 1.0;	v[1]->y =3D 1.0;		v[1]->z =3D=
+ 1.0;
+	v[2] =3D AddVertex(Model);	v[2]->x =3D -1.0;	v[2]->y =3D -1.0;		v[2]->z =
+=3D 1.0;
+	v[3] =3D AddVertex(Model);	v[3]->x =3D 1.0;	v[3]->y =3D -1.0;		v[3]->z =3D=
+ 1.0;
+	v[4] =3D AddVertex(Model);	v[4]->x =3D -1.0;	v[4]->y =3D 1.0;		v[4]->z =3D=
+ -1.0;
+	v[5] =3D AddVertex(Model);	v[5]->x =3D 1.0;	v[5]->y =3D 1.0;		v[5]->z =3D=
+ -1.0;
+	v[6] =3D AddVertex(Model);	v[6]->x =3D -1.0;	v[6]->y =3D -1.0;		v[6]->z =
+=3D -1.0;
+	v[7] =3D AddVertex(Model);	v[7]->x =3D 1.0;	v[7]->y =3D -1.0;		v[7]->z =3D=
+ -1.0;
+
+	p =3D AddPolygon(Model); AddPolyvert(p,v[0]); AddPolyvert(p,v[1]); AddPo=
+lyvert(p,v[3]); AddPolyvert(p,v[2]);
+	p =3D AddPolygon(Model); AddPolyvert(p,v[4]); AddPolyvert(p,v[5]); AddPo=
+lyvert(p,v[7]); AddPolyvert(p,v[6]);
+	p =3D AddPolygon(Model); AddPolyvert(p,v[0]); AddPolyvert(p,v[1]); AddPo=
+lyvert(p,v[5]); AddPolyvert(p,v[4]);
+	p =3D AddPolygon(Model); AddPolyvert(p,v[2]); AddPolyvert(p,v[3]); AddPo=
+lyvert(p,v[7]); AddPolyvert(p,v[6]);
+	}
+*/
+	//LoadModel("CC:Lambda/orig/freighter.lwo",Model);
+	//LoadModel("CC:Lambda/orig/mfighter2.img",Model);
+
+	viewgr->View_Model =3D Model;
+}
+
+super Method Mainwin::OM_DISPOSE()
+{
+	obj->Window_RemEventHandler(&ehnode);
+	MUI_FreeAslRequest(objreq);
+
+	FreeModel(Model);
+}
+
+super Method Mainwin::MUIM_HandleEvent()
+{
+	Object *mouseobj =3D (Object *)obj->Window_MouseObject;
+
+	if (msg->imsg)
+	{
+		if (mouseobj =3D=3D view1)
+		{
+			switch(msg->imsg->Class)
+			{
+				case IDCMP_RAWKEY:
+					switch(msg->imsg->Code)
+					{
+						case 76:
+							viewgr->View_ScrollZPos();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+						case 77:
+							viewgr->View_ScrollZNeg();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+						case 79:
+							viewgr->View_ScrollXPos();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+						case 78:
+							viewgr->View_ScrollXNeg();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+					}
+					break;
+				case IDCMP_MOUSEMOVE:
+					xcoordtxt->Contents =3D "X 0.0 m";
+					ycoordtxt->Contents =3D NULL;
+					zcoordtxt->Contents =3D "Z 0.0 m";
+					break;
+			}
+		}
+		else if (mouseobj =3D=3D view3)
+		{
+			switch(msg->imsg->Class)
+			{
+				case IDCMP_RAWKEY:
+					switch(msg->imsg->Code)
+					{
+						case 76:
+							viewgr->View_ScrollYPos();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+						case 77:
+							viewgr->View_ScrollYNeg();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+						case 79:
+							viewgr->View_ScrollXPos();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+						case 78:
+							viewgr->View_ScrollXNeg();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+					}
+					break;
+				case IDCMP_MOUSEMOVE:
+					xcoordtxt->Contents =3D "X 0.0 m";
+					ycoordtxt->Contents =3D "Y 0.0 m";
+					zcoordtxt->Contents =3D NULL;
+					break;
+			}
+		}
+		else if (mouseobj =3D=3D view4)
+		{
+			switch(msg->imsg->Class)
+			{
+				case IDCMP_RAWKEY:
+					switch(msg->imsg->Code)
+					{
+						case 76:
+							viewgr->View_ScrollYPos();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+						case 77:
+							viewgr->View_ScrollYNeg();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+						case 79:
+							viewgr->View_ScrollZNeg();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+						case 78:
+							viewgr->View_ScrollZPos();
+							mreturn MUI_EventHandlerRC_Eat;
+							break;
+					}
+					break;
+				case IDCMP_MOUSEMOVE:
+					xcoordtxt->Contents =3D NULL;
+					ycoordtxt->Contents =3D "Y 0.0 m";
+					zcoordtxt->Contents =3D "Z 0.0 m";
+					break;
+			}
+		}
+		else
+		{
+			if (msg->imsg->Class =3D=3D IDCMP_MOUSEMOVE)
+			{
+				xcoordtxt->Contents =3D NULL;
+				ycoordtxt->Contents =3D NULL;
+				zcoordtxt->Contents =3D NULL;
+			}
+		}
+	}
+
+	mreturn 0;
+}
+
+Method Mainwin::New()
+{
+	RemAllVertices(Model);
+	MUI_Redraw(viewgr,MADF_DRAWOBJECT);
+}
+
+static __saveds __asm void IntuiMsgFunc(register __a1 struct IntuiMessage=
+ *imsg,register __a2 struct FileRequester *req)
+{
+	if (imsg->Class =3D=3D IDCMP_REFRESHWINDOW)
+		DoMethod(req->fr_UserData,MUIM_Application_CheckRefresh);
+}
+
+Method Mainwin::Load()
+{
+	static char buf[512];
+	static const struct Hook IntuiMsgHook =3D { { 0,0 },(void *)IntuiMsgFunc=
+,NULL,NULL };
+	Object *app =3D (Object *)obj->_ApplicationObject;
+
+	set(app,MUIA_Application_Sleep,TRUE);
+	if (MUI_AslRequestTags(objreq,
+		ASLFR_Window,		obj->Window_Window,
+		ASLFR_TitleText,	"Load an object",
+		ASLFR_DoSaveMode,	FALSE,
+		ASLFR_UserData,		app,
+		ASLFR_IntuiMsgFunc,	&IntuiMsgHook,
+		TAG_DONE,0))
+	{
+		if (*objreq->fr_File)
+		{
+			stccpy(buf,objreq->fr_Drawer,sizeof(buf));
+			AddPart(buf,objreq->fr_File,sizeof(buf));
+
+			LoadModel(buf,Model);
+			MUI_Redraw(viewgr,MADF_DRAWOBJECT);
+		}
+	}
+	set(app,MUIA_Application_Sleep,FALSE);
+}
+
+static char *getfilename(Object *win,char *title,char *dir,char *pattern,=
+char save)
+{
+	static char buf[512];
+	struct FileRequester *req;
+	struct Window *w;
+	static long left=3D-1,top=3D-1,width=3D-1,height=3D-1;
+	Object *app =3D (Object *)BCC_XGet(win,MUIA_ApplicationObject);
+	char *res =3D NULL;
+	static const struct Hook IntuiMsgHook =3D { { 0,0 },(VOID *)IntuiMsgFunc=
+,NULL,NULL };
+
+	get(win,MUIA_Window_Window,&w);
+	if (left=3D=3D-1)
+	{
+		left   =3D w->LeftEdge+w->BorderLeft+2;
+		top    =3D w->TopEdge+w->BorderTop+2;
+		width  =3D w->Width-w->BorderLeft-w->BorderRight-4;
+		height =3D w->Height-w->BorderTop-w->BorderBottom-4;
+	}
+
+	if (req=3DMUI_AllocAslRequestTags(ASL_FileRequest,
+		ASLFR_Window, w,
+		ASLFR_TitleText, title,
+		ASLFR_InitialLeftEdge, left,
+		ASLFR_InitialTopEdge , top,
+		ASLFR_InitialWidth   , width,
+		ASLFR_InitialHeight  , height,
+		ASLFR_InitialDrawer  , dir,
+		ASLFR_InitialPattern , pattern,
+		ASLFR_DoSaveMode     , save,
+		ASLFR_DoPatterns     , TRUE,
+		ASLFR_RejectIcons    , TRUE,
+		ASLFR_UserData       , app,
+		ASLFR_IntuiMsgFunc   , &IntuiMsgHook,
+		TAG_DONE))
+	{
+		set(app,MUIA_Application_Sleep,TRUE);
+		if (MUI_AslRequestTags(req,TAG_DONE))
+		{
+			if (*req->fr_File)
+			{
+				res =3D buf;
+				stccpy(buf,req->fr_Drawer,sizeof(buf));
+				AddPart(buf,req->fr_File,sizeof(buf));
+			}
+			left   =3D req->fr_LeftEdge;
+			top    =3D req->fr_TopEdge;
+			width  =3D req->fr_Width;
+			height =3D req->fr_Height;
+		}
+		MUI_FreeAslRequest(req);
+		set(app,MUIA_Application_Sleep,FALSE);
+	}
+	return(res);
+}
+
+Method Mainwin::ZoomIn()
+{
+	obj->Zoom =3D f2l(Zoom * 1.25);
+}
+
+Method Mainwin::ZoomOut()
+{
+	obj->Zoom =3D f2l(Zoom /=A01.25);
+}
+
+Attribute Mainwin::Zoom:S(long zoom)
+{
+	char buf[64];
+
+	Zoom =3D l2f(zoom);
+
+	GridSize =3D pow(10.0,floor(log10(0.1 / Zoom)));
+	if (fract(log10(1.0 /=A0Zoom)) > 0.699) GridSize *=3D 5.0;
+	else if (fract(log10(1.0 /=A0Zoom)) > 0.301) GridSize *=3D 2.0;
+
+	if (GridSize >=3D 1000000.0)
+		sprintf(buf,"Grid: %d Mm",(long)(GridSize /=A01000000.0));
+	else if (GridSize >=3D 1000.0)
+		sprintf(buf,"Grid: %d km",(long)(GridSize /=A01000.0));
+	else if (GridSize >=3D 1.0)
+		sprintf(buf,"Grid: %d m",(long)GridSize);
+	else if (GridSize >=3D 0.01)
+		sprintf(buf,"Grid: %d cm",(long)(GridSize * 100.0));
+	else
+		sprintf(buf,"Grid: %d mm",(long)(GridSize * 1000.0));
+
+	gridsizetxt->Contents =3D buf;
+
+	viewgr->View_Zoom =3D f2l(Zoom);
+	viewgr->View_GridSize =3D f2l(GridSize);
+	MUI_Redraw(viewgr,MADF_DRAWOBJECT);
+}

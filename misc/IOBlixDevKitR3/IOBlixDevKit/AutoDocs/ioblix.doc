@@ -1,0 +1,474 @@
+
+TABLE OF CONTENTS
+
+ioblix.resource/--background--
+ioblix.resource/AddIRQHook
+ioblix.resource/AllocChipList
+ioblix.resource/FindChip
+ioblix.resource/FreeChipList
+ioblix.resource/ObtainChip
+ioblix.resource/ObtainChipShared
+ioblix.resource/ReleaseChip
+ioblix.resource/ReleaseChipShared
+ioblix.resource/RemIRQHook
+
+ioblix.resource/--background--                   ioblix.resource/--background--
+
+   PURPOSE
+      The ioblix.resource is created by SetupIOBlix during startup and provides
+      several functions to gain exclusive as well as shared access to any chip
+      the IOBlix multi I/O boards provide. If you ever want to use one of the
+      IOBlix chips you should ALWAYS use either ObtainChip() or
+      ObtainChipShared() to prevent other ioblix.resource-conform programs from
+      interferring with your program. All device drivers being delivered with
+      your IOBlix board follow this rule. And hopefully all third-party drivers
+      will also do.
+      To access these functions just call OpenResource(IOBLIXRESNAME) and use
+      the returned pointer in the same manner as library bases are used.
+
+
+ioblix.resource/AddIRQHook                           ioblix.resource/AddIRQHook
+
+   NAME
+      AddIRQHook  - add a private interrupt function to the IOBlix interrupt
+                    chain
+
+   SYNOPSIS
+      void = AddIRQHook( node )
+                         A0
+
+      void AddIRQHook( struct IRQHookNode * );
+
+   FUNCTION
+      Adds the given node to the IOBlix interrupt chain. This is necessary
+      because normal interrupt handling by AmigaOS will loose some interrupts on
+      heavy system load.
+      Just imagine two applications using the IOBlix board (eg one serial and
+      one parallel port). When adding your own interrupt function with Exec's
+      AddIntServer() the system will just recognize the first of two
+      simultaneously happening interrupts, because the first function will return
+      a successfull interrupt handling and Exec will cease any further handling
+      within its chain. But at this time the second interrupt has still not been
+      processed. IOBlix' own interrupt chain avoids this problem by checking all
+      active chips before returning control to Exec.
+      The function given in ihn_HookFunc will be passed the data given in
+      ihn_HookUserData on the stack. Just as Exec's interrupt handling functions
+      a return value of 0 indicates that no interrupt has happened. Any other
+      return value indicates a successfull interrupt handling.
+
+   INPUTS
+      node     -- a correctly initialized IRQHookNode
+
+   EXAMPLE
+      /* add a private interrupt function */
+      ULONG __saveds myIRQFunc( APTR userData);
+      APTR myUserData;
+      struct IRQHookNode *node;
+
+      if (IOBlixBase = OpenResource(IOBLIXRESNAME)) {
+        node->ihn_Node.ln_Name = "TestHook";
+        node->ihn_Node.ln_Pri = 5; /* priority within the chain */
+        node->ihn_HookFunc = myIRQFunc;
+        node->ihn_HookUserData = myUserData;
+        AddIRQHook(node);
+        /* do whatever you want */
+        RemIRQHook(node);
+      }
+
+      ULONG myIRQFunc( APTR userData )
+      {
+        /* check wether an interrupt has happened or not                   */
+        /* if yes, then do all necessary things and return a value of != 0 */
+        /* else just return 0                                              */
+      }
+
+   SEE ALSO
+      RemIRQHook
+
+ioblix.resource/AllocChipList                     ioblix.resource/AllocChipList
+
+   NAME
+      AllocChipList -- get a list of all available chips
+
+   SYNOPSIS
+      list = AllocChipList( void )
+      D0
+
+      struct List *AllocChipList( void );
+
+   FUNCTION
+      This function returns a copy of the internal list of all available chips.
+      You are allowed to iterate through the list, but you must not change
+      anything. All nodes in the list are of type (struct IOBlixChipNode *). No
+      chip in the list is obtained in a ObtainChip()-like manner.
+
+   RESULTS
+      chipNode -- a list of all available chips, or NULL if the call failed
+
+   EXAMPLE
+      /* print information about all IOBlix chips in the system */
+      struct IOBlixResource *IOBlixBase;
+      struct List *list;
+      struct IOBlixChipNode *node;
+
+      if (IOBlixBase = OpenResource(IOBLIXRESNAME)) {
+        if (list = AllocChipList()) {
+          node = (struct IOBlixChipNode *)chipList->lh_Head;
+          while (node->icn_Node.ln_Succ) {
+            switch (node->icn_Type) {
+              case ICT_Z2_SERIAL_CHIP:
+                printf("IOBlix Z2 UART, %s, %ld bytes FIFO\n",
+                       node->icn_Description, node->icns_FIFOSize);
+                break;
+              case ICT_Z2_PARALLEL_CHIP:
+                printf("IOBlix Z2 parallel port, %s, %ld bytes FIFO\n",
+                       node->icn_Description, node->icnp_FIFOSize);
+                break;
+              default:
+                break;
+              printf("chip is in use by %s\n",
+                     (node->icn_Owner) ? node->icn_Owner : "nobody");
+            }
+            node = (struct IOBlixChipNode *)node->icn_Node.ln_Succ);
+          }
+          FreeChipList(list);
+        } else {
+          printf("failed to allocate chip list\n");
+        }
+      }
+
+   SEE ALSO
+      FreeChipList
+
+ioblix.resource/FindChip                               ioblix.resource/FindChip
+
+   NAME
+      FindChip -- find a chip in the resource's database
+
+   SYNOPSIS
+      chipNode = FindChip(chipType, chipNum)
+      D0                  D0        D1
+
+      struct IOBlixChipNode *FindChip( ULONG, ULONG );
+
+   FUNCTION
+      This function searches the internal list for the chip matching the given
+      values for chip type and number. If the search is successfull the chip's
+      information block is returned, but the chip is NOT obtained!
+      You may use this function just to check if a certian chip is available
+      and to get some information about it. All fields in IOBlixChipNode are
+      considered READ-ONLY, you must not change anything.
+
+   INPUTS
+      chipType -- the type of chip you want to find
+      chipNum  -- internal number of the chip you want to find
+                  valid range is 0..IOBLIX_Z2_NUM_SERUNITS for UARTs
+                                 0..IOBLIX_Z2_NUM_PARUNITS for parallel ports
+                                 0..IOBLIX_Z2_NUM_FIFOUNITS for external FIFOs
+                  to obtain a chip on multiple IOBlix boards use
+                  boardNum*10+chipNum as value, ie 13 is the third UART on the
+                  second board
+
+   RESULTS
+      chipNode -- a pointer to the chip's information block, or NULL if the
+                  chip is not available.
+
+   EXAMPLE
+      /* try to find serial unit 0 on first IOBlix board */
+      struct IOBlixResource *IOBlixBase;
+      struct IOBlixChipNode *chipInfo;
+
+      if (IOBlixBase = OpenResource(IOBLIXRESNAME)) {
+        if (chipInfo = FindChip(ICT_Z2_SERIAL_CHIP, 0)) {
+          /* chip is available, let's see what it is able to do */
+          printf("UART is a %s with %ld bytes FIFO"\n,
+                 chipInfo->icn_Description, chipInfo->icns_FIFOSize);
+          printf("UART is in use by %s\n",
+                 (chipInfo->icn_Owner) ? chipInfo->icn_Owner : "nobody");
+        } else {
+          printf("serial port #0 is not available\n");
+        }
+      }
+
+   SEE ALSO
+      ReleaseChip, FindChip
+
+ioblix.resource/FreeChipList                       ioblix.resource/FreeChipList
+
+   NAME
+      FreeChipList -- free a previously allocated chip list
+
+   SYNOPSIS
+      void = FreeChipList( list )
+                           A0
+
+      void FreeChipList( struct List * );
+
+   FUNCTION
+      This function frees the given list again.
+
+   INPUTS
+      list     -- a list previously allocated by AllocChipList(). Passing NULL
+                  is a no-op.
+
+   SEE ALSO
+      AllocChipList
+
+ioblix.resource/ObtainChip                           ioblix.resource/ObtainChip
+
+   NAME
+      ObtainChip -- obtain a chip for exclusive use
+
+   SYNOPSIS
+      chipNode = ObtainChip(chipType, chipNum, newOwner, oldOwner)
+      D0                    D0        D1          A0        A1
+
+      struct IOBlixChipNode *ObtainChip( ULONG, ULONG, UBYTE *, UBYTE ** );
+
+   FUNCTION
+      This function attempts to obtain the specified chip for exclusive use.
+      The name newOwner is used as an identifier to tell other programs who
+      currently has obtained the chip.
+      If the chip is not in use by anybody then the IOBlixChipNode of this chip
+      is returned to show a successfull allocation. If the chip is already in
+      use then the return value will be NULL, and the identifier of the using
+      program is retured in oldOwner, if a valid pointer is given. If also
+      oldOwner is still NULL then the chip is not available.
+
+   INPUTS
+      chipType -- the type of chip you want to obtain
+      chipNum  -- internal number of the chip you want to obtain
+                  valid range is 0..IOBLIX_Z2_NUM_SERUNITS for UARTs
+                                 0..IOBLIX_Z2_NUM_PARUNITS for parallel ports
+                                 0..IOBLIX_Z2_NUM_FIFOUNITS for external FIFOs
+                  to obtain a chip on multiple IOBlix boards use
+                  boardNum*10+chipNum as value, ie 13 is the third UART on the
+                  second board
+      newOwner -- a string to identify you as the current owner of the chip
+      oldOwner -- pointer to a string where the identfier of a previous owner
+                  will be placed. If NULL then it will not be used.
+
+   RESULTS
+      chipNode -- If the chip is available and not in use then chipNode will be
+                  a pointer to IOBlixChipNode, which contains various
+                  information about the chip. If the chip is either not
+                  available or already obtained by someone else, this function
+                  will return NULL. Use oldOwner to check if the chip is
+                  already in use.
+      oldOwner -- If given a valid pointer and the chip is obtained by someone
+                  else, the previous allocators identifier will be placed here.
+
+   EXAMPLE
+      /* try to obtain serial unit 0 on first IOBlix board */
+      struct IOBlixResource *IOBlixBase;
+      struct IOBlixChipNode *chipInfo;
+      UBYTE *oldOwner = NULL;
+
+      if (IOBlixBase = OpenResource(IOBLIXRESNAME)) {
+        if (chipInfo = ObtainChip(ICT_Z2_SERIAL_CHIP, 0, "Test", &oldOwner)) {
+          /* chip is obtained now, do whatever you want */
+          ReleaseChip(chipInfo);
+        } else {
+          if (oldOwner) {
+            printf("serial port #0 is in use by %s\n", oldOwner);
+          } else {
+            printf("serial port #0 is not available\n");
+          }
+        }
+      }
+
+   SEE ALSO
+      ObtainChipShared, ReleaseChip, ReleaseChipShared, FindChip
+
+ioblix.resource/ObtainChipShared               ioblix.resource/ObtainChipShared
+
+   NAME
+      ObtainChipShared -- obtain a chip for shared use
+
+   SYNOPSIS
+      chipNode = ObtainChipShared(chipType, chipNum, newOwner, oldOwner)
+            D0                    D0        D1          A0        A1
+
+      struct IOBlixChipNode *ObtainChipShared( ULONG, ULONG,
+                                               UBYTE *, UBYTE ** );
+
+   FUNCTION
+      This function attempts to obtain the specified chip for shared use.
+      The name newOwner is used as an identifier to tell other programs who
+      currently has obtained the chip.
+      If the chip is not in use by anybody or already obtained in shared mode
+      then the IOBlixChipNode of this chip is returned to show a successfull
+      allocation. If the chip is already obtained in exclusive mode the return
+      value will be NULL, and the identifier of the using program is retured in
+      oldOwner, if a valid pointer is given. If also oldOwner is still NULL then
+      the chip is not available.
+
+      When using a chip in shared mode you MUST use the semaphore contained in
+      the returned IOBlixChipNode while accessing the chip with Exec's semaphore
+      functions to gain exclusive access for a short time. After that you MUST
+      give access back to the system again with exec.library/ReleaseSemaphore.
+      When you got access to the chip you should save the important registers of
+      the chip (ie the control register of a parallel port), then put the values
+      you need there. Before calling ReleaseSemaphore() on the IOBlixChipNode's
+      semaphore you should put the previously saved values back to the important
+      registers to leave the chip in a specified state.
+
+      When this call succeeds the ICFF_SHARED flag will be set in the chip
+      node's icn_Flags field. It will remain set unless the last user has
+      released the chip with ReleaseChipShared(). The list
+      icn_SharedAccessorList contains all users, while icn_Owner just contains
+      the string "shared use".
+
+   INPUTS
+      chipType -- the type of chip you want to obtain
+      chipNum  -- internal number of the chip you want to obtain
+                  valid range is 0..IOBLIX_Z2_NUM_SERUNITS for UARTs
+                                 0..IOBLIX_Z2_NUM_PARUNITS for parallel ports
+                                 0..IOBLIX_Z2_NUM_FIFOUNITS for external FIFOs
+                  to obtain a chip on multiple IOBlix boards use
+                  boardNum*10+chipNum as value, ie 13 is the third UART on the
+                  second board
+      newOwner -- a string to identify you as the current owner of the chip
+      oldOwner -- pointer to a string where the identfier of a previous owner
+                  will be placed. If NULL then it will not be used.
+
+   RESULTS
+      chipNode -- If the chip is available and not in use then chipNode will be
+                  a pointer to IOBlixChipNode, which contains various
+                  information about the chip. If the chip is either not
+                  available or already obtained by someone else, this function
+                  will return NULL. Use oldOwner to check if the chip is
+                  already in use.
+      oldOwner -- If given a valid pointer and the chip is obtained by someone
+                  else, the previous allocators identifier will be placed here.
+
+   EXAMPLE
+      /* try to obtain serial unit 0 on first IOBlix board */
+      struct IOBlixResource *IOBlixBase;
+      struct IOBlixChipNode *chipInfo;
+      struct UARTRegisters *uart;
+      UBYTE *oldOwner = NULL;
+      UBYTE scratch
+
+      if (IOBlixBase = OpenResource(IOBLIXRESNAME)) {
+        if (chipInfo = ObtainChipShared(ICT_Z2_SERIAL_CHIP, 0,
+                                        "Test", &oldOwner)) {
+          /* chip is obtained in shared mode now */
+          uart = (struct UARTRegisters *)chipInfo->icn_ChipRegisters;
+
+          /* now access the chip exclusively for a short time */
+          ObtainSemaphore(&chipInfo->icn_SharedAccessSema);
+
+          /* first save some importan registers */
+          scratch = *uart->ur_scr;
+
+          /* now do whatever you want */
+          *uart->ur_scr = 0x42;
+
+          /* put back the saved registers */
+          *uart->ur_scr = scratch;
+
+          /* release the chip from exclusive access */
+          ReleaseSemaphore(&chipInfo->icn_SharedAccessSema);
+
+          /* completely release the chip */
+          ReleaseChipShared(chipInfo, "Test");
+        } else {
+          if (oldOwner) {
+            printf("serial port #0 is in use by %s\n", oldOwner);
+          } else {
+            printf("serial port #0 is not available\n");
+          }
+        }
+      }
+
+   SEE ALSO
+      ObtainChip, ReleaseChip, ReleaseChipShared, FindChip
+
+ioblix.resource/ReleaseChip                         ioblix.resource/ReleaseChip
+
+   NAME
+      ReleaseChip -- release a previously obtained chip from exclusive use
+
+   SYNOPSIS
+      ReleaseChip(chipNode)
+                  A0
+
+      void ReleaseChip( struct IOBlixChipNode * );
+
+   FUNCTION
+      ReleaseChip() is the inverse of ObtainChip(). After calling ReleaseChip()
+      the given chip is available again for others.
+
+      Each ObtainChip() call must be balanced by exactly one ReleaseChip() call.
+      Needless to say, havoc breaks out if the task releases a chip more times
+      than it has obtained it.
+
+   INPUTS
+      chipNode -- the node previously returned by ObtainChip(). Passing NULL is
+                  a no-op.
+
+   NOTES
+      Never release a shared obtained chip with ReleaseChip()!
+
+   SEE ALSO
+      ObtainChip, ObtainChipShared, ReleaseChipShared
+
+ioblix.resource/ReleaseChipShared             ioblix.resource/ReleaseChipShared
+
+   NAME
+      ReleaseChipShared -- release a previously obtained chip from shared use
+
+   SYNOPSIS
+      ReleaseChipShared(chipNode, owner)
+                        A0        A1
+
+      void ReleaseChipShared( struct IOBlixChipNode *, UBYTE * );
+
+   FUNCTION
+      ReleaseChipShared () is the inverse of ObtainChipShared().
+
+      Each ObtainChipShared() call must be balanced by exactly one
+      ReleaseChipShared() call. Needless to say, havoc breaks out if the task
+      releases a chip more times than it has obtained it. The chip remains in
+      shared mode unless all obtainers have released it.
+
+      You should call ReleaseChipShared() with the same owner name as
+      ObtainChipShared(), else the chip will remain obtained.
+
+      When the last obtainer calls ReleaseChipShared() the ICFF_SHARED flag will
+      be reset.
+
+   INPUTS
+      chipNode -- the node previously returned by ObtainChipShared(). Passing
+                  NULL is a no-op.
+      owner    -- the same owner as used for ObtainChipShared()
+
+
+   NOTES
+      Never release an exclusively obtained chip with ReleaseChipShared()!
+
+   SEE ALSO
+      ObtainChip, ObtainChipShared, ReleaseChip
+
+ioblix.resource/RemIRQHook                           ioblix.resource/RemIRQHook
+
+   NAME
+      RemIRQHook  - remove a previously installed interrupt function
+
+   SYNOPSIS
+      void = RemIRQHook( node )
+                         A0
+
+      void RemIRQHook( struct IRQHookNode * );
+
+   FUNCTION
+      Removes the given node from IOBlix' own interrupt chain.
+
+   INPUTS
+      node     -- a correctly initialized IRQHookNode
+
+   SEE ALSO
+      AddIRQHook
+
+

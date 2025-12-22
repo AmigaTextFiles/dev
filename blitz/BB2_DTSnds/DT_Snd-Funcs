@@ -1,0 +1,554 @@
+; Datatype Sound Functions V1.25
+; By Leigh Parry
+;
+; Requires :
+;    amigalibs.res in compiler options
+;    installed datatypes for samples
+
+; If you use this code please acknowledge me in docfiles
+; as this took quite a lot of work. Thankyou.
+
+; *** Thanks to James Boyd for Testing and suggestions ***
+
+; Seperate file DTS-Funcs.asc for INCBIN'ing
+
+;**** v1.25 ****
+;  Removed comments from code - If you want 'em e-mail me
+;  Newtype      - Stores pointer,default Period,waitlength,Frequency and samplelength
+;  DTSFree      - Free a sample object
+;  DTSFreeAll   - Free all sample objects
+;  DTSPlay      - Just plays a sample (use other funcs to change period/freq)
+;  DTSPlaySpeed - Plays a sample at required Period/Frequency
+;  DTSLength    - Get length to wait for sample at Period/Frequency/Current setting(s)
+;  DTSFreq      - Get/Set the Frequency of a sample
+;  DTSPeriod    - Get/Set Period of a sample
+;  DTSVolume    - Get/Set Period of a sample
+;  DTSPan       - Get/Set panning for a sample
+;  DTSType      - Get type of a sample
+;  DTSChanW     - Returns channels being used as Word
+;  DTSChanS     - Returns channels being used as String
+;  DTSSave      - Save through Datatypes
+;  DTSSaveNew   - Save to a new format (if possible)
+
+; Future
+; DTSChannel - set the channel a sample will be played
+; (May not be able to do channels due to sound.datatype)
+; Better error returns
+
+; Any other suggestions ?
+
+._Types_Const
+DEFTYPE .l
+
+#DTSObjects=#20
+
+NEWTYPE .DTSInfo
+  *o.b
+  period.l              ; default store
+  waitlength            ; default store
+  frequency             ; default store
+  samplelength          ; default store
+  sample                ; default store
+  *vhdr.VoiceHeader
+End NEWTYPE
+
+Dim DTSounds.DTSInfo(#DTSObjects)
+
+; Set some constants for V41 sound.datatype
+#SDTA_SampleType=#SDTA_Dummy+30
+#SDTA_Panning=#SDTA_Dummy+31
+#SDTA_Frequency=#SDTA_Dummy+32
+
+; Some for DTSFunctions use
+#DTS_Left=0
+#DTS_Centre=$8000
+#DTS_Right=$10000
+#DTS_IFF=#DTWM_IFF
+#DTS_RAW=#DTWM_RAW
+
+.
+; ------------------------------------------------------------
+;Free a sample object
+
+._DTSFree
+Statement DTSFree {OBJ}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    DisposeDTObject_ DTSounds(OBJ)\o
+    DTSounds(OBJ)\o=0,0,0,0,0
+  End If
+End Statement
+
+
+; ------------------------------------------------------------
+;Free all sample objects
+
+._DTSFreeAll
+Statement DTSFreeAll {}
+  SHARED DTSounds()
+  For n=0 to #DTSObjects
+    DTSFree {n}
+  Next n
+End Statement
+
+
+; ------------------------------------------------------------
+; Get/Set the volume of a sample
+; level<0 gets Volume
+; level>-1 sets the volume
+; (has a limit of 64, but I've used upto 255 - seems O.K.)
+; (maybe a boost or *4 of level for correct value?)
+
+._DTSVolume
+Function  DTSVolume {OBJ,level}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    Dim snd.TagItem(1)
+    If level<0
+      snd(0)\ti_Tag=#SDTA_Volume,&level
+      snd(1)\ti_Tag=0,0
+      GetDTAttrsA_ DTSounds(OBJ)\o,&snd(0)
+      Function Return level
+    Else
+      If level<0 Then level=0
+      If level>64 Then level=64 ; I've used upto 254 and still works ?
+      snd(0)\ti_Tag=#SDTA_Volume,level
+      snd(1)\ti_Tag=0,0
+      suc=SetDTAttrsA_(DTSounds(OBJ)\o,-1,-1,&snd(0))
+      Function Return -1
+    End If
+  End If
+End Statement
+
+
+; ------------------------------------------------------------
+; Get/Set the Frequency of a sample
+; freak<1 gets Frequency
+; freak>0 sets Frequency
+; (has limits of 8096-44100) - if you need otherwise just change
+
+._DTSFreq
+Function.l DTSFreq {OBJ,freak}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    Dim snd.TagItem(1)
+    speed.l=freak
+    If speed<1
+      snd(0)\ti_Tag=#SDTA_Frequency,&speed
+      snd(1)\ti_Tag=0,0
+      GetDTAttrsA_ DTSounds(OBJ)\o,&snd(0)
+      Function Return speed
+    Else
+      If speed<8097 Then speed=8096 ; lowest wanted value ?
+      If speed>44099 Then speed=44100 ; highest wanted value ?
+      snd(0)\ti_Tag=#SDTA_Frequency,speed
+      snd(1)\ti_Tag=0,0
+      suc=SetDTAttrsA_(DTSounds(OBJ)\o,-1,-1,&snd(0))
+      Function Return -1
+    End If
+  End If
+End Statement
+
+
+; ------------------------------------------------------------
+; Get/Set the Period of a sample
+; period<1 gets Period
+; period>0 sets Period
+; (has limit of 2000) - if you need otherwise just change
+
+
+._DTSPeriod
+Function.l DTSPeriod {OBJ,period}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    Dim snd.TagItem(1)
+    speed.l=period
+    If speed<1
+      snd(0)\ti_Tag=#SDTA_Period,&speed
+      snd(1)\ti_Tag=0,0
+      GetDTAttrsA_ DTSounds(OBJ)\o,&snd(0)
+      Function Return speed
+    Else
+      If speed>2000 Then speed=2000 ; highest wanted value ?
+      snd(0)\ti_Tag=#SDTA_Period,speed
+      snd(1)\ti_Tag=0,0
+      suc=SetDTAttrsA_(DTSounds(OBJ)\o,-1,-1,&snd(0))
+      Function Return -1
+    End If
+  End If
+End Statement
+
+
+; ------------------------------------------------------------
+; get the ticks to wait - Period or Frequency
+; <0 gets default waitlength
+; =0 gets waitlength for current Period & Frequency
+; <8096 gets waitlength for new period - not 100% accurate
+; >8095 gets waitlength for new frequency
+
+._DTSLength
+Function.l DTSLength {OBJ,speed}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    defwaitlength.l=DTSounds(OBJ)\waitlength
+    defperiod.l=DTSounds(OBJ)\period
+    deffrequency.l=DTSounds(OBJ)\frequency
+    samplelenth.l=DTSounds(OBJ)\samplelength
+    If speed<0
+      Function Return defwaitperiod
+    Else
+      If speed=0
+        newperiod.l=DTSPeriod{OBJ,0}
+        newfrequency.l=DTSFreq{OBJ,0}
+      Else
+        If speed<8096
+          newperiod.l=speed
+          newfrequency=deffrequency
+        Else
+          newperiod=defperiod
+          newfrequency=speed
+        End If
+      End If
+      leng=defwaitlength*newperiod/defperiod*newfrequency/deffrequency
+      Function Return leng
+    End If
+  Else
+    Function Return 0
+  End If
+End Function
+
+
+; ------------------------------------------------------------
+; Gets the type of sample
+; 0=8b  Mono   1=8b  Stereo
+; 2=16b Mono   3=16b Stereo
+
+
+._DTSType
+Function.l DTSType {OBJ}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    Dim snd.TagItem(1)
+    DEFTYPE .l samtype
+    snd(0)\ti_Tag=#SDTA_SampleType,&samtype
+    snd(1)\ti_Tag=0,0
+    GetDTAttrsA_ DTSounds(OBJ)\o,&snd(0)
+    Function Return samtype
+  Else
+    Function Return 0
+  End If
+End Statement
+
+
+; ------------------------------------------------------------
+; returns a word showing the channels being used
+
+
+._DTSChanW
+Function.w DTSChanW {}
+  DMA.w=Peek.w ($dff002)
+  Function Return DMA
+End Function
+
+
+; ------------------------------------------------------------
+; returns a 4 char string showing the channels being used
+
+
+._DTSChanS
+Function.s DTSChanS {}
+  CHAN$=Right$ ("000"+Bin$(DTSChanW{} AND 15),4)
+  Function Return CHAN$
+End Function
+
+
+; ------------------------------------------------------------
+; Get/Set the Panning of a sample
+; amount<0 gets Panning amount
+; amount=$0 sets Left      - use #DTS_Left
+; amount=$8000 sets Centre - use #DTS_Centre
+; amount=$10000 sets Right - use #DTS_Right
+
+._DTSPan
+Function.l DTSPan {OBJ,chan.l}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    Dim snd.TagItem(1)
+    If chan<0
+      snd(0)\ti_Tag=#SDTA_Panning,&chan
+      snd(1)\ti_Tag=0,0
+      GetDTAttrsA_ DTSounds(OBJ)\o,&snd(0)
+      Function Return chan
+    Else
+      If chan>$FFFF
+        chan=#DTS_Right
+      End If
+      snd(0)\ti_Tag=#SDTA_Panning,chan
+      snd(1)\ti_Tag=0,0
+      suc=SetDTAttrsA_(DTSounds(OBJ)\o,-1,-1,&snd(0))
+      Function Return suc
+    End If
+  End If
+  Delay_2
+End Statement
+
+
+; ------------------------------------------------------------
+; Plays a sample object
+; to change frequency or period use DTSPlaySpeed
+
+._DTSPlay
+Statement DTSPlay {OBJ}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    Dim snd.TagItem(3)
+    snd(0)\ti_Tag=#DTM_TRIGGER,0
+    snd(1)\ti_Tag=#STM_PLAY,0
+    snd(2)\ti_Tag=0,0
+    DoDTMethodA_ DTSounds(OBJ)\o,0,0,&snd(0)
+  End If
+End Statement
+
+
+;; ------------------------------------------------------------
+;; Pause a playing sample object
+;; (resume doesn't seem to work yet so this is STOP)
+;
+;._DTSPause
+;Statement DTSPause {OBJ}
+;  SHARED DTSounds()
+;  If DTSounds(OBJ)\o
+;    Dim snd.TagItem(3)
+;    snd(0)\ti_Tag=#DTM_TRIGGER,0
+;    snd(1)\ti_Tag=#STM_PAUSE,0
+;    snd(2)\ti_Tag=0,0
+;    DoDTMethodA_ DTSounds(OBJ)\o,0,0,&snd(0)
+;  End If
+;End Statement
+;
+
+;; ------------------------------------------------------------
+;; Resumes a paused sample object
+;; doesn't seem to work yet
+;
+;._DTSResume
+;Statement DTSResume {OBJ}
+;  SHARED DTSounds()
+;  If DTSounds(OBJ)\o
+;    Dim snd.TagItem(3)
+;    snd(0)\ti_Tag=#DTM_TRIGGER,0
+;    snd(1)\ti_Tag=#STM_RESUME,0
+;    snd(2)\ti_Tag=0,0
+;    DoDTMethodA_ DTSounds(OBJ)\o,0,0,&snd(0)
+;  End If
+;End Statement
+;
+
+; ------------------------------------------------------------
+; Stop a playing sample object
+
+._DTSStop
+Statement DTSStop {OBJ}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    Dim snd.TagItem(3)
+    snd(0)\ti_Tag=#DTM_TRIGGER,0
+    snd(1)\ti_Tag=#STM_STOP,0
+    snd(2)\ti_Tag=0,0
+    DoDTMethodA_ DTSounds(OBJ)\o,0,0,&snd(0)
+  End If
+End Statement
+
+
+;; ------------------------------------------------------------
+;; Checks to see if sample is playing
+;; *** doesn't work yet ***
+;
+;._DTSIsPlaying
+;Statement DTSIsPlaying {OBJ}
+;  SHARED DTSounds()
+;  If DTSounds(OBJ)\o
+;    Dim snd.TagItem(3)
+;    snd(0)\ti_Tag=#DTM_TRIGGER,0
+;    snd(1)\ti_Tag=#STM_PLAY,0
+;    snd(2)\ti_Tag=0,0
+;    DoDTMethodA_ DTSounds(OBJ)\o,0,0,&snd(0)
+;  End If
+;End Statement
+;
+
+; ------------------------------------------------------------
+; Plays a sample object at requires
+; to change frequency or period use functions
+; <1 play at default speed
+; <8096 play sample at period
+; >8095 play sample at frequency
+
+._DTSPlaySpeed
+Statement DTSPlaySpeed {OBJ,speed}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    Dim snd.TagItem(3)
+    If speed<1
+      suc=DTSPeriod {OBJ,DTSounds(OBJ)\period}
+      suc=DTSFreq {OBJ,DTSounds(OBJ)\frequency}
+    Else
+      If speed<8096
+        suc=DTSPeriod{OBJ,speed}
+      Else
+        suc=DTSFreq{OBJ,speed}
+      End If
+    End If
+    DTSPlay{OBJ}
+  End If
+End Statement
+
+
+; ------------------------------------------------------------
+; load the sample object and store pointers etc.
+
+._DTSLoad
+Function.l DTSLoad {Fyle.s,OBJ}
+  SHARED DTSounds()
+  Dim snd.TagItem(5)
+  snd(0)\ti_Tag=#DTA_SourceType,#DTST_FILE
+  snd(1)\ti_Tag=#DTA_GroupID,#GID_SOUND
+  snd(2)\ti_Tag=#SDTA_Volume,64
+  snd(3)\ti_Tag=#SDTA_Cycles,1
+  snd(4)\ti_Tag=0,0
+  name$=Fyle.s
+  If DTSounds(OBJ)\o Then DTSFree {OBJ}
+  *o.b=NewDTObjectA_(&name$,&snd(0))
+  If *o
+    DEFTYPE.VoiceHeader *vhdr
+    DEFTYPE.l sample,samplelength,period,frequency
+    snd(0)\ti_Tag=#SDTA_VoiceHeader,&*vhdr
+    snd(1)\ti_Tag=#SDTA_Sample,&sample
+    snd(2)\ti_Tag=#SDTA_SampleLength,&samplelength
+    snd(3)\ti_Tag=#SDTA_Period,&period
+    snd(4)\ti_Tag=#SDTA_Frequency,&frequency
+    snd(5)\ti_Tag=0,0
+    GetDTAttrsA_ *o,&snd(0)
+    leng.l=samplelength*50/*vhdr\vh_SamplesPerSec
+    DTSounds(OBJ)\o=*o,period,leng,frequency,samplelength,sample,*vhdr
+    Function Return -1
+  Else
+    DTSounds(OBJ)\o=0,0,0,0,0
+    Function Return 0
+  End If
+End Function
+
+
+; ------------------------------------------------------------
+; Save the sample to file as format
+; #DTS_IFF = IFF format
+; #DTS_RAW = Samples native format
+
+._DTSSave
+Function.l DTSSave {Fyle.s,OBJ,FRMT}
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    name$=Fyle.s
+    DEFTYPE .dtWrite dtw
+    fh.l=Open_(&name$,#MODE_NEWFILE)
+    If fh
+      dtw\MethodID=#DTM_WRITE
+      dtw\dtw_FileHandle=fh
+      dtw\dtw_Mode=FRMT
+      OK=DoDTMethodA_ (DTSounds(OBJ)\o,0,0,&dtw)
+      Close_ fh
+    End If
+  End If
+  Function Return OK
+End Function
+
+
+; ------------------------------------------------------------
+
+._DTSSaveNew
+Function.l DTSSaveNew{OBJ,DestDT.s,DSTFyle.s}
+  DEFTYPE .DataType       *ddt
+  DEFTYPE .DataTypeHeader *dth
+
+  If DestDT.s="8SVX"
+    success=DTSSave{DSTFyle.s,OBJ,#DTS_IFF}
+  Else
+
+  Dim attrs.TagItem(15)
+  sfyle$=SRCFyle.s : dfyle$=DSTFyle.s
+  success=0  : destdt$=DestDT.s
+
+  SHARED DTSounds()
+  If DTSounds(OBJ)\o
+    *ddt=ObtainDataTypeA_(#DTST_RAM,&destdt$,0)
+    If *ddt
+      *dth=*ddt\dtn_Header
+      GroupID$=Left$(Peek$(&*dth\dth_GroupID),4)
+      If GroupID$="soun"
+        attrs(0)\ti_Tag=#DTA_SourceType,#DTST_RAM
+        attrs(1)\ti_Tag=#DTA_DataType,*ddt
+        attrs(2)\ti_Tag=0,0
+        *do.b=NewDTObjectA_(0,attrs(0))
+
+        If *do
+          objname$="" : objauthor$="" : objannotatio$=""
+          objcopyright$="" : objversion$=""
+          DEFTYPE .VoiceHeader *svh,*dvh
+          DEFTYPE.l sample,samplelength,period,svolume,cycles
+
+          attrs(0)\ti_Tag=#DTA_ObjName,&objname$
+          attrs(1)\ti_Tag=#DTA_ObjAuthor,&objauthor$
+          attrs(2)\ti_Tag=#DTA_ObjAnnotation,&objannotation$
+          attrs(3)\ti_Tag=#DTA_ObjCopyright,&objcopyright$
+          attrs(4)\ti_Tag=#DTA_ObjVersion,&objversion$
+          attrs(5)\ti_Tag=#SDTA_Sample,&sample
+          attrs(6)\ti_Tag=#SDTA_SampleLength,&samplelength
+          attrs(7)\ti_Tag=#SDTA_Period,&period
+          attrs(8)\ti_Tag=#SDTA_Volume,&svolume
+          attrs(9)\ti_Tag=#SDTA_Cycles,&cycles
+          attrs(10)\ti_Tag=#SDTA_VoiceHeader,&*svh
+          attrs(11)\ti_Tag=0,0
+          GetDTAttrsA_ DTSounds(OBJ)\o,&attrs(0)
+
+          attrs(0)\ti_Tag=#SDTA_VoiceHeader,&*dvh
+          attrs(1)\ti_Tag=0,0
+          GetDTAttrsA_ *do,&attrs(0)
+
+          attrs(0)\ti_Tag=#DTA_ObjName,objname$
+          attrs(1)\ti_Tag=#DTA_ObjAuthor,objauthor$
+          attrs(2)\ti_Tag=#DTA_ObjAnnotation,objannotation
+          attrs(3)\ti_Tag=#DTA_ObjCopyright,objcopyright
+          attrs(4)\ti_Tag=#DTA_ObjVersion,objversion
+          attrs(5)\ti_Tag=#SDTA_Sample,sample
+          attrs(6)\ti_Tag=#SDTA_SampleLength,samplelength
+          attrs(7)\ti_Tag=#SDTA_Period,period
+          attrs(8)\ti_Tag=#SDTA_Volume,svolume
+          attrs(9)\ti_Tag=#SDTA_Cycles,cycles
+          attrs(10)\ti_Tag=0,0
+          *dvh=*svh
+          *dvh\vh_Compression=#CMP_NONE
+          suc=SetDTAttrsA_(*do,-1,-1,&attrs(0))
+
+          DEFTYPE .dtWrite dtw
+          fh.l=Open_(&dfyle$,#MODE_NEWFILE)
+          If fh
+            dtw\MethodID=#DTM_WRITE
+            dtw\dtw_FileHandle=fh
+            dtw\dtw_Mode=#DTWM_RAW
+            success=DoDTMethodA_ (*do,0,0,&dtw)
+            Close_ fh
+            If success=0 Then DeleteFile_ &dfyle$
+          End If
+          attrs(0)\ti_Tag=#SDTA_Sample,0
+          attrs(1)\ti_Tag=0,0
+          suc=SetDTAttrsA_(*do,-1,-1,&attrs(0))
+          DisposeDTObject_ *do
+        End If
+      End If
+      ReleaseDataType_ *ddt
+    End If
+  End If
+  End If
+Function Return success
+End Function
+

@@ -1,0 +1,68 @@
+/* NotifyTimer 1.02 */
+/* Copyright © Michael Tanzer, 1991, 1992 */
+/* See additional notices in accompanying documentation */
+parse arg time thismsg .                   /* Get time and msg number      */
+now = time()                               /* Get the current time         */
+if upper(time)='NOW' then time = substr(now,1,5)
+cm = substr(now,1,2)*60+substr(now,4,2)    /* Get current time in minutes  */
+dm = substr(time,1,2)*60+substr(time,4,2)  /* Get desired time in minutes  */
+
+do forever
+  mm = dm-cm                               /* Get minutes until time       */
+  if mm=0 then ss = 0                      /* If now not desired time...   */
+  else ss = substr(now,7,2)                /* ...get seconds into minute   */
+  if mm<0 then mm = mm+1440                /* Handle midnight crossing     */
+  if mm<10 then leave                      /* Leave loop if <10 min        */
+  mm = mm*9%10                             /* Get 90% of minutes           */
+  call wait                                /* Go wait 90% of time          */
+  now = time()                             /* Get current time             */
+  cm = substr(now,1,2)*60+substr(now,4,2)  /* Get current time in minutes  */
+  end                                      /* Go handle remaining 10%      */
+
+call wait                                  /* Wait for desired time        */
+message = subword(getenv('Notify.'thismsg),2) /* Get the message           */
+call delmsg                                /* Go delete msg from list      */
+if result=0 then exit                      /* Exit if deleted earlier      */
+if upper(word(message,1))='CMD' then do    /* Handle 'CMD' request         */
+  call pragma('S',4000)                    /*   Set stack size             */
+  address command subword(message,2)       /*   Issue the command to ADOS  */
+  exit                                     /*   No requester/announcement  */
+  end
+call screentofront()                       /* Bring Workbench to front     */
+if getenv('Notify.quiet')~=1 then          /* Handle noisy messages        */
+  address arexx 'NotifyNoise' time message
+twentyfour = getenv('Notify.twentyfour')   /* Get value from Notify        */
+if ~twentyfour then do                     /* Adjust for 12-hour clock     */
+  parse var time hh':'mm                   /*   Separate hour and minute   */
+  if hh<12 then suffix = 'am'              /*   Set for am...              */
+  else suffix = 'pm'                       /*   ...or pm                   */
+  hh = hh//12                              /*   Limit hour to 12           */
+  if hh=0 then hh = '12'                   /*   Handle 12                  */
+  time = hh':'mm||suffix                   /*   Rebuild time               */
+  end
+if words(message)=0 then prompt = 'It is now' time
+else prompt = 'It is now' time'\'message
+call request(0,0,prompt,,'OK')             /* Display time and message     */
+exit                                       /* Get out                      */
+
+wait:                                      /* Wait for time to pass        */
+  ss = mm*60-ss                            /* Subtract seconds into minute */
+  signal on halt                           /* Disable halt interrupt       */
+  call delay(ss*50)                        /* Wait a while                 */
+halt:
+  signal off halt                          /* Enable halt interrupt        */
+  return
+
+delmsg:                                    /* Delete message from list     */
+  call forbid()                            /* Hold other tasks             */
+  msglist = getenv('Notify.list')          /* Get list of msg numbers      */
+  w = find(msglist,thismsg)                /* Get word number of our msg   */
+  if w=0 then do                           /* If msg already deleted...    */
+    call permit()                          /*   Free other tasks           */
+    return 0                               /*   Indicate failure           */
+    end
+  msglist = strip(delword(msglist,w,1),'B')/* Delete our msg from list     */
+  call setenv('Notify.list',msglist)       /* Store new list               */
+  call permit()                            /* Free other tasks             */
+  call setenv('Notify.'thismsg)            /* Delete the message           */
+  return 1                                 /* Indicate success             */

@@ -1,0 +1,327 @@
+DEFINITION MODULE Dos;
+
+FROM SYSTEM IMPORT
+ CAST,ADDRESS,BYTE,LONGSET,WORD;
+FROM Exec IMPORT
+ Library,Message,MessagePtr,MsgPort,MsgPortPtr,Task;
+
+CONST
+ dosName="dos.library";
+(* Open modes *)
+ readWrite=1004;
+ readOnly=1005;
+ oldFile=readOnly;
+ newFile=1006;
+(* Seek modes *)
+ beginning=-1;
+ current=0;
+ end=1;
+(* Lock modes *)
+ sharedLock=-2;
+ exclusiveLock=-1;
+
+ ticksPerSecond=50;
+(* FileInfoBlock.protection bits *)
+ delete=0;
+ execute=1;
+ writeProt=2;
+ readProt=3;
+ archive=4;
+
+TYPE
+ BPTR=ADDRESS;
+ BSTR=ADDRESS;
+ FileHandlePtr=BPTR;
+ FileLockPtr=BPTR; 
+ Date=RECORD
+  days: LONGINT;
+  minute: LONGINT;
+  tick: LONGINT;
+ END;
+ DatePtr=POINTER TO Date;
+ FileInfoBlockPtr=POINTER TO FileInfoBlock;
+ FileInfoBlock=RECORD
+  diskKey: LONGINT;
+  dirEntryType: LONGINT;
+  fileName: ARRAY [0..107] OF CHAR;
+  protection: LONGSET;
+  entryType: LONGINT;
+  size: LONGINT;
+  numBlocks: LONGINT;
+  date: Date;
+  comment: ARRAY [0..115] OF CHAR;
+ END;
+ InfoDataPtr=POINTER TO InfoData;
+ InfoData=RECORD
+  numSoftErrors: LONGINT;
+  unitNumber: LONGINT;
+  diskState: LONGINT;
+  numBlocks: LONGINT;
+  numBlocksUsed: LONGINT;
+  bytesPerBlock: LONGINT;
+  diskType: LONGINT;
+  volumeNode: BPTR;
+  inUse: LONGINT;
+ END;
+
+CONST
+(* InfoData.diskState *)
+ writeProtect=80;
+ validating=81;
+ validated=82;
+(* InfoData.diskType *)
+ noDiskPresent=-1;
+ unreadableDisk=CAST(LONGINT,"BAD ")-ORD(" ");
+ dosDisk=CAST(LONGINT,"DOS ")-ORD(" ");
+ notReallyDos=CAST(LONGINT,"NDOS");
+ kickstartDisk=CAST(LONGINT,"KICK");
+(* err:=IOErr() *)
+ noFreeStore=103;
+ taskTableFull=105;
+ lineTooLong=120;
+ fileNotObject=121;
+ invalidResidentLibrary=122;
+ noDefaultDir=201;
+ objectInUse=202;
+ objectExists=203;
+ dirNotFound=204;
+ objectNotFound=205;
+ badStreamName=206;
+ objectTooLarge=207;
+ actionNotKnown=209;
+ invalidComponentName=210;
+ invalidLock=211;
+ objectWrongType=212;
+ diskNotValidated=213;
+ diskWriteProtected=214;
+ renameAcrossDevices=215;
+ directoryNotEmpty=216;
+ tooManyLevels=217;
+ deviceNotMounted=218;
+ seekError=219;
+ commentTooBig=220;
+ diskFull=221;
+ deleteProtected=222;
+ writeProtected=223;
+ readProtected=224;
+ notADosDisk=225;
+ noDisk=226;
+ noMoreEntries=232;
+(* Exit() *)
+ ok=0;
+ warn=5;
+ error=10;
+ fail=20;
+(* break flags Exec.SetSignal, etc *)
+ ctrlC=12;
+ ctrlD=13;
+ ctrlE=14;
+ ctrlF=15;
+
+TYPE
+ ProcessPtr=MsgPortPtr;
+ Process=RECORD
+  task: Task;
+  msgPort: MsgPort;
+  pad: WORD;
+  segList: BPTR;
+  stackSize: LONGINT;
+  globVec: ADDRESS;
+  taskNum: LONGINT;
+  stackBase: BPTR;
+  result2: LONGINT;
+  currentDir: FileLockPtr;
+  cis: BPTR;
+  cos: BPTR;
+  consoleTask: MsgPortPtr;
+  fileSystemTask: MsgPortPtr;
+  cli: BPTR;
+  returnAddr: ADDRESS;
+  pktWait: ADDRESS;
+  windowPtr: ADDRESS;
+ END;
+ FileHandle=RECORD
+  link: MessagePtr;
+  port: MsgPortPtr;
+  type: MsgPortPtr;
+  buf: LONGINT;
+  pos: LONGINT;
+  end: LONGINT;
+  func1: LONGINT;
+  func2: LONGINT;
+  func3: LONGINT;
+  arg1: LONGINT;
+  arg2: LONGINT;
+ END;
+ DosPacket=RECORD
+  link: MessagePtr;
+  port: MsgPortPtr;
+  type: LONGINT; (* Action *)
+  res1: LONGINT; (* Status *)
+  res2: LONGINT; (* Status2 *)
+  arg1: LONGINT; (* BufAddr *)
+  arg2: LONGINT;
+  arg3: LONGINT;
+  arg4: LONGINT;
+  arg5: LONGINT;
+  arg6: LONGINT;
+  arg7: LONGINT;
+ END;
+ DosPacketPtr=POINTER TO DosPacket;
+ StandardPacket=RECORD
+  msg: Message;
+  pkt: DosPacket;
+ END;
+ 
+CONST
+(* DosPacket.type *)
+ getBlock=2;
+ setMap=4;
+ die=5;
+ event=6;
+ currentVolume=7;
+ locateObject=8;
+ renameDisk=9;
+ write=ORD('W');
+ read=ORD('R');
+ freeLock=15;
+ deleteObject=16;
+ renameObject=17;
+ copyDir=19;
+ waitChar=20;
+ setProtect=21;
+ createDir=22;
+ examineObject=23;
+ examineNext=24;
+ diskInfo=24;
+ info=25;
+ setComment=28;
+ parent=29;
+ timer=30;
+ inhibit=31;
+ diskType=32;
+ diskChange=33;
+
+TYPE
+ DosLibrary=RECORD
+  lib: Library;
+  root: ADDRESS;
+  gv: ADDRESS;
+  a2: LONGINT;
+  a5: LONGINT;
+  a6: LONGINT;
+ END;
+ RootNode=RECORD
+  taskArray: BPTR;
+  consoleSegment: BPTR;
+  time: Date;
+  restartSeg: BPTR;
+  info: BPTR;
+  fileHandlerSegment: BPTR;
+ END;
+ DosInfo=RECORD
+  mcName: BPTR;
+  devInfo: BPTR;
+  devices: BPTR;
+  handlers: BPTR;
+  netHand: ADDRESS;
+ END;
+ CommandLineInterface=RECORD
+  result2: LONGINT;
+  setName: BSTR;
+  commandDir: FileLockPtr;
+  returnCode: LONGINT;
+  commandName: BSTR;
+  failLevel: LONGINT;
+  prompt: BSTR;
+  standardInput: FileHandlePtr;
+  currentInput: FileHandlePtr;
+  commandFile: BSTR;
+  interactive: LONGINT;
+  background: LONGINT;
+  currentOutput: FileHandlePtr;
+  defaultStack: LONGINT;
+  standardOutput: FileHandlePtr;
+  module: BPTR;
+ END;
+ DeviceListType=(device,directory,volume);
+ DeviceList=RECORD
+  next: BPTR;
+  pad1,pad2,pad3: BYTE;
+  type: DeviceListType;
+  task: MsgPortPtr;
+  lock: BPTR;
+  CASE :DeviceListType OF
+  | device,directory:
+   handler: ADDRESS;
+   stackSize: LONGINT;
+   priority: LONGINT;
+   startup: LONGINT;
+   segList: BPTR;
+   globVec: ADDRESS
+  | volume:
+   volumeDate: Date;
+   lockList: BPTR;
+   diskType: LONGINT;
+   unused: LONGINT
+  END;
+  name: BSTR;
+ END;
+ FileLock=RECORD
+  link: BPTR;
+  key: LONGINT;
+  access: LONGINT;
+  task: MsgPortPtr;
+  volume: BPTR;
+ END;
+
+PROCEDURE Close(file: FileHandlePtr);
+PROCEDURE CreateDir(name: ADDRESS): FileLockPtr;
+PROCEDURE CreateProc(name: ADDRESS;
+                     pri: LONGINT;
+                     segment: BPTR;
+                     stackSize: LONGINT): ProcessPtr;
+PROCEDURE CurrentDir(lock: FileLockPtr): FileLockPtr;
+PROCEDURE DateStamp(v: DatePtr);
+PROCEDURE Delay(ticks: LONGINT);
+PROCEDURE DeleteFile(name: ADDRESS): LONGINT;
+PROCEDURE DeviceProc(name: ADDRESS): ProcessPtr;
+PROCEDURE DupLock(lock: FileLockPtr): FileLockPtr;
+PROCEDURE Examine(lock: FileLockPtr;
+                  infoBlock: FileInfoBlockPtr): LONGINT;
+PROCEDURE Execute(commandString: ADDRESS;
+                  input: FileHandlePtr;
+                  output: FileHandlePtr): LONGINT;
+PROCEDURE Exit(returnCode: LONGINT);
+PROCEDURE ExNext(lock: FileLockPtr;
+                 infoBlock: FileInfoBlockPtr): LONGINT;
+PROCEDURE IoErr(): LONGINT;
+(*PRIVATE*) PROCEDURE GetPacket(wait: LONGINT): DosPacketPtr;
+PROCEDURE Info(lock: FileLockPtr;
+               parameterBlock: InfoDataPtr): LONGINT;
+PROCEDURE Input(): FileHandlePtr;
+PROCEDURE IsInteractive(file: FileHandlePtr): LONGINT;
+PROCEDURE LoadSeg(name: ADDRESS): BPTR;
+PROCEDURE Lock(name: ADDRESS; accessMode: LONGINT): FileLockPtr;
+PROCEDURE Seek(file: FileHandlePtr;
+               position: LONGINT;
+               mode: LONGINT): LONGINT;
+PROCEDURE SetComment(name,comment: ADDRESS): LONGINT;
+PROCEDURE SetProtection(name: ADDRESS; mask: LONGSET): LONGINT;
+PROCEDURE Open(name: ADDRESS;
+               accessMode: LONGINT): FileHandlePtr;
+PROCEDURE Output(): FileHandlePtr;
+PROCEDURE ParentDir(lock: FileLockPtr): FileLockPtr;
+(*PRIVATE*) PROCEDURE QueuePacket(packet: DosPacketPtr): LONGINT;
+PROCEDURE Read(file: FileHandlePtr;
+               buffer: ADDRESS;
+               length: LONGINT): LONGINT;
+PROCEDURE Rename(oldName,newName: ADDRESS): LONGINT;
+PROCEDURE UnLoadSeg(segment: BPTR): LONGINT;
+PROCEDURE UnLock(lock: FileLockPtr);
+PROCEDURE WaitForChar(file: FileHandlePtr;
+                      timeout: LONGINT): LONGINT;
+PROCEDURE Write(file: FileHandlePtr;
+                buffer: ADDRESS;
+                length: LONGINT): LONGINT;
+END Dos.

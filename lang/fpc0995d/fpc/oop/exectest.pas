@@ -1,0 +1,142 @@
+PROGRAM test;
+
+{
+    A small test of execobject unit.
+
+    nils.sjoholm@mailbox.swipnet.se
+}
+
+uses exec, execobject,strings;
+
+
+    VAR
+
+    Mylist   : pList;
+    MyNode   : pNode;
+    i        : Longint;
+    temp     : Longint;
+    buffer   : PChar;
+    bufsize  : Longint;
+    templist : pList;
+    myexec : pExecObject;
+   
+BEGIN
+    myexec := New(pExecObject,Create);
+    if not assigned(myexec) then begin
+       writeln('Couldn''t allocate ExecObject');
+       halt(20);
+    end;
+    
+
+    myexec^.AddS('Monday');
+    myexec^.AddS('Tuesday');
+    myexec^.AddS('Wednesday');
+    myexec^.AddS('Thursday');
+    myexec^.AddS('Friday');
+    myexec^.AddS('Saterday');
+    MyNode := myexec^.AddS('Sunday');
+    
+    if not assigned(MyNode) then begin
+       writeln('Can''t allocate memory for strings');
+       Dispose(myexec,Free);
+       halt(20);
+    end;
+
+    writeln;
+    WriteLN('This is the list');
+    myexec^.PrintList;
+
+    writeln;
+    WriteLN('Now we are going to remove the last node');
+    WriteLN('>> Press return');
+    readln;
+    myexec^.DeleteLast;
+    myexec^.PrintList;
+    writeln;
+
+    WriteLN('>> Press return to get the size of the list');
+    writeln;
+    readln;
+    WriteLN('The size of allocated list is ', myexec^.SizeOfList);
+    writeln;
+
+    writeln('Now we are going to print all strings' +#10+ 'in the list with the internal commands');
+    WriteLN('>> Press return');
+    readln;
+
+    i := myexec^.Count;
+    MyNode := myexec^.First;
+    FOR temp := 1 TO i DO BEGIN
+        WriteLN(MyNode^.ln_Name);
+        MyNode := myexec^.Next(MyNode);
+    END;
+
+    writeln;
+    WriteLN('We will move the last node to the top');
+    WriteLN('>> Press return');
+    readln;
+    MyNode := myexec^.Last;
+    myexec^.Top(MyNode);
+    myexec^.PrintList;
+    writeln;
+
+    WriteLN('We shall change the value in one node');
+    WriteLN('>> Press return');
+    readln;
+    MyNode := myexec^.First;
+    MyNode := myexec^.Next(MyNode);
+    myexec^.UpDateS(MyNode,'This is the new day');
+    myexec^.PrintList;
+    writeln;
+
+    MyNode := myexec^.Next(MyNode);
+    WriteLN('Now we delete one node');
+    WriteLN('>> Press return');
+    readln;
+    WriteLN('This node is going to be deleted ',myexec^.GetData(MyNode));
+    myexec^.Delete(MyNode);
+    myexec^.PrintList;
+
+    writeln;
+    WriteLN('Sort the list');
+    WriteLN('>> Press return');
+    readln;
+    myexec^.Sort;
+    myexec^.PrintList;
+
+    writeln;
+    writeln('Search for a node, in this case Friday');
+    WriteLN('>> Press return');
+    readln;
+    MyNode := myexec^.FindS('Friday');
+    IF assigned(MyNode) THEN BEGIN
+        WriteLN('found the node ',MyNode^.ln_Name);
+        
+    END ELSE BEGIN
+        WriteLN('Node not found');
+    END;
+
+    writeln;
+    WriteLN('And now copy the list to a stringbuffer' +#10+ 'and print it');
+    WriteLN('>> Press return');
+    readln;
+    bufsize := myexec^.SizeOfList;
+    buffer := StrAlloc(bufsize);
+    myexec^.ToBuffer(buffer);
+    WriteLN(buffer);
+
+    writeln;
+    WriteLN('Press return to destroy the list');
+    readln;
+    Dispose(myexec,Free);
+    writeln;
+    WriteLN('All done');
+   
+END.
+
+
+
+
+
+
+

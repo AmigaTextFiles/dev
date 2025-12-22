@@ -1,0 +1,340 @@
+; 5/6 2018 -=ONIX=-
+; Complete listing of a BCPL startup-code for AmigaOS1.2
+; Okay, 30 years too late to be of any use but anyway...
+; :ts=8
+; vasmm68k_mot -nosym -Fhunkexe -kick1hunks -quiet -o ram:Test bcpl_startup.a
+; Convention: Any number introduced by the dollar sign has got a special meaning.
+
+	SECTION	bcpl_startup,CODE	; Always 316 bytes!
+
+; Register set up by AmigaDOS/CLI:
+;			A0 - APTR pr_CIS^fh_Buf
+;			A1 - BCPL stack frame
+;			A2 - Global Vector (GV)
+;			A3 - pr_ReturnAddr
+;			A4 - code start (segment's first code instruction)
+;			A5 - function to invoke BCPL compiled code
+;			A6 - function to opt out from BCPL compiled code
+;			A7 - user stack pointer
+; D0 - D7 with different contents based on command line
+
+
+; Any BCPL function call (JSR A5) trashes D0-D4/A0/A3-A4!
+startup
+;	NOTE: Function $59 does not require the register A0 to be cleared
+	movea.l	$59*4(A2),A4	; A2 = GV, GV index = $59; get BPTR pr_SegList
+	moveq	#12,D0		; BCPL stack offset (min. 12 aka 3 long words!)
+	jsr	(A5)		; Get BPTR pr_SegList
+	move.l	D1,D2		; Remember
+	move.l	#$95,D1		; Positive GV items and functions ($95 = max.
+;				  149 items, the default)
+	lea	startup(pc),A4	; Code start address ('startup') into A4
+	movea.l	-4(A4),A4	; BPTR next segment
+	move.l	A4,-(sp)	; ...onto user stack
+	move.l	D2,-(sp)	; D2 = save BPTR pr_SegList
+
+; Search for program's end of segments or for last long word of any additional
+; code segment, which tells us how tall the GV space must be; lower than $95 
+; results in $95 (default size of GV) or anything greater if you need more
+; global space in the GV (up from index $96 onward).
+sizegv
+	adda.l	A4,A4
+	adda.l	A4,A4		; APTR 2nd code segment
+	move.l	A4,D0		; Segment exists?
+	beq.b	allocgv		; If not (no more entries in segment list), go
+;				  and demand local GV
+	move.l	4(A4),D0	; Read 1st long word of 2nd code segment
+;				  (e.g. #$0000009F), represents size in long
+;				  words of 2nd code segment
+	asl.l	#2,D0		; Into amount bytes
+	cmp.l	0(A4,D0.l),D1	; Compare read value with #$95 or with read
+;				  value at offset 'N', where 'N' was the last
+;				  long word of the 2nd, 3rd asf. code segment
+	bge.b	nextcodeseg	; If value is lower #$95, continue with next
+;				  code segment (there is no 3rd, because all
+;				  BCPL commands (CLI commands) do only contain
+;				  two code segments!)
+	move.l	0(A4,D0.l),D1	; Set and greater, read new value at offset 'N'
+;				  - it was greater #$95!
+nextcodeseg
+	movea.l	(A4),A4		; BPTR next segment (should be empty as BCPL
+;				  commands consist of just two code segments)
+	bra.b	sizegv
+
+; No more segments found; demand memory for local GV, either #$95 or more
+; long words 
+allocgv
+	move.l	D1,D6		; Size GV (min #$95)
+	addi.l	#$32,D1		; Plus space for 50 functions (maximum of those
+;				  negatives that form the official API!)
+	suba.l	A0,A0		; BCPL requires A0 as NULL register; it must
+;				  be cleared
+	movea.l	$1D*4(A2),A4	; 'getmem' MEMF_PUBLIC (similar to AllocVec)
+	moveq	#12,D0
+	jsr	(A5)		; WARNING: 'getmem' requires amount long words
+;				  not bytes!
+	tst.l	D1		; BPTR to local GV there?
+	beq.w	nomem		; If not...
+
+; Memory to create local GV present (incl. space for negative indices); prepare
+; local GV for initialisation  
+	addi.l	#$32,D1		; D1 = pointer allocated memory, plus 50 items
+;				  is the current address, i.e. the GV itself! 
+	move.l	$1C*4(A2),D5	; Remember function for initialising local GV in
+;				  D5 because we lose control to global GV just
+;				  one instruction further (globin)
+	movea.l	D1,A2		; (BPTR) memory is now equal local GV
+	adda.l	A2,A2		; 
+	adda.l	A2,A2		; APTR local GV
+	move.l	D1,D7		; BPTR local GV
+	movea.l	A2,A0		; APTR local GV A0 and A2
+	move.l	D6,(A0)+	; Set positive size of local GV (GV index $0)
+	movea.l	D6,A4		; Positive size local GV in A4
+	adda.l	D7,A4		; plus BPTR address of local GV = end of local
+;				  GV
+	adda.l	A4,A4
+	adda.l	A4,A4		; APTR end of local GV
+	move.l	#$474C0003,D0	; Identification "GL03" in D0
+loopid	move.l	D0,(A0)+	; Store ID at offset 'N' of local GV
+	addq.l	#2,D0		; = "GL05", "GL07", "GL09" asf.
+	cmpa.l	A4,A0 
+	ble.b	loopid		; As long end of local GV is not reached
+
+; CURRENT STACK LAYOUT A7 (user stack pointer):
+; [0]	BPTR SegList ( see move.l D2,-(sp) )
+; [4]	BPTR next segment ( see move.l A4,-(sp) )
+; [8]	For 'RTS' to fetch address (ROM code to return control to DOS)
+; [12]	pr_ReturnAddr (i.e. long word containing initial stack size, e.g. 4096
+; bytes)
+; Draft BCPL stack frame and record it in GV
+	suba.l	A0,A0		; Clear BCPL NULL register
+	move.l	12(sp),D0	; Stack size into D0 (out of pr_ReturnAddr),
+;				  e.g. 4096 bytes
+	lea	16(sp),A1	; 16(sp),A1 = BCPL stack frame = upper bound
+;				  user stack
+	suba.l	D0,A1		; Minus stack size = initial BCPL stack pointer,
+;				  ergo lower end user stack
+	move.l	#-1,4(A1)	; #1 BCPL stack = DOSTRUE - will be overridden
+;				  see [ movem.l A1/A3-A4,-12(A1,D0) ]
+	move.l	A1,D1		; BCPL stack frame = initial BCPL stack pointer
+	subi.l	#160,D0		; e.g. 4096 - 160 = 3936
+; Remember, each JSR to a BCPL routine requires space in the user stack frame.
+	add.l	D1,D0		; = BCPL stack frame upper bound (160 bytes
+;				  before the end of the user stack)
+	move.l	D0,8(A1)	; #2 BCPL stack = upper bound of BCPL stack
+;				  in user stack - anyhow, it gets overridden,
+;				  see [ movem.l A1/A3-A4,-12(A1,D0) ], really?
+	asr.l	#2,D1		; APTR BCPL stack frame pointer as BPTR
+	move.l	D1,$C*4(A2)	; File it in GV (GV index 12)
+
+	move.l	(sp)+,D7	; BPTR pr_SegList off user stack (pointer to
+;				  e.g. 00000002 00094217 00095F75) 
+	move.l	D7,D6		; Copy of it in D6
+	asl.l	#2,D6		; As APTR
+	add.l	0(A0,D6.l),D7	; A0 = 0, D6 = APTR pr_SegList pointer, D7 BPTR
+;				  pr_SegList pointer <-> D6 + D7 does not change
+;				  anything, normally! ;-)
+	asl.l	#2,D7		; Result is equal D6
+;				  Only when the SegList is in ROM (>= $FC0000
+;				  and <= $FFFFFF) then D6 and D7 differ.
+;				  (D6 is then a 24 bit value and D7 a 27 to
+;				  30 bit)
+;				  This stunt requires the DOS really to be
+;				  in this high segment!!!
+; Link segments as segment array - make them available to local GV.
+; Do initialising for ROM resident segments? - or plain RAM?
+loopseg
+	addq.l	#4,D6		; Pointer to first or next segment
+	cmp.l	D6,D7		; Compare values
+	blt.b	inram		; If lower, RAM
+;				  Following code is normally not executed
+;				  (for that, the SegList must be ROM resident)
+; Adapt ROM segments for local GV
+	move.l	0(A0,D6.l),D1	; BPTR current segment in D1
+	movea.l	D5,A4		; Function for initialising local GV
+;				  (was remembered in D5)
+	moveq	#12,D0		; Offset BCPL stack
+	jsr	(A5)		; Initialise local GV (globin)
+	tst.l	D1		; Does it fit?
+	beq.w	noseg		; If error, bring user stack into a valid
+;				  condition
+	bra.b	loopseg		; Else, continue with next segment
+
+; Adapt (available in ordinary address space) the segment for use by local GV
+inram	move.l	(sp)+,D1	; Push BPTR next segment off stack
+	movea.l	D5,A4		; Function for initialising local GV
+;				  (was remembered in D5)
+	moveq	#12,D0		; Offset BCPL stack
+	jsr	(A5)		; Initialise local GV (globin) 
+	tst.l	D1
+	beq.b	nogv		; If error, end program
+
+; NOTE: Local GV is now almost useable!!!
+
+; With the introduction of kickstart v33 (?) there was a new DOS record, CLI.
+; It gets used when the command in question is launched using a NEWCLI segment
+; or launched as a run-back code (CLI/Shell's RUN command was used).
+; Copy CommandLineInterface's whole record
+	movea.l	$86*4(A2),A4	; Offset (GV index 134) for getting BPTR
+;				  to CLI record (pr_CLI, global!)
+	moveq	#12,D0		; Offset BCPL stack
+	jsr	(A5)		; Get BPTR to current CLI record (pr_CLI)
+	asl.l	#2,D1		; Into APTR
+	movea.l	D1,A3		; To A3
+	move.l	A3,-(sp)	; Saved onto user stack - Exit requires it!
+	beq.b	setexit		; If no CLI record...
+	lea	$86*4(A2),A4	; Address of GV index 134 (get pr_CLI)
+	moveq	#15,D0		; 16 long words
+loopcli
+	move.l	(A3)+,(A4)+	; Copy CommandLineInterface entries ($86 up to
+;				  and including $95) so local (to GV) access
+;				  work
+	dbra	D0,loopcli	; As long as not all 16 long words copied
+
+setexit
+	lea	return(pc),A4	; Get return to callee function	
+	move.l	A4,$2*4(A2)	; ...and register in local GV (GV index $2,
+;				  'stop')
+
+; Now, deliver control to second code segment!
+	movea.l	$1*4(A2),A4	; Execute code (GV index $1, 'start')
+	moveq	#32,D0		; 32; BCPL stack offset, why?
+;				  Does GV initialising return 5 long words with
+;				  informations? Haven't disassembled it yet...
+;				  Perhaps 'longjump' is used?...
+	moveq	#0,D1		; arg1 = 0 - offset code start within segment
+	jsr	(A5)		; Execute code at this address (segment)
+
+; Program was performed successfully (JMP A6, 2nd code segment), now terminate
+	moveq	#0,D0		; No error (RETURN_OK)
+
+cleanup
+	move.l	D0,D7		; Remember error code ('stop' returns return
+;				  code in D1 but our private moves it into D0!
+	move.l	(sp)+,D1	; APTR pr_CLI from user stack ( see
+;				  [ move.l A3,-(sp) ] )
+	beq.b	wocli		; If process ran without CLI record
+	movea.l	D1,A3		; APTR CLI
+	lea	$86*4(A2),A4	; Get BPTR CLI (GV index 134 (pr_CLI))
+	moveq	#15,D0		; Copy back 16 items (reflect changes)
+cback	move.l	(A4)+,(A3)+
+	dbra	D0,cback	; Until whole CLI record was copied back
+
+wocli	move.l	A2,D1		; APTR local GV
+	asr.l	#2,D1		; BPTR local GV
+	subi.l	#$32,D1		; Because of the 50 negative functions (DOS API)
+	movea.l	$1E*4(A2),A4	; 'free' (give back memory used by local GV)
+	moveq	#12,D0		; Offset BCPL stack
+	jsr	(A5)		; Return memory to free list of memory
+	move.l	D7,D0
+	rts			; Back to CLI (we cannot use the ordinary 'stop'
+;				  function of BCPL, because we lost completely
+;				  access to the global and local GV!)
+
+
+nomem	; No more RAM, 'getmem' returned NULL
+	tst.l	(sp)+		; Put user stack straight (addq.w #4,sp)
+
+noseg	; Required segment not found
+	tst.l	(sp)+		; Same as above
+
+nogv	; Initialising GV failed
+	moveq	#-1,D0		; Program couldn't be executed.
+	rts			; Back to CLI (without freeing allocated memory!
+;				  It cannot be freed, because we lost access
+;				  to global GV)
+
+return
+	move.l	D1,D0		; This is the 'stop' function! Return code from
+;				  BCPL/assembler code into D0
+	bra.b	cleanup		; Clean up and reflect changes done to local GV
+
+; NOTE: Linker has to insert a NULL-word to make this code long word divisble!
+
+* ############################################################################
+
+; UP FROM HERE THE CODE IN QUESTION IS WRITTEN DOWN
+	SECTION	bcpl_code,CODE
+
+; BCPL specific
+_2ndCodeSegStart	; First long word of new code segment 
+	dc.l	(_2ndCodeSegEnd-_2ndCodeSegStart)/4	; Size of this segment in
+;							  amount of long words
+
+_base		; As usual for AmigaDOS (BCPL written), A4 contains pointer to
+;		  this address (segment start)
+
+; Enter your BCPL specific code here - NOTE: A4 points to _base, i.e code start
+; A2 = local GV, A1 is also set up for using local GV
+
+	suba.l	A0,A0
+	moveq	#12,D0
+	lea	_string-_base(A4),A3
+	move.l	A3,D1
+	asr.l	#2,D1		; APTR to BPTR
+	move.l	$49*4(A2),A4	; Print BSTR ('writes')
+	jsr	(A5)
+
+; Now, we can terminate with RETURN_OK (just calling JMP A6) or we can set an
+; error code and call "stop", index 2 of GV
+	suba.l	A0,A0
+	moveq	#12,D0
+	moveq	#1,D1		; Set ~0, retrieve = 0
+	moveq	#121,D2		; Error code (secondary) - for WHY-command! :-)
+	movea.l	$A*4(A2),A4	; Index 10, set or get result2 ('res2')
+	jsr	(A5)
+
+	suba.l	A0,A0
+	moveq	#12,D0
+	moveq	#5,D1		; Return with RETURN_WARN
+	move.l	$2*4(A2),A4	; Index 2 = 'stop'
+	jsr	(A5)		; Error code is supplied in D1 of receiver
+; We don't come back here...
+
+; Or, if we don't use index 2 ('stop'), we can use this
+;	jmp	(A6)		  Back to startup-code 
+
+	cnop	0,4
+_string
+	dc.b	24,'BCPL says "Hello World"',10
+	
+; Let end your code in front of this remark!
+
+	cnop	0,4
+; USED RECORD - note, this record is read backward!
+;
+; INDEX E   (-N)	END MARK
+;
+; [...]
+; [...]
+;
+; [INDEX S  (-6)]	Global Vector index to set
+; [INDEX V  (-5)]	Value for previous Global Vector index relative to
+;			segment address
+;
+; [INDEX S  (-4)]	Global Vector index to set
+; [INDEX V  (-3)]	Value for previous Global Vector index relative to
+;			segment address
+;
+; [INDEX S  (-2)]	Global Vector index to set
+; [INDEX V  (-1)]	Value for previous Global Vector index relative to
+;			segment address
+;
+; INDEX GV  ( 0)	Size required in long words for creating Global Vector
+;
+; Note that such an array is read from INDEX GV to INDEX E, thus any indices
+; of this array not being the GV size must be negative!
+; Anything within the brackets "[]" is optional.
+
+; BCPL loader specific - DO NOT WRITE CODE BEYOND THESE FOUR LONG WORDS
+	dc.l	0	; Index -3 of record. End of record, i.e. no more
+;			  information (INDEX E)
+	dc.l	$1	; Index -2 of record. File (see index -1) code
+;			  start in 1st longword ('start') of GV
+	dc.l	_base-_2ndCodeSegStart	; Index -1 of record.
+;			  Code start as offset in bytes counted from segment
+;			  address
+	dc.l	$95	; Index 0 of record (INDEX GV). Size of local GV in
+;			  amount long words
+_2ndCodeSegEnd
+	END

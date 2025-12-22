@@ -1,0 +1,8 @@
+		IFND LIBRARIES_KEYBOARD_LIB_I
+LIBRARIES_KEYBOARD_LIB_I	SET	1
+
+
+_LVOkeyAddInputHandler      	EQU	-6
+_LVOkeyRemInputHandler      	EQU	-12
+
+		ENDC

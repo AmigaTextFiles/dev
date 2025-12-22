@@ -1,0 +1,148 @@
+MODULE 'devices/serial','devices/parallel','exec/tasks','utility/tagitem','intuition/preferences'
+
+OBJECT DeviceData
+  Device|Lib:Lib,
+  Segment:APTR,
+  ExecBase:APTR,
+  CmdVectors:APTR,
+  CmdBytes:APTR,
+  NumCommands:UWORD
+
+CONST DEVICES_PRTBASE_I=1,
+ IOB_QUEUED=4,
+ IOB_CURRENT=5,
+ IOB_SERVICING=6,
+ IOB_DONE=7,
+ IOF_QUEUED=(1<<IOB_QUEUED),
+ IOF_CURRENT=(1<<IOB_CURRENT),
+ IOF_SERVICING=(1<<IOB_SERVICING),
+ IOF_DONE=(1<<IOB_DONE),
+ PB_IOR0=0,
+ PB_IOR1=1,
+ PB_IOOPENED=2,
+ PB_EXPUNGED=7,
+ PBF_IOR0=(1<<PB_IOR0),
+ PBF_IOR1=(1<<PB_IOR1),
+ PBF_IOOPENDED=(1<<PB_IOOPENED),
+ PBF_EXPUNGED=(1<<PB_EXPUNGED),
+ DUB_STOPPED=0,
+ DUF_STOPPED=(1<<DUB_STOPPED),
+ P_OLDSTKSIZE=$0800,
+ P_STKSIZE=$1000,
+ P_BUFSIZE=256,
+ P_SAFESIZE=128
+
+OBJECT PrinterData
+  Device|DD:DeviceData,
+  Unit:MP,
+  PrinterSegment:BPTR,
+  PrinterType:UWORD,
+  SegmentData:PTR TO PrinterSegment,
+  PrintBuf:PTR TO UBYTE,
+  PWrite:LONG,
+  PBothReady:LONG,
+  NEWUNION  IOR0
+    P0:IOExtPar,
+    S0:IOExtSer
+  UNION IOR1
+    P1:IOExtPar,
+    S1:IOExtSer
+  ENDUNION,
+  TIOR:TimeRequest,
+  IORPort:MP,
+  TC:TC,
+  OldStk[$800]:UBYTE,
+  Flags:UBYTE,
+  pad:UBYTE,
+  Preferences:Preferences,
+  PWaitEnabled:UBYTE,
+  Flags1:UBYTE,
+  Stk[$1000]:UBYTE,
+//  PUnit:PTR TO PrinterUnit, /* Can't find this one !!! */
+  PRead:LONG,
+  CallErrHook:LONG,
+  UnitNumber:ULONG,
+  DriverName:PTR TO UBYTE,
+  PQuery:LONG
+
+CONST PPCB_GFX=0,
+    PPCF_GFX=1,
+    PPCB_COLOR=1,
+    PPCF_COLOR=2,
+    PPC_BWALPHA=0,
+    PPC_BWGFX=1,
+    PPC_COLORALPHA=2,
+    PPC_COLORGFX=3,
+    PPCB_EXTENDED=2,
+    PPCF_EXTENDED=$4,
+    PPCB_NOSTRIP=3,
+    PPCF_NOSTRIP=$8,
+    PCC_BW=1,
+    PCC_YMC=2,
+    PCC_YMC_BW=3,
+    PCC_YMCB=4,
+    PCC_4COLOR=4,
+    PCC_ADDITIVE=8,
+    PCC_WB=9,
+    PCC_BGR=10,
+    PCC_BGR_WB=11,
+    PCC_BGRW=12,
+    PCC_MULTI_PASS=16
+
+OBJECT PrinterExtendedData
+  PrinterName:PTR TO CHAR,
+  Init:VOID,
+  Expunge:VOID,
+  Open:LONG,
+  Close:VOID,
+  PrinterClass:UBYTE,
+  ColorClass:UBYTE,
+  MaxColumns:UBYTE,
+  NumCharSets:UBYTE,
+  NumRows:UWORD,
+  MaxXDots:LONG,
+  MaxYDots:LONG,
+  XDotsInch:UWORD,
+  YDotsInch:UWORD,
+  Commands:PTR TO PTR TO PTR TO UBYTE,
+  DoSpecial:LONG,
+  Render:LONG,
+  TimeOutSecs:LONG,
+  8BitChars:PTR TO PTR TO UBYTE,
+  PrintMode:LONG,
+  ConvFunv:LONG,
+  TagList:PTR TO TagItem,
+  DoPreferences:LONG,
+  CallErrHook:VOID
+
+OBJECT PrinterSegment
+  NextSegment:BPTR,
+  runAlert:ULONG,
+  Version:UWORD,
+  Revision:UWORD,
+  PED:PrinterExtendedData
+
+OBJECT PrtDriverPreferences
+  Version:UWORD,
+  PrinterID[32]:UBYTE,
+  PrefName[FILENAME_SIZE-16]:CHAR,
+  Length:ULONG
+
+CONST PRTA_Dummy=(TAG_USER + $50000), /* V44 features */
+ PRTA_8BitGuns=(PRTA_Dummy + 1),
+ PRTA_ConvertSource=(PRTA_Dummy + 2),
+ PRTA_FloydDithering=(PRTA_Dummy + 3),
+ PRTA_AntiAlias=(PRTA_Dummy + 4),
+ PRTA_ColorCorrection=(PRTA_Dummy + 5),
+ PRTA_NoIO=(PRTA_Dummy + 6),
+ PRTA_NewColor=(PRTA_Dummy + 7),
+ PRTA_ColorSize=(PRTA_Dummy + 8),
+ PRTA_NoScaling=(PRTA_Dummy + 9),
+ PRTA_DitherNames=(PRTA_Dummy + 20),
+ PRTA_ShadingNames=(PRTA_Dummy + 21),
+ PRTA_ColorCorrect=(PRTA_Dummy + 22),
+ PRTA_DensityInfo=(PRTA_Dummy + 23),
+ PRTA_LeftBorder=(PRTA_Dummy + 30),
+ PRTA_TopBorder=(PRTA_Dummy + 31),
+ PRTA_MixBWColor=(PRTA_Dummy + 32),
+ PRTA_Preferences=(PRTA_Dummy + 40)

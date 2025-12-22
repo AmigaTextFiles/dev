@@ -1,0 +1,243 @@
+(**************************************************************************)
+(*                                                                        *)
+(* Definition Module (C) Copyright 1994 Marcel Timmermans.                *)
+(* Date     : 06 Feb 1994                                                 *)
+(* Language : Modula-2                                                    *)
+(*                                                                        *)
+(**************************************************************************)
+
+(*$ Implementation- *)
+DEFINITION MODULE UtilityD;
+
+FROM SYSTEM IMPORT ADDRESS, LONGSET;
+FROM ExecD IMPORT
+ Library,MinNode;
+
+IMPORT Reg;
+
+(* utility.h *)
+CONST
+  utilityName="utility.library";
+
+TYPE
+  UtilityBase=RECORD
+    libNode:Library;
+    language:SHORTCARD;
+    reserved:SHORTCARD;
+  END;
+  UtilityBasePtr=POINTER TO UtilityBase;
+
+(* Tags are a general mechanism of extensible data arrays for parameter
+ * specification and property inquiry. In practice, tags are used in arrays,
+ * or chain of arrays.
+ *
+ *)
+
+(* tagitem.h *)
+TYPE
+  Tag=LONGCARD;
+  TagItem=RECORD
+    tag:Tag;            (* identifies the type of data *)
+    data:LONGCARD;      (* type-specific data	       *)
+  END;
+
+  TagPtr=POINTER TO Tag;
+  TagItemPtr=POINTER TO TagItem;
+
+(* constants for Tag.ti_Tag, system tag values *)
+CONST
+  tagDone=Tag(0);   (* terminates array of TagItems. ti_Data unused *)
+  tagEnd=Tag(0);    (* synonym for TAG_DONE			  *)
+  tagIgnore=Tag(1); (* ignore this item, not end of array		  *)
+  tagMore=Tag(2);   (* ti_Data is pointer to another array of TagItems
+            			   * note that this tag terminates the current array                    
+            			   *)
+  tagSkip=Tag(3);   (* skip this and the next ti_Data items	  *)
+
+(* Indication of user tag, OR this in with user tag values *)
+  tagUser=Tag(080000000H);
+
+(* NOTE: Until further notice, tag bits 16-30 are RESERVED and should be zero.
+ *	 Also, the value (TAG_USER | 0) should never be used as a tag value.
+ *)
+
+(* Tag filter logic specifiers for use with FilterTagItems() *)
+  tagFilterAND=0;  (* exclude everything but filter hits	*)
+  tagFilterNOT=1;  (* exclude only filter hits		*)         
+
+(* Mapping types for use with MapTags() *)
+  mapRemoveNotFound=0;        (* remove tags that aren't in mapList *)
+  mapKeepNotFound=1;         (* keep tags that aren't in mapList   *)
+
+(* Merging types for use with MergeTagItems() *)
+  mergeOrList1=0;   (* list 1's item is preferred	       *)
+  mergeOrList2=1;   (* list 2's item is preferred	       *)
+  mergeAndList1=2;  (* item must appear in both lists    *)
+  mergeAndList2=3;  (* item must appear in both lists    *)
+  mergeNotList1=4;  (* item must not appear in list 1    *)
+  mergeNotList2=5;  (* item must not appear in list 2    *)
+  mergeXor=6;       (* item must appear in only one list *)        
+
+(* pack.h *)
+(* PackTable definition:
+ *
+ * The PackTable is a simple array of LONGWORDS that are evaluated by
+ * PackStructureTags() and UnpackStructureTags().
+ *
+ * The table contains compressed information such as the tag offset from
+ * the base tag. The tag offset has a limited range so the base tag is
+ * defined in the first longword.
+ *
+ * After the first longword, the fields look as follows:
+ *
+ *	+--------- 1 = signed, 0 = unsigned (for bits, 1=inverted boolean)
+ *	|
+ *	|  +------ 00 = Pack/Unpack, 10 = Pack, 01 = Unpack, 11 = special
+ *	| / \
+ *	| | |  +-- 00 = Byte, 01 = Word, 10 = Long, 11 = Bit
+ *	| | | / \
+ *	| | | | | /----- For bit operations: 1 = TAG_EXISTS is TRUE
+ *	| | | | | |
+ *	| | | | | | /-------------------- Tag offset from base tag value
+ *	| | | | | | |		      \
+ *	m n n o o p q q q q q q q q q q r r r s s s s s s s s s s s s s
+ *					\   | |		      |
+ *	Bit offset (for bit operations) ----/ |		      |
+ *					      \ 		      |
+ *	Offset into data structure -----------------------------------/
+ *
+ * A -1 longword signifies that the next longword will be a new base tag
+ *
+ * A 0 longword signifies that it is the end of the pack table.
+ *
+ * What this implies is that there are only 13-bits of address offset
+ * and 10 bits for tag offsets from the base tag.  For most uses this
+ * should be enough, but when this is not, either multiple pack tables
+ * or a pack table with extra base tags would be able to do the trick.
+ * The goal here was to make the tables small and yet flexible enough to
+ * handle most cases.
+ *)
+
+CONST
+  pstSigned=31;
+  pstUnpack=30;   (* Note that these are active low... *)
+  pstPack=29;     (* Note that these are active low... *)
+  pstExists=26;   (* Tag exists bit true flag hack...  *)
+
+  pkctrlPackUnpack=LONGSET{};
+  pkctrlPackOnly  =LONGSET{30};
+  pkctrlUnpackOnly=LONGSET{29};
+
+  pkctrlByte      =LONGSET{31};
+  pkctrlWord      =LONGSET{31,27};
+  pkctrlLong      =LONGSET{31,28};
+
+  pkctrlUByte     =LONGSET{};
+  pkctrlUWord     =LONGSET{27};
+  pkctrlULong     =LONGSET{28};
+
+  pkctrlBit       =LONGSET{28,27};
+  pkctrlFlipBit   =LONGSET{31,28,27};
+
+(* name.h *)
+TYPE
+(* The named object structure *)
+(* Note how simple this structure is!  You have nothing else that is *)
+(* defined.  Remember that...  Do not hack at the namespaces!!! *)  
+  NamedObject=RECORD
+   object:ADDRESS; (* Your pointer, for whatever you want *)
+  END;
+  NamedObjectPtr=POINTER TO NamedObject;
+
+CONST
+(* Tags for AllocNamedObjectTags *)
+  anoNameSpace=4000;    (* Tag to define namespace	*)
+  anoUserSpace=4001;    (* tag to define userspace	*)
+  anoPriority=4002;     (* tag to define priority	  *)
+  anoFlags=4003;        (* tag to define flags		  *)
+
+(* Flags for tag ANO_FLAGS *)
+  nsNoDups=0;
+  nsCase=1;
+
+(* hooks.h *)
+TYPE
+  HookPtr=POINTER TO Hook;
+
+  HookProc=PROCEDURE(HookPtr{Reg.A0},
+                     (*object*)ADDRESS{Reg.A2},
+                     (*message*)ADDRESS{Reg.A1}):ADDRESS;
+
+
+  Hook=RECORD
+    node:MinNode;
+    entry:HookProc;   (* assembler entry point *)
+    subEntry:ADDRESS; (* often HLL entry point *)
+    data:ADDRESS;     (* owner specific	 *)
+  END;
+
+(* Hook calling conventions.
+ *
+ * The function pointed to by Hook.h_Entry is called with the following
+ * parameters:
+ *
+ *	A0 - pointer to hook data structure itself
+ *	A1 - pointer to parameter structure ("message")
+ *	A2 - Hook specific address data ("object")
+ *
+ * Control will be passed to the routine h_Entry.  For many
+ * High-Level Languages (HLL), this will be an assembly language
+ * stub which pushes registers on the stack, does other setup,
+ * and then calls the function at h_SubEntry.
+ *
+ * The standard C receiving code is:
+ *
+ *    HookFunc(struct Hook *hook, APTR object, APTR message)
+ *
+ * Note that register natural order differs from this convention for C
+ * parameter order, which is A0,A2,A1.
+ *
+ * The assembly language stub for "vanilla" C parameter conventions
+ * could be:
+ *
+ * _hookEntry:
+ *	move.l	a1,-(sp)		; push message packet pointer
+ *	move.l	a2,-(sp)		; push object pointer
+ *	move.l	a0,-(sp)		; push hook pointer
+ *	move.l	h_SubEntry(a0),a0	; fetch C entry point ...
+ *	jsr	(a0)			; ... and call it
+ *	lea	12(sp),sp		; fix stack
+ *	rts
+ *
+ * With this function as your interface stub, you can write a Hook setup
+ * function as:
+ *
+ * InitHook(struct Hook *hook, ULONG c_function)(), APTR userdata)
+ * {
+ * ULONG hookEntry)();
+ *
+ *     hook->h_Entry	= hookEntry;
+ *     hook->h_SubEntry = c_function;
+ *     hook->h_Data	= userdata;
+ * }
+ *
+ * With a compiler capable of registerized parameters, such as SAS C, you
+ * can put the C function in the h_Entry field directly. For example, for
+ * SAS C:
+ *
+ *   ULONG __saveds __asm HookFunc(register __a0 struct Hook *hook,
+ *				   register __a2 APTR	      object,
+ *				   register __a1 APTR	      message);
+ *
+ *)
+
+(* date.h *)
+TYPE
+  ClockData=RECORD
+    sec,min,hour,
+    mday,month,year,
+    wday:CARDINAL;
+  END;
+  ClockDataPtr=POINTER TO ClockData;
+
+END UtilityD.

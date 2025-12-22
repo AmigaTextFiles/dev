@@ -1,0 +1,118 @@
+OPT MODULE, PREPROCESS
+OPT EXPORT
+
+CONST STRINGSIZE=1024
+
+#define rexstring PTR TO CHAR
+
+CONST SIGINT=2,
+      REX_INTERACTIVE=1
+
+OBJECT rst_cmd
+  len
+  val:PTR TO LONG
+ENDOBJECT
+
+OBJECT rst_env
+  len
+  val:PTR TO LONG
+ENDOBJECT
+
+OBJECT rex_start
+  cmd:rst_cmd
+  host:rexstring
+  fsname:rexstring
+  host:rexstring
+  env:rst_env
+  port0
+  port1
+  port2
+  flags
+ENDOBJECT
+
+OBJECT rex_result
+  stat
+  message:rexstring
+ENDOBJECT
+
+OBJECT sgttyb
+  four
+  chars[4]:ARRAY
+  flags
+ENDOBJECT
+
+ENUM B0, B50, B75, B110, B134, B150, B200, B300, B600, B1200, B1800, B2400,
+     B4800, B9600, B19200, B38400
+
+SET TANDEM, CBREAK, LCASE, ECHO, CRMOD, RAW, ODDP, EVENP
+
+CONST ANYP=ODDP OR EVENP,
+      NLDELAY=$00000300,
+      NL0    =0,
+      NL1    =$00000100,
+      NL2    =$00000200,
+      NL3    =$00000300,
+      TBDELAY=$00000C00,
+      TAB0   =0,
+      TAB1   =$00000400,
+      TAB2   =$00000800,
+      XTABS  =$00000C00,
+      CRDELAY=$00003000,
+      CR0    =0,
+      CR1    =$00001000,
+      CR2    =$00002000,
+      CR3    =$00003000,
+      VTDELAY=$00004000,
+      FF0    =0,
+      FF1    =$00004000,
+      BSDELAY=$00008000,
+      BS0    =0,
+      BS1    =$00008000,
+      CRTBS  =$00010000,
+      PRTERA =$00020000,
+      CRTERA =$00040000,
+      TILDE  =$00080000,
+      MDMBUF =$00100000,
+      LITOUT =$00200000,
+      TOSTOP =$00400000,
+      FLUSHO =$00800000,
+      NOHANG =$01000000,
+      L001000=$02000000,
+      CRTKIL =$04000000,
+      PASS8  =$08000000,
+      CTLECH =$10000000,
+      PENDIN =$20000000,
+      DECCTQ =$40000000,
+      NOFLSH =$80000000
+
+OBJECT tchars
+  six
+  chars[6]:ARRAY
+ENDOBJECT
+
+OBJECT ltchars
+  six
+  chars[6]:ARRAY
+  mode
+ENDOBJECT
+
+OBJECT rex_ttysize
+  lines
+  cols
+ENDOBJECT
+
+OBJECT rex_ttymode
+  basic:sgttyb
+  more:tchars
+  yetmore:ltchars
+  andmore
+ENDOBJECT
+
+SET LCRTBS, LPRTERA, LCRTERA, LTILDE, LMDMBUF, LLITOUT, LTOSTOP, LFLUSHO,
+    LNOHANG, LL001000, LCRTKIL, LPASS8, LCTLECH, LPENDIN, LDECCTQ, LNOFLSH
+
+CONST REXPROG=100017,
+      REXVERS=1
+
+ENUM REXPROC_START=1, REXPROC_WAIT, REXPROC_MODES, REXPROC_WINCH,
+     REXPROC_SIGNAL

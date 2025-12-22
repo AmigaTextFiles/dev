@@ -1,0 +1,234 @@
+DEFINITION FOR LIBRARY MODULE RealTime ;
+
+FROM SYSTEM	IMPORT STRING, ADDRESS ;
+FROM Utility	IMPORT TAG_USER, TagItemPtr, Tag, HookPtr ;
+FROM Exec	IMPORT Node, MinList, Library, TaskPtr  ;
+
+(*============================================================================*)
+
+(* realtime.library's idea of time is based on a clock which emits a pulse    *)
+(* 1200 times a second (1.2kHz).All time values maintained by realtime.library*)
+(* are based on this number. For example, the field RealTimeBase->rtb_Time    *)
+(* expresses an amount of time equivalent to(RealTimeBase->rtb_Time/TICK_FREQ)*)
+(* seconds.								      *)
+
+CONST
+  TICK_FREQ = 1200 ;
+
+(*============================================================================*)
+
+(* Each Conductor represents a group of applications which wish to remain  *)
+(* synchronized together.						   *)
+(*									   *)
+(* This structure must only be allocated by realtime.library and is	   *)
+(* READ-ONLY!								   *)
+
+TYPE
+  ConductorPtr = POINTER TO Conductor ;
+  Conductor = RECORD
+    cdt_Link		: Node      ;
+    cdt_Reserved0	: CARDINAL  ;
+    cdt_Players		: MinList   ; (* this conductor's players      *)
+    cdt_ClockTime	: LONGINT   ; (* current time of this sequence *)
+    cdt_StartTime	: LONGINT   ; (* start time of this sequence   *)
+    cdt_ExternalTime	: LONGINT   ; (* time from external unit       *)
+    cdt_MaxExternalTime : LONGINT   ; (* upper limit on sync'd time    *)
+    cdt_Metronome	: LONGINT   ; (* MetricTime highest pri node   *)
+    cdt_Reserved1	: CARDINAL  ;
+    cdt_Flags		: BITSET    ; (* conductor flags	       *)
+    cdt_State		: SHORTCARD ; (* playing or stopped	       *)
+  END ;
+
+CONST
+(* Flag bits for Conductor.cdt_Flags *)
+  CONDUCTF_EXTERNAL = {0} ; (* clock is externally driven *)
+  CONDUCTF_GOTTICK  = {1} ; (* received 1st external tick *)
+  CONDUCTF_METROSET = {2} ; (* cdt_Metronome filled in    *)
+  CONDUCTF_PRIVATE  = {3} ; (* conductor is private	  *)
+
+  CONDUCTB_EXTERNAL = 0 ;
+  CONDUCTB_GOTTICK  = 1 ;
+  CONDUCTB_METROSET = 2 ;
+  CONDUCTB_PRIVATE  = 3 ;
+
+(* constants for Conductor.cdt_State and SetConductorState() *)
+  CONDSTATE_STOPPED     = 0 ; (* clock is stopped	    *)
+  CONDSTATE_PAUSED      = 1 ; (* clock is paused	    *)
+  CONDSTATE_LOCATE      = 2 ; (* go to 'running' when ready *)
+  CONDSTATE_RUNNING     = 3 ; (* run clock NOW		    *)
+
+(* These do not actually exist as Conductor states, but are used as additional*)
+(* arguments to SetConductorState()					      *)
+
+  CONDSTATE_METRIC     = -1 ; (* ask high node to locate       *)
+  CONDSTATE_SHUTTLE    = -2 ; (* time changing but not running *)
+  CONDSTATE_LOCATE_SET = -3 ; (* maestro done locating	       *)
+
+
+(*============================================================================*)
+
+
+(* The Player is the connection between a Conductor and an application. *)
+(*									*)
+(* This structure must only be allocated by realtime.library and is	*)
+(* READ-ONLY!								*)
+
+TYPE
+  PlayerPtr = POINTER TO Player ;
+  Player = RECORD
+    pl_Link	 : Node     ;
+    pl_Reserved0 : SHORTINT ;
+    pl_Reserved1 : SHORTINT ;
+    pl_Hook	 : HookPtr  ;	 (* player's hook function	 *)
+    pl_Source	 : ConductorPtr; (* pointer to parent context	 *)
+    pl_Task	 : TaskPtr  ;	 (* task to signal for alarm	 *)
+    pl_MetricTime: LONGINT  ;	 (* current time in app's metric *)
+    pl_AlarmTime : LONGINT  ;	 (* time to wake up		 *)
+    pl_UserData	 : ADDRESS  ;	 (* for application use		 *)
+    pl_PlayerID	 : CARDINAL ;	 (* for application use		 *)
+    pl_Flags	 : BITSET   ;	 (* general Player flags	 *)
+  END ;
+
+CONST
+(* Flag bits for Player.pl_Flags *)
+  PLAYERF_READY		= {0} ;  (* player is ready to go!	   *)
+  PLAYERF_ALARMSET	= {1} ;  (* alarm is set		   *)
+  PLAYERF_QUIET		= {2} ;  (* a dummy player, used for sync  *)
+  PLAYERF_CONDUCTED	= {3} ;  (* give me metered time	   *)
+  PLAYERF_EXTSYNC	= {4} ;  (* granted external sync	   *)
+
+  PLAYERB_READY		= 0 ;
+  PLAYERB_ALARMSET	= 1 ;
+  PLAYERB_QUIET		= 2 ;
+  PLAYERB_CONDUCTED	= 3 ;
+  PLAYERB_EXTSYNC	= 4 ;
+
+
+(*============================================================================*)
+
+
+(* Tags for CreatePlayer(), SetPlayerAttrs(), and GetPlayerAttrs() *)
+  PLAYER_Base		= (TAG_USER+64)    ;
+  PLAYER_Hook		= (PLAYER_Base+1)  ;  (* set address of hook function *)
+  PLAYER_Name		= (PLAYER_Base+2)  ;  (* name of player	       	      *)
+  PLAYER_Priority	= (PLAYER_Base+3)  ;  (* priority of player	      *)
+  PLAYER_Conductor	= (PLAYER_Base+4)  ;  (* set conductor for player     *)
+  PLAYER_Ready		= (PLAYER_Base+5)  ;  (* the "ready" flag	      *)
+  PLAYER_AlarmTime	= (PLAYER_Base+12) ;  (* alarm time		      *)
+  					      (*  (sets PLAYERF_ALARMSET)     *)
+  PLAYER_Alarm		= (PLAYER_Base+13) ;  (* sets/clears PLAYERF_ALARMSET *)
+  					      (*  flag			      *)
+
+  PLAYER_AlarmSigTask	= (PLAYER_Base+6)  ;  (* task to signal for alarm/    *)
+  					      (*  notify		      *)
+  PLAYER_AlarmSigBit	= (PLAYER_Base+8)  ;  (* signal bit for alarm (or -1) *)
+  PLAYER_Conducted	= (PLAYER_Base+7)  ;  (* sets/clears PLAYERF_CONDUCTED*)
+  					      (*  flag			      *)
+  PLAYER_Quiet		= (PLAYER_Base+9)  ;  (* don't process time thru this *)
+  PLAYER_UserData	= (PLAYER_Base+10) ;
+  PLAYER_ID		= (PLAYER_Base+11) ;
+  PLAYER_ExtSync	= (PLAYER_Base+14) ;  (* attempt/release to ext sync  *)
+  PLAYER_ErrorCode	= (PLAYER_Base+15) ;  (* error return value	      *)
+
+
+(*============================================================================*)
+
+CONST
+(* Method types for messages sent via a Player's hook *)
+  PM_TICK     = 0 ;
+  PM_STATE    = 1 ;
+  PM_POSITION = 2 ;
+  PM_SHUTTLE  = 3 ;
+
+(* used for PM_TICK, PM_POSITION and PM_SHUTTLE methods *)
+TYPE
+  pmTimePtr = POINTER TO pmTime ;
+  pmTime = RECORD
+    pmt_Method : LONGINT ; (* PM_TICK, PM_POSITION, or PM_SHUTTLE *)
+    pmt_Time   : LONGINT ;
+  END ;
+
+(* used for the PM_STATE method *)
+
+  pmStatePtr = POINTER TO pmState ;
+  pmState = RECORD
+    pms_Method   : LONGINT ; (* PM_STATE *)
+    pms_OldState : LONGINT ;
+  END ;
+
+
+(*============================================================================*)
+
+CONST
+(* Possible lock types for LockRealTime() *)
+  RT_CONDUCTORS	= 0 ;  (* conductor list *)
+
+
+(*============================================================================*)
+
+CONST
+(* realtime.library error codes *)
+  RTE_NOMEMORY	  = 801 ;  (* memory allocation failed      *)
+  RTE_NOCONDUCTOR = 802 ;  (* player needs a conductor      *)
+  RTE_NOTIMER	  = 803 ;  (* timer (CIA) allocation failed *)
+  RTE_PLAYING	  = 804 ;  (* can't shuttle while playing   *)
+
+(*============================================================================*)
+
+(* OpenLibrary("realtime.library",0) returns a pointer to this structure. *)
+(* All fields are READ-ONLY.						  *)
+
+TYPE
+  RealTimeBasePtr = POINTER TO RealTimeBaseRec ;
+  RealTimeBaseRec = RECORD
+    rtb_LibNode   : Library ;
+    rtb_Reserved0 : ARRAY [0..1] OF CHAR ;
+
+    rtb_Time	  : LONGINT  ; (* current time			     *)
+    rtb_TimeFrac  : LONGINT  ; (* fixed-point fraction part of time  *)
+    rtb_Reserved1 : CARDINAL ;
+    rtb_TickErr	  : INTEGER  ; (* nanosecond error from ideal Tick   *)
+  END ;			       (* length to real tick length	     *)
+
+VAR RealTimeBase : RealTimeBasePtr ;
+
+(* Actual tick length is: 1/TICK_FREQ + rtb_TickErr/1e9 *)
+
+CONST
+  RealTime_TickErr_Min = -705 ;
+  RealTime_TickErr_Max =  705 ;
+
+
+(*============================================================================*)
+
+(*--- functions in V37 or higher (Release 2.04) ---*)
+
+(* Locks *)
+
+PROCEDURE LockRealTime( lockType : LONGINT ) : ADDRESS ;
+PROCEDURE UnlockRealTime( lock : ADDRESS ) ;
+
+(* Conductor *)
+
+PROCEDURE CreatePlayerA( tagList : TagItemPtr ) : PlayerPtr ;
+PROCEDURE CreatePlayer( tag1 : Tag ; .. ) : PlayerPtr ;
+
+PROCEDURE DeletePlayer( player : PlayerPtr );
+
+PROCEDURE SetPlayerAttrsA( player: PlayerPtr ; tagList: TagItemPtr ) : BOOLEAN ;
+PROCEDURE SetPlayerAttrs( player : PlayerPtr ; tag1 : Tag ; .. ) : BOOLEAN ;
+
+PROCEDURE SetConductorState( player : PlayerPtr ;
+			     state  : LONGINT ;
+			     time   : LONGINT ) : LONGINT ;
+
+PROCEDURE ExternalSync( player : PlayerPtr ;
+			minTime, maxTime : LONGINT ) : BOOLEAN ;
+
+PROCEDURE NextConductor( previousConductor : ConductorPtr ) : ConductorPtr ;
+PROCEDURE FindConductor( name : STRING ) : ConductorPtr ;
+
+PROCEDURE GetPlayerAttrsA( player: PlayerPtr ; tagList : TagItemPtr ): LONGINT ;
+PROCEDURE GetPlayerAttrs( player : PlayerPtr ; tag1 : Tag ; .. ) : LONGINT ;
+
+END RealTime.

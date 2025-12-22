@@ -1,0 +1,2 @@
+def BATTCLOCKNAME = "battclock.resource";
+

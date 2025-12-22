@@ -1,0 +1,291 @@
+
+#include <proto/exec.h>
+#include <proto/dos.h>
+#include <proto/datatypes.h>
+#include <proto/muimaster.h>
+#include <clib/alib_protos.h>
+#include <mui/SpeedBar_mcc.h>
+#include <mui/SpeedButton_mcc.h>
+#include <mui/SpeedBarCfg_mcc.h>
+#include <datatypes/pictureclass.h>
+#include <string.h>
+#include <stdio.h>
+
+/***********************************************************************/
+
+long __stack = 8192;
+struct Library *DataTypesBase;
+struct Library *MUIMasterBase;
+
+/***********************************************************************/
+
+#ifndef MAKE_ID
+#define MAKE_ID(a,b,c,d) ((ULONG) (a)<<24 | (ULONG) (b)<<16 | (ULONG) (c)<<8 | (ULONG) (d))
+#endif
+
+/***********************************************************************/
+
+struct MUIS_SpeedBar_Button buttons[] =
+{
+    {0, "_Get", "Get the disc.", 0, NULL},
+    {1, "Sa_ve", "Save the disc.", 0, NULL},
+    {2, "_Stop", "Stop the connection.", 0, NULL},
+    {MUIV_SpeedBar_Spacer},
+    {3, "_Disc", "Disc page.", 0, NULL},
+    {4, "_Matches", "Matches page.", 0, NULL},
+    {5, "_Edit", "Edit page.", 0, NULL},
+    {MUIV_SpeedBar_End},
+};
+
+/***********************************************************************/
+
+static Object *
+loadDTBrush(struct MyBrush *brush,STRPTR file)
+{
+    struct BitMapHeader *bmh;
+    register Object     *dto;
+
+    if (!(dto = NewDTObject(file,DTA_GroupID,GID_PICTURE,PDTA_Remap,FALSE,PDTA_DestMode,PMODE_V42,TAG_DONE)) ||
+        !(DoMethod(dto,DTM_PROCLAYOUT,NULL,1)) ||
+        !(GetDTAttrs(dto,PDTA_DestBitMap,&brush->BitMap,PDTA_CRegs,&brush->Colors,PDTA_BitMapHeader,&bmh,TAG_DONE)==3))
+    {
+        if (dto)
+        {
+            DisposeDTObject(dto);
+            dto = NULL;
+        }
+        brush->BitMap = NULL;
+    }
+    else
+    {
+        brush->Width  = bmh->bmh_Width;
+        brush->Height = bmh->bmh_Height;
+    }
+
+    return dto;
+}
+
+/***********************************************************************/
+
+Object *
+buttonObject(STRPTR label)
+{
+    Object *obj;
+
+    if (obj = MUI_MakeObject(MUIO_Button,label))
+        set(obj,MUIA_CycleChain,TRUE);
+
+    return obj;
+}
+
+/***********************************************************************/
+
+Object *
+checkmarkObject(STRPTR key)
+{
+    Object *obj;
+
+    if (obj = MUI_MakeObject(MUIO_Checkmark,key))
+        set(obj,MUIA_CycleChain,TRUE);
+
+    return obj;
+}
+
+/***********************************************************************/
+
+Object *
+cycleObject(STRPTR *labels,STRPTR key)
+{
+    Object *obj;
+
+    if (obj = MUI_MakeObject(MUIO_Cycle,key,labels))
+        set(obj,MUIA_CycleChain,TRUE);
+
+    return obj;
+}
+
+/***********************************************************************/
+
+#define TEMPLATE "STRIP,NUMBUTTON/N"
+
+STRPTR positions[] =
+{
+    "Bottom",
+    "Top",
+    "Right",
+    "Left",
+    NULL
+};
+
+int
+main(int argc,char **argv)
+{
+    struct RDArgs   *ra;
+    LONG            arg[2] = {0};
+    int             res;
+
+    if (ra = ReadArgs(TEMPLATE,arg,NULL))
+    {
+        if (DataTypesBase = OpenLibrary("datatypes.library",37))
+        {
+            if (MUIMasterBase = OpenLibrary("muimaster.library",19))
+            {
+                struct MyBrush                  stripBrush;
+                Object                          *dto, *app, *win, *sb, *pos, *cfg, *update, *c0, *c1, *c2, *c3, *c4, *c5;
+                struct MUIS_SpeedBarCfg_Config  c = {MUIV_SpeedBar_ViewMode_TextGfx, MUIV_SpeedBarCfg_Borderless|MUIV_SpeedBarCfg_Sunny};
+                STRPTR                          stripName;
+
+                stripName = arg[0] ? (char *)arg[0] : "PROGDIR:Pics/Main.toolbar";
+
+                if (!(dto = loadDTBrush(&stripBrush,stripName)))
+                    printf("%s: warning can't load '%s'\n",argv[0],stripName);
+
+                if (app = ApplicationObject,
+                        MUIA_Application_Title,         "SpeedBar Demo6",
+                        MUIA_Application_Version,       "$VER: SpeedBarDemo6 16.1 (3.12.2002)",
+                        MUIA_Application_Copyright,     "Copyright 1999-2002 by Alfonso Ranieri",
+                        MUIA_Application_Author,        "Alfonso Ranieri <alforan@tin.it>",
+                        MUIA_Application_Description,   "Speed(Bar|Button|BarCfg).mcc test",
+                        MUIA_Application_Base,          "SPEEDBARTEST",
+
+                        SubWindow, win = WindowObject,
+                            MUIA_Window_ID,             MAKE_ID('M','A','I','N'),
+                            MUIA_Window_Title,          "SpeedBar Demo6",
+
+                            WindowContents, VGroup,
+
+                                Child, sb = SpeedBarObject,
+                                    GroupFrame,
+                                    MUIA_Group_Horiz,               TRUE,
+                                    MUIA_SpeedBar_Layout,           MUIV_SpeedBar_Layout_Left,
+                                    MUIA_SpeedBar_Borderless,       TRUE,
+                                    MUIA_SpeedBar_Sunny,            TRUE,
+                                    MUIA_SpeedBar_Buttons,          buttons,
+                                    MUIA_SpeedBar_StripUnderscore,  TRUE,
+                                    MUIA_SpeedBar_EnableUnderscore, TRUE,
+                                    MUIA_SpeedBar_BarSpacer,        TRUE,
+                                    MUIA_SpeedBar_StripBrush,       &stripBrush,
+                                    MUIA_SpeedBar_StripButtons,     arg[1] ? (*((ULONG *)arg[1])) : 14,
+                                End,
+
+                                Child, VGroup,
+                                    GroupFrameT("Appareance"),
+                                    Child, VSpace(0),
+                                    Child, cfg = SpeedBarCfgObject,
+                                        MUIA_SpeedBarCfg_Config, &c,
+                                    End,
+                                    Child, HGroup,
+                                        Child, Label2("Label position"),
+                                        Child, pos = cycleObject(positions,NULL),
+                                    End,
+                                    Child, VSpace(0),
+                                    Child, update = buttonObject("_Update"),
+                                End,
+
+                                Child, VGroup,
+                                    GroupFrameT("Disable"),
+                                    Child, VSpace(0),
+                                    Child, HGroup,
+                                        Child, HSpace(0),
+                                        Child, RowGroup(2),
+                                            Child, Label1("Disable _0"),
+                                            Child, c0 = checkmarkObject("0"),
+                                            Child, Label1("Disable _1"),
+                                            Child, c1 = checkmarkObject("1"),
+                                            Child, Label1("Disable _2"),
+                                            Child, c2 = checkmarkObject("2"),
+                                            Child, Label1("Disable _3"),
+                                            Child, c3 = checkmarkObject("3"),
+                                            Child, Label1("Disable _4"),
+                                            Child, c4 = checkmarkObject("4"),
+                                            Child, Label1("Disable _5"),
+                                            Child, c5 = checkmarkObject("5"),
+                                        End,
+                                        Child, HSpace(0),
+                                    End,
+                                    Child, VSpace(0),
+                                End,
+
+                            End,
+                        End,
+                    End)
+                {
+                    ULONG sigs = 0, id;
+
+                    DoMethod(win,MUIM_Notify,MUIA_Window_CloseRequest,TRUE,MUIV_Notify_Application,2,MUIM_Application_ReturnID,MUIV_Application_ReturnID_Quit);
+                    DoMethod(update,MUIM_Notify,MUIA_Pressed,FALSE,app,2,MUIM_Application_ReturnID,TAG_USER);
+
+                    DoMethod(c0,MUIM_Notify,MUIA_Selected,MUIV_EveryTime,sb,5,MUIM_SpeedBar_DoOnButton,0,MUIM_Set,MUIA_Disabled,MUIV_TriggerValue);
+                    DoMethod(c1,MUIM_Notify,MUIA_Selected,MUIV_EveryTime,sb,5,MUIM_SpeedBar_DoOnButton,1,MUIM_Set,MUIA_Disabled,MUIV_TriggerValue);
+                    DoMethod(c2,MUIM_Notify,MUIA_Selected,MUIV_EveryTime,sb,5,MUIM_SpeedBar_DoOnButton,2,MUIM_Set,MUIA_Disabled,MUIV_TriggerValue);
+                    DoMethod(c3,MUIM_Notify,MUIA_Selected,MUIV_EveryTime,sb,5,MUIM_SpeedBar_DoOnButton,4,MUIM_Set,MUIA_Disabled,MUIV_TriggerValue);
+                    DoMethod(c4,MUIM_Notify,MUIA_Selected,MUIV_EveryTime,sb,5,MUIM_SpeedBar_DoOnButton,5,MUIM_Set,MUIA_Disabled,MUIV_TriggerValue);
+                    DoMethod(c5,MUIM_Notify,MUIA_Selected,MUIV_EveryTime,sb,5,MUIM_SpeedBar_DoOnButton,6,MUIM_Set,MUIA_Disabled,MUIV_TriggerValue);
+
+                    set(win,MUIA_Window_Open,TRUE);
+
+                    while ((id = DoMethod(app,MUIM_Application_NewInput,&sigs))!=MUIV_Application_ReturnID_Quit)
+                    {
+                        if (id==TAG_USER)
+                        {
+                            struct MUIS_SpeedBarCfg_Config  *c;
+                            ULONG                           p;
+
+                            get(cfg,MUIA_SpeedBarCfg_Config,&c);
+                            get(pos,MUIA_Cycle_Active,&p);
+
+                            SetAttrs(sb,MUIA_SpeedBar_ViewMode,c->ViewMode,
+                                        MUIA_SpeedBar_Borderless,c->Flags & MUIV_SpeedBarCfg_Borderless,
+                                        MUIA_SpeedBar_RaisingFrame,c->Flags & MUIV_SpeedBarCfg_Raising,
+                                        MUIA_SpeedBar_SmallImages,c->Flags & MUIV_SpeedBarCfg_SmallButtons,
+                                        MUIA_SpeedBar_Sunny,c->Flags & MUIV_SpeedBarCfg_Sunny,
+                                        MUIA_SpeedBar_LabelPosition,p,
+                                        TAG_DONE);
+                        }
+
+                        if (sigs)
+                        {
+                            sigs = Wait(sigs | SIGBREAKF_CTRL_C);
+                            if (sigs & SIGBREAKF_CTRL_C) break;
+                        }
+                    }
+
+                    MUI_DisposeObject(app);
+
+                    res = RETURN_OK;
+                }
+                else
+                {
+                    printf("%s: can't create application\n",argv[0]);
+                    res = RETURN_FAIL;
+                }
+
+                if (dto) DisposeDTObject(dto);
+                CloseLibrary(MUIMasterBase);
+            }
+            else
+            {
+                printf("%s: Can't open muimaster.library ver 19 or higher\n",argv[0]);
+                res = RETURN_ERROR;
+            }
+
+            CloseLibrary(DataTypesBase);
+        }
+        else
+        {
+            printf("%s: can't open datatypes.library ver 37 or higher\n",argv[0]);
+            res = RETURN_ERROR;
+        }
+
+        FreeArgs(ra);
+    }
+    else
+    {
+        PrintFault(IoErr(),argv[0]);
+        return RETURN_FAIL;
+    }
+
+    return res;
+}
+
+/***********************************************************************/

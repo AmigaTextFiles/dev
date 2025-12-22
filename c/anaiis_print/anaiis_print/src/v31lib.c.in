@@ -1,0 +1,445 @@
+/****************************************************************/
+/* v33lib.c                                                     */
+/****************************************************************/
+/*                                                              */
+/* Compatibility layer                                          */
+/*                                                              */
+/****************************************************************/
+/*                                                              */
+/* Modification history                                         */
+/* ====================                                         */
+/* 26-Oct-2009 Remove MFPrintf, DOSBase reference               */
+/* 21-Sep-2008 Semaphores                                       */
+/* 13-Sep-2008 MFPrintf                                         */
+/* 04-Mar-2008 CopyMem                                          */
+/* 03-Mar-2008 rename v33 into v31                              */
+/* 27-Jan-2008 the mother of all utility routines               */
+/* 04-Oct-2007 my own sprintf                                   */
+/* 18-Jun-1993 first steps                                      */
+/****************************************************************/
+
+#include <stdarg.h>
+#include <string.h>
+
+#include <exec/exec.h>
+#include <clib/alib_protos.h>
+#include <exec/memory.h>
+#include <exec/ports.h>
+#include <exec/execbase.h>
+
+#include <proto/exec.h>
+#include <proto/dos.h>
+
+#include "compiler.h"
+
+
+#ifdef WB33_COMPATIBLE
+
+#ifdef WB33_IO
+APTR MCreateIORequest(struct MsgPort *port, unsigned long size) 
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 36)
+  {
+    return CreateIORequest(port, size) ;
+  }
+  else
+#endif
+  {
+    struct IORequest *io ;
+
+    if (size < sizeof(struct Message)) size = sizeof(struct Message) ;
+
+    io = (struct IORequest*) MAllocVec(size, MEMF_PUBLIC|MEMF_CLEAR) ;
+    if (io != NULL)
+    {
+      io->io_Message.mn_Node.ln_Type = NT_MESSAGE ;
+      io->io_Message.mn_ReplyPort    = port ;
+      io->io_Message.mn_Length       = size ;
+    }
+    return io ;
+  }
+}
+
+void MDeleteIORequest(APTR iorequest) 
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 36)
+  {
+    DeleteIORequest(iorequest) ;
+  }
+  else
+#endif
+  {
+    MFreeVec(iorequest) ;
+  }
+}
+#endif
+
+#ifdef WB33_PORTS
+struct MsgPort* MCreateMsgPort(void)
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 36)
+  {
+    return CreateMsgPort() ;
+  }
+  else
+#endif
+  {
+    BYTE signal ;
+    struct MsgPort *port ;
+
+    signal = AllocSignal(-1) ;
+    /*printf("AllocSignal(-1) %ld\n", signal) ;*/
+    if (signal == -1)
+    {
+      return NULL ;
+    }
+
+    port = AllocMem( sizeof(struct MsgPort),
+                     MEMF_PUBLIC|MEMF_CLEAR ) ;
+    /*printf("AllocMem() 0x%lx\n", port) ;*/
+    if (port == NULL)
+    {
+      FreeSignal(signal) ;
+      return NULL ;
+    }
+
+    port->mp_Node.ln_Name = NULL ;
+    port->mp_Node.ln_Pri  = 0 ;
+    port->mp_Node.ln_Type = NT_MSGPORT ;
+    port->mp_Flags        = PA_SIGNAL ;
+    port->mp_SigBit       = signal ;
+    port->mp_SigTask      = FindTask(NULL) ;
+    NewList(&(port->mp_MsgList)) ;
+    return port ;
+  }
+}
+
+void MDeleteMsgPort(struct MsgPort *port)
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 36)
+  {
+    DeleteMsgPort(port) ;
+  }
+  else
+#endif
+  {
+    port->mp_Node.ln_Type = 0xff ;
+    port->mp_MsgList.lh_Head = (struct Node*)-1 ;
+    FreeSignal(port->mp_SigBit) ;
+    FreeMem(port, sizeof(struct MsgPort)) ;
+  }
+}
+#endif
+
+#ifdef WB33_MEMORY
+APTR MAllocVec( unsigned long byteSize, unsigned long requirements )
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 36)
+  {
+    return AllocVec(byteSize, requirements) ;
+  }
+  else
+#endif
+  {
+    unsigned long *data = NULL ;
+
+    byteSize += sizeof(unsigned long) ;
+    data = (unsigned long *)AllocMem(byteSize, requirements) ;
+  
+    *data = byteSize ;
+    data++ ;
+    return data ;
+  }
+}
+
+void MFreeVec( APTR memoryBlock )
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 36)
+  {
+    FreeVec(memoryBlock) ;
+  }
+  else
+#endif
+  {
+    unsigned long byteSize ;
+    unsigned long *data ;
+
+    data = (unsigned long*)memoryBlock ;
+    data-- ;
+    byteSize = *data ;
+    FreeMem(data, byteSize) ;
+  }
+}
+
+void MCopyMem(APTR source, APTR dest, ULONG size)
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 33)
+  {
+    CopyMem(source, dest, size) ;
+  }
+  else
+#endif
+  {
+#if 0
+    register UBYTE *src = (UBYTE *)source ;
+    register UBYTE *dst = (UBYTE *)dest ;
+
+    while (size > 0)
+    {
+      *dst++ = *src++ ;
+      size -- ;
+    }
+#else
+    memcpy(dest, source, size) ;
+#endif
+  }
+}
+#endif
+
+#ifdef WB33_TAGS
+struct TagItem *MNextTagItem(struct TagItem **tagListPtr)
+{
+  struct TagItem *ti = NULL ;
+
+  if (tagListPtr != NULL)
+  {
+    if (*tagListPtr != NULL)
+    {
+      int loop = TRUE ;
+      while (loop)
+      {
+        switch ((*tagListPtr)->ti_Tag)
+        {
+	    case TAG_END :
+          {
+            /* Terminate array of TagItems */
+            (*tagListPtr) = NULL ;
+            loop = FALSE ;
+            ti = NULL ;
+            break ;
+          }
+
+          case TAG_IGNORE:
+          {
+            /* Ignore this item, not end of array */
+            (*tagListPtr) ++;
+            break ;
+          }
+
+          case TAG_MORE:
+          {
+            /* ti_Data is pointer to another array of TagItems */
+            *tagListPtr = (struct TagItem *)(*tagListPtr)->ti_Data ;
+            if (tagListPtr == NULL)
+            {
+              loop = FALSE ;
+              ti = NULL ;
+            }
+            break ;
+          }
+
+          case TAG_SKIP:
+          {
+            /* skip this and the next ti_Data items */
+            (*tagListPtr) += (*tagListPtr)->ti_Data + 1 ;
+	      break ;
+          }
+
+          default:
+          {
+            loop = FALSE ;
+	      ti = (struct TagItem *)(*tagListPtr)++ ;
+            break ;
+          }
+        }
+      }
+    }
+  }
+  return ti ;
+}
+#endif
+
+#ifdef WB33_SEMAPHORES
+void ASM MInitSemaphore(A0 struct SignalSemaphore *sigSem)
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 33)
+  {
+    InitSemaphore(sigSem) ;
+  }
+  else
+#endif
+  {
+    memset(sigSem, 0, sizeof(struct SignalSemaphore)) ;
+
+    /* Newlist on wait message queue */
+    sigSem->ss_WaitQueue.mlh_Head     = (struct MinNode *)&sigSem->ss_WaitQueue.mlh_Tail ;
+    sigSem->ss_WaitQueue.mlh_Tail     = NULL ;
+    sigSem->ss_WaitQueue.mlh_TailPred = (struct MinNode *)&sigSem->ss_WaitQueue.mlh_Head ;
+
+    /* Semaphore has no owner yet */
+    sigSem->ss_Owner = 0 ;
+
+    /* Semaphore is currently unused */
+    sigSem->ss_NestCount = 0 ;
+    
+    /* Semaphore has no queue */
+    sigSem->ss_QueueCount = -1 ;
+
+    /* Set type of Semaphore */
+    sigSem->ss_Link.ln_Type = NT_SIGNALSEM ;
+  }
+}
+
+void ASM MObtainSemaphore(A0 struct SignalSemaphore *sigSem)
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 33)
+  {
+    ObtainSemaphore(sigSem) ;
+  }
+  else
+#endif
+  {
+    struct Task *me ;
+
+    /* Get pointer to current task */
+    me = FindTask(NULL) ;
+
+    Forbid() ;
+
+    sigSem->ss_QueueCount++ ;
+    if (sigSem->ss_QueueCount == 0)
+    {
+      sigSem->ss_Owner = me ;
+    }
+    else if (sigSem->ss_Owner != me)
+    {
+      struct SemaphoreRequest ssr ;
+
+      memset(&ssr, 0, sizeof(ssr)) ;
+      ssr.sr_Waiter = me ;
+
+      AddTail((struct List *)&sigSem->ss_WaitQueue, (struct Node *)&ssr) ;
+
+      SetSignal(0L, SIGF_SINGLE) ;
+      Wait(SIGF_SINGLE) ;
+    }
+
+    sigSem->ss_NestCount++ ;
+    Permit() ;
+  }
+}
+
+typedef unsigned long IPTR ;
+
+void ASM MReleaseSemaphore(A0 struct SignalSemaphore *sigSem)
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 33)
+  {
+    ReleaseSemaphore(sigSem) ;
+  }
+  else
+#endif
+  {
+    sigSem->ss_NestCount-- ;
+    if (sigSem->ss_NestCount == 0)
+    {
+      Forbid() ;
+
+      sigSem->ss_QueueCount-- ;
+      if (sigSem->ss_QueueCount >= 0)
+      {
+        struct SemaphoreRequest *sr = NULL;
+
+        sr = (struct SemaphoreRequest *)RemHead((struct List *)&sigSem->ss_WaitQueue) ;
+        if (sr != NULL)
+        {
+          sigSem->ss_Owner = sr->sr_Waiter ;
+          Signal(sr->sr_Waiter, SIGF_SINGLE) ;
+        }
+        else
+        {
+          Alert(AT_DeadEnd | AN_SemCorrupt) ;
+        }
+      }
+      else
+      {
+        sigSem->ss_Owner = NULL ;
+      }
+
+      Permit() ;
+    }
+    else if (sigSem->ss_NestCount < 0)
+    {
+     Alert(AT_DeadEnd | AN_SemCorrupt) ;
+    }
+    else
+    {
+      sigSem->ss_QueueCount-- ;
+    }
+  }
+}
+
+BOOL ASM MAttemptSemaphore(A0 struct SignalSemaphore *sigSem)
+{
+#ifdef WB33_BESTCODE
+  struct Library *SysBase = *(struct Library **)4 ;
+
+  if (SysBase->lib_Version >= 33)
+  {
+    return (BOOL)((AttemptSemaphore(sigSem) != 0)?TRUE:FALSE) ;
+  }
+  else
+#endif
+  {
+    struct Task *me = FindTask(NULL) ;
+
+    Forbid() ;
+
+    sigSem->ss_QueueCount++ ;
+    if (sigSem->ss_QueueCount == 0)
+    {
+      sigSem->ss_Owner = me ;
+      sigSem->ss_NestCount++ ;
+      Permit() ;
+      return TRUE ;
+    }
+
+    sigSem->ss_QueueCount-- ;
+    Permit() ;
+    return FALSE ;
+  }
+}
+#endif
+
+#endif
+

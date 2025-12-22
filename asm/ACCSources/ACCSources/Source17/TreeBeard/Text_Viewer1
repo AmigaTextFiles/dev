@@ -1,0 +1,449 @@
+
+** CODE BY TREEBEARD OF TDM
+
+; Hi-res version
+
+	opt	c-
+	section	Treebeard,code_c
+	include source:include/hardware.i
+
+OpenLibrary	=-552
+CloseLibrary	=-414
+Read	=-42
+Write	=-48
+Open    =-30
+Close   =-36
+Lock	=-84
+Unlock	=-90
+Examine	=-102
+AllocMem	=-198
+FreeMem	=-210
+Oldfile	=1005
+Newfile	=1006
+
+Test	=	1		; Set to 0 when assembling to disc
+
+rows	=	32		; Height of text part of screen in text lines
+
+maxpics	=	20		; Max no. of pictures
+
+	ifne	Test
+	lea	Struct,a0
+	move.l	#SLen,d0
+	endc
+
+	move.l	a0,file		; a0 = filename of data	
+	clr.b	-1(a0,d0)	; Make carriage return into a NULL
+	move.l	4,a6
+	lea	gfxname,a1	; Open Gfx library
+	moveq.l	#0,d0		; Any version
+	jsr	OpenLibrary(a6)
+	move.l	d0,gfxbase	; Store its base
+	lea	dosname,a1	; Open Dos library
+	moveq.l	#0,d0		; Any version
+	jsr	OpenLibrary(a6)
+	move.l	d0,dosbase	; Store its base
+	move.l	#rows*8*160*2,d0	; Reserve 4 bitplane space
+	moveq.l	#2,d1		; Chip RAM
+	jsr	AllocMem(a6)	; Reserve it
+	tst.l	d0		; Check if available
+	beq	quit		; If unavailable quit
+	moveq.l	#3,d1		; d1 = no. of bitplanes -1
+	lea	b1,a0		; a0 = place to store address of bpl 1
+	lea	b1l,a1		; a1 = place in copper list to put pointers
+dobpls	move.l	d0,(a0)+	; Store address in b1,b2,b3 or b4
+	move.w	d0,(a1)		; Store address in copper list
+	swap	d0
+	move.w	d0,4(a1)
+	swap	d0
+	add.l	#256*80,d0	; Next bpl
+	add.l	#8,a1		; Next part in copper list
+	dbra	d1,dobpls
+
+	move.l	file,a2		; Load the file
+	bsr	dofile
+	beq	free		; If Z flag set an error occured
+	move.l	d7,filelen	; save length of file
+	move.l	a4,fileadd	; and address of memory it was loaded into
+
+; Load all the pictures and store their places in memory and size in picspace
+
+	lea	picspace,a3	; a3 = address of table to put addresses in
+	move.l	fileadd,a2	; Start of filenames
+loadpic	tst.b	(a2)		; First byte 0?
+	beq.s	donepic		; Yes, finished
+	bsr	dofile		; Load the picture
+	beq	freepic		; If error free the memory
+	move.l	a4,(a3)+	; Save address of picture
+	move.l	d7,(a3)+	; And its length
+
+; Find the address of byte after next zero byte
+
+zfind	tst.b	(a2)+
+	bne.s	zfind
+	bra	loadpic		; And load the next picture
+
+donepic	move.l	a3,picfin
+	addq.l	#1,a2
+	move.l	a2,d0
+	btst	#0,d0		; Make a2 even
+	beq.s	.ok
+	addq.l	#1,a2
+.ok	move.l	a2,pages
+	move.l	#-1,d0
+.loop	tst.l	(a2)+
+	beq.s	.loop1
+	addq.l	#1,d0
+	bra	.loop
+.loop1	move.l	d0,pagel
+	clr.l	cpage
+
+	lea	$dff000,a5
+	move.w	#$20,dmacon(a5)
+	move.l	#copper,cop1lch(a5)
+	move.w	#0,copjmp1(a5)
+
+	move.l	cpage,d0
+	bsr	disppage
+
+wait	move.b	$bfec01,d0
+	cmp.b	#$61,d0
+	beq	left
+	cmp.b	#$63,d0
+	beq	right
+	cmp.b	#$7f,d0
+	beq	right
+	btst	#6,$bfe001	; Wait for LMB
+	bne.s	wait
+
+	move.w	#$8e30,dmacon(a5)
+
+	move.l	gfxbase,a1	; Restore old copper list
+	move.l	4,a6
+	move.l	38(a1),cop1lch(a5)
+	jsr	CloseLibrary(a6)	; And close the library
+	move.l	dosbase,a1	; Close dos library
+	jsr	CloseLibrary(a6)
+
+freepic1
+	move.l	picfin,a3
+freepic	cmp.l	#picspace,a3
+	beq.s	free2
+	move.l	-(a3),d0	; Go back and get picture length
+	move.l	-(a3),a1	; And its address
+	move.l	4,a6
+	jsr	FreeMem(a6)
+	bra	freepic
+
+free2	move.l	filelen,d0	; Free the main file memory - d0 = length
+	move.l	fileadd,a1	; a1 = address
+	jsr	FreeMem(a6)
+free	move.l	#2*rows*8*160,d0	; 4 bitplanes space
+	move.l	b1,a1		; Free the memory
+	jmp	FreeMem(a6)
+
+left	tst.l	cpage
+	beq	wait
+	subq.l	#1,cpage
+change	move.l	cpage,d0
+	bsr	disppage
+.loop	btst	#0,$bfec01	; Wait until no key pressed
+	bne.s	.loop
+	bra	wait
+
+right	move.l	cpage,d0
+	cmp.l	pagel,d0
+	beq	wait
+	addq.l	#1,cpage
+	bra	change
+
+bwait	btst	#14,dmaconr(a5)
+	bne.s	bwait
+	rts
+
+vwait	cmp.b	#255,$dff006
+	bne.s	vwait
+quit	rts
+
+; Prints a character from the font
+; d0 = character
+; d1 = x pos (0 - 39)
+; d2 = y pos (0 - (31 - no. of lines logo takes up))
+; d3 = colour (1 - 4)-1
+
+; Work out address of character in font definition
+
+doletter
+	sub.l	#32,d0		; Take 32 from character
+	lsl.l	#3,d0		; Multiply 8 since each char takes up 8 bytes
+	add.l	#font,d0	; Add the start of the font
+	move.l	d0,a0		; a0 = source
+
+; Work out address on screen by times d3 by the size of one bitplane and
+; then adding the start of the first bitplane, then adding the offset given
+; by d1 and d2
+
+	mulu	#rows*8*80,d3	; d3 = colour × size of a bitplane
+	add.l	b1,d3		; Add the start of 1st bitplane
+	mulu	#8*80,d2	; Get vertical offset
+	add.l	d1,d2		; Add horizontal offset
+	add.l	d2,d3		; Add offset to start of bpl to use
+	move.l	d3,a1		; a1 = destination
+
+; Copy 8 lines
+
+	move.l	a0,spare
+	move.l	a1,spare1
+	moveq.l	#7,d2		; No. of bytes to copy
+copy	move.b	(a0)+,(a1)	; Copy a byte
+	add.l	#80,a1		; Move onto next line
+	dbra	d2,copy		; Copy another byte
+	rts
+
+; Prints a line of text
+; a2 = address of textt
+
+; First initialise the variables
+
+dotext	clr.w	xpos		; Start at top of screen
+	clr.w	ypos
+	clr.w	colour		; With colour 1 (0 to the program)
+doone	clr.l	d0		; Clear whole long word of d0
+	move.b	(a2)+,d0	; Get a character
+	beq	quit		; If end of text quit
+	cmp.b	#9,d0		; Tab?
+	beq	tab		; Yes, do special routine
+	cmp.b	#17,d0		; Colour change?
+	beq	colourc
+	cmp.b	#31,d0		; Position command?
+	beq.s	newpos
+	cmp.b	#30,d0		; Horizontal position command?
+	beq	doxpos
+	cmp.b	#10,d0		; Carriage return?
+	beq.s	carret
+	clr.l	d1
+	move.w	xpos,d1		; Set up variables for doletter
+	clr.l	d2
+	move.w	ypos,d2
+	clr.l	d3
+	move.w	colour,d3
+	bsr	doletter
+	addq.w	#1,xpos		; Move on 1 character
+nextc	cmp.w	#80,xpos	; Reached end of line?
+	bne	doone		; No, then do next letter
+carret	clr.w	xpos		; New line
+	add.w	#1,ypos		; Move down 1 line
+	cmp.w	#rows,ypos	; Reached bottom of text (precaution only)
+	bne	doone		; If not, do next letter
+	clr.w	ypos		; Start at top again
+	bra	doone
+colourc	move.b	(a2)+,d0	; Next character in string = colour no.
+	move.w	d0,colour
+	bra	doone
+newpos	move.b	(a2)+,d0
+	move.w	d0,xpos
+	move.b	(a2)+,d0
+	move.w	d0,ypos
+	bra	doone
+tab	add.w	#8,xpos		; Next 8 characters
+	and.b	#$f8,xpos	; Make it divisible by 8
+	bra	nextc		; Make sure it isn't off the screen
+doxpos	move.b	(a2)+,d0
+	move.w	d0,xpos
+	bra	doone
+
+; Display Picture
+; d0 = xpos (in characters)	(w)
+; d1 = ypos (in characters)	(w)
+; d2 = width (in bytes)		(w)
+; d3 = height (in pixels)	(l)
+; d4 = no. of bitplanes -1	(w)
+; a0 = address of picture	(l)
+
+; If picture only 1 bitplane, for example, the routine will just display
+; it anyway, so as to wipe out the need for 3 blank bitplanes in the picture
+; just to make up the 4 bitplanes on the screen
+
+picture	mulu	#8*80,d1	; Get vertical offset
+	add.w	d0,d1		; Add horizontal offset
+	add.l	b1,d1		; Add offset to start of bpl to get address 
+				; of place on screen in d1
+	bsr	bwait
+
+	lsl.l	#7,d3		; height*128
+	or.w	d2,d3		; Add width
+	lsr.l	d3		; Divide by 2 to get no. needed for bltsize
+	move.l	a0,bltapth(a5)	; a0 = source
+	move.w	#$ffff,bltafwm(a5)
+	move.w	#$ffff,bltalwm(a5)
+	move.w	#%100111110000,bltcon0(a5)	; Standard A-D blit
+	move.w	#0,bltcon1(a5)
+	move.w	#0,bltamod(a5)
+	move.w	#80,d0		; Take width from 80 to get modulo for D
+	sub.w	d2,d0
+	move.w	d0,bltdmod(a5)
+.loop	bsr	bwait
+	move.l	d1,bltdpth(a5)	; D = d1
+	move.w	d3,bltsize(a5)
+	add.l	#256*80,d1	; Advance 1 bitplane
+	dbra	d4,.loop	; Do other bitplanes
+	rts
+
+; Entry, d0 = page number
+
+disppage
+	bsr	vwait
+	move.w	#$100,dmacon(a5)	; Disable screen
+	bsr	clears
+	lsl.l	#2,d0		; Times d0 by 4
+	add.l	pages,d0	; Add start of page offsets
+	move.l	d0,a0
+	move.l	(a0),d0		; Get offset
+	add.l	fileadd,d0	; Add to start of file to get real address
+	move.l	d0,a4
+dopics	clr.l	d0
+	move.b	(a4)+,d0	; Get picture no.
+	beq	textnow		; If =0 go onto text
+	subq.b	#1,d0
+	lsl.l	#3,d0		; Times d0 by 8
+	add.l	#picspace,d0	; Add start of picture addresses
+	move.l	d0,a1
+	move.l	(a1),a0		; Get address of picture in a0
+	clr.l	d0
+	move.b	(a4)+,d0	; x pos in d0
+	clr.l	d1
+	move.b	(a4)+,d1	; y pos in d1
+	clr.l	d2
+	move.b	(a4)+,d2	; width in d2
+	clr.l	d3
+	move.b	(a4)+,d3	; height in d3
+	clr.l	d4
+	move.b	(a4)+,d4	; no. of bitplanes (-1) in d4
+	bsr	picture		; Display the picture
+	bra	dopics		; Do the next picture
+textnow	move.l	a4,a2		; Text routine needs text string in a2 not a4
+	bsr	dotext		; Display the text
+	bsr	vwait		; Wait for vertical blanking
+	move.w	#$8100,dmacon(a5)	; Re-enable screen
+	rts
+
+; Loads file into memory, address of which is returned in a4 and length
+; in d7.
+
+dofile	move.b	#0,errorf
+	move.l	dosbase,a6
+	move.l	a2,d1		; Open the file
+	move.l	#Oldfile,d2
+	jsr	Open(a6)
+	move.l	d0,inhandle	; save handle
+	beq	error		; If we can't, there is an error
+	move.l	a2,d1		; Lock the file
+	move.l	#-2,d2
+	jsr	Lock(a6)
+	move.l	d0,inlock	; Save it
+	beq	error1		; if =0, can't lock it
+	move.l	inlock,d1	; Examine file (to get length)
+	move.l	#fib,d2
+	jsr	Examine(a6)
+	tst.l	d0
+	beq	error2
+	move.l	fib+124,d7	; Get length into d7
+	move.l	4,a6
+	move.l	d7,d0		; Reserve d7 bytes to read file
+	moveq.l	#2,d1		; MEMF_Chip
+	jsr	AllocMem(a6)
+	move.l	d0,a4		; move it to d4
+	beq	error2
+	move.l	dosbase,a6
+	move.l	inhandle,d1	; Read d7 bytes from file to address a4
+	move.l	a4,d2
+	move.l	d7,d3
+	jsr	Read(a6)
+	addq.b	#1,errorf
+error2	move.l	dosbase,a6
+	move.l	inlock,d1	; Unlock file
+	jsr	Unlock(a6)
+error1	move.l	dosbase,a6
+	move.l	inhandle,d1	; and close it
+	jsr	Close(a6)
+error	tst.b	errorf
+	rts
+
+clears	bsr	bwait
+	move.l	b1,bltdpth(a5)
+	move.w	#%100000000,bltcon0(a5)
+	move.w	#0,bltcon1(a5)
+	move.w	#$ffff,bltalwm(a5)
+	move.w	#$ffff,bltafwm(a5)
+	move.w	#0,bltdmod(a5)
+	moveq.l	#3,d7
+.loop	bsr	bwait
+	move.w	#256*64+40,bltsize(a5)
+	dbra	d7,.loop
+	rts
+
+	even
+copper	dc.w	bplcon0,%1100001000000000
+	dc.w	bplcon1,0
+	dc.w	bplcon2,0
+	dc.w	bpl1mod,0
+	dc.w	bpl2mod,0
+	dc.w	diwstrt,$2c81
+	dc.w	diwstop,$2cc1
+	dc.w	ddfstrt,$3c
+	dc.w	ddfstop,$d4
+	dc.w	bpl1ptl
+b1l	dc.w	0,bpl1pth
+b1h	dc.w	0,bpl2ptl
+b2l	dc.w	0,bpl2pth
+b2h	dc.w	0,bpl3ptl
+b3l	dc.w	0,bpl3pth
+b3h	dc.w	0,bpl4ptl
+b4l	dc.w	0,bpl4pth
+b4h	dc.w	0
+	dc.w	color00,$000
+	dc.w	color01,$c00
+	dc.w	color02,$ddd
+	dc.w	color03,$940
+	dc.w	color04,$0d0
+	dc.w	color08,$0ce
+	dc.w	$ffff,$fffe
+gfxbase	dc.l	0
+dosbase	dc.l	0
+b1	dc.l	0
+b2	dc.l	0
+b3	dc.l	0
+b4	dc.l	0
+spare	dc.l	0
+spare1	dc.l	0
+colour	dc.w	0		; Colour of text
+xpos	dc.w	0		; X pos of text
+ypos	dc.w	0		; Y pos of text
+inlock	dc.l	0
+inhandle
+	dc.l	0
+file	dc.l	0
+filelen	dc.l	0
+fileadd	dc.l	0
+picfin	dc.l	0
+pages	dc.l	0
+cpage	dc.l	0
+pagel	dc.l	0
+gfxname	dc.b	'graphics.library',0
+dosname	dc.b	'dos.library',0
+errorf	dc.b	0
+
+font	incbin	source:treebeard/gfx/Topaz.font
+
+	even
+
+	ifne	Test
+Struct	dc.b	'source:treebeard/Viewer_eg',0
+SLen	=	*-Struct
+	endc
+
+	cnop	0,4		; Needs to be on a long word boundary
+fib	ds.b	256
+
+picspace
+	ds.l	maxpics*2

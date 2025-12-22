@@ -1,0 +1,149 @@
+# Generated automatically from Makefile.in by configure.
+# Makefile for vacall
+
+#### Start of system configuration section. ####
+
+HOST = m68k-cbm-amigados
+CPU = m68k
+
+# Directories used by "make":
+srcdir = /WB/usr/source/clisp/ffcall/vacall
+
+# Directories used by "make install":
+prefix = /usr/local
+local_prefix = /usr/local
+exec_prefix = $(prefix)
+libdir = $(exec_prefix)/lib
+includedir = $(local_prefix)/include
+mandir = $(exec_prefix)/man
+
+# Programs used by "make":
+CC = gcc
+CFLAGS = -g -O -DFOR_AMIGA_CLISP
+CPP = gcc -E
+INCLUDES = -I. -I$(srcdir) -I/AB/usr/include/Amiga31
+ASPFLAGS = `if test true = true; then echo '-DUNDERSCORE'; fi`
+AR = ar
+AR_FLAGS = rc
+RANLIB = ranlib
+MV = mv
+LN = ln
+RM = rm -f
+
+
+# Programs used by "make install":
+INSTALL = /bin/install -c
+INSTALL_PROGRAM = $(INSTALL)
+INSTALL_DATA = $(INSTALL) -m 644
+
+#### End of system configuration section. ####
+
+SHELL = /bin/sh
+
+OBJECTS = vacall.o misc.o structcpy.o
+
+all : $(OBJECTS) libvacall.a vacall.h $(srcdir)/vacall.3 $(srcdir)/vacall.html
+
+vacall.o : vacall-$(CPU).o
+	$(RM) vacall.o
+	$(LN) vacall-$(CPU).o vacall.o
+
+vacall-i386.o : vacall-i386.s
+	$(CC) -c vacall-i386.s
+
+vacall-i386.s : $(srcdir)/vacall-i386.S
+	$(CPP) $(ASPFLAGS) $(srcdir)/vacall-i386.S | grep -v '^ *#line' | grep -v '^#ident' | sed -e 's,% ,%,g' > vacall-i386.s
+
+vacall-sparc.o : vacall-sparc.s
+	$(CC) -c vacall-sparc.s
+
+vacall-sparc.s : $(srcdir)/vacall-sparc.S
+	$(CPP) $(ASPFLAGS) $(srcdir)/vacall-sparc.S > vacall-sparc.s
+
+vacall-m68k.o : $(srcdir)/vacall-m68k.s
+	$(CC) -c -mc68020 $(srcdir)/vacall-m68k.s
+
+vacall-mips.o : $(srcdir)/vacall-mips.s
+	$(CC) -c $(srcdir)/vacall-mips.s
+
+vacall-alpha.o : $(srcdir)/vacall-alpha.s
+	$(CC) -c $(srcdir)/vacall-alpha.s
+
+vacall-hppa.o : $(srcdir)/vacall-hppa.s
+	$(CC) -c $(srcdir)/vacall-hppa.s
+
+vacall-arm.o : $(srcdir)/vacall-arm.s
+	$(CC) -c $(srcdir)/vacall-arm.s
+
+vacall-rs6000.o : $(srcdir)/vacall-rs6000.s
+	$(CC) -c $(srcdir)/vacall-rs6000.s
+
+vacall-m88k.o : $(srcdir)/vacall-m88k.s
+	$(CC) -c $(srcdir)/vacall-m88k.s
+
+vacall-convex.o : $(srcdir)/vacall-convex.s
+	$(CC) -c $(srcdir)/vacall-convex.s
+
+misc.o : $(srcdir)/misc.c vacall.h config.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c $(srcdir)/misc.c
+
+structcpy.o : $(srcdir)/structcpy.c
+	$(CC) $(CFLAGS) -c $(srcdir)/structcpy.c
+
+libvacall.a : $(OBJECTS)
+	$(RM) libvacall.a
+	$(AR) $(AR_FLAGS) libvacall.a $(OBJECTS)
+	$(RANLIB) libvacall.a
+
+install : all force
+	if [ ! -d $(libdir) ] ; then mkdir $(libdir) ; fi
+	$(INSTALL_DATA) libvacall.a $(libdir)/libvacall.a
+	if [ ! -d $(includedir) ] ; then mkdir $(includedir) ; fi
+	$(INSTALL_DATA) vacall.h $(includedir)/vacall.h
+	if [ ! -d $(mandir) ] ; then mkdir $(mandir) ; fi
+	if [ ! -d $(mandir)/man3 ] ; then mkdir $(mandir)/man3 ; fi
+	$(INSTALL_DATA) $(srcdir)/vacall.3 $(mandir)/man3/vacall.3
+	if [ ! -d $(mandir)/html ] ; then mkdir $(mandir)/html ; fi
+	$(INSTALL_DATA) $(srcdir)/vacall.html $(mandir)/html/vacall.html
+
+installdirs : force
+	if [ ! -d $(libdir) ] ; then mkdir $(libdir) ; fi
+	if [ ! -d $(includedir) ] ; then mkdir $(includedir) ; fi
+	if [ ! -d $(mandir) ] ; then mkdir $(mandir) ; fi
+	if [ ! -d $(mandir)/man3 ] ; then mkdir $(mandir)/man3 ; fi
+	if [ ! -d $(mandir)/html ] ; then mkdir $(mandir)/html ; fi
+
+uninstall : force
+	$(RM) $(libdir)/libvacall.a
+	$(RM) $(includedir)/vacall.h
+	$(RM) $(mandir)/man3/vacall.3
+	$(RM) $(mandir)/html/vacall.html
+
+tests.o : $(srcdir)/tests.c vacall.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c $(srcdir)/tests.c
+
+tests.s : $(srcdir)/tests.c vacall.h
+	$(CC) $(CFLAGS) $(INCLUDES) -S $(srcdir)/tests.c
+
+tests : tests.o $(OBJECTS)
+	$(CC) $(CFLAGS) tests.o $(OBJECTS) -o tests
+
+check : all tests
+	./tests > tests.out
+	uniq -u < tests.out > tests.output.$(HOST)
+	test '!' -s tests.output.$(HOST)
+
+mostlyclean : clean
+
+clean : force
+	$(RM) *.o *.a core
+	$(RM) vacall-i386.s vacall-sparc.s
+	$(RM) tests.o tests.s tests tests.out
+
+distclean : clean
+	$(RM) config.status config.log config.cache Makefile vacall.h config.h tests.output.*
+
+maintainer-clean : distclean
+
+force :
+

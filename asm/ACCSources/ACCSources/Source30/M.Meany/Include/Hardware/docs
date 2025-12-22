@@ -1,0 +1,603 @@
+
+			Hardware Statup Code
+			~~~~~~~~~~~~~~~~~~~~
+
+ To simplify direct programming of the hardware I am putting together a set
+of macro and subroutine files. My intention is to prevent a bald patch
+appearing on my scalp years ahead of time due to me constantly pulling at
+tuffs of hair as a way of venting my frustration.
+
+ To date the following files have been written, but not extensivley tested:
+
+	macros.i
+	HW_Start.i
+	memory.i
+	disk.i
+
+ With the exception of memory.i and text.i, these files rely on the now
+standard include file, hardware.i so this must be included as well.
+
+ Usage
+ ~~~~~ 
+ In all cases, the following files must be included in the order shown:
+
+	include		hardware.i
+	include		macros.i
+	include		HW_Start.i
+
+ HW_Start.i will cause memory.i to be read in as well, so it does not need
+to be explicitly included. The disk.i file is optional, but if required
+should be included after HW_Start.i
+
+ The Startup Code
+ ~~~~~~~~~~~~~~~~
+ A number of functions are preformed by the startup code. It handles programs
+launched from the WorkBench or CLI, so you can give your latest intro an icon
+if you so wish. Below is a list of all tasks preformed by the startup code:
+
+1. Preserves stack pointer	The system stack pointer is preserved. This
+				allows your program to make a quick exit
+				during any part of execution with no ill
+				effects, providing you are still in user
+				mode.
+
+2. Handles WorkBench		if program was launched from the WB, the
+				startup message is obtained and remembered.
+
+3. Stops system requests	A -1 pointer is written into the pr_Window
+				field of the programs Process structure.
+				This effectively stops the system from
+				throwing up 'Insert Disk' type requesters
+				that would crash a program running it's own
+				Copper List -- you would not be able to
+				answer the request as you could not see it!
+
+4. Preserves System DMA		System DMA settings are remembered.
+
+5. Preserves System Interrupts	Both the interrupt settings and the systems
+				autovectors are remembered.
+
+6. Preserves System Copper	A pointer to the system Copper List is 
+				obtained from graphics.library and remembered
+
+7. Stops all DMA activity	All DMA is stopped allowing your program to
+				enable only the DMA it requires.
+
+8. Kills The Mouse Pointer!	No more horrid vertical strips down the
+				screen.
+
+9. Stops all interrupt activity	All interrupts are stopped and the six
+				interrupt autovectors are all set to point
+				to a safe handler that simply clears any
+				interrupt requested.
+
+10. Opens dos.library		This is to allow integration of disk routines
+				that use dos functions if required.
+
+11. Stops multitasking		Goes without saying really.
+
+12. Stops the drive motors	Stops the disk from whirring round during
+				execution of your program.
+
+13. Initialises a Memory List	An empty memory list is built, you'll see why
+				shortly.
+
+14. Calls your program.		Calls your program, which should start at
+				the label 'Main'.
+
+ On entry to your program, nothing is happening. Your Amiga is effectively
+dead. The first thing your program should do is initialise the DMA and
+interrupts it requires.
+
+ There is one subroutine available to your program that can be used to pass
+back an error message to the user. If your program relies on a large block
+of memory being allocated, or a file on disk, something may go wrong and
+you will want to tell the user about it. You pass the address of a null
+terminated string to the errr routine in register a0 and on termination
+this message will be displayed in a small window opened by the shutdown
+code. The error routine is called 'SetError' and it will only accept and
+display the first message passed to it. This means that all calls after the
+first are ignored.
+
+		**************************
+eg.		lea		errMsg1,a0		a0->error text
+		bsr		SetError
+
+		 |		 |  |  |
+
+errMsg1		dc.b		'Could not load "sprite.data".',0
+		even
+		**************************
+
+ Your program can terminate in one of two ways. It can execute an rts
+instruction in the normal way, or if it gets into real difficulty it can
+simply jump to the label 'QuitFast'.
+
+ When your program finishes, control passes back to HW_Start.i which then
+executes shutdown routines. These restore the machine to a state that
+should allow the system to continue when your program finishes. The tasks
+preformed by the shutdown code are detailed below:
+
+1. Restore stack		In case your program exits by jumping to the 
+				disaster label 'QuitFast'.
+
+2. Stops all interrupts		Your programs interrupts are stopped.
+
+3. Stops all DMA		Any DMA enabled are stopped.
+
+4. Restores autovectors		The systems autovectors are restored.
+
+5. Memory is released		Any memory your code allocated is released.
+				For more info see 'memory.i' below.
+
+6. Restore system interrupts	The systems interrupt requirements are
+				restored.
+
+7. Restore system DMA		The systems DMA requirements are restored.
+
+8. Restart system Copperlist	The systems copper list is restored and
+				started.
+
+9. Restart multitasking		Wakes the system up.
+
+10. Display any errors		If you called SetError, the message is
+				displayed in a small window.
+
+11. Reply Workbench		If your program was launched from the 
+				workbench, the startup message is replied.
+
+
+ Macros.i
+ ~~~~~~~~
+ A number of macros have been provided that simplify repetative, mundane
+tasks required in just about all programs that hit the hardware directly.
+My pride and joy of this set of macros are the ones specific to the copper
+list, these make life so much easier.
+
+ Below is a list of all the macros along with an explanation and an example
+of how to use them.
+
+		**************************
+		      General Macros
+		**************************
+PUSH	regs	
+		Push contents of registers onto the stack. This macro uses
+		movem.l so should only be used to save contents of three or
+		more registers at a time.
+
+	eg	PUSH		d1-d4/a0-a6
+
+		**************************
+PULL	regs
+		Pulls contents of registers back off stack.
+
+	eg	PULL		d1-d4/a0-a6
+
+		**************************
+PUSHALL
+		Pushes the contents of d0-d7/a0-a6 onto the stack.
+
+	eg	PUSHALL
+
+		**************************
+PULLALL
+		Pulls the contents of d0-d7/a0-a6 off of the stack.
+
+	eg	PULLALL
+
+		**************************
+DIV10	Dn
+		A fast divide by 10. This is considerably faster than DIVU.
+
+	eg	DIV10		d0
+
+		**************************
+		    Copper List Macros
+		**************************
+CMOVE	reg,val
+		Simulates the copper MOVE instruction and generates the
+		required dc.w statement.
+
+	eg	CMOVE		COLOR00,$0f0f
+
+	yields	dc.w		COLOR00,$0f0f
+
+		**************************
+CWAIT	x,y
+		Simulates the copper WAIT instruction and generates the
+		required dc.w statement.
+
+	eg	CWAIT		0,255		wait for line 255
+
+	yields	dc.w		$ff01,$fffe
+
+		**************************
+
+CEND
+		Simulates the end of a copper list.
+
+	eg	CEND
+
+	yields	dc.w		$ffff,$fffe
+
+		**************************
+
+STARTCOP addr
+		Starts the copper list at the specified address. Note that
+		this macro sets COP1LCH and then strobes COPJMP1, it does
+		not enable copper DMA. This task is left to your program.
+
+	eg	STARTCOP	MyCopper
+
+	eg1.	STARTCOP	a0
+
+		**************************
+
+WAITCOP
+		Waits for a copper interrupt to be requested and then clears
+		the interrupt request bit. Use this to syncronise your code
+		to the copper.
+
+	eg	WAITCOP
+
+		**************************
+
+COPBPL	cop,bpl,size,depth
+		Initialises bitplane pointers in a copper list. The bpl
+		parameter should point to the first CMOVE used to define
+		the bitplane pointers. For example, consider a situation
+		where a display of 320x256x2 is used. The copper list must
+		contain an entry such as:
+
+CopPlanes	CMOVE		BPL1PTH,0
+		CMOVE		BPL1PTL,0
+		CMOVE		BPL2PTH,0
+		CMOVE		BPL2PTL,0
+
+		The macro would be called as follows:
+
+	eg.	COPBPL		CopPlanes,Screen,(320/8)*256,2
+
+		**************************
+
+COPBPLC	cop,bpl,size,depth
+
+		This is an extended version of the previous macro. Use this
+		version if the colour map for the screen is stored after
+		the bitplane data, typically done by setting 'CMAP After' in
+		an IFF converter program. The bitplane initialisation in the
+		copper list should be followed by a block large enough to
+		contain the colour register initialisations. Using the same
+		example as above:
+
+CopPlanes	CMOVE		BPL1PTH,0
+		CMOVE		BPL1PTL,0
+		CMOVE		BPL2PTH,0
+		CMOVE		BPL2PTL,0
+		ds.w		2*4
+
+		It is necessary to declare 2*4 words since each entry
+		consists of two words and their are four colours to define.
+		The macro would be called as follows:
+
+	eg.	COPBPLC		CopPlanes,Screen,(320/8)*256,2
+
+		**************************
+
+COPCMAP	cop,cmap,depth
+
+		This macro will initialise the colour section of a copper
+		list. It requires a pointer to a colour map ( 1 word for
+		each colour ) and the depth of the display. Using the above
+		example with the addittion of a label in the copper list to
+		locate the section to initialise:
+
+CopPlanes	CMOVE		BPL1PTH,0
+		CMOVE		BPL1PTL,0
+		CMOVE		BPL2PTH,0
+		CMOVE		BPL2PTL,0
+
+CopColour	ds.w		2*4
+
+		The macro would be called as follows:
+
+	eg.	COPCOL		CopColour,ColorMap,2
+
+		Note, this macro only effects the colour section and does
+		not attempt to set the bitplane pointers.
+
+		**************************
+			Other Macros
+		**************************
+
+CATCHVBL
+		This macro waits for the start of the next vertical blanking
+		period. Note however that it disables the VERTB interrupt
+		and also clears the VERTB interrupt request when it occurs.
+		This is more efficient and reliable than waiting for VPOS
+		to reach a specified value.
+
+		CATCHVBL
+
+		**************************
+
+ The macros.i file also contains a suite of routines for list handling that
+are equivalent to the exec macros provided in 'exec/lists.i'. The list
+structure used is a simplified version of the exec list. These macros are
+used primarily by the memory.i routines, but feel free to take a peek and
+use them yourself.
+
+ Memory.i
+ ~~~~~~~~
+ Memory management on the Amiga is a pain in the rear. This file contains
+three subroutines aimed at making the task a whole lot simpler. I must
+admit I nicked the idea from the ARP dosAllocMem() function, but I'm sure
+C.H and S.B wont mind:-)
+
+ The philosophy behind the routines is the programmer only needs to remember
+the address of allocated memory, not it's size. Also, on termination of a
+program, the programmer need not deallocate memory as there is a FreeAll
+routine that will do this job for him/her. The FreeAll routine is called by
+the shutdown code in HW_Start.i, so all memory allocated using these
+routines will be released.
+
+ The routines:
+
+GetMem		Allocate a block of memory for use by your program.
+
+		Entry		d0=size of memory required.
+				d1=type:	ANYMEM  - not fussy.
+						CHIPMEM - must be CHIP memory
+						FASTMEM - must be FAST memory
+
+		Exit		d0=address of memory block or 0.
+
+FreMem		Free a block of memory allocated using GetMem.
+
+		Entry		d0=address of memory block to release.
+
+FreeAllMem	Free all blocks of memory allocated to a program by calls
+		to GetMem.	
+
+		Entry		None
+
+ The routines work by allocating 12bytes more than requested and building a
+node structure in these bytes. The node structure contains a pointer to the
+next allocated block in the list, a pointer to the previous allocated block
+in the list and also the size of the block itself. The pointer returned to
+your program is adjusted to point to the first byte after the node structure.
+You can reference the node structure if you so wish, but you should not
+under any circumstances tamper with it.
+
+ Disk.i
+ ~~~~~~
+ This file contains three routines for use by your program. These routines
+rely on functions in dos.library and for this reason a large portion of the
+operating system is temporarily restored so that the functions can operate.
+On return, the system will have been laid to rest again.
+
+ Because of this, do not expect any interrupts to function while calling a
+disk routine. You will have to rely on a static copper list I'm afraid,
+this at least should still function!
+
+ I may do more work on this interface soon to allow at least a VERTB
+interrupt to function while disks are being accessed.
+
+ The subroutines available are:
+
+LoadData		Loads data from a specified file into a specified
+			memory location.
+
+		Entry	a0->the name of the file to load the data from.
+			a1->the address to load data into.
+			d0=number of bytes to read.
+
+		Exit	d0=0 if an error occurs.
+
+			error=LoadData( filename, buffer, size )
+			 d0                a0       a1     d0
+
+LoadFile		Load data from a file into an block of memory. The
+			block of memory is allocated by this routine by a 
+			call to GetMem.
+
+		Entry	a0->name of file to read data from.
+			d0=type of memory to load data into:
+				ANYMEM
+				CHIPMEM
+				FASTMEM
+
+		Exit	d0=0 if an error occurs.
+
+			 error=LoadFile( filename, mem_type )
+			  d0                a0        d0
+
+SaveData		Saves data from a block of memory into a file.
+
+		Entry	a0->Name of file to create.
+			a1->Memory to save data from.
+			d0=number of bytes to save.
+
+		Exit	d0=0 if an error occured.
+
+			 error=SaveData( filename, memory, size )
+			  d0		    a0       a1     d0
+
+ Sound.i
+ ~~~~~~~
+
+ Text.i
+ ~~~~~~
+ Inspired by M.Cross, P.Kent and Kefrens. This file contains a fairly
+flexible 8x8 pixel text printing routine. Up to eight different fonts can
+be declared and used by embedding codes in the text to be printed.
+
+ There are two ways of using this routine. One is to simply call it with
+the address of the string to print in a0, the other is to set a flag so
+that only 1 character is printed each call. The second method was included
+so that text can be printed a character at a time from within a VERTB
+interrupt handler.
+
+ A number of codes can be embedded in the text, I'll cover them shortly.
+There are also a few variables to initialise before the routine can be
+called, that specify the dimensions and address of the bit planes. NOTE
+that if the bit planes are not sequential, you must set the depth to 1 and 
+only print in one of the planes available!
+
+ The file contains default values for a display of width 40 bytes, heigh
+256 lines and depth 4. If this is the same as the display you are using,
+you need only specify the start address of the first bit plane during your
+programs initialisation.
+
+WriteText		Writes text to specified bit planes
+
+		Entry	a0->start of text to print
+
+		Exit	a0->0 terminating byte if end of text reached, or
+			    to the next character to be printed ( see notes
+			    below ).
+
+FONTSCREEN	bit plane address [, width, height ] [, depth ]
+
+		This is the macro used to define the bit planes you are
+		using. If you only wish to change the address of the bit
+		planes, do not include the other optional parameters:
+
+		FONTSCREEN	#Screen1
+
+		Width and height MUST always be changed together and the
+		width must be specified in bytes, not pixels:
+
+		FONTSCREEN	#Screen1,40,256
+
+		Depth can be changed independantly of width and height:
+
+		FONTSCREEN	#Screen1,,,5
+
+		FONTSCREEN	#Screen1,80,200,3
+
+		In all these examples the bit plane data is located at the
+		label 'Screen1'. You can pass the address in a register if
+		you so wish:
+
+		FONTSCREEN	a0,40,200,5
+
+SETFONT		number, address
+
+		This macro allows you to add a font to the system. Up to 8
+		fonts can be specified, numbered 0 to 7. The routine has
+		one font built in which all 8 fonts default to at start up.
+		To specify the address of new font data use the macro as
+		follows:
+
+		SETFONT		3,#Arcfont	('Arcfont' = addr of font 3)
+
+		SETFONT		2,#Slantfont	('Slantfont'=addr of font 2)
+
+ As stated above, control codes may be imbedded in the text. To simplify
+this procedure, each code has an equate that makes reading and remembering
+a easier. Below is a list of all control codes currently supported along
+with a brief explanation:
+
+Name	Value	Description
+
+FEND	0	end of the text
+FEXIT	1	soft exit. Causes routine to stop processing text and returns
+		the address of next character in a0.
+FCOLOUR	2	Change the colour the text is printed in. Follow this byte
+		with the colour number to start using. eg. To switch to
+		colour 4:
+
+		dc.b		FCOLOUR,4	select colour 4
+
+FPOS	3	Change cursor position. Follow this byte with the new X and
+		then new Y coordinates. Note if the x coordinate is negative
+		then the current value is retained. The x coordinate must be
+		specified in bytes from the left hand edge of the bit plane,
+		the y coordinate the number of lines from the top of the
+		bit plane. eg. To start pronting at 10,10:
+
+		dc.b		FPOS,10,100	cursor to (10,100)
+
+FFONT	4	Start using another font. The font number to use should
+		follow this byte and be in the range 1 to 8. eg. To start
+		using font 3:
+
+		dc.b		FFONT,3		use font 3
+
+FCENTER	5	Centralise the line of text that follows. This byte MUST be
+		followed by printable text. When printed it will be centered
+		in the bit plane. The routine assumes the text to center will
+		be terminated by either a line feed ( $0a ), FEND, or FPOS
+		byte. eg. To centralise 'Mega Demo':
+
+		dc.b		FCENTER,'Mega Demo',$0a
+
+FMODE	6	Two modes of printing are supported, SPLAT and BLEND. SPLAT
+		mode is the default and causes the screen to be cleared
+		where the character are printed. If BLEND is used, the
+		characters are blended in with any gfx already in the bit
+		plane. The mode can be changed any number of times during
+		printing. ( NB both BLEND and SPLAT are also equated in the
+		macros.i file and can be referenced by name ).eg. To select
+		BLEND mode:
+
+		dc.b		FMODE,BLEND	select blend mode
+
+FSINGLE	7	Toggles between single character and string printing. Main
+		use is if text is being displayed via an interrupt routine.
+
+		dc.b		FSINGLE
+
+FSTRING	8	Always switches single character printing off.
+
+		dc.b		FSTRING
+
+ Well that's about it. See the examples if your confused, it really is so
+simple to use!
+
+ Closing
+ ~~~~~~~
+ Provided with these files should be a number of examples that I used to
+test the routines out with. These were assembled and tested using both
+DevpacII and DevpacIII.
+
+ I would like to express my thanks to the following people for their help
+at one time or another:
+
+	Mike Cross
+	Dave Edwards
+	Steve Marshall
+and	Paul Kent
+
+
+ Future
+ ~~~~~~
+ I have a number of other ideas in mind that may come to fruition, time
+permitting. I will post copies of updated files as and when appropriate.
+
+ History
+ ~~~~~~~
+ In the following list, a basic overhead has been quoted. This is the size
+of the code generated if all files are included at the start of the following
+program:
+
+		**************************
+;		include all files here!
+
+Main		rts
+		**************************
+
+ v1.00		16 Sept 92		macros.i
+					HW_Start.i
+					memory.i
+					disk.i
+
+		Internal error handling not to good, but should suffice.
+		Basic overhead 1674 bytes.
+
+		**************************
+
+							
+
+			Mark.

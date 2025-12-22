@@ -1,0 +1,25 @@
+/* primary.c */
+extern int primary(LVALUE *lval);
+extern void dcerror(LVALUE *lval);
+extern int calc(int left, void (*oper)(void), int right);
+extern int calc2(unsigned int left, void (*oper)(void),unsigned int right);
+extern void intcheck(LVALUE *lval, LVALUE *lval2);
+extern void force(int t1, int t2, char sign1, char sign2, int lconst);
+extern int widen(LVALUE *lval, LVALUE *lval2);
+extern void widenlong(LVALUE *lval, LVALUE *lval2);
+extern int dbltest(LVALUE *lval, LVALUE *lval2);
+extern void result(LVALUE *lval, LVALUE *lval2);
+extern void prestep(LVALUE *lval, int n, void (*step)(void), void (*longstep)(void));
+extern void poststep(int k, LVALUE *lval, int n, void (*step)(void), void (*unstep)(void));
+extern void nstep(LVALUE *lval, int n);
+extern void store(LVALUE *lval);
+extern void smartpush(LVALUE *lval, char *before);
+extern void smartstore(LVALUE *lval);
+extern void rvalue(LVALUE *lval);
+extern void test(int label, int parens);
+extern int constexpr(long *val);
+extern void vlongconst(unsigned long val);
+extern void vconst(int val);
+extern void const2(int val);
+extern void cscale(int type, struct tag_symbol *tag, int *val);
+extern void addconst(int val, int opr, char zfar);

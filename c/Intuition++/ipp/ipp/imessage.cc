@@ -1,0 +1,56 @@
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+///////////////////                                        ////////////////////
+///////////////////           file : imessage.cc           ////////////////////
+///////////////////                                        ////////////////////
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+
+
+#include "imessage.h"
+
+void IMessage :: clear()
+{
+	iclass=NOMESSAGE;
+	icode=0;
+	iqualifier=0;
+	iaddress=NULL;
+	imousex=0;
+	imousey=0;
+	iseconds=0;
+	imicros=0;
+}
+
+
+IMessage :: IMessage()
+{
+	clear();
+}
+
+
+IMessage :: ~IMessage() {}
+
+
+void IEvent :: nothing() {}
+
+void IEvent :: clear()
+{
+	eclass=NOMESSAGE;
+	ecode=0;
+	equalifier=0;
+	eitem=NULL;
+	ecallback=NULL;
+	nextevent=NULL;
+}
+
+
+IEvent :: IEvent()
+{
+	clear();
+}
+
+
+IEvent :: ~IEvent() {}
+
+
+

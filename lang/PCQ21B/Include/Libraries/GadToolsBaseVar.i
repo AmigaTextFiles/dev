@@ -1,0 +1,3 @@
+
+VAR GadToolsBase : Address;
+                                   

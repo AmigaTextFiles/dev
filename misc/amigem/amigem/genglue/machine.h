@@ -1,0 +1,3 @@
+#define NUMREGS 16
+#define SPREGNUM 16
+#define DEFAULTBASEREG 14

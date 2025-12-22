@@ -1,0 +1,269 @@
+The secret life of memory pools in Kickstart 3.x
+Extracting and showing usage information
+
+by Olaf Barthel (2022-01-23)
+
+
+1. Introduction
+
+Memory pools were introduced in 1992 as part of Kickstart 3.0 (V39) with both
+new functions in exec.library (CreatePool, DeletePool, AllocPooled,
+FreePooled) as well as in amiga.lib (LibCreatePool, LibDeletePool,
+LibAllocPooled, LibFreePooled) becoming available.
+
+The purpose of memory pools was to curb memory fragmentation, remove the
+need to use Forbid/Permit locking when allocating memory (as far as
+possible) and to track memory allocations so that they may be released
+with one single function call (DeletePool/LibDeletePool) instead of
+releasing each and every single allocation separately.
+
+This is accomplished through CreatePool/LibCreatePool which creates a private
+memory management domain ("pool") which a single Task/Process may use, and
+which may be shared among multiple Tasks/Processes if access to the pool is
+restricted to one Task/Process at a time.
+
+Creating a memory pool requires making a good choice for one of the defining
+parameters of memory pools. Pools are made up from single large memory
+chunks, so-called puddles, all of which are the same size. How do you know
+which size to use?
+
+
+2. Creating a pool and its side-effects
+
+CreatePool/LibCreatePool expect two parameters which control how the pool
+will operate: the puddle size and the threshold size. Here is an excerpt
+from the CreatePool Autodocs which describes them:
+
+    NAME
+        CreatePool -- Generate a private memory pool header (V39)
+
+    SYNOPSIS
+        newPool=CreatePool(memFlags,puddleSize,threshSize)
+        a0                 d0       d1         d2
+
+        APTR CreatePool(ULONG,ULONG,ULONG);
+
+    FUNCTION
+        Allocate and prepare a new memory pool header. Each pool is a
+        separate tracking system for memory of a specific type. Any number
+        of pools may exist in the system.
+
+        Pools automatically expand and shrink based on demand. Fixed sized
+        "puddles" are allocated by the pool manager when more total memory
+        is needed.  Many small allocations can fit in a single puddle.
+        Allocations larger than the threshSize are allocation in their own
+        puddles.
+
+        At any time individual allocations may be freed. Or, the entire
+        pool may be removed in a single step.
+
+    INPUTS
+        memFlags   - a memory flags specifier, as taken by AllocMem.
+        puddleSize - the size of Puddles...
+        threshSize - the largest allocation that goes into normal puddles
+                     This *MUST* be less than or equal to puddleSize
+                     (CreatePool() will fail if it is not)
+
+Pools are made of puddles, which all memory allocations are made from whose
+sizes does not exceed the threshold size. This can curb memory fragmentation
+for the global Amiga shared memory space. Instead of fragmenting the global
+memory space, fragmentation will take place within the puddles.
+
+New puddles will be allocated as needed, once a memory allocation can no
+longer fit into the already existing puddles. Note that every new puddle
+will be allocated from the global Amiga shared memory space, even if you
+only need a tiny portion of the puddle's size.
+
+This can become problematic if your choice of puddle size is a poor match
+for the memory allocation sizes your software is using. You may wind up
+allocating new puddles of which only a small portion is being used if the
+allocation size is so large that no more than 1-3 allocations can be made
+from a puddle. This can lead to the odd phenomenon of large scale memory
+fragmentation which allocates and ties up much more memory than is really
+needed.
+
+
+3. How to choose a good puddle size?
+
+It is recommended that you take stock of how much memory your software
+needs over time and in which portions the memory is allocated. You may
+find that there will be a marked difference between the group of large
+allocations (there will be only few large allocations) and the group
+of small allocations (there will be significantly more small allocations).
+This difference in allocation sizes is what memory pools were designed
+to handle.
+
+You may want to take stock of how large the largest small allocations
+are and how many of these are in use over time. These largest small
+allocations provide a hint as to how large you should make the puddle
+size value for CreatePool/LibCreatePool.
+
+Once you have picked a puddle size, how do you find out how well it
+suits your needs? The memory pool API, unfortunately, never came
+with a set of functions to query its performance and attributes
+such as the total amount of memory allocated for puddles and large
+applications. This is still true for Amiga OS 3.2 but future operating
+system versions may introduce one.
+
+In the mean time, there is a 'C' language header file called
+"memory_pool_insights.h" which accompanies this article. It contains
+a function called show_memory_pool_insights() which will become
+available if you use the header file like so in your software:
+
+   #define SHOW_MEMORY_POOL_INSIGHTS
+   #include "memory_pool_insights.h"
+
+If you omit the '#define SHOW_MEMORY_POOL_INSIGHTS' then the function
+show_memory_pool_insights() will become a macro with no effect.
+
+CAUTION: The show_memory_pool_insights() function is limited to how
+         memory pools work in Kickstart 3.x and will not work with
+         the memory pools in AmigaOS4. This is because AmigaOS4 uses
+         a different memory pool design as well as having a different
+         memory management system in place.
+
+Calling the show_memory_pool_insights() function requires a valid
+exec.library base pointer and a memory pool, like so:
+
+   show_memory_pool_insights(SysBase, pool);
+
+It will examine the memory pool internals and print usage information
+using the amiga.lib/kprintf function like so:
+
+   total pool size = 24 (header) + 116480 (puddle size) + 0 (large allocations) bytes -> 116504 bytes
+   total pool size minus free puddle memory = 106328 bytes
+   number of puddles = 14
+   number of large allocations = 0
+   number of fragments in puddles = 21
+   puddles memory used = 106304 of 116480 bytes (91%)
+   memory usage = 100% puddles and 0% large allocations
+   how many puddles are filled to a specific percentage (no overlaps!):
+           > 50% = 1 (4744 bytes -> 4% of all puddle memory)
+           > 70% = 3 (19216 bytes -> 16% of all puddle memory)
+           > 90% = 10 (82344 bytes -> 70% of all puddle memory)
+
+This usage information can tell you about how well your memory pool is being
+utilized and how much memory has been allocated for both its puddles and
+any large allocation which exceed the pool threshold size.
+
+What does the example output above say, and how can you use this information
+to improve your software's performance and memory usage?
+
+   total pool size = 24 (header) + 116480 (puddle size) + 0 (large allocations) bytes -> 116504 bytes
+
+      This is how much memory the pool consumes, broken down into its
+      management data structure ("header"), the total size of all puddles
+      ("puddle size"), and the total size of all large allocations ("large
+      allocations"). Regardless of how much memory in the puddles is
+      being used, this figure shows how much of the global Amiga shared
+      memory is currently reserved for the pool.
+
+   total pool size minus free puddle memory = 106328 bytes
+
+      Not all the memory allocated for the puddles may be currently used.
+      This figure reflects how much memory in the puddles is still nominally
+      free and could be used successfully with AllocPooled/LibAllocPooled
+      if the allocation size fits.
+
+   number of puddles = 14
+
+      This counts how many individual puddles are currently in play. You may
+      see this number grow over time but rarely see it become smaller. This
+      is a side-effect of how memory allocations are made from puddles.
+      Allocations made at the same time may not be drawn from the same
+      puddle and they may not be released at the same time either, with
+      the effect of puddles staying nearly empty for a long time because
+      the remaining allocation is not freed earlier.
+
+   number of large allocations = 0
+
+      This counts how many large allocations are currently in play, with
+      "large" meaning that the size exceeds the threshold value used at
+      pool creation time.
+
+   number of fragments in puddles = 21
+
+      Puddles are subject to memory fragmentation just like the global Amiga
+      shared memory space is. Whenever you allocate memory from a puddle and
+      then free it again, it will become part of the free puddle memory. But
+      that does not mean it will also become allocatable. Small allocations
+      may not merge with other small allocations which have been freed.
+      These are the fragments, whose number may indicate trouble. The more
+      fragments there are, the more new puddles may have to be created to
+      satisfy memory allocation requests.
+
+      For best performance, the number of fragments in puddles should be low.
+
+   puddles memory used = 106304 of 116480 bytes (91%)
+
+      Puddles are allocated from the global Amiga shared memory space and
+      will tie up memory regardless of how much of the respective puddle size
+      is actually needed by allocations made through
+      AllocPooled/LibAllocPooled.
+
+      In this example 14 puddles use 116480 bytes of memory, with 8320 bytes
+      for each puddle. But as the figure shows, 91% of the puddle memory is
+      allocated, which is quite good.
+
+      For best performance, the amount of puddle memory used should approach
+      the total size of the memory allocated for the puddles.
+
+   memory usage = 100% puddles and 0% large allocations
+
+      Memory pools manage both individual large allocations (whose size
+      exceeds the pool threshold value) and the smaller allocations which
+      should fit into the individual puddles.
+
+      You might expect that your choice of puddle size would allow almost
+      all the allocations to be made from puddles. This figure will tell
+      you if this expectation will hold. If there are significantly more
+      large allocations (exceeding the pool threshold value) than you
+      expected, you may want to adjust the puddle size, the threshold
+      size or even both.
+
+   how many puddles are filled to a specific percentage (no overlaps!):
+           > 50% = 1 (4744 bytes -> 4% of all puddle memory)
+           > 70% = 3 (19216 bytes -> 16% of all puddle memory)
+           > 90% = 10 (82344 bytes -> 70% of all puddle memory)
+
+      This table groups puddles by how much of the memory each puddle
+      manages is actually in use, and how much of the puddle memory
+      each of these groups represents.
+
+      For example, there is just one puddle which is filled between
+      50-60% and which consequently is mostly unused. If you have
+      several such puddles which waste memory you may want to
+      adjust the the puddle size, the threshold size or even both.
+
+      A good outcome is the group for which all the puddles are
+      filled between 90-100% which also happen to represent 70%
+      of all the memory allocations made from the pool. This is
+      the outcome you should be aiming for.
+
+
+4. Future development path for memory pools on AmigaOS 3.x
+
+The "memory_pool_insights.h" header file shows how the data structures look
+like for the memory pools for AmigaOS 3.x and also the amiga.lib version
+which first shipped at the time of release for Kickstart and Workbench 3.0.
+
+You should not use this knowledge to tinker with the memory pools at runtime
+because future versions of the memory pools may no longer use these data
+structures. The future plan for memory pools in 1992, which never
+materialized, was to keep the implementation details opaque so that features
+such as virtual memory support could be added at some point.
+
+While we can make no promises with regard to virtual memory support today,
+a possible future development path would be to add a more powerful API to the
+memory pool feature, allowing you to query its properties and performance at
+runtime, instead of examining low level data structures. As AmigaOS 4 has
+shown, it would be a good idea to add an optional arbitration mechanism to
+the memory pool which is used transparently whenever you use
+AllocPooled/LibAllocPooled and FreePooled/LibFreePooled.
+
+As before, it would be in your best interest to use the diagnostic means
+enabled by "memory_pool_insights.h" only if there is no alternative solution
+available.
+
+Please do not make assumptions about how memory pools will look like in future
+releases of the Amiga operating system.

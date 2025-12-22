@@ -1,0 +1,2 @@
+def POTGONAME = "potgo.resource";
+

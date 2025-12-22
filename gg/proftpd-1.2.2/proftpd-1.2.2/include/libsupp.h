@@ -1,0 +1,74 @@
+/*
+ * ProFTPD - FTP server daemon
+ * Copyright (c) 1997, 1998 Public Flood Software
+ * Copyright (C) 1999, 2000 MacGyver aka Habeeb J. Dihu <macgyver@tos.net>
+ *  
+ * Parts Copyright (C) 1991, 1992, 1993, 1999, 2000 Free Software
+ *   Foundation, Inc.
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307, USA.
+ *
+ * As a special exemption, Public Flood Software/MacGyver aka Habeeb J. Dihu
+ * and other respective copyright holders give permission to link this program
+ * with OpenSSL, and distribute the resulting executable, without including
+ * the source code for OpenSSL in the source distribution.
+ */
+
+/* ProFTPD support library definitions.
+ *
+ * $Id: libsupp.h,v 1.5 2001/06/18 17:12:45 flood Exp $
+ */
+
+#include <glibc-glob.h>
+
+/* Bits set in the FLAGS argument to `pr_fnmatch'.  */
+#define	PR_FNM_PATHNAME	(1 << 0) /* No wildcard can ever match `/'.  */
+#define	PR_FNM_NOESCAPE	(1 << 1) /* Backslashes don't quote special chars.  */
+#define	PR_FNM_PERIOD	(1 << 2) /* Leading `.' is matched only explicitly.  */
+
+#define	PR_FNM_FILE_NAME	PR_FNM_PATHNAME /* Preferred GNU name.  */
+#define	PR_FNM_LEADING_DIR	(1 << 3) /* Ignore `/...' after a match.  */
+#define	PR_FNM_CASEFOLD		(1 << 4) /* Compare without regard to case.  */
+
+/* Value returned by `pr_fnmatch' if STRING does not match PATTERN.  */
+#define	PR_FNM_NOMATCH	1
+
+int pr_fnmatch(const char *pattern, const char *strings, int flags);
+
+#ifndef HAVE_STRSEP
+
+char *strsep(char **stringp, const char *delim);
+
+#endif /* HAVE_STRSEP */
+
+#ifndef HAVE_VSNPRINTF
+
+int vsnprintf(char *,size_t,const char*,va_list);
+
+#endif /* HAVE_VSNPRINTF */
+
+#ifndef HAVE_SNPRINTF
+
+int snprintf(char *,size_t,const char*,...);
+
+#endif
+
+#ifndef HAVE_FGETPWENT
+struct passwd *fgetpwent(FILE*);
+#endif /* HAVE_FGETPWENT */
+
+#ifndef HAVE_FGETGRENT
+struct group *fgetgrent(FILE*);
+#endif /* HAVE_FGETGRENT */

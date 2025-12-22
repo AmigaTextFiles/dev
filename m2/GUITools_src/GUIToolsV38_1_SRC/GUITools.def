@@ -1,0 +1,625 @@
+(**********************************************************************
+:Program.    GUITools.def
+:Contents.   Functions for creating and using GUIs
+:Author.     Carsten Ziegeler
+:Address.    Augustin-Wibbelt-Str.7, 33106 Paderborn, Germany
+:Copyright.  Freeware, refer to GUITools-Documentation
+:Language.   Modula-2
+:Translator. M2Amiga V4.1
+:Remark.     OS 2.0 required
+:Remark.     see GUITools-Documentation for detailled information
+:History.    v38.1  Carsten Ziegeler  20-May-94
+**********************************************************************)
+DEFINITION MODULE GUITools;
+
+  FROM SYSTEM     IMPORT ADDRESS, BITSET;
+  FROM GadToolsD  IMPORT NewGadgetFlagSet, NewMenu, NewGadget, NewMenuPtr;
+  FROM ExecD      IMPORT MsgPortPtr;
+  FROM GraphicsD  IMPORT TextAttr, TextAttrPtr, TextFontPtr, hiresKey,
+                         loresKey, defaultMonitorID, palMonitorID;
+  FROM IntuitionD IMPORT IDCMPFlagSet, ScreenPtr, WindowPtr, WindowFlagSet,
+                         GadgetPtr, MenuPtr, DrawInfoPtr, IntuiMessage,
+                         MenuItemPtr;
+  FROM UtilityD   IMPORT TagItemPtr, tagUser;
+
+(* ======================================================================= *)
+(*                               Constants                                 *)
+(* ======================================================================= *)
+
+CONST
+
+(* ----------- results from CreateGUIInfoTags in guiCreateError ---------- *)
+
+(*38.0*) cgiNoError      = 0;   (* everything seams to be OK *)
+(*38.0*) cgiNoWindow     = 1;   (* no window specified *)
+(*38.0*) cgiNoVisualInfo = 2;   (* couldn't get VisualInfo *)
+(*38.0*) cgiNoMemory     = 3;   (* not enough memory *)
+(*38.0*) cgiNoDrawInfo   = 4;   (* couldn't get DrawInfo *)
+(*38.0*) cgiCreateContext= 5;   (* error calling CreateContext *)
+
+
+
+(* ------------ result from SetGUI / RedrawGUI --------------------------- *)
+
+         guiSet      = 0;           (* no error, everything done *)
+         gadgetError = 1;           (* error calling CreateGadget *)
+         menuError   = 2;           (* error calling CreateMenuA *)
+         memError    = 3;           (* not enough memory *)
+
+(*38.0*) gadKeyDefTwice    =  4;    (* same key-equivalent for two gadgets *)
+(*38.0*) menuSetError      =  5;    (* error calling SetMenuStrip *)
+(*38.0*) menuLayoutError   =  6;    (* error calling LayoutMenusA *)
+(*38.0*) gadKeyNotAllowed  =  7;    (* key-equivalent is not a letter *)
+(*38.0*) tooManyGadsError  =  8;    (* more gadgets as mentioned in Create *)
+(*38.0*) tooManyMenusError =  9;    (* more menu-items as mentioned/Create *)
+(*38.0*) gadKeyNotFound    = 10;    (* gtUnderscore-Tag found, but the char
+                                       is missing in the text *)
+(*38.0*) noGadToolsGadKind = 11;    (* no GadTools-Gadget *)
+(*38.0*) noGUIToolsGadKind = 12;    (* no GUITools-Gadget *)
+(*38.0*) rdGUIContextError = 13;    (* RedrawGUI:error call. CreateContext *)
+
+
+(* ----------------- OpenIntWindow/Tags width and height ----------------- *)
+
+         asScreen    = -1;
+
+(* -------------------- ResizeGadget ------------------------------------- *)
+
+(*38.0*) preserve    = -1;
+
+
+(* ----------- predefined displayIDs for OpenIntScreen/Tags -------------- *)
+
+         hiresPalID  = hiresKey + palMonitorID;
+         hiresID     = hiresKey + defaultMonitorID;
+         loresPalID  = loresKey + palMonitorID;
+         loresID     = loresKey + defaultMonitorID;
+
+(* --------------------- CreateGUIInfo / CreateGUIInfoTags --------------- *)
+
+
+(*38.0*) noGadgets = 0;
+(*38.0*) noMenu    = 0;
+
+
+(* --------------------- Gadget-Kinds for CreateSpecialGadget ------------ *)
+
+(*38.0*) guiToolsKinds         = 65535; (* now follow GUITools-Gadgets *)
+(*38.0*) progressIndicatorKind = 65536;
+(*38.0*) bevelboxKind          = 65537;
+
+(* -------------------- Requester-Kinds for ShowRequester ---------------- *)
+
+(*38.0*) generalReqKind = 0;
+(*38.0*) okReqKind      = 1;
+(*38.0*) doitReqKind    = 2;
+(*38.0*) yncReqKind     = 3;
+(*38.1*) fileReqKind    = 4;
+(*38.1*) dirReqKind     = 5;
+
+(* ---------------------- results from ShowRequester --------------------- *)
+
+(*38.0*) reqYes    = 1;  (* yncReqKind *)
+(*38.0*) reqNo     = 2;
+(*38.0*) reqCancel = 0;
+(*38.0*) reqOK     = 0;  (* okReqKind *)
+(*38.0*) reqDo     = 1;  (* doitReqKind *)
+(*38.0*) reqLeave  = 0;
+(*38.1*) reqAslCancel = 0; (* all Asl-requesters *)
+(*38.1*) reqAslOK     = 1;
+
+(* --------------- gadget size and position description flags ------------ *)
+
+(*38.1*) distNorm    = 0;  (* Normal distance *)
+(*38.1*) distAbs     = 1;  (* absolute distance from an object *)
+(*38.1*) distRel     = 2;  (* relative distance from an object *)
+(*38.1*) distPercent = 3;  (* percentual distance *)
+
+(*38.1*) objBorder= 0;  (* window border *)
+(*38.1*) objGadget= 4;  (* gadget (standard is previous gadget) *)
+
+(*38.1*) objRight  = 0; (* distance from which part of the object *)
+(*38.1*) objBottom = 0;
+(*38.1*) objLeft   = 32;
+(*38.1*) objTop    = 32;
+
+(*38.1*) shiftLeft   = 256*256*256; (* Use these to create the data *)
+(*38.1*) shiftTop    = 256*256;     (* for the sgGadgetDecs tag *)
+(*38.1*) shiftWidth  = 256;
+(*38.1*) shiftHeight = 1;
+
+(* ======================================================================= *)
+(*                                 Types                                   *)
+(* ======================================================================= *)
+
+TYPE
+
+(* ------------------------ Hook-Functions ------------------------------- *)
+
+(*38.0*) VanKeyFct = PROCEDURE( CHAR{0}, ADDRESS{8}, ADDRESS{9}) : BOOLEAN;
+
+                     (* Hook-Function for key-equivalents:
+                        D0  : character
+                        A0  : pointer to INTEGER. Through this INTEGER the
+                              hook-function specifies the gadget-number
+                        A1  : pointer to INTEGER. Should the key treated as
+                              a shifted key (0 = no/FALSE / 1 = yes/TRUE)
+                        The result must be TRUE, if the key is an equivalent
+                     *)
+
+(*38.0*) MenuFct   = PROCEDURE() : BOOLEAN;
+
+                     (* This function is called, when an menuPick-Message
+                        arrives and the callMenuData-flag is set.
+                        If you want to wait for further messages return
+                        TRUE, otherwise FALSE to exit the message-loop
+                     *)
+
+(*38.1*) NewVanKeyFct = PROCEDURE( CHAR{0}, ADDRESS{8},
+                                   ADDRESS{9}, ADDRESS{10}) : BOOLEAN;
+
+                     (* Hook-Function for key-equivalents:
+                        D0  : character
+                        A0  : pointer to INTEGER. Through this INTEGER the
+                              hook-function specifies the gadget-number
+                        A1  : pointer to INTEGER. Should the key treated as
+                              a shifted key (0 = no/FALSE / 1 = yes/TRUE)
+                        A2  : pointer to user data
+                        The result must be TRUE, if the key is an equivalent
+                     *)
+
+(*38.1*) NewMenuFct   = PROCEDURE(ADDRESS{8}) : BOOLEAN;
+
+                     (* This function is called, when an menuPick-Message
+                        arrives and the callMenuData-flag is set.
+                        A0  : pointer to user data
+                        If you want to wait for further messages return
+                        TRUE, otherwise FALSE to exit the message-loop
+                     *)
+
+(* ----------------------------- PRIVATE --------------------------------- *)
+(* ------------------------- DO NOT USE THEM ----------------------------- *)
+
+  DistanceFlags = (abs, rel, gadget, unused1, unused2, obLeftTop,
+                   unused3, unused4);
+  DistanceFlagSet = SET OF DistanceFlags;
+
+  STRPTR = POINTER TO ARRAY[0..255] OF CHAR;
+  LINTPTR= POINTER TO LONGINT;
+  INTPTR = POINTER TO INTEGER;
+  CARDPTR= POINTER TO CARDINAL;
+  BOOLPTR= POINTER TO BOOLEAN;
+  DISTFIELD = ARRAY[0..3] OF DistanceFlagSet;
+  GADOFIELD = ARRAY[0..3] OF SHORTCARD;
+
+(* --------------------------- END PRIVATE ------------------------------- *)
+
+
+(* --------------------------- GUIInfoFlagSet ---------------------------- *)
+
+  GUIInfoFlags = (stringNotify,         (* notifies the String-Address     *)
+                  integerNotify,        (* gtinNumber : ADR(LONGINT)       *)
+                  linkEntryGads,        (* activate automatically the next
+                                           entry-gadget *)
+                  cycleEntryGads,       (* If you exit the last EntryGadget,
+                                           activate again the first one *)
+                  activateFirstEGad,    (* after creating gadgets, activate
+                                           the first entry-gadget *)
+                  cycleNotify,          (* gtcyActive : ADR(CARDINAL) *)
+                  checkboxNotify,       (* gtcbChecked: ADR(BOOLEAN)  *)
+                  autoUpdateEGads,      (* Copy the contents of the entry-
+                                           gadgets in the variables when
+                                           an gadgetUp-Message arrives *)
+                  mxNotify,             (* gtmxActive : ADR(CARDINAL) *)
+         (*38.0*) vanillaKeysNotify,    (* notify key-equivalents *)
+         (*38.0*) convertKeys,          (* and convert them automatically
+                                           into gadget-messages if hit *)
+         (*38.0*) noHandleIntMsgCall,   (* do not call HandleIntMsg when
+                                           using WaitIntMsg/GetIntMsg *)
+         (*38.0*) sliderNotify,         (* gtslLevel : ADR(INTEGER) *)
+         (*38.0*) scrollerNotify,       (* gtscTop   : ADR(INTEGER) *)
+         (*38.0*) listviewNotify,       (* gtlvSelected : ADR(CARDINAL) *)
+         (*38.0*) internMsgHandling,    (* the messages that are complete
+                                           processed by GUITools will not
+                                           be send to the main-programm *)
+         (*38.0*) lvKeyClearTime,       (* this clears the sek-entry of
+                                           the intui-message from a
+                                           listviewKind-gadget if the
+                                           key-equivalent was used *)
+         (*38.0*) allowAllVanillaKeys,  (* All key-equivalents are allowed
+                                           not only letters *)
+         (*38.0*) addBorderDims,        (* Adds when defining gadgets
+                                           Window^.borderLeft to left and
+                                           Window^.borderTop to top *)
+         (*38.0*) callVanillaKeyFct,    (* calls the hook-function if
+                                           GUITools can't handle the
+                                           vanillaKey-code *)
+         (*38.0*) callMenuData,         (* jsr menuitem^.menuData *)
+         (*38.0*) doRefresh,            (* automatic refresh *)
+         (*38.0*) addStdUnderscore,     (* add gtUnderscore-Tag *)
+         (*38.0*) paletteNotify,        (* gtpaColor : ADR(CARDINAL) *)
+         (*38.1*) doResizing);          (* automatic resizing *)
+
+
+  GUIInfoFlagSet = SET OF GUIInfoFlags;  (* 32 Bits ! *)
+
+
+(* ------------------------------ GUIInfo -------------------------------- *)
+
+(*38.0*) GUIGadgetInfoPtr = POINTER TO GUIGadgetInfo; (* gadget^.userData *)
+
+  GUIInfoPtr = POINTER TO GUIInfo;
+  GUIInfo = RECORD
+         window   : WindowPtr;         (* pointer to the used Window *)
+         screen   : ScreenPtr;         (* pointer to Window-Screen *)
+         font     : TextAttr;          (* Font for menus and gadgets (37.3),
+                                          can be changed. From (*38.0*) on
+                                          only for gadgets when using
+                                          CreateGUIInfoTags ! *)
+         visual   : ADDRESS;           (* Pointer to screens VisualInfo *)
+         port     : MsgPortPtr;        (* Pointer to IDCMP-Port, can be
+                                          changed for multiple Windows with
+                                          a shared Port (not yet tested!) *)
+         gadlist  : GadgetPtr;         (* pointer to gadget-list *)
+(*38.0*) drawinfo : DrawInfoPtr;       (* pointer to a copy of DrawInfo *)
+         newgad   : NewGadget;         (* used for CreateGadget,
+                                          can be directly manipulated *)
+         actgad   : INTEGER;           (* actual CreateGadget *)
+(*38.1*) winIWidth: INTEGER;           (* window inner width *)
+         gadgets  : POINTER TO ARRAY[0..255] OF GadgetPtr;    (* max 256 ! *)
+
+         menus    : MenuPtr;           (* pointer to new menu *)
+         actmenu  : INTEGER;           (* same as with gadgets *)
+(*38.1*) winIHeight: INTEGER;          (* window inner height *)
+         newMenus : POINTER TO ARRAY[0..255] OF NewMenu;      (* max 256 ! *)
+
+         im       : IntuiMessage;      (* copy of IntuiMessage *)
+         CASE :SHORTINT OF
+           0 :  gadID    : INTEGER;     (* with GadgetUp/Down-Msgs GadgetID*)
+                gadget   : GadgetPtr;   (* and pointer to event-gadget *)
+         | 1 :  menuNum  : INTEGER;     (* numbers for menuPick and *)
+                itemNum  : INTEGER;     (* menuHelp (*38.0*) messages *)
+                subNum   : INTEGER;
+         END;
+         flags    : GUIInfoFlagSet;     (* valid flags, to be changed *)
+(*38.0*) CASE :SHORTINT OF              (* copy of the IntuiMsg-code-entry *)
+           0 : (*38.0*) cardCode : CARDINAL;
+         | 1 : (*38.0*) intCode  : INTEGER;
+         | 2 : (*38.0*) boolCode : BOOLEAN;  (* for checkboxKind *)
+               (*38.0*) charCode : CHAR;
+         END;
+(*38.0*) gadNbr   : INTEGER;            (* gadget-number in gadgets-field *)
+(*38.0*) menuFont : TextAttrPtr;        (* pointer to menu-font. Is set to
+                                           screens font with CreateGUIInfo-
+                                           Tags and to GUIInfo^.font with
+                                           CreateGUIInfo *)
+(*38.0*) CASE :SHORTINT OF              (* Hook fct for key equivalents *)
+           0 : (*38.0*) vanKeyHook    : VanKeyFct;
+         | 1 : (*38.1*) newVanKeyHook : NewVanKeyFct
+         END;
+         msgClass  : IDCMPFlagSet;      (* IntuiMessage-IDCMPFlagSet *)
+(*38.0*) CASE :SHORTINT OF
+           0 : (*38.0*) itemAdr   : MenuItemPtr;  (* Item-Address *)
+         | 1 : (*38.0*) menuAdr   : NewMenuPtr;   (* act. NewMenu *)
+         END;
+(*38.1*) vanKeyFctData : ADDRESS;       (* NewVanKeyFct user data *)
+(*38.1*) menuFctData   : ADDRESS;       (* NewMenuFct   user data *)
+(*38.1*) userData      : ADDRESS;       (* for own data *)
+(*38.1*) compilerReg   : ADDRESS;       (* for compiler data reg *)
+
+(* And now PRIVATE / DO NOT USE THEM !!! *)
+         maxgads  : INTEGER;           (* max. reserved amount of gadgets *)
+         maxmenus : INTEGER;           (* same as with gadgets *)
+         gad      : GadgetPtr;          (* current gadget during definition*)
+         firstEGad: GadgetPtr;          (* first activation entry-gadget *)
+         lastEGad : GadgetPtr;          (* internal use ! *)
+         firstInfo: GUIGadgetInfoPtr;   (* pointer to the first gadgets
+                                           info-structur / chained list *)
+         spezialGad : GadgetPtr;        (* first GUIToolsGadget *)
+         prcwin     : WindowPtr;        (* Process^.windowPtr *)
+         tagmem     : TagItemPtr;       (* storage for tag-lists *)
+         keys     : ARRAY[0..25] OF INTEGER; (* for key-equivalents*)
+         firstError:INTEGER; (* error-number for SetGUI *)
+         status   : BITSET;  (* internal use ! what's up ! *)
+  (* ATTENTION ! - THIS STRUCTURE MUST BE LONG ALIGNED !!! *)
+  END;
+
+(* --------------------------- GUIGadgetInfo ----------------------------- *)
+
+(*38.0*) GUIGadgetInfo = RECORD  (* a pointer to this structure is stored in
+                                    gadget^.userData *)
+           userData : ADDRESS;   (* use this for own user data *)
+           kind     : LONGCARD;  (* gadget kind *)
+
+(* And now PRIVATE / DO NOT USE THEM *)
+
+      CASE :SHORTINT OF
+        0 : buffer : ADDRESS;
+      | 1 : string : STRPTR;
+      | 2 : lint   : LINTPTR;
+      | 3 : bool   : BOOLPTR;
+      | 4 : card   : CARDPTR;
+      | 5 : int    : INTPTR;
+      END;
+      CASE :SHORTINT OF     (* parameters, depands on gadgetkind *)
+        1 : v0 : CARDINAL;
+            v1 : CARDINAL;
+            v2 : CARDINAL;
+            v3 : CARDINAL;  (* contains GadgetNbr *)
+      | 2 : v0S: INTEGER;
+            v1S: INTEGER;
+            v2S: INTEGER;
+            v3S: INTEGER;   (* see v3 *)
+      | 3 : v0B: BOOLEAN;
+            V1B: BOOLEAN;
+            v0C: CHAR;
+            v1C: CHAR;
+            pad0:LONGCARD;  (* see v3 *)
+      | 4 : v0L: LONGCARD;
+            pad1:LONGCARD;  (* see v3 *)
+      | 5 : v0I: LONGINT;
+            pad2:LONGCARD;  (* see v3 *)
+      END;
+      description : DISTFIELD;
+      gadfield    : GADOFIELD;
+      leftC, topC : INTEGER;
+      widthC, heightC : INTEGER;
+      nextEGad : GadgetPtr;    (* next gadget to activate *)
+      nextGadInfo : GUIGadgetInfoPtr; (* next gadget *)
+      tagsC      : TagItemPtr; (* tag-list for this gadget *)
+      impTags    : TagItemPtr; (* internal tag-list *)
+      nbrTags    : CARDINAL;   (* number of tags *)
+      nextEGadNbr: INTEGER; (* number of the gadget to be activated next *)
+      gadDesc    : NewGadget;  (* copy of the NewGadget-Structur *)
+      onlyIntern : BOOLEAN; (* for internMsgHandling *)
+      lvClearTime: BOOLEAN; (* for lvKeyClearTime *)
+      gadActive  : BOOLEAN; (* gadget active ? *)
+    END;
+
+
+(* ======================================================================= *)
+(*                                 Tags                                    *)
+(* ======================================================================= *)
+
+(* -------------------- Tags for CreateGUIInfoTags ----------------------- *)
+
+(*38.0*) GuiTags=(guiDummy:=tagUser+015000H,
+
+  (*38.0*) guiResizableGads,           (* FALSE *)
+  (*38.0*) guiFlags,                   (* GUIInfoFlagSet{} *)
+  (*38.0*) guiGadFont,                 (* gui^.font *)
+  (*38.0*) guiMenuFont,                (* screen^.font *)
+  (*38.0*) guiVanKeyFct,               (* NIL *)
+  (*38.0*) guiCreateError,             (* NIL *)
+  (*38.0*) guiSetProcessWindow,        (* FALSE *)
+  (*38.0*) guiRestoreProcessWindow,    (* FALSE *)
+  (*38.0*) guiRefreshWindowFrame,      (* guiResizableGads *)
+  (*38.1*) guiVanKeyFctData,           (* gui *)
+  (*38.1*) guiMenuFctData,             (* gui *)
+  (*38.1*) guiUserData,                (* NIL *)
+  (*38.1*) guiCompilerReg,             (* NIL *)
+  (*38.1*) guiUseGadDesc);             (* FALSE *)
+
+
+(* -------------------- Tags for CreateSpecialGadget --------------------- *)
+
+(*38.0*) SgTags=(sgDummy:=tagUser+016000H,
+
+  (*38.0*) sgGadgetText,               (* NIL *)
+  (*38.0*) sgGadgetFlags,
+  (*38.0*) sgpiMaxValue,               (* CARDINAL(100) *)
+  (*38.0*) sgpiCurrentValue,           (* CARDINAL(0) *)
+  (*38.0*) sgbbRecessed,               (* FALSE *)
+  (*38.1*) sgGadgetFont,
+  (*38.1*) sgGadgetID,
+  (*38.1*) sgVisualInfo,
+  (*38.1*) sgUserData,
+  (*38.1*) sgGadgetDesc,
+  (*38.1*) sgGadgetObjects);
+
+(* -------------------- Tags for ShowRequester --------------------------- *)
+
+(*38.0*) SrTags=(srDummy:=tagUser+017000H,
+
+  (*38.0*) srGadgets,                  (* NIL *)
+  (*38.0*) srArgs,                     (* NIL *)
+  (*38.0*) srFlags,                    (* LONGSET{} *)
+  (*38.0*) srTitle,                    (* NIL *)
+  (*38.0*) srIDCMP,                    (* NIL *)
+  (*38.0*) srReqWindow,                (* gui^.window *)
+  (*38.1*) srAslPattern,               (* NIL *)
+  (*38.1*) srAslNameBuffer,            (* NIL *)
+  (*38.1*) srAslFileBuffer,            (* NIL *)
+  (*38.1*) srAslDirBuffer,             (* NIL *)
+  (*38.1*) srAslSave);                 (* FALSE *)
+
+
+(* ======================================================================= *)
+(*                               Procedures                                *)
+(* ======================================================================= *)
+
+(* WARNING !  DO NOT CHANGE THE ORDER OF APPEARANCE !!!
+   Otherwise you will get SOME TROUBLE converting this to a real shared
+   library with M2LMC !! *)
+
+
+         PROCEDURE CreateGUIInfo(window   : WindowPtr;
+                                 maxGads  : INTEGER;
+                                 maxMenus : INTEGER) : GUIInfoPtr;
+
+         PROCEDURE FreeGUIInfo(gui : GUIInfoPtr);
+
+         PROCEDURE SetGUI(gui : GUIInfoPtr) : INTEGER;
+
+         PROCEDURE CreateGadget(gui    : GUIInfoPtr;
+                                left   : INTEGER;
+                                top    : INTEGER;
+                                width  : INTEGER;
+                                height : INTEGER;
+                                kind   : LONGCARD;
+                                tags   : TagItemPtr);
+
+         PROCEDURE CreateGadgetText(gui    : GUIInfoPtr;
+                                    left   : INTEGER;
+                                    top    : INTEGER;
+                                    width  : INTEGER;
+                                    height : INTEGER;
+                                    kind   : LONGCARD;
+                                    text   : ADDRESS;
+                                    tags   : TagItemPtr);
+
+         PROCEDURE CreateGadgetFull(gui    : GUIInfoPtr;
+                                    left   : INTEGER;
+                                    top    : INTEGER;
+                                    width  : INTEGER;
+                                    height : INTEGER;
+                                    kind   : LONGCARD;
+                                    text   : ADDRESS;
+                                    place  : NewGadgetFlagSet;
+                                    tags   : TagItemPtr);
+
+         PROCEDURE MakeMenuEntry(gui  : GUIInfoPtr;
+                                 type : SHORTCARD;
+                                 text : ADDRESS;
+                                 key  : ADDRESS);
+
+         PROCEDURE WaitIntMsg(gui : GUIInfoPtr);
+
+         PROCEDURE GetIntMsg(gui : GUIInfoPtr) : BOOLEAN;
+
+         PROCEDURE EmptyIntMsgPort(gui : GUIInfoPtr);
+
+(*38.0*) PROCEDURE DrawBox(gui      : GUIInfoPtr;
+                           left     : INTEGER;
+                           top      : INTEGER;
+                           width    : INTEGER;
+                           height   : INTEGER;
+                           recessed : BOOLEAN);
+
+         PROCEDURE GadgetStatus(gui    : GUIInfoPtr;
+                                nbr    : INTEGER;
+                                status : BOOLEAN);
+
+         PROCEDURE ModifyGadget(gui  : GUIInfoPtr;
+                                nbr  : INTEGER;
+                                tags : TagItemPtr);
+
+         PROCEDURE UpdateEntryGadgets(gui : GUIInfoPtr);
+
+         PROCEDURE TopazAttr() : TextAttrPtr;
+
+         PROCEDURE GetOwnFont(name : ADDRESS;
+                              size : CARDINAL;
+                              font : TextAttrPtr) : TextFontPtr;
+
+         PROCEDURE RemOwnFont(font : TextFontPtr);
+
+         PROCEDURE OpenIntScreen(id    : LONGCARD;
+                                 depth : INTEGER;
+                                 name  : ADDRESS;
+                                 font  : TextAttrPtr) : ScreenPtr;
+
+         PROCEDURE OpenIntWindow(left        : INTEGER;
+                                 top         : INTEGER;
+                                 width       : INTEGER;
+                                 height      : INTEGER;
+                                 name        : ADDRESS;
+                                 idcmpFlags  : IDCMPFlagSet;
+                                 windowFlags : WindowFlagSet;
+                                 screen      : ScreenPtr) : WindowPtr;
+
+         PROCEDURE CloseIntWindow(window : WindowPtr);
+
+         PROCEDURE CloseIntScreen(screen : ScreenPtr);
+
+         PROCEDURE HandleIntMsg(gui : GUIInfoPtr);
+
+         PROCEDURE UpdateEGad(gui : GUIInfoPtr;
+                              nbr : INTEGER);
+
+(*38.0*) PROCEDURE ConvKMsgToGMsg(gui : GUIInfoPtr);
+
+(*38.0*) PROCEDURE VarToGad(gui : GUIInfoPtr;
+                            nbr : INTEGER);
+
+(*38.0*) PROCEDURE AllVarsToGad(gui : GUIInfoPtr);
+
+(*38.0*) PROCEDURE GadWithKey(gui   : GUIInfoPtr;
+                              nbr   : INTEGER;
+                              shift : BOOLEAN);
+
+(*38.0*) PROCEDURE OpenIntScreenTags(id    : LONGCARD;
+                                     depth : INTEGER;
+                                     name  : ADDRESS;
+                                     font  : TextAttrPtr;
+                                     tags  : TagItemPtr) : ScreenPtr;
+
+(*38.0*) PROCEDURE OpenIntWindowTags(left        : INTEGER;
+                                     top         : INTEGER;
+                                     width       : INTEGER;
+                                     height      : INTEGER;
+                                     name        : ADDRESS;
+                                     idcmpFlags  : IDCMPFlagSet;
+                                     windowFlags : WindowFlagSet;
+                                     screen      : ScreenPtr;
+                                     tags        : TagItemPtr) : WindowPtr;
+
+(*38.0*) PROCEDURE RedrawGadgets(gui     : GUIInfoPtr;
+                                 setGads : BOOLEAN) : INTEGER;
+
+(*38.0*) PROCEDURE RedrawMenu(gui : GUIInfoPtr) : INTEGER;
+
+(*38.0*) PROCEDURE ResizeGadget(gui    : GUIInfoPtr;
+                                nbr    : INTEGER;
+                                left   : INTEGER;
+                                top    : INTEGER;
+                                width  : INTEGER;
+                                height : INTEGER);
+
+(*38.0*) PROCEDURE NewGadgetFont(gui  : GUIInfoPtr;
+                                 nbr  : INTEGER;
+                                 font : TextAttrPtr);
+
+(*38.0*) PROCEDURE NewGadgetText(gui  : GUIInfoPtr;
+                                 nbr  : INTEGER;
+                                 text : ADDRESS);
+
+(*38.0*) PROCEDURE RemoveGadgets(gui : GUIInfoPtr; erase : BOOLEAN);
+
+(*38.0*) PROCEDURE RemoveMenu(gui : GUIInfoPtr; erase : BOOLEAN);
+
+(*38.0*) PROCEDURE CreateGUIInfoTags(window   : WindowPtr;
+                                     maxGads  : INTEGER;
+                                     maxMenus : INTEGER;
+                                     tags     : TagItemPtr) : GUIInfoPtr;
+
+(*38.0*) PROCEDURE NewFontAllGadgets(gui : GUIInfoPtr;
+                                     font: TextAttrPtr);
+
+(*38.0*) PROCEDURE ClearWindow(gui : GUIInfoPtr);
+
+(*38.0*) PROCEDURE CreateSpecialGadget(gui    : GUIInfoPtr;
+                                       left   : INTEGER;
+                                       top    : INTEGER;
+                                       width  : INTEGER;
+                                       height : INTEGER;
+                                       kind   : LONGCARD;
+                                       tags   : TagItemPtr);
+
+(*38.0*) PROCEDURE BeginRefresh(gui : GUIInfoPtr);
+
+(*38.0*) PROCEDURE EndRefresh(gui : GUIInfoPtr;
+                              complete : BOOLEAN);
+
+(*38.0*) PROCEDURE ShowRequester(gui  : GUIInfoPtr;
+                                 text : ADDRESS;
+                                 kind : LONGCARD;
+                                 tags : TagItemPtr) : LONGINT;
+
+(*38.0*) PROCEDURE SetProcessWindow(window : WindowPtr) : WindowPtr;
+
+(*38.0*) PROCEDURE SimpleReq(text : ADDRESS; kind : LONGCARD) : LONGINT;
+
+(*38.1*) PROCEDURE DoResizing(gui : GUIInfoPtr);
+
+END GUITools.

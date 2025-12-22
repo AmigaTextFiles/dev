@@ -1,0 +1,57 @@
+	IFND	LIBRARIES_GUIFRONT_LIB_I
+LIBRARIES_GUIFRONT_LIB_I SET 1
+*
+*	$VER: GUIFront.i 37.3 (29.10.94)
+*	Includes Release 37.3
+*
+*	Assembly header file for GUIFront.
+*
+*	(C) Copyright 1994 Michael Berg
+*	    All Rights Reserved
+*
+
+	IFND	EXEC_LIBRARIES_I
+	INCLUDE	"exec/libraries.i"
+	ENDC
+
+	LIBINIT
+
+	LIBDEF _LVOGF_CreateGUIAppA
+	LIBDEF _LVOGF_DestroyGUIApp
+	LIBDEF _LVOGF_GetGUIAppAttrA
+	LIBDEF _LVOGF_SetGUIAppAttrA
+	LIBDEF _LVOGF_DestroyGUI
+	LIBDEF _LVOGF_CreateGUIA
+	LIBDEF _LVOGF_GetGUIAttrA
+	LIBDEF _LVOGF_SetGUIAttrA
+	LIBDEF _LVOGF_GetIMsg
+	LIBDEF _LVOGF_Wait
+	LIBDEF _LVOGF_ReplyIMsg
+	LIBDEF _LVOGF_SetAliasKey
+	LIBDEF _LVOGF_BeginRefresh
+	LIBDEF _LVOGF_EndRefresh
+	LIBDEF _LVOGF_SetGadgetAttrsA
+	LIBDEF _LVOGF_GetGadgetAttrsA
+	LIBDEF _LVOGF_LockGUI
+	LIBDEF _LVOGF_UnlockGUI
+	LIBDEF _LVOGF_LockGUIApp
+	LIBDEF _LVOGF_UnlockGUIApp
+	LIBDEF _LVOGF_LoadPrefs
+	LIBDEF _LVOGF_SavePrefs
+	LIBDEF _LVOGF_LockPrefsList
+	LIBDEF _LVOGF_UnlockPrefsList
+	LIBDEF _LVOGF_FirstPrefsNode
+	LIBDEF _LVOGF_NextPrefsNode
+	LIBDEF _LVOGF_CopyAppID
+	LIBDEF _LVOGF_GetPrefsAttrA
+	LIBDEF _LVOGF_SetPrefsAttrA
+	LIBDEF _LVOGF_DeletePrefs
+	LIBDEF _LVOGF_DefaultPrefs
+	LIBDEF _LVOGF_NotifyPrefsChange
+	LIBDEF _LVOGF_EndNotifyPrefsChange
+	LIBDEF _LVOGF_AslRequest
+	LIBDEF _LVOGF_EasyRequestArgs
+	LIBDEF _LVOGF_ProcessListView
+	LIBDEF _LVOGF_SignalPrefsVChange
+
+	ENDC

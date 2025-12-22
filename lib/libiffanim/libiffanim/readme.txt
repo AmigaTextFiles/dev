@@ -1,0 +1,1 @@
+Configure and use the makefile or compile manually.

@@ -1,0 +1,341 @@
+Short:        A global SegList tracking utility
+Author:       Thomas Richter <thomas.richter@alumni.tu-berlin.de>, Michael Sinz <enforcer@sinz.org>
+Uploader:     Thomas Richter <thomas.richter@alumni.tu-berlin.de>
+Type:         dev/debug
+Version:      47.6
+Requires:     AmigaOS 2.04 or better
+Architecture: m68k-amigaos >= 2.0.4
+
+============================================================================
+                                 SegTracker
+         Copyright © 1992-1998 by Michael Sinz (Enforcer@sinz.org)
+ Copyright © 2021-2025 by Thomas Richter (thomas.richter@alumni.tu-berlin.de)
+
+	This program is not in the public domain, but may be redistributed
+	free of charge. See the license conditions at the end of this file.
+============================================================================
+
+This is an update of Michael Sinz original SegTracker Utility, based on
+the original C code, with many updates included (see below). It is enhanced
+and redistributed with the kind permission of Michal Sinz <enforcer@sinz.org>.
+
+While not based on it, this version is also compatible to the v45 SegTracker
+by Georg Hörmann, whom I'd like to thank for keeping the project updated.
+This version is not based on Georg's source code, though, but an extended
+version of Michael's original C code. Georg's fixes were integrated into
+this later release.
+
+Make sure you read the documentation before using the program.
+
+
+New in release 46.1 (note that this version is not based on v45)
+----------------------------------------------------------------
+
+- The ROM modules scanner was fixed to depend on the official ROM
+  size, and no longer depends on second-guessing the ROM area.
+- The AmigaOs ROM Updates are no longer checked, though SegTracker
+  is now aware of LoadModule and the modules it loads.
+- Similar to v45.1, installed kick tags are scanned.
+- SegTracker now supports overlays and also delivers ordinate
+  positions of the loaded segments (see below for the interface).
+- ROM/Kicktag offsets are fixed, as in the v45 release.
+- SegTracker can now be removed again with the REMOVE command line
+  option.
+- SegTracker can now run from the workbench as well, and takes
+  most command line options as tool types.
+- Several race conditions were fixed, such as printing the segment
+  list or finding segments while segment loading is ungoing.
+- The FIND option now also accepts C-style hex numbers starting
+  with "0x".
+- This release provides the same extended interface as v45 to
+  provide segment type information, though was extended to also
+  include overlay ordinate information.
+  
+New in release 47.1
+----------------------------------------------------------------
+- SegTracker can now also be instructed to scan binaries for
+  symbol names and file name and line number information, if
+  such information is present in the loaded program. Thus,
+  it includes features of the "FindHit" program which can then
+  be provided to debugging tools online.
+  
+New in release 47.2
+----------------------------------------------------------------
+- SegTracker did not scan the HUNK_HEADER correctly in case
+  it contained hunk sizes with the topmost two bits set,
+  indicating that the memory type follows in a second long.
+
+New in release 47.3
+----------------------------------------------------------------
+- Due to a typo, the LOADSYMBOLS option was broken in release
+  47.2. Fixed!
+  
+New in release 47.4
+----------------------------------------------------------------
+- SegTracker can now be told to allocate memory for
+  keeping tracked symbols and files bypassing memory checking
+  and memory leak test tools such as MemLog from
+  the same author. For this, SegTracker should be started
+  first (or run permanently) with the MEMLOG option while
+  MemLog should be started later when needed. In particular,
+  such memory logging tools then no longer log the memory
+  required by SegTracker for storing tracked segments and
+  symbols. Note that, besides such effords, MemLog will still
+  track memory that is allocated by other system functions such
+  as Open(), LoadSeg() or Free().
+  With the MEMLOG option present, SegTracker now stores upon
+  startup the exec memory allocation and release functions and
+  uses those for allocating the storage for the tracked symbols
+  and modules, thus bypassing any later patches installed into
+  the exec memory system.
+  This implies that SegTracker should be started *after*
+  patches of the exec memory system that should be used by
+  SegTracker itself - all patches installed afterwards
+  will not be used (on purpose).
+
+
+New in release 47.5
+----------------------------------------------------------------
+- Fixed a MuForce hit if run without the MEMLOG argument.
+
+New in release 47.6
+----------------------------------------------------------------
+- When debug symbols are output, the index is now no longer
+  kept on the stack to avoid trouble if the stack is damaged
+  by another program.
+
+
+Command line options
+----------------------------------------------------------------
+
+SHOW/S:		Show the name of all tracked segments.
+
+DUMP/S:		More extensive list of all tracked segments and hunks
+		being tracked, along with ordinate positions for overlays.
+
+FIND/M:	      	Find one or more segments by address. One or multiple
+		addresses in hex format can be passed in.
+
+NOROM/S:	Do not track segments found in the kickstart ROM
+		(same as v45). Default is to track them.
+
+NOKICKTAG/S:	Do not track segments on the exec module list (same as
+		v45). Default is to track them.
+
+FULLPATH/S:	For loaded segments, include the full path of the
+		loaded program (same as v45).
+
+NOPATH/S:	Do not include any path and only the program name
+		when tracking programs (same as v45).
+
+NOLOADMODULE/S:	Do not track segments loaded through LoadModule.
+		Default is to track LoadModule segments (new in v46).
+
+LOADSYMBOLS/:	Additionally, scan loaded segments for debugging
+		symbols and file name and line number information.
+		This requires a second pass through the binary as
+		the Os function ignores both data. (new in v47)
+
+MEMLOG/S:	Buffer exec memory allocation and release functions
+		during startup and use the buffered functions for
+		allocating memory for tracked segments and symbols
+		during the lifetime of SegTracker. The default is
+		to always use the system functions.
+
+REMOVE/S:	Remove a running instance of SegTracker.
+
+Workbench ToolTypes
+----------------------------------------------------------------
+
+SHOW,DUMP,NOROM,NOKICKTAG,FULLPATH,NOPATH,NOLOADMODULE,
+LOADSYMBOLS,MEMLOG,REMOVE:
+
+Same as the Shell command line argument. These tooltypes do not
+take any arguments.
+
+WINDOW=<path>	Defines the output path where SegTracker should
+		prints its output do.
+
+
+Program interface
+----------------------------------------------------------------
+
+SegTracker installs a public semaphore (named "SegTracker") into
+the exec semaphore list. The structure of the semaphore is as
+follows:
+
+typedef UBYTE (* __asm SegTrack(register __a0 ULONG address,
+	      	       		register __a1 ULONG *segnum,
+				register __a2 ULONG *offset));
+
+struct  SegSem
+{
+struct  SignalSemaphore seg_Semaphore;
+        SegTrack        *seg_Find;
+struct  MinList         seg_List;
+        UWORD           seg_Version;
+        APTR            seg_Self;       /* a consistency check */
+	BPTR            seg_Segment;    /* internal */
+	ULONG           seg_UseCount;   /* internal */
+	void            (*seg_Remove)(void); /* internal */
+	/* The following members exist if seg_Version >= 47 */
+	SegTrack       *seg_FindSymbol; 
+	ULONG           seg_LoadSymbols; /* if set, symbols loaded */
+	struct  MinList seg_Symbols;     /* internal */
+	struct	MinList seg_Lines;	 /* internal */
+};
+
+"seg_Find" is a function pointer that, given an address in a0,
+returns the name of the program (or name of the segment) the address
+belongs to, and the hunk number in *segnum, and the offset of the
+address relative to the start of the hunk in *offset.
+
+If segnum and offset are identical (i.e. segnum == offset), then
+in this (then single) pointer contains the pointer to the segment
+itself, or the pointer to the resident kicktag for ROM tags.
+
+seg_List contains the list of tracked segments. Its structure is
+private.
+
+
+If seg_Self points to seg_Semaphore, seg_Version is the version
+of SegTracker, currently v46. Private fields follow that are not
+part of the public interface.
+
+
+SegTracker v46 also supports the extended v45 interface, which is
+defined through the UBYTE * returned by seg_Find. If
+
+	name = (*seg->Find)(address,&hunk,&offset);
+
+is the return value of seg_Find, and seg_Version is 46 or larger,
+then name[-1] contains information on the type of the segment
+found.
+
+name[-1] == 0x00:   identifies regular segments, and
+
+	       	   (*seg->Find)(address,&segment,&segment)
+
+		   returns in "segment" the pointer to a regular
+		   BPTR-linked segment list.
+
+name[-1] == 0xff:  identfies a ROM or KickTag segment, and no
+	    	   segment linkage should be expected.
+
+name[-1] == 0x01:  identifies an overlay segment. The segment
+	    	   pointer is valid. Additional information
+		   on the overlay ordinate can be obtained as
+		   follows:
+
+ULONG *ord    = (ULONG *)(name - 1 - sizeof(ULONG));
+       ord   -= ord[0];
+
+		   ord[hunk] contains then the ordinate number
+		   of the hunk, i.e. "ord" is an array of
+		   ordinate coordinates indexed by the hunk
+		   number.
+
+		   Note that ord[] is correctly aligned, i.e.
+		   is an even address.
+
+
+All other values of name[-1] are reserved for future use.
+
+If seg_Self points back to the semaphore and seg_Version is greater or
+equal to 47, an additional function seg_FindSymbol is present. This
+function locates the nearest symbol or line number in a source file
+given an address into a binary, provided the binary included such
+debug information and SegTracker was instructed with the LOADSYMBOLS
+command line argument to retrieve them when loading the code.
+
+This function is called as follows to find the nearest debug
+symbol in the source code:
+
+       symbol = (*seg->FindSymbol)(address,&offset,NULL);
+
+This function returns a NUL-terminated string of the symbol nearest
+to "address", or NULL if no such symbol is found. "offset" is
+filled by the offset from the symbol.
+
+If the second argument is not NULL, and the function is called
+as follows:
+
+       file = (*seg->FindSymbol)(address,&offset,&line);
+
+It then returns a NUL-terminated string of the file name where the
+supplied address is found, or NULL if no such file could be found. The
+offset pointer is filled by the byte offset from the start of the
+nearest source code line, and line by the line number from the start
+of the file.
+
+------------------------------------------------------------------------------
+
+                      The THOR-Software Licence (v3, January 2nd 2021)
+
+This License applies to the computer programs known as "SegTracker",
+and the corresponding documentation, "SegTracker.doc". The
+"Program", below, refers to such program. The "Archive" refers to
+the package of distribution, as prepared by the author of the Program,
+Thomas Richter. Each licensee is addressed as "you".
+
+The Program and the data in the archive are freely distributable
+under the restrictions stated below, but are also Copyright (c)
+Thomas Richter.
+
+Distribution of the Program, the Archive and the data in the Archive by a
+commercial organization without written permission from the author to any
+third party is prohibited if any payment is made in connection with such
+distribution, whether directly (as in payment for a copy of the Program) or
+indirectly (as in payment for some service related to the Program, or
+payment for some product or service that includes a copy of the Program
+"without charge"; these are only examples, and not an exhaustive
+enumeration of prohibited activities).
+
+
+However, the following methods of distribution involving payment shall not
+in and of themselves be a violation of this restriction:
+(i) Distributing the Program on a physical data carrier (e.g. CD-ROM,
+    DVD, USB-Stick, Disk...) provided that:
+
+a) the Archive is reproduced entirely and verbatim on such data carrier,
+   including especially this licence agreement;
+
+b) the data carrier is made available to the public for a nominal
+   fee only, i.e. for a fee that covers the costs of the data carrier,
+   and shipment of the data carrier;
+
+c) a data carrier with the Program installed is made available to the
+   author for free except for shipment costs, and
+
+d) provided further that all information on said data carrier is
+   redistributable for non-commercial purposes without charge.
+
+
+Redistribution of a modified version of the Archive, the Program or the
+contents of the Archive is prohibited in any way, by any organization,
+regardless whether commercial or non-commercial. Everything must be kept
+together, in original and unmodified form.
+
+
+
+Limitations.
+
+
+THE PROGRAM IS PROVIDED TO YOU "AS IS", WITHOUT WARRANTY. THERE IS NO
+WARRANTY FOR THE PROGRAM, EITHER EXPRESSED OR IMPLIED, INCLUDING, BUT NOT
+LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A
+PARTICULAR PURPOSE AND NONINFRINGEMENT OF THIRD PARTY RIGHTS. THE ENTIRE
+RISK AS TO THE QUALITY AND PERFORMANCE OF THE PROGRAM IS WITH YOU. SHOULD
+THE PROGRAM PROVE DEFECTIVE, YOU ASSUME THE COST OF ALL NECESSARY
+SERVICING, REPAIR OR CORRECTION.
+
+
+IF YOU DO NOT ACCEPT THIS LICENCE, YOU MUST DELETE THE PROGRAM, THE ARCHIVE
+AND ALL DATA OF THIS ARCHIVE FROM YOUR STORAGE SYSTEM. YOU ACCEPT THIS
+LICENCE BY USING OR REDISTRIBUTING THE PROGRAM.
+
+______________________________________________________________________________
+
+So long,
+
+        Thomas Richter (June 2025)

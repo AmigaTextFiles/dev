@@ -1,0 +1,167 @@
+\ Show IFF ILBM File
+\ Use deferred IFF parsing words to parse file,
+\ create bitmap and make screen from bitmap.
+\
+\ Author: Phil Burk
+\ Copyright 1987 Phil Burk
+\
+\ MOD: PLB 12/7/90 Added SW-HI SW-WIDE to SCREEN>BACKWINDOW
+\      Thanks to Marty Kees
+\ MOD: PLB 9/91 Moved SCREEN>WINDOW etc. to JU:SCREEN_SUPPORT
+\ MOD: PLB 10/25/91 Changed ERROR to ERR in $IFF.DISPLAY
+\          to avoid naming conflict.
+\ 00001 PLB 11/13/91 Explicitly close SIFF-WINDOW
+
+getmodule includes
+include? gr.init ju:amiga_graph
+include? ?closebox ju:amiga_events
+include? newscreen.setup ju:screen_support
+\
+include? unpackrow jiff:unpacking
+include? IFF.DOFILE jiff:iff_support
+include? task-ilbm_parser jiff:ilbm_parser
+
+decimal
+ANEW TASK-SHOW_IFF
+
+variable SIFF-SCREEN  ( holder for relative screen pointer )
+variable SIFF-WINDOW  \ 00001
+
+: SIFF.SHOWIT ( -- , Put window display in front for closebox.)
+	siff-Screen @ true showtitle()
+	siff-Screen @ false showtitle()
+;
+
+: SIFF.CLOSE ( -- , Close screen and window.)
+	siff-window @ ?dup \ 00001
+	IF
+		gr.closewindow siff-window off
+	THEN
+	siff-Screen @ ?dup
+	IF
+		closescreen()  siff-Screen off
+	THEN
+;
+
+32 constant SIFF_MAX_COLORS
+create siff-ctable siff_max_colors 2* allot
+
+: SIFF.USE.CTABLE ( ctable #colors -- )
+	siff-Screen @ .. sc_viewport -rot
+	loadRGB4()
+;
+
+: SIFF.BLACKOUT ( -- , black out colors on screen )
+	siff-screen @ .. sc_viewport
+	..@ vp_colormap >rel ..@ cm_count
+	siff-ctable over 2* erase  ( clear color table )
+	siff-ctable swap siff.use.ctable
+;
+
+: SIFF.USE.CMAP ( cmap cmsize -- )
+	pad swap
+	3 / dup>r
+	cmap>ctable
+	pad r> siff.use.ctable
+;
+
+: SIFF.WAIT ( -- , wait for event )
+	BEGIN ?closebox ?terminal OR
+	UNTIL
+;
+
+: SIFF.ABORT
+	ilbm.cleanup
+	." IFF parsing aborted" cr
+	abort
+;
+
+: $IFF>BITMAP ( $filename -- bitmap | NULL , read )
+	gr.init
+\ Read graphics from file.
+	$ilbm.parse.file?
+	IF
+		0
+	ELSE
+		ilbm.alloc.bitmap dup
+		IF  dup ilbm.fill.bitmap 0=
+			IF free.bitmap 0
+			THEN
+		THEN
+	THEN
+	ilbm.cleanup
+;
+
+: IFF>BITMAP ( <filename> -- bitmap | NULL , read IFF file )
+	fileword $iff>bitmap
+;
+
+: $IFF>DISPLAY { $filename | bmap scr wnd -- bitmap | NULL , read and open}
+	gr.init
+	siff.close
+	0 -> bmap
+\
+\ Read graphics from file.
+	$filename $ilbm.parse.file? ?goto.error
+	ilbm.alloc.bitmap -> bmap
+	bmap 0= ?goto.error
+\
+\ Create proper screen
+	bmap clear.bitmap
+	bmap ilbm-camg @ bitmap>screen -> scr
+	scr 0=
+	IF 
+		." Couldn't open screen!" cr
+		goto.error
+	THEN
+\
+\ Set up backdrop window
+	scr siff-screen !
+	scr screen>backwindow -> wnd
+	wnd 0=
+	IF
+		." Couldn't open window!" cr
+		goto.error
+	THEN
+	
+	wnd siff-window ! \ 00001
+	ilbm-cmap @  ( set colors )
+	IF ilbm-cmap @ ilbm-cmsize @ siff.use.cmap
+	THEN
+	siff.showit
+\
+\ Now that it's safe, load graphics into bitmap.
+	bmap ilbm.fill.bitmap 0= ?goto.error
+	ilbm.cleanup
+	bmap
+	exit
+\
+ERROR:
+	ilbm.cleanup
+	siff.close
+	bmap
+	IF bmap free.bitmap
+	THEN
+	0
+;
+
+: IFF>DISPLAY ( <filename> -- bitmap , open a screen and display )
+	fileword $iff>display
+;
+
+: JSHOW  ( <filename> -- , read an IFF file, show and close)
+	gr.init
+	>newline ." JSHOW V3.0 - By Phil Burk, written in JForth" cr
+	ilbm.init
+	iff>display ?dup
+	IF  siff.wait
+		siff.close
+		free.bitmap
+	THEN
+	gr.term
+;
+
+cr ." Enter:   JSHOW <filename>   to see an IFF file." cr
+cr ."          (click top-left corner to exit)" cr
+cr ." NOTE:  to see the provided picture,  enter:" cr
+cr ."            JSHOW JFORTH_DEMO:TUTORIALS/STORM.IFF" cr cr

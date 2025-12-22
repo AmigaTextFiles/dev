@@ -1,0 +1,738 @@
+/*
+ *   3DS object loader
+ *      a TKScript module written by Bastian Spiegel <bs@tkscript.de>
+ *   
+ *   created: 8.Dec.2003
+ *   changed: 8.Dec.2003
+ *
+ *
+ */
+
+module Simple3DS;
+use tksdl;
+
+enum {
+    3DS_MAIN                         = 0x4D4D,
+    3DS_EDITOR                       = 0x3D3D,
+
+    3DS_COLOR_RGBF                   =0x010,
+    3DS_COLOR_RGBI                   =0x011,
+    3DS_COLOR_UNK                    =0x013,
+
+    3DS_OBJ                          = 0x4000,
+       3DS_OBJ_MESH                  = 0x4100,
+       3DS_OBJ_MESH_VERTICELIST      = 0x4110,
+       3DS_OBJ_MESH_FACELIST         = 0x4120,
+           3DS_OBJ_MESH_FACEMAT      = 0x4130,
+       3DS_OBJ_MESH_MAPCOORDLIST     = 0x4140,
+           3DS_OBJ_MESH_SMOOTHLIST   = 0x4150,
+       3DS_OBJ_MESH_LOCALCOORDS      = 0x4160,
+
+       3DS_OBJ_LIGHT                 = 0x4600,
+           3DS_OBJ_LIGHT_SPOTLIGHT   = 0x4610,
+
+       3DS_OBJ_CAMERA                = 0x4700,
+    
+    3DS_MAT                          = 0xAFFF,
+    3DS_MAT_NAME                     = 0xA000,
+    3DS_MAT_AMBIENT                  = 0xA010,
+    3DS_MAT_DIFFUSE                  = 0xa020, 
+    3DS_MAT_SPECULAR                 = 0xA030,
+    3DS_MAT_MAP_TEXTURE1             = 0xA200,
+    3DS_MAT_MAP_BUMP                 = 0xa230,
+    3DS_MAT_MAP_REFLECTION           = 0xa220,
+    3DS_MAT_MAP_FILENAME             = 0xa300,
+    3DS_MAT_MAP_PARAMETERS           = 0xa351,
+
+    3DS_PAD__
+
+};
+
+enum {
+
+    3DS_COLORTYPE_PAD
+};
+
+#define 3DS_AVGNUMMATERIALS 16
+#define 3DS_AVGNUMOBJECTS 8
+
+function int2string(int _i) {
+    Integer io; io.value=_i; return io.printf("%04x");
+}
+
+class C3DSMaterial {
+    String name;
+    Color ambient;
+    Color diffuse;
+    Color specular;
+}
+
+class C3DSMesh {
+    FloatArray vertices;
+    IntArray   faces;
+    FloatArray facenormals;
+    FloatArray normals;
+    FloatArray uv;
+
+    calcNormals() {
+	FloatArray fa<=facenormals;
+	if(fa.realloc((faces.numElements/4)*3))
+	    {
+		fa.numElements=faces.numElements*3;
+		// pass1: generate surface normals
+		int i=0;
+		int fai=0;
+		Vector v;
+		float ax,ay,az,bx,by,bz;
+		compile 
+		    loop(faces.numElements/4)
+		    {
+			ax= vertices[faces[i  ]*3  ] - 
+			    vertices[faces[i+1]*3  ];
+			ay= vertices[faces[i  ]*3+1] - 
+			    vertices[faces[i+1]*3+1];
+			az= vertices[faces[i  ]*3+2] - 
+			    vertices[faces[i+1]*3+2];
+
+			bx= vertices[faces[i+1]*3  ] - 
+			    vertices[faces[i+2]*3  ];
+			by= vertices[faces[i+1]*3+1] - 
+			    vertices[faces[i+2]*3+1];
+			bz= vertices[faces[i+1]*3+2] - 
+			    vertices[faces[i+2]*3+2];
+
+			v.x=ay*bz - az*by;
+			v.y=az*bx - ax*bz;
+			v.z=ax*by - ay*bx;
+
+			v.unit();
+			fa[fai++]=v.x;
+			fa[fai++]=v.y;
+			fa[fai++]=v.z;
+			i=i+4;
+		    }     
+		// pass2: generate point normals
+		FloatArray fp<=normals;
+		if(fp.realloc(vertices.numElements))
+		    {
+			fp.numElements=vertices.numElements;
+			fp.fill(0);
+			IntArray ifc<=faces;
+			fai=0;
+			i=0;
+			compile 
+			    loop(ifc.numElements/4)
+			    {
+				fp[ifc[fai]*3  ]+=fa[i  ];
+				fp[ifc[fai]*3+1]+=fa[i+1];
+				fp[ifc[fai]*3+2]+=fa[i+2];
+
+				fp[ifc[fai+1]*3  ]+=fa[i  ];
+				fp[ifc[fai+1]*3+1]+=fa[i+1];
+				fp[ifc[fai+1]*3+2]+=fa[i+2];
+
+				fp[ifc[fai+2]*3  ]+=fa[i  ];
+				fp[ifc[fai+2]*3+1]+=fa[i+1];
+				fp[ifc[fai+2]*3+2]+=fa[i+2];
+				i+=3;
+				fai+=4;
+			    }
+		    }
+		i=0;
+		compile 
+		    loop(normals.numElements/3)
+		    {
+			v.x=fp[i];
+			v.y=fp[i+1];
+			v.z=fp[i+2];
+			v.unit();
+			fp[i++]=v.x;
+			fp[i++]=v.y;
+			fp[i++]=v.z;
+		    }
+	    }
+    }
+
+}
+
+
+class C3DSObject {
+    String name;
+    C3DSMesh meshes[];
+}
+
+class C3DS {
+    C3DSMaterial materials[];
+    C3DSMaterial cmaterial;
+
+    C3DSObject objects[];
+    C3DSObject cobject;
+    C3DSMesh   cmesh;
+
+    int total_numvertices;
+    int total_numfaces;
+
+    C3DS() {
+    }
+
+    Stream ifs;
+    int i_filesize;
+    int i_chunk_id;
+    int i_chunk_size;
+    int i_subchunk_id;
+    int i_subchunk_size;
+    String s_tmpname;
+    
+    float maxx;
+    float maxy;
+    float maxz;
+    float minx;
+    float miny;
+    float minz;
+
+    readChunkHeader() {
+	i_chunk_id = ifs.i16;
+	i_chunk_size=ifs.i32-6;
+	return i_chunk_id;
+    }
+    readSubChunkHeader() {
+	i_subchunk_id = ifs.i16 &0xFFFF;
+	i_subchunk_size=ifs.i32 -6;
+	//trace "readSubChunkHeader: i_subchunk_id="+getSubChunkName()+" size="+i_subchunk_size;
+	return i_subchunk_id;
+    }
+    getChunkName() {
+	return int2string(i_chunk_id);
+    }
+    getSubChunkName() {
+	return int2string(i_subchunk_id);
+    }
+    readTempName() {
+	int i=0;
+	s_tmpname.alloc(128);
+	int c;
+	do {
+	    c=ifs.i8;
+	    s_tmpname[i++]=c;
+	} while c!=0;
+	s_tmpname.fixLength();
+	i_subchunk_size-=i;
+	return s_tmpname;
+    }
+
+    readColorChunk(Color _c) {
+	int cf=ifs.i16&0xFFFF;
+	int cfsz=ifs.i32-6;
+	switch(cf)
+	    {
+	    case 3DS_COLOR_RGBF:
+		trace "        colortype RGBF.";
+		_c.rf=ifs.f32;
+		_c.gf=ifs.f32;
+		_c.bf=ifs.f32;
+		_c.af=1;
+		break;
+	    case 3DS_COLOR_RGBI:
+		trace "        colortype RGBI.";
+		_c.ri=ifs.i8;
+		_c.gi=ifs.i8;
+		_c.bi=ifs.i8;
+		_c.af=1;
+		break;
+	    case 3DS_COLOR_UNK:
+	    default:
+		trace "      unknown color format "+cf+"..skipping.";
+		_c.colori=0;
+		ifs.seek(cfsz, SEEK_CUR);
+		break;
+	    }
+	trace "read color "+_c.string;
+    }
+
+    skipSubChunk() {
+	ifs.seek(i_subchunk_size, SEEK_CUR);
+	//trace "skipSubChunk "+getSubChunkName()+" size="+i_subchunk_size;
+    }
+
+    seekNextSubChunkByID(int _id) {
+	while ( readSubChunkHeader() != _id ) 
+	    skipSubChunk();
+    }
+
+    getMaterialIndexByName(String _name) {
+	C3DSMaterial m;
+	int i=0;
+	foreach m in materials 
+	    {
+		if(m.name==_name)
+		    return i;
+		else i++;
+	    }
+    }
+
+    validateIndices() {
+	C3DSObject o;
+	C3DSMesh m;
+	int maxmat=materials.numElements;
+	trace "---maxmat="+maxmat;
+	foreach o in objects
+	    foreach m in o.meshes 
+	    {
+		int vtxnum=m.vertices.numElements/3;
+		IntArray fl<=m.faces;
+		int flnum=fl.numElements;
+		for(int i=0; i<flnum; i+=4)
+		    {
+			if(fl[i]>=vtxnum) fl[i]=0;
+			if(fl[i+1]>=vtxnum) fl[i+1]=0;
+			if(fl[i+2]>=vtxnum) fl[i+2]=0;
+			if(fl[i+3]>=maxmat) fl[i+3]=0;
+		    }
+	    }
+    }
+
+	
+    /** bool **/ loadLocal3DS(String _name) {
+	File fs;
+	ifs<=fs;
+	if(fs.openLocal(_name, 0))
+	    {
+		return load3DSFromStream(fs);
+	    }
+	else
+	    {
+		stderr "Load3DS: cannot open local file \""+_name+"\"";
+		dtrace true;
+		return false;
+	    }
+    }
+
+    /** bool **/ load3DS(String _name) {
+	File fs;
+	ifs<=fs;
+	if(fs.open(_name))
+	    {
+		return load3DSFromStream(fs);
+	    }
+	else
+	    {
+		stderr "Load3DS: cannot open logic file \""+_name+"\"";
+		dtrace true;
+		return false;
+	    }
+    }
+
+    /** bool **/ load3DSFromStream(Stream _ifs) {
+	materials.alloc(3DS_AVGNUMMATERIALS);
+	objects.alloc(3DS_AVGNUMOBJECTS);
+	cobject<=null;
+	cmaterial<=null;
+	cmesh<=null;
+	total_numvertices=0;
+	total_numfaces=0;
+	maxx=-10000;
+	maxy=-10000;
+	maxz=-10000;
+	minx=10000;
+	miny=10000;
+	minz=10000;
+	
+//  	dtrace false;
+	
+	if(1)//fs.openLocal(_name, 0))
+	    {
+		readChunkHeader();
+		if (i_chunk_id==3DS_MAIN)
+		{
+		    trace "--3DS_MAIN-- ("+i_chunk_size+" bytes)";
+  		    seekNextSubChunkByID(3DS_EDITOR);
+//  		    dtrace false;
+		    while(!ifs.eof())
+			{
+			    //trace "ifs.offset="+ifs.offset+" ifs.size="+ifs.size;
+			    readSubChunkHeader();
+			    switch(i_subchunk_id)
+				{
+				default:
+//  				    trace "-------- unknown chunk (size="+i_subchunk_size+").";
+//  				    trace "         i_subchunk_id="+getSubChunkName();
+//  				    trace "         i_subchunk_size="+i_subchunk_size;
+//  				    trace "         x readSubChunkHeader: ifs.offset="+ifs.offset;
+				    skipSubChunk();
+//      				    dtrace false;
+				    break;
+
+				case 3DS_OBJ:
+				    trace "-------- found OBJECT chunk.";
+				    readTempName();
+				    trace "         name:" +s_tmpname;
+				    objects.realloc(objects.numElements+1);
+				    cobject<=objects.nextFree;
+//    				    dtrace true;
+//    				    dtrace false;
+				    break;
+
+				case 3DS_OBJ_MESH:
+				    trace "-------- found OBJECT::MESH CHUNK.";
+				    if(cobject)
+					{
+					    _=cobject.meshes.realloc(cobject.meshes.numElements+1);
+					    cmesh<=cobject.meshes.nextFree;
+					}
+				    else
+					{
+					    cmesh<=null;
+					    skipSubChunk();
+					}
+				    break;
+				    
+				case 3DS_OBJ_MESH_VERTICELIST:
+				    trace "-------- found OBJECT::MESH::VERTICELIST CHUNK.";
+				    if(cmesh)
+					{
+					    int numverts=ifs.i16&0xFFFF;
+					    float cf;
+					    FloatArray verts<=cmesh.vertices;
+					    verts.alloc(numverts*3); verts.numElements=0;
+					    compile loop(numverts)
+						{
+						    cf=ifs.f32;
+						    if(cf>maxx) maxx=cf;
+						    if(cf<minx) minx=cf;
+						    verts.add(cf);
+
+						    cf=ifs.f32;
+						    if(cf>maxy) maxy=cf;
+						    if(cf<miny) miny=cf;
+						    verts.add(cf);
+
+						    cf=ifs.f32;
+						    if(cf>maxz) maxz=cf;
+						    if(cf<minz) minz=cf;
+						    verts.add(cf);
+						}
+					    trace "read "+numverts+" vertices.";
+					    total_numvertices+=numverts;
+					}
+				    else
+					{
+					    trace "vertice list outside of mesh";
+					    skipSubChunk();
+					}
+				    break;
+
+				case 3DS_OBJ_MESH_FACELIST:
+				    trace "-------- found OBJECT::MESH::FACELIST CHUNK.";
+				    if(cmesh)
+					{
+					    int numfaces=ifs.i16&0xFFFF;
+					    IntArray fia<=cmesh.faces;
+					    fia.alloc(numfaces*4); fia.numElements=0;
+					    compile loop(numfaces)
+						{
+						    fia.add(ifs.i16&0xFFFF);
+						    fia.add(ifs.i16&0xFFFF);
+						    fia.add(ifs.i16&0xFFFF);
+						    fia.add(ifs.i16&0); // later material index
+						}
+					    trace "read "+numfaces+" faces.";
+					    total_numfaces+=numfaces;
+					}
+				    else
+					{
+					    trace "face list outside of mesh";
+					    skipSubChunk();
+					}
+				    break;
+
+				case 3DS_OBJ_MESH_FACEMAT:
+				    trace "-------- found OBJECT::MESH::FACEMAT CHUNK.";
+				    if(cmesh)
+					{
+					    int mi=getMaterialIndexByName(readTempName());
+					    int numentries=ifs.i16&0xFFFF;
+					    IntArray faces<=cmesh.faces;
+					    loop(numentries)
+						{
+						    int fi=ifs.i16&0xFFFF;
+						    faces[fi*4+3]=mi;
+						}
+					    trace "read material assignments for "+numentries+" faces.";
+					}
+				    else
+					skipSubChunk();
+				    break;
+				
+				case 3DS_OBJ_MESH_MAPCOORDLIST:
+				    trace "-------- found OBJECT::MESH::MAPCOORDLIST CHUNK.";
+				    skipSubChunk();
+				    break;
+
+				case 3DS_OBJ_MESH_SMOOTHLIST:
+				    trace "-------- found OBJECT::MESH::SMOOTHLIST CHUNK.";
+				    skipSubChunk();
+				    break;
+
+				case 3DS_OBJ_MESH_LOCALCOORDS:
+				    trace "-------- found OBJECT::MESH::LOCALCOORDS CHUNK.";
+				    skipSubChunk();
+				    break;
+
+				case 3DS_OBJ_LIGHT:
+				    trace "-------- found OBJECT::LIGHT CHUNK.";
+				    skipSubChunk();
+				    break;
+
+				case 3DS_OBJ_LIGHT_SPOTLIGHT:
+				    trace "-------- found OBJECT::LIGHT::SPOTLIGHT CHUNK.";
+				    skipSubChunk();
+				    break;
+
+				case 3DS_OBJ_CAMERA:
+				    trace "-------- found OBJECT::CAMERA CHUNK.";
+				    skipSubChunk();
+				    break;
+    
+				case 3DS_MAT:
+				    trace "-------- found MATERIAL CHUNK.";
+				    materials.realloc(materials.numElements+1);
+				    cmaterial<=materials.nextFree;
+
+				    //skipSubChunk();
+				    break;
+				    
+				case 3DS_MAT_NAME:
+				    trace "-------- found MATERIAL::NAME CHUNK.";
+				    if(cmaterial)
+					{
+					    cmaterial.name=readTempName();
+					    trace "---- name=\""+cmaterial.name+"\"";
+					}
+				    else
+					{
+					    skipSubChunk();
+					}
+				    break;
+
+				case 3DS_MAT_AMBIENT:
+				    trace "-------- found MATERIAL::AMBIENTCOLOR CHUNK.";
+				    if(cmaterial)
+					    readColorChunk(cmaterial.ambient);
+				    else
+					skipSubChunk();
+				    break;
+				    
+				case 3DS_MAT_DIFFUSE:
+				    trace "-------- found MATERIAL::DIFFUSECOLOR CHUNK.";
+				    if(cmaterial)
+					    readColorChunk(cmaterial.diffuse);
+				    else
+					skipSubChunk();
+				    break;
+
+				case 3DS_MAT_SPECULAR:
+				    trace "-------- found MATERIAL::SPECULAR CHUNK.";
+				    if(cmaterial)
+					readColorChunk(cmaterial.specular);
+				    else
+					skipSubChunk();
+				    break;
+
+				case 3DS_MAT_MAP_TEXTURE1:
+				    trace "-------- found MATERIAL::MAP_TEXTURE1 CHUNK.";
+				    skipSubChunk();
+				    break;
+
+				case 3DS_MAT_MAP_BUMP:
+				    trace "-------- found MATERIAL::MAP_BUMP CHUNK.";
+				    skipSubChunk();
+				    break;
+
+				case 3DS_MAT_MAP_REFLECTION:
+				    trace "-------- found MATERIAL::MAP_REFLECTION CHUNK.";
+				    skipSubChunk();
+				    break;
+
+				case 3DS_MAT_MAP_FILENAME:
+				    trace "-------- found MATERIAL::MAP::FILENAME CHUNK.";
+				    skipSubChunk();
+				    break;
+
+				case 3DS_MAT_MAP_PARAMETERS:
+				    trace "-------- found MATERIAL::MAP::PARAMETERS CHUNK.";
+				    skipSubChunk();
+				    break;
+				}
+			}
+
+		    // ---- finished parsing
+		    dtrace true;
+		    validateIndices();
+		    trace "Load3DS: found "+materials.numElements+" materials and "+
+			objects.numElements+" objects.";
+		    trace "                #triangles="+total_numfaces+" #vertices="+total_numvertices;
+		    return true;
+		}
+		else {
+		    stderr "Load3DS: missing 3DS_MAIN.";
+		    dtrace true;
+		    return false;
+		}
+	    }
+    }
+
+
+    normalize() {
+	trace "normalize(): max=("+maxx+","+maxy+","+maxz+")";
+	trace "             min=("+minx+","+miny+","+minz+")";
+	float scx=1.0/(maxx-minx);
+	float scy=1.0/(maxy-miny);
+	float scz=1.0/(maxz-minz);
+	float ax=(minx-maxx)*0.5;
+	float ay=(miny-maxy)*0.5;
+	float az=(minz-maxz)*0.5;
+
+	C3DSMesh m;
+	C3DSObject o;
+	foreach o in objects {
+	    foreach m in o.meshes {
+		FloatArray va<=m.vertices;
+		ax=0; ay=0; az=0;
+		int i=0;
+		compile loop(va.numElements/3) {
+		    va[i]=(va[i]+ax)*scx;
+		    i++;
+		    va[i]=(va[i]+ay)*scx;
+		    i++;
+		    va[i]=(va[i]+az)*scx;
+		    i++;
+		    //trace "v=("+va[i-3]+","+va[i-2]+","+va[i-1]+")";
+		}
+	    }
+	}
+    }
+
+    calcNormals() {
+	C3DSObject o;
+	C3DSMesh m;
+	foreach o in objects
+	    foreach m in o.meshes
+  	        m.calcNormals();
+    }
+
+
+}
+
+
+
+
+
+
+
+/*
+http://www.spacesimulator.net/tut4_3dsloader.html
+
+ In this table we can see the offset (in byte) and the length (in byte) of each field in a typical chunk:
+Offset 	Length 	 
+0 	2 	Chunk identifier
+2 	4 	Chunk length: chunk data + sub-chunks(6+n+m)
+6 	n 	Data
+6+n 	m 	Sub-chunks
+
+
+MAIN CHUNK 0x4D4D
+   3D EDITOR CHUNK 0x3D3D
+      OBJECT BLOCK 0x4000
+         TRIANGULAR MESH 0x4100
+            VERTICES LIST 0x4110
+            FACES DESCRIPTION 0x4120
+               FACES MATERIAL 0x4130
+            MAPPING COORDINATES LIST 0x4140
+               SMOOTHING GROUP LIST 0x4150
+            LOCAL COORDINATES SYSTEM 0x4160
+         LIGHT 0x4600
+            SPOTLIGHT 0x4610
+         CAMERA 0x4700
+      MATERIAL BLOCK 0xAFFF
+         MATERIAL NAME 0xA000
+         AMBIENT COLOR 0xA010
+         DIFFUSE COLOR 0xA020
+         SPECULAR COLOR 0xA030
+         TEXTURE MAP 1 0xA200
+         BUMP MAP 0xA230
+         REFLECTION MAP 0xA220
+         [SUB CHUNKS FOR EACH MAP]
+            MAPPING FILENAME 0xA300
+            MAPPING PARAMETERS 0xA351
+      KEYFRAMER CHUNK 0xB000
+         MESH INFORMATION BLOCK 0xB002
+         SPOT LIGHT INFORMATION BLOCK 0xB007
+         FRAMES (START AND END) 0xB008
+            OBJECT NAME 0xB010
+            OBJECT PIVOT POINT 0xB013
+            POSITION TRACK 0xB020
+            ROTATION TRACK 0xB021
+            SCALE TRACK 0xB022
+            HIERARCHY POSITION 0xB030 
+
+
+
+
+MAIN CHUNK 0x4D4D
+   3D EDITOR CHUNK 0x3D3D
+      OBJECT BLOCK 0x4000
+         TRIANGULAR MESH 0x4100
+            VERTICES LIST 0x4110
+            FACES DESCRIPTION 0x4120
+            MAPPING COORDINATES LIST 0x4140
+
+Let's describe in detail these chunks:
+MAIN CHUNK
+Identifier 	0x4d4d 
+Length 	0 + sub-chunks length
+Chunk father 	None
+Sub chunks 	3D EDITOR CHUNK
+Data 	None
+3D EDITOR CHUNK
+Identifier 	0x3D3D 
+Length 	0 + sub-chunks length
+Chunk father 	MAIN CHUNK
+Sub chunks 	OBJECT BLOCK, MATERIAL BLOCK, KEYFRAMER CHUNK
+Data 	None
+OBJECT BLOCK
+Identifier 	0x4000
+Length 	Object name length + sub-chunks length
+Chunk father 	3D EDITOR CHUNK
+Sub chunks 	TRIANGULAR MESH, LIGHT, CAMERA
+Data 	Object name
+TRIANGULAR MESH
+Identifier 	0x4100
+Length 	0 + sub-chunks length
+Chunk father 	OBJECT BLOCK
+Sub chunks 	VERTICES LIST, FACES DESCRIPTION, MAPPING COORDINATES LIST
+Data 	None
+VERTICES LIST
+Identifier 	0x4110
+Length 	varying + sub-chunks length
+Chunk father 	TRIANGULAR MESH
+Sub chunks 	None
+Data 	Vertices number (unsigned short)
+Vertices list: x1,y1,z1,x2,y2,z2 etc. (for each vertex: 3*float)
+FACES DESCRIPTION
+Identifier 	0x4120
+Length 	varying + sub-chunks length
+Chunk father 	TRIANGULAR MESH
+Sub chunks 	FACES MATERIAL
+Data 	Polygons number (unsigned short)
+Polygons list: a1,b1,c1,a2,b2,c2 etc. (for each point: 3*unsigned short)
+Face flag: face options, sides visibility etc. (unsigned short)
+MAPPING COORDINATES LIST
+Identifier 	0x4140
+Length 	varying + sub-chunks length
+Chunk father 	TRIANGULAR MESH
+Sub chunks 	SMOOTHING GROUP LIST
+Data 	Vertices number (unsigned short)
+Mapping coordinates list: u1,v1,u2,v2 etc. (for each vertex: 2*float)
+
+
+*/

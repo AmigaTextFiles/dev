@@ -1,0 +1,255 @@
+[LANGUAGE english; PARENT index; PAGE 4]
+[C;6;B]		Auto-Initialisation
+		Auto-Exit
+[J;1;N]
+  lk actually supports two types of intialisation and \
+exit code. Those are from:
+[C;3; GOTO slink]		Slink
+[1]			and
+[3; GOTO dice]			DICE
+[J]
+[LABEL slink; 5]  . Slink's autos:
+[1]
+  This mode needs the use of the option SLINK.
+
+  To have auto-initialisation, SAS/C creates functions \
+named __STI<function name> or @_STI<function name> (The \
+second one correspond to the same function called with \
+registers not saved on the stack.) Those are called \
+'CREATORS.'
+  To have auto-exit, SAS/C creates functions named \
+__STD<function name> or @_STD<function name>. Those \
+are called 'DESTRUCTORS.'
+  The code (or data) which needs those initialisation and \
+exit functions is created into the same unit.
+  The disaventage of this method is to create a relocation \
+pointer for each function. This has a high time and space \
+cost. The following initialisation method does not have \
+that disaventage.
+[5]
+  The following example is an illustration of the \
+functions of SAS/C. Note that's not a copy of it. \
+Nothing oblige you to use those models.
+[1]
+  To call each of those functions, you need a function \
+called '___construct'. lk will create two lists one \
+after another both terminated with a null pointer and \
+before the first one a pointer to the '___construct' \
+function will be saved. In C, the declarations are:
+[2]
+    int (*)(void) __ctors[[];
+    void (*)(void) __dtors[[];
+
+  /* construct is called with ctors and dtors */
+    extern int __construct(int (*)(void)[[]);
+
+  with '__ctors[[-1] == __construct'
+  and  '__ctors[[LASTFUNC + 1] == 0'
+[1]
+  Example of the functions which will call '___construct':
+[2]
+  int __init()
+  {
+    return (__construct(_ctors));
+  }
+
+  int __exit()
+  {
+    return (__construct(_dtors));
+  }
+[1]
+  Of course you will have to call those two functions.
+
+  Example of '___construct' function:
+[2]
+  int __construct(int (_tors*)(void))
+  {
+    int r = 0;
+
+    while(*_tors) {
+ /* This suppose destructors always returns 0 */
+      if(!r) r = (*_tors)();
+      _tors++;
+    }
+
+    return (r);
+  }
+[1]
+  Note: SAS/C has a flag to know if the called functions \
+are the creators or the destuctors.
+
+  The object file looks like:
+[2]
+    hunk_unit  <unit name>
+    hunk_name  <hunk name>
+    hunk_code  <680x0 code>
+               (it could be a hunk of data)
+    hunk_ext   <ext_def: user function(s)>
+               and other externals
+    hunk_end
+    hunk_name  <init hunk name>
+    hunk_code  <680x0 code>
+    hunk_ext   <ext_def: __STI<user function>
+               and other externals
+    hunk_end
+    hunk_name  <exit hunk name>
+    hunk_code  <680x0 code>
+    hunk_ext   <ext_def: __STD<user function>
+               and other externals
+    hunk_end
+[1]
+  Note: there is no need to have STI/STD functions into \
+another hunk of code, each function or hunk name can be \
+different, some data or bss hunks can exist and any hunk \
+can have the usual debug and symbols.
+
+  To ensure that the order is respected, the creators and \
+destructors names can include a level. The creator function \
+with the lower level will be called first and the higher \
+level will be called last. For the destructor functions the \
+order is inverted; functions with the lower level will be \
+called last and functions with the higher level will be \
+called first. When no level is included the default is \
+used, also 30000. The level is a long word value. \
+Functions with the same level are called in the \
+order they were defined (Now lk does not garantie \
+it.)
+  There is the generic syntax:
+     __ST?[[_]<value><user function name>
+  any number of underscore (_) may appear before the value.
+
+  Example of names:
+[2]    __STI3890_MyInit     (Called before defaults)
+    @_STD__81956_MyExit  (Called after defaults)
+[1]
+  The initialisation function, in C, is declared as:
+[2]     extern int _STImyinit(void);
+[1]  when a creator returns TRUE (a value other than null) \
+following creators will not be called.
+
+  The exit function, in C, is declared as:
+[2]     extern void _STDmyexit(void);
+[1]  with the default SAS/C '___construct' function all \
+descriptors are always called, even the corresponding \
+initialisation has never took place.
+
+  How to use it:
+
+    For instance, if you define a function which needs \
+the IntuitionBase, you will write:
+[2]
+  external void *Intuition;
+  ...
+    #asm
+      MOVEA.L _Intuition(A6)
+      JSR _LVOOpenWorkBench(A6)
+    #endasm
+  ...
+[1]
+    Then the corresponding initialisation and exit will be:
+[2]
+  void *Intuition;
+  _STI_OpenIntuition()
+  {
+    Intuition = OldOpenLibrary
+[R]			("intuition.library");
+[L]    return (!Intuition);
+  }
+
+  void *Intuition;
+  _STD_CloseIntuition()
+  {
+    if(Intuition) {
+      CloseLibrary(Intuition);
+      Intuition = (void *) 0;
+    }
+  }
+[1]
+[LABEL dice; 5]  . DICE's autos:
+[1]
+  This mode needs the use of the option BLOCKUNIT \
+(and eventually CC.) The use of DICE is needed only \
+if you use DICE object files.
+
+  dlink, to have auto-initialisation, uses the hunk names \
+autoinit and autoexit. Those names might be modified as \
+you want with lk, there is no restriction.
+  Because all hunks with the same name are linked together, \
+all autoinit and autoexit will be. Those hunks will be found \
+in the same unit than the function/data which needs to be \
+initialized. You need to have one hunk for the user function \
+or data, one hunk for the initialisation and one hunk for the \
+exit code. To produce several levels, several names are \
+used (like autoinit0, autoinit1, ...) The header will call \
+each of those groups of hunks one after another.
+
+  Actually DICE uses autoinit0, autoinit1, autoexit0, \
+autoexit1 and autoconfig. The only problem in DICE is \
+the file 'c.o' which have some relocation pointing to \
+empty hunks. This could be avoided by creating hunks \
+with NOP's instructions. Anyway lk handled them, but \
+it needs the use of the option DICE.
+  The difference for DICE between the autoinits and \
+autoconfig is that autoinits may fail.
+
+  The functions of initialisation or of exit does not \
+have the usual RTS at the end. This also enable, with \
+a single call, to execute all functions of a given level. \
+To create that kind of hunks you may use DICE which \
+enables initialisation and exit functions or use \
+your prefered assembler. You will have to verify that \
+your assembler finish your hunks of code with a NOP \
+when your code is not long word aligned.
+
+  The last object file will also contains all \
+init/exit hunks with that simple hunk of code \
+which is the RTS. In DICE that file is the 'x.o' \
+object. An RTS instruction will be used while initializing \
+if you need to report a failure. DICE have a function \
+named '__AutoFail' for this purpose.
+
+  Note: all hunks having one of those names must be \
+of type code.
+
+  Example:
+
+  file 'c.a'
+[2]
+    ...
+    JSR     _autoinit0
+    BEQ     .error      ;Exit now
+    JSR     _autoinit1
+    BEQ     .error
+    JSR     __main
+    JSR     _autoexit0  ;The order is user choice
+    JSR     _autoexit1
+    ...
+[1]
+  file 'myinit.a'
+[2]
+    LEA      _cnttable,A0
+    MOVE.W  #$00FF,D0
+.next
+    MOVEQ   #$00,D1
+    MOVEQ   #$07,D2
+.cnt
+    BTST.B  D2,D0
+    BEQ.B   .iszero
+    ADDQ.B  #$01,D1
+.iszero
+    DBF     D2,.cnt
+    MOVE.B  D1,(A0)+
+    DBF     D0,.next
+                        ;<- NO RTS!
+[1]
+  file 'x.a'
+[2]
+    RTS
+[1]
+  See also:
+[L;3][LINK block]		    BLOCKUNIT
+[LINK block]			    BLOCKHUNK
+[LINK cc]			    CC
+[LINK dice]			    DICE
+[LINK slink]			    SLINK
+[5; LINK about; GOTO address]	    Become Registred

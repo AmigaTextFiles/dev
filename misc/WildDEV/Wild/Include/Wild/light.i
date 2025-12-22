@@ -1,0 +1,10 @@
+
+	IFND	WILLight
+WILLight	SET	1
+
+		STRUCTURE	WildLightModuleBASE,wm_SIZEOF
+			LABEL	wlm_SIZEOF
+
+_LVOLIGIlluminate	EQU	-60
+
+	ENDC

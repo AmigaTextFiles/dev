@@ -1,0 +1,153 @@
+********************************************************************************
+*
+*	Program:	Open Data
+*	Filename:	OpenData.a
+*
+*	Contents:	Ein angegebenes File (a0.l Zeiger auf Filename) wird
+*			geladen. Dazu wird zuerst das File untersucht, und
+*			der benötigte Speicher zum laden belegt (PUBLIC).
+*			Nach dem Laden werden die Startadresse des Files in
+*			a0.l, die Länge des belegten Speichers in d1.l und
+*			der Returncode in d0.l (0=OK) zurückgegeben.
+*
+*	Language:	68000 Assembler
+*
+*	Author:		Johannes R. Geiss
+*
+*	Copyright:	Amigavisions
+*
+*	History:	$HISTORY:
+*			1.4 (28-Oct-91) bug fixed JRG
+*			1.3 (26-Oct-91) changed JRG
+*			1.2 (14-Oct-91) changed JRG
+*			1.1 (10-Oct-91) changed JRG
+*			1.0 (03-Sep-91) written JRG
+*
+*	Version:	$VER: OpenData.a 1.4 (28-Oct-91)
+*
+********************************************************************************
+
+
+*------ Includes
+	include 'xref.i'
+	include 'call.i'
+	include 'exec/types.i'
+	include 'libraries/dos.i'
+	include 'exec/memory.i'
+
+
+*------ Imports
+	XLIB	Lock
+	XLIB	UnLock
+	XLIB	Examine
+	XLIB	Open
+	XLIB	Close
+	XLIB	Read
+	XLIB	IoErr
+	XLIB	AllocMem
+	XLIB	FreeMem
+	xref	_DOSBase
+	xref	_SysBase
+
+
+*------ Exports
+	xdef	OpenData
+
+
+********************************************************************************
+
+	SECTION OpenData
+
+*------ OpenData procedure
+*
+* Input: a0.l Zeiger auf Filename
+*
+* Output: a0.l Adresse des Speichers
+*	  d1.l Länge des belegten Speichers (=Filelänge)
+*	  d0.l Returncode (0=OK)
+
+OpenData
+	movem.l d2-d3/d5-d7/a3-a6,-(a7)
+	movea.l a0,a5			; Filename merken
+
+	move.l	a0,d1			; Lock eröffnen
+	moveq.l #ACCESS_READ,d2
+	CALLDOS Lock
+	movea.l d0,a3
+	tst.l	d0
+	bne.s	LockOK
+ErExit	move.l	#ERROR_OBJECT_NOT_FOUND,d0
+Out	movem.l (a7)+,d2-d3/d5-d7/a3-a6
+	rts
+
+LockOK	move.l	a3,d1			; Lock untersuchen
+	move.l	#MyLockInfo,d2
+	CALLSYS Examine
+	tst.l	d0
+	bne.s	ExamOK
+	bsr	UnLck
+	bra.s	ErExit
+
+ExamOK	movea.l #MyLockInfo,a1		; allocate memory
+	move.l	fib_Size(a1),d7
+	bne.s	fileOK
+	bsr	UnLck
+	move.l	#ERROR_OBJECT_WRONG_TYPE,d0
+	bra.s	Out
+fileOK	moveq.l #MEMF_PUBLIC,d1
+	move.l	d7,d0
+	CALLEXE AllocMem
+	movea.l d0,a4
+	tst.l	d0
+	bne.s	MemOK
+	bsr.s	UnLck
+	moveq.l #ERROR_NO_FREE_STORE,d0
+	bra.s	Out
+
+MemOK	move.l	a5,d1			; load File
+	move.l	#MODE_OLDFILE,d2
+	CALLDOS Open
+	move.l	d0,d6
+	bne.s	OpOK
+	bsr.s	FreeM
+	bra.s	ErExit
+OpOK	move.l	d0,d1
+	move.l	a4,d2
+	move.l	d7,d3
+	CALLSYS Read
+	cmp.l	d7,d0
+	beq.s	ReadOK
+	CALLSYS IoErr
+	move.l	d0,d5
+	bsr.s	CloseF
+	move.l	d5,d0
+	bra	Out
+ReadOK	move.l	d6,d1
+	CALLSYS Close
+
+	bsr.s	UnLck			; unlock file
+
+	movea.l a4,a0			; returned values
+	move.l	d7,d1
+	moveq.l #RETURN_OK,d0
+	bra	Out
+
+
+*------ Error procedure
+CloseF	move.l	d6,d1			; close File
+	CALLDOS Close
+FreeM	movea.l a4,a1			; free memory
+	move.l	d7,d0
+	CALLEXE FreeMem
+UnLck	move.l	a3,d1			; unlock File
+	CALLDOS UnLock
+	rts
+
+
+********************************************************************************
+
+	section data,BSS
+
+*------ BSSfield
+MyLockInfo	ds.b	fib_SIZEOF
+	END

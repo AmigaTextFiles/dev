@@ -1,0 +1,2 @@
+def ICONNAME = "icon.library";
+

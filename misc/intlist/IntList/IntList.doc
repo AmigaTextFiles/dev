@@ -1,0 +1,233 @@
+IntList V3.0
+
+Copyright 1996 J.v.d.Loo
+
+IntList  3.0  is  a replacement for Commodores (previous Amiga Technologies,
+currently  Gateway 2000) IntList for displaying interrupts currently used in
+system.
+
+I  wondered  myself  each  time  I  wrote  an  interrupt  structure that all
+"Listers"  did  not  reflect  my  set  interrupt.  After writing this little
+utility  I  know  why: Because I used cia-x-resource interrupts that are not
+reflected through the exec-base and thus are not set in an exec list.
+Those  interrupts  are  managed by the resource (here cia-x) and only caused
+through  an  exec  routine.  This means that cia-x interrupts are not set to
+the  exec-base,  but  to the extended resource structure (resource-base). So
+the resource-base has to be scanned. This program does it.
+
+The  next  that  I  have missed are interrupts that not continue over a long
+period,  instead,  only  once called through exec function Cause(). I do not
+use  an  interrupt  to examine the exec-field for it; I do it via a patch on
+the exec-function Cause() that is removed after the examination is done.
+
+
+- Sample IntList output -
+
+IntList V3.0 - Based on no one's Guru's Guide
+- Copyright 1996 ONIX - Exec should be rewritten...
+
+IRQ (TBEmpty Level 1), PRI   0, owner: "serial.device"
+IRQ (DSKBLoK Level 1), PRI   0, owner: "disk.resource"
+IRQ (PORTS   Level 2), PRI 120, owner: "ciaa.resource"
+IRQ (PORTS   Level 2), PRI 100, owner: "VBInt CVision3D (0)"
+IRQ (PORTS   Level 2), PRI  21, owner: "atapi.device"
+IRQ (PORTS   Level 2), PRI  20, owner: "AT-IDE"
+IRQ (PORTS   Level 2), PRI   0, owner: "timer.device",     IVEC 1 = Timer A
+IRQ (PORTS   Level 2), PRI   0, owner: "timer.device",     IVEC 2 = Timer B
+IRQ (PORTS   Level 2), PRI   0, owner: "timer.device",     IVEC 3 = TOD Alarm
+IRQ (PORTS   Level 2), PRI   0, owner: "keyboard.device",  IVEC 4 = Serial Port
+IRQ (COPpER  Level 3), PRI   0, owner: ""
+IRQ (VERTB   Level 3), PRI  10, owner: "graphics.library"
+IRQ (VERTB   Level 3), PRI   0, owner: "gameport.device"
+IRQ (VERTB   Level 3), PRI   0, owner: "timer.device"
+IRQ (BLITter Level 3), PRI   0, owner: "graphics.library"
+IRQ (AUDio 0 Level 4), PRI   0, owner: "audio.device"
+IRQ (AUDio 1 Level 4), PRI   0, owner: "audio.device"
+IRQ (AUDio 2 Level 4), PRI   0, owner: "audio.device"
+IRQ (AUDio 3 Level 4), PRI   0, owner: "audio.device"
+IRQ (RBFull  Level 5), PRI   0, owner: "serial.device"
+IRQ (DSKSYNC Level 5), PRI   0, owner: "disk.resource"
+IRQ (EXTER   Level 6), PRI 120, owner: "ciab.resource"
+IRQ (EXTER   Level 6), PRI -16, owner: "noise.library",    IVEC 2 = Timer B
+IRQ (EXTER   Level 6), PRI  10, owner: "graphics.library", IVEC 3 = TOD Alarm
+IRQ (EXTER   Level 6), PRI   0, owner: "disk.resource",    IVEC 5 = Flag Input 
+Scanning for Cause() Level 1 interrupts
+Hold on, computing for about one second...
+
+IRQ (SOFTINTS Level 1) raised by: "VBInt CVision3D (0)", PRI: 32
+IRQ (SOFTINTS Level 1) raised by: "noise.library", PRI: 16
+
+- End of sample -
+
+
+Cause()  is  often  used  by  high  level  interrupts to start a lower level
+interrupt,  e.g.  level-6  (ciab)  Timer-B can be used to cause continuously
+every 1/50 sec. a sub-interrupt via function Cause().
+
+	CIAx:
+		movea.l	A1,A5				; IS_DATA
+		movea.l	Level_1_IRQ(A5),A1
+		movea.l	_SysBase(A5),A6
+		jsr	_LVOCause(A6)
+		moveq	#0,D0
+		rts
+
+	CAUSE:
+		movem.l	D2-D7/A2-A4/A6,-(sp)
+		movea.l	A1,A5				; IS_DATA
+		....
+		....
+		movem.l	(sp)+,D2-D7/A2-A4/A6
+		moveq	#0,D0
+		rts
+
+This  has got the advantage that timing conflicts through the use of a cia-b
+timer  are minimised. Also device depending things like the audio-device can
+now be used from within the interrupt.
+The  disadvantages are that soft-interrupts only take precedence over tasks,
+but  not over other interrupts. Thus, even you call your soft-interrupt from
+an  interrupt  with  a  high  level  (e.g. level 6, cia-b) on a heavy loaded
+system  the  soft-interrupt will not work continuously, which will result in
+the lost of the control over your interrupt-code!
+
+Some notes at this point:
+The  v33 through 40 includes do not hold the required things (currently they
+are  empty)  and you can only follow the source if you have a KickRom 1.x or
+above documented listing - or look here!
+
+---	CIA-Resource structure	--- (CIA = complexe interface adapter)
+
+There  are  five  available  vectors that can be used to signal the CPU that
+she  should  stop with normal work and switch from user mode into supervisor
+mode.
+
+Knowledge:
+The  CPU offers only three pipes for interrupts ( IPL0, IPL1 and IPL2 : %111
+=  7  interrupt  sources) and has got only so called 7 auto-vectors (level 0
+through  7) who represent an index equal to the state of IPL0 | IPL1 | IPL2.
+From the index to the auto-vector it is a little step:
+
+Amiga implementation (memory address (no care about vector base here)):
+0 = no interrupt
+	
+1	= $64	level 1	Interrupt caused by DMA-hardware
+2	= $68	level 2	Interrupt caused by CIA-A-hardware
+3	= $6C	level 3	Interrupt caused by DMA-hardware
+4	= $70	level 4	Interrupt caused by DMA-hardware
+5	= $74	level 5	Interrupt caused by DMA-hardware
+6	= $78	level 6	Interrupt caused by CIA-B-hardware
+7	= $7C	level 7	(NMI - cannot be disabled)
+
+Seems  pretty  easy,  does  it?  Of course it's a little more complex. I can
+mention  here  also FC0, FC1, FC2, VPA and DTACK and that it's possible with
+DTACK  to  cause  a  lot  more  hardware interrupts, transferred through the
+data-bus  but  this  isn't  implemented for the Amiga, and for understanding
+how  the CIAs are implemented into the system it's not necessary. But now we
+know  that  the  CPU can only distinguish between an interrupt caused by the
+CIA-A  (level  2)  and  CIA-B (level 6) while she itself does not know which
+hardware  requested  for  an  interrupt. The only thing she now does (easily
+said,  it's again a little more complex) is to call the appropriate routine,
+which  is  pointing  to  the  auto-  vector. Auto-vector level-2 points to a
+routine,  which  will manage the CIA-A interrupts, while auto-vector level-6
+points   to   the   "manager"   for   CIA-B.   These  "managers"  using  the
+CIA-x-Resource  to  distinguish  which vector of the CIA hardware has caused
+the interrupt.
+
+That should be enough for the moment.
+
+There  is  only one exec-sever list for each CIA, the interrupt lists itself
+are  managed  by  the  CIA-resources, where the exec-server list itself is a
+member of them.
+
+struct CIAxResource
+0	struct Node LibNode	Normal node, LN_NAME points to resource name
+14	UBYTE	lib_Flags
+15	UBYTE	lib_pad
+16	UWORD	lib_NegSize
+18	UWORD	lib_PosSize
+20	UWORD	lib_Version
+22	UWORD	lib_Revision
+24	STRPTR	lib_IDString
+28	ULONG	lib_Sum
+32	UWORD	lib_OpenCnt
+34	APTR	CiaStartPointer	Pointer to hardware address (CIA-A $BFE001, CIA-B, $BFD000)
+38	WORD	IntReqBits	Bits to set if interrupt is called: CIA-A $8, CIA-B $2000
+40	BYTE	IntEnableCIA	Remembered allowed CIA interrupt
+41	BYTE	IntRequestCIA	Remembered requested CIA interrupt
+
+( OS 1.x unknown state, OS 2.x unknown state, OS 3.x - see notes)
+42 struct Interrupt CIAIRQ (normal node)
+	42	struct	Interrupt *NextIRQ Next	Interrupt (if CIA-A & OS 3.x: AT-IDE, CIA-B zero)
+	46	struct	Interrupt *PrevIRQ Last	Interrupt
+	50	UBYTE	Type			Interrupt
+	51	BYTE	PRI			Priority
+	52	STRPTR	NAME			Name of this interrupt
+	56	APTR	DATA			(IS_DATA)
+	60	APTR	CODE			(IS_CODE)
+
+----Now  the  vectors  follow  -  signalled to CPU. Note: the CPU itself can
+    only  detect  two  IRQs,  CIA-A (level 2) and CIA-B (level 6), while the
+    entries  IntEnableCIA  and  IntRequestCIA  will be investigated to check
+    which CIA-x vector caused the IRQ.
+
+T I M E R - A	(IVEC = 1)
+( OS 1.x: CIA-A & CIA-B unused by system,
+	OS 2.x: unknown state
+	OS 3.x: CIA-A used by timer.device, CIA-B unused by system)
+64 struct IntVec TimerA
+	64	APTR		IS_DATA
+	68	APTR		IS_CODE
+	72	struct Node	*IRQNode
+
+T I M E R - B	(IVEC = 2)
+( OS 1.x: CIA-A used by timer.device, CIA-B unused by system
+	OS 2.x: unknown
+	OS 3.x: CIA-A used by timer.device, CIA-B unused by system)
+76 struct IntVec TimerB
+	76	APTR		IS_DATA
+	80	APTR		IS_CODE
+	84	struct Node	*IRQNode
+
+T O D - A L A R M	(IVEC = 3)
+( OS 1.x: CIA-A unused by system, CIA-B used by graphics.library
+	OS 2.x: unknown,
+	OS 3.x: CIA-A used by timer.device, CIA-B used by graphics.library)
+88 struct IntVec TODAlarm
+	88	APTR		IS_DATA
+	92	APTR		IS_CODE
+	96	struct Node	*IRQNode
+
+S E R I A L - D A T A	(IVEC = 4)
+( OS 1.x: CIA-A used by keyboard.device, CIA-B unused by system
+	OS 2.x: unknown,
+	OS 3.x: CIA-A keybord.device, CIA-B unused by system)
+100 struct IntVec SerialData
+	100	APTR		IS_DATA
+	104	APTR		IS_CODE
+	108	struct Node	*IRQNode
+
+F L A G - I N P U T	(IVEC = 5)
+( OS 1.x: CIA-A unused by system, CIA-B used by disk.resource
+	OS 2.x: unknown,
+	OS 3.x: CIA-A unused by system, CIA-B used by disk.resource)
+112 struct IntVec FlagInput
+	112	APTR		IS_DATA
+	116	APTR		IS_CODE
+	120	struct Node	*IRQNode
+- END
+
+Note  that an Amiga computer can only handle eight interrupts ( 7 + spurious
+irq  =  8  )  but  exec  uses each hardware interrupt for several things and
+multiple  times!  So  a  normal  A4000  has  ever 13 interrupts running (has
+nothing  to  do  with  the  pseudo  interrupts) and if a program requires an
+interrupt (sound playing utility) there are at least 18, most of the time 19!
+
+
+I  hope  I  explained  the  stuff  so  that you can update your own powerful
+system  monitor  with  the new knowledge. But beware: Never make me held for
+anything  caused  by  this  little  documentation  nor  through  the  use of
+IntList.  Note  also:  the  Draco computer has got no CIAs and I don't think
+other future Amiga-ROM compatible machine will have!
+
+
+	Joerg

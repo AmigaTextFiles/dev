@@ -1,0 +1,399 @@
+/* ARexxComm.e  v1.1 (21-03-99)  by Chris S Handley (cshandley@iee.org)
+
+   Heavily based on ARexxPort.e v1.0 by Leon Woestenberg (leon@stack.urc.tue.nl);
+  a great source & top comments, but unreadable & not suited to modern programming
+  practices - basically used global vars for communication, plus could not
+  'drop in' to a program as a procedure required large modifications...
+
+   I have spent a pretty long time restructuring it, checking logic, altering
+  & creating procedures, and so on - i.e.lots of work, so don't take this lightly!
+
+   So, you can finally send/recieve arexx messages as a (fairly) simple OO
+  AmigaE Module.
+
+
+   Notes:
+  -The ARexxPort source was completely in the Public Domain, and so is ARexxComm .
+  -For those with a technical interest...
+   If you tell ackRexxMsg() that you didn't recognise the command, then a NEW
+   message is created that is sent to Rexx Master.  This new message contains a
+   pointer to the first message.  Now, when the new message is replied by Rexx
+   Master, we can remove the first message from memory (by using the pointer).
+   In this way, ARexx scripts can transparantly be used with ARexx commands.
+  -If you wish to ensure you don't cause crashes, please enable NILCHECK when
+   compiling both this & your own source code, as well as initialise all rxcom
+   object pointers to NIL when you declare them yourself.
+
+   Here is a list of exceptions that are used:
+   exception	exceptioninfo	Reason
+   "LIB"	(library name)	Could not open library (can be disabled)
+   "PORT"	(port name)	Could not open ARexx port (can be disabled)
+   "RXNA"	(rexx command)	Did not acknowledge previous ARexx message
+   "RXNM"	-		No ARexx message to
+   "RXCM"	(description)	Method object-use error - details supplied.
+*/
+
+OPT MODULE
+
+MODULE 'exec/ports','exec/nodes'
+MODULE 'rexxsyslib','rexx/rexxio','rexx/rxslib','rexx/errors','rexx/storage'
+MODULE 'dos/dos'
+
+EXPORT OBJECT rxcom PRIVATE
+	hostport:PTR TO mp		->pointer to our host's port
+	unconfirmed			->counts unconfirmed messages sent by user
+	allunconfirmed			->counts all unconfirmed messages sent
+	useexceptions			->indicates ONLY if we should use exceptions for failure to open an ARexx port
+	rexxmsgtoreply:PTR TO rexxmsg	->pointer to the message we have yet to reply to
+	cmdtoreply:PTR TO CHAR		->the command of the message not yet replied to
+	argstoreply:PTR TO CHAR		->the args of the message not yet replied to
+ENDOBJECT
+
+->Acknowledge a message was handled
+EXPORT PROC ackRexxMsg(commandknown:LONG) OF rxcom
+ DEF rexxmsg:PTR TO rexxmsg,	->pointer to handled message
+     rexxargs:PTR TO LONG	->list of 16 argument pointers (inc.command strings)
+
+	IF self.cmdtoreply
+		rexxmsg:=self.rexxmsgtoreply	->get rexxmsg value from waitForRexxMsg()
+
+		IF commandknown			->act on whether command is known or not
+			ReplyMsg(rexxmsg)	->reply that 'message was recieved'
+		ELSE
+			 /* Send unknown commands to Rexx Master (so can call program from a rexx script) */
+
+			 /* Forward this command to Rexx Master, but the original unknown
+			   command (message) is not replied to until we recieve a
+			   confirmation from Rexx Master.
+
+			   Therefore we remember this message by storing a messagepointer
+			   in rexxargs[15] of the forwarded command to Rexx Master */
+
+			rexxargs:=rexxmsg.args					->set pointer to arguments
+			IF self.sendRexxMsg_Add('REXX',rexxargs[0],rexxmsg,0)=NIL	->failed to send message? (Rexx Master does not exist?)
+				cantAckRexxMsg(rexxmsg,RC_FATAL,NIL)		->set fatal error return code & result string
+				ReplyMsg(rexxmsg)				->reply that 'message was recieved' (with return code & result string)
+			ENDIF
+		ENDIF
+
+		DisposeLink(self.cmdtoreply); self.cmdtoreply:=NIL
+		IF self.argstoreply
+			DisposeLink(self.argstoreply); self.argstoreply:=NIL
+		ENDIF
+	ELSE
+		Raise("RXNM")			->error: no message (to reply to)!
+	ENDIF
+ENDPROC
+
+->set return code & result string of an ARexx message
+PROC cantAckRexxMsg(rexxmsg:PTR TO rexxmsg,rc,resultstring)
+	 /* set the return code */
+	rexxmsg.result1:=rc
+
+	 /* a pointer to the result string */
+	IF (rexxmsg.action AND RXFF_RESULT) AND (resultstring<>NIL)
+		rexxmsg.result2:=CreateArgstring(resultstring,StrLen(resultstring))
+	ELSE
+		rexxmsg.result2:=NIL
+	ENDIF
+ENDPROC
+
+->tell how many outstanding acknowledgements there are
+EXPORT PROC howManyAcksLeft() OF rxcom
+	RETURN self.unconfirmed
+ENDPROC
+
+->wait for an ARexx message with a real command, and returns that command and/or notification of a Ctrl-C
+EXPORT PROC waitForRexxMsg(tellofack=FALSE) OF rxcom
+ DEF signalmask=0, hostmask=0, command=NIL:PTR TO CHAR, args=NIL:PTR TO CHAR,
+     rexxmsg=NIL:PTR TO rexxmsg,
+     quit=FALSE, busywait=TRUE,				->note we never REALLY "busy wait" if busywait=TRUE - but we DO directly poll the list until it is empty
+     wasack=FALSE
+
+	hostmask:=Shl(1,self.hostport.sigbit)		->signalmask for our host port
+
+	IF self.cmdtoreply=NIL
+		 /* get a valid command to be returned for the host */
+		REPEAT
+			IF busywait			->see if there's a good chance of another message (i.e.we just got one before) then...
+							->...directly poll for another message, else...
+				rexxmsg:=GetMsg(self.hostport)			->(try to) get next message
+				IF rexxmsg					->see if there really was a message
+					command, args, wasack:=self.handleRexxMsg({rexxmsg}) ->handle this message
+				ELSE
+					busywait:=FALSE				->no more messages currently in list, so don't busywait!
+				ENDIF
+			ELSE
+							->...get OS to wake us when a new message arrives
+				signalmask:=Wait(hostmask OR SIGBREAKF_CTRL_C)	->wait for event signals (either message for us or a Ctrl-C)
+				IF signalmask AND hostmask			->act on a message signal
+					rexxmsg:=GetMsg(self.hostport)		->get first message
+					command, args, wasack:=self.handleRexxMsg({rexxmsg}) ->handle this event
+				ENDIF
+				IF signalmask AND SIGBREAKF_CTRL_C THEN quit:=TRUE ->act on a quit signal
+			ENDIF
+		UNTIL command OR quit OR (wasack AND tellofack)	->repeat if last message was a confirmation reply to a message from us, unless caller wants to know about it
+
+		IF wasack AND tellofack				->if msg was just an acknowledge then...
+			command:=NIL				->...ensure caller can't read any useless info...
+			args:=NIL
+		ELSE						->...else store valid message (so know this needs acknolwedging)
+			self.rexxmsgtoreply:=rexxmsg		->store rexxmsg (pointer) for replyToRexxMsg()
+			self.argstoreply:=args			->record of String() to DisposeLink() of
+			self.cmdtoreply:=command		->show that stored rexxmsg not yet replied to (& record of String() to DisposeLink() of)
+		ENDIF
+
+		IF quit AND command THEN WriteF('WARNING:  waitForRexxMsg(); Ctrl-C & a command recieved simultaneously; was assumed impossible, so Ctrl-C has been safely ignored.  Please notify author of ARexxComm (Chris.S.Handley@BTInternet.com).\n')	->should never happen (I guess)
+	ELSE
+		Throw("RXNA",self.cmdtoreply)		->error: didn't reply to last message!
+	ENDIF
+ENDPROC command, args, wasack
+
+->poll for an ARexx message with a real command, and returns that command (may =NIL)
+EXPORT PROC pollForRexxMsg(tellofack=FALSE) OF rxcom
+ DEF hostmask=0, command=NIL:PTR TO CHAR, args=NIL:PTR TO CHAR,
+     rexxmsg=NIL:PTR TO rexxmsg, old_rexxmsg=NIL:PTR TO rexxmsg,
+     wasack=FALSE
+
+	hostmask:=Shl(1,self.hostport.sigbit)		->signalmask for our host port
+
+	IF self.cmdtoreply=NIL
+		 /* get a valid command to be returned for the host, if one exists */
+		REPEAT
+			 /* directly poll for a message */
+			rexxmsg:=GetMsg(self.hostport)			->(try to) get next message
+			old_rexxmsg:=rexxmsg
+			IF rexxmsg					->see if there really was a message
+				command, args, wasack:=self.handleRexxMsg({rexxmsg}) ->handle this message
+			ENDIF
+		UNTIL (rexxmsg=old_rexxmsg) OR (wasack AND tellofack) ->repeat if last message was a confirmation reply to a message from us, unless caller wants to know about it
+		
+		IF wasack AND tellofack				->if msg was just an acknowledge then...
+			command:=NIL				->...ensure caller can't read any useless info...
+			args:=NIL
+		ELSE						->...else store valid message (so know this needs acknolwedging)
+			self.rexxmsgtoreply:=rexxmsg		->store rexxmsg (pointer) for replyToRexxMsg()
+			self.argstoreply:=args			->record of String() to DisposeLink() of
+			self.cmdtoreply:=command		->show that stored rexxmsg not yet replied to (& record of String() to DisposeLink() of)
+		ENDIF
+	ELSE
+		Throw("RXNA",self.cmdtoreply)		->error: didn't reply to last message!
+	ENDIF
+ENDPROC command, args, wasack
+
+->examine message & deal with if was a reply to something we sent (& nullify rexxmsg since was dealt with), else return command
+PROC handleRexxMsg(rexxmsgptr:PTR TO LONG) OF rxcom 	->rexxmsgptr=address of pointer to handled message
+ DEF rexxmsg=NIL:PTR TO rexxmsg,->pointer to handled message; dereferenced rexxmsgptr
+     msgnode:PTR TO mn,		->pointer to messagenode
+     listnode:PTR TO ln,	->pointer to listnode of message
+     rexxargs:PTR TO LONG,	->list of 16 argument pointers (inc.command strings)
+     command=NIL:PTR TO CHAR,	->points to command string
+     args=NIL:PTR TO CHAR,	->points to arguments string
+     wasack=FALSE,		->says whether message was an acknowledgement of our message or not
+     cmdstart, cmdend, argsstart, argsend, string:PTR TO CHAR
+
+	rexxmsg:=^rexxmsgptr
+	IF rexxmsg				->could be called with no message to handle! (don't think should ever happen, but...)
+		msgnode:=rexxmsg.mn		->get pointer to messagenode
+		listnode:=msgnode.ln		->get pointer to listnode
+		rexxargs:=rexxmsg.args		->get pointer to commands
+
+		IF listnode.type=NT_REPLYMSG		->if confirmation reply of a message sent by us then...
+							->...deal automatically with our reply...
+			IF rexxargs[15]				->see if this is a reply to a forwarded message then...
+				ReplyMsg(rexxargs[15])		->...finally reply to original sender that message was handled
+			ELSE
+				self.unconfirmed:=self.unconfirmed-1	->decrease unconfirmed message-recieved counter
+				wasack:=TRUE	->make so return indicating message was just a reply/acknowledge (ignore ack of commands not known to our user)
+			ENDIF
+			self.allunconfirmed:=self.allunconfirmed-1	->decrease unconfirmed message-recieved counter
+			DeleteArgstring(rexxargs[0])		->deallocate this confirmation message object
+			->ClearRexxMsg(rexxmsg, 16)		->### this may be useful? ###
+			DeleteRexxMsg(rexxmsg); rexxmsg:=NIL; ^rexxmsgptr:=NIL
+			->rexxmsg is NIL; tells caller message was of no use
+		ELSEIF listnode.type=NT_MESSAGE		->...else if can read then...*/
+							->...extract & return the command + args sent to us in this brand new message...
+			 /* extract command (1st word) & args (later words) from rexxargs[0] string */
+			string:=rexxargs[0]
+			 /* find start of command after skipping spaces/etc. */
+			cmdstart:=TrimStr(string)-string
+			IF string[cmdstart]<>"\0"
+				 /* find end of command (1st space) */
+				cmdend:=cmdstart; REPEAT
+					cmdend++
+				UNTIL (string[cmdend]="\0") OR (string[cmdend]=" ")
+				argsstart:=cmdend
+				cmdend--
+				->*have command
+				command:=String(cmdend-cmdstart+1) ->create command string
+				MidStr(command,string,cmdstart,cmdend-cmdstart+1) ->copy in command part
+				IF string[argsstart]=" "
+					 /* find start of args after skipping spaces/etc. */
+					REPEAT
+						argsstart++
+					UNTIL (string[cmdend]="\0") OR (string[cmdend]<>" ")
+					IF string[argsstart]<>"\0"
+						 /* find end of args (end of string) */
+						argsend:=argsstart; REPEAT
+							argsend++
+						UNTIL string[argsend]="\0"
+						argsend--
+						->*have args
+						args:=String(argsend-argsstart+1)	->create command string
+						MidStr(args,string,argsstart,argsend-argsstart+1) ->copy in args part
+					ELSE
+						->*no args
+						args:=String(1)		->create an empty args string
+					ENDIF
+				ELSE
+					->*no args
+					args:=String(1)			->create an empty args string
+				ENDIF
+			ELSE
+				->*no command (or args)
+				command:=String(1)			->create an empty command string
+				args:=String(1)				->create an empty args string
+			ENDIF
+			rexxmsg.result1:=0			->init. the resultcode
+			rexxmsg.result2:=NIL			->init. the resultstring
+		ELSE					->...else message type is unknown (ought to be type NT_UNKNOWN)...
+							->...so completely ignore it - must definitely not reply to!
+			rexxmsg:=NIL; ^rexxmsgptr:=NIL	->rexxmsg is NIL; tells caller message was of no use
+		ENDIF
+	ENDIF
+ENDPROC command, args, wasack
+
+->send a message to some target ARexx port
+EXPORT PROC sendRexxMsg(targetname:PTR TO CHAR, command:PTR TO CHAR, flags=0) OF rxcom
+	IF targetname=NIL THEN Throw("RXCM",'sendRexxMsg(); targetname was NIL')
+	IF command=NIL THEN Throw("RXCM",'sendRexxMsg(); command was NIL')
+
+	RETURN self.sendRexxMsg_Add(targetname,command,NIL,flags)
+ENDPROC
+
+->send a message to some target ARexx port - with an Added pointer as the last argument
+PROC sendRexxMsg_Add(targetname:PTR TO CHAR, command:PTR TO CHAR, unknownmsg=NIL, flags=0) OF rxcom
+ DEF targetport=NIL:PTR TO mp, rexxmsg=NIL:PTR TO rexxmsg, rexxargs=NIL:PTR TO LONG, hostport=NIL:PTR TO mp,
+     listnode=NIL:PTR TO ln, argstring=NIL, cmdlen
+
+	IF targetname=NIL THEN Throw("RXCM",'sendRexxMsg_Add(); targetname was NIL')
+	IF command=NIL THEN Throw("RXCM",'sendRexxMsg_Add(); command was NIL')
+
+	hostport:=self.hostport
+	listnode:=hostport.ln
+	IF (rexxmsg:=CreateRexxMsg(hostport,'rexx',listnode.name))=NIL THEN RETURN NIL	->tell if could not send message; N.B.CreateRexxMsg() sets .replyport for us
+	rexxargs:=rexxmsg.args			->pointer to commands
+
+	cmdlen:=StrLen(command)
+	IF argstring:=CreateArgstring(command,cmdlen+3)			->was the argstring created?
+		argstring[cmdlen]:="\0"		->ensure null terminated!
+		rexxargs[0]:=argstring		->set the first argstring
+		rexxmsg.action:=RXCOMM OR flags	->set the flags
+		rexxargs[15]:=unknownmsg	->store original message pointer into 16th argstring pointer for handleRexxMsg()
+
+		Forbid()			->forbid multitasking (ouch!)
+		IF (targetport:=FindPort(targetname)) THEN PutMsg(targetport,rexxmsg)	->send our message to an existing port
+		Permit()			->permit multitasking (phew!)
+
+		IF targetport			->check if message was sent
+			IF unknownmsg=NIL THEN self.unconfirmed:=self.unconfirmed+1	->increase the unconfirmed message-recieved counter (for messages sent by user)
+			self.allunconfirmed:=self.allunconfirmed+1	->increase unconfirmed message-recieved counter
+			RETURN rexxmsg		->successfully sent this message
+		ENDIF
+	ELSE
+		DeleteRexxMsg(rexxmsg)
+		RETURN NIL								->could not send message
+	ENDIF
+
+	 /* although rexxmsg & argstring should exist, this is a catch-all just-in-case, so still checks if exists */
+	IF argstring
+		DeleteArgstring(argstring)
+	ENDIF
+	IF rexxmsg
+		DeleteRexxMsg(rexxmsg)
+	ENDIF
+	RETURN NIL
+ENDPROC
+
+->see if a port exists
+EXPORT PROC portExists(portname:PTR TO CHAR) OF rxcom
+	IF portname=NIL THEN Throw("RXCM",'portExists(); portname was NIL')
+
+	RETURN IF FindPort(portname) THEN TRUE ELSE FALSE
+ENDPROC
+
+->create a port for our host
+EXPORT PROC createPort(portname:PTR TO CHAR,useexceptionsoraddr,priority=0) OF rxcom
+ DEF hostport=NIL:PTR TO mp, node=NIL:PTR TO ln
+
+	IF portname=NIL THEN Throw("RXCM",'createPort(); portname was NIL')
+	IF useexceptionsoraddr=FALSE THEN Throw("RXCM",'createPort(); useexceptionsoraddr was FALSE')
+
+	IF (rexxsysbase:=OpenLibrary('rexxsyslib.library',0))
+		IF portname		->create named (public) port?
+			Forbid()	->ensure no-one makes a port of the same name while we are making ours
+			IF FindPort(portname)=0			->ensure port name does not already exist
+				IF hostport:=CreateMsgPort()	->if created port
+					node:=hostport.ln
+					node.name:=portname	->set name
+					node.pri:=priority	->set public port priority
+					AddPort(hostport)	->make this port public (add to public port list)
+				ENDIF
+			ENDIF
+			Permit()
+		ELSE
+			hostport:=CreateMsgPort()		->(try) to create an unnamed (private) port
+		ENDIF
+
+		IF hostport					->create port info block (needed by ARexxCom) if port created
+			self.hostport:=hostport
+			self.unconfirmed:=0
+			self.allunconfirmed:=0
+			self.useexceptions:=(IF useexceptionsoraddr=TRUE THEN TRUE ELSE FALSE)
+			self.rexxmsgtoreply:=NIL
+			self.cmdtoreply:=NIL
+			self.argstoreply:=NIL
+		ELSE
+			self.end()				->a little trick!
+			IF useexceptionsoraddr=TRUE THEN Throw("PORT",portname)	->warn that port was not opened
+			^useexceptionsoraddr:=NIL
+		ENDIF
+	ELSE
+		IF useexceptionsoraddr=TRUE THEN Throw("LIB",'rexxsyslib.library')	->warn that library could not be opened
+		^useexceptionsoraddr:=NIL
+	ENDIF
+ENDPROC
+
+->destroy the port of our host
+EXPORT PROC end() OF rxcom
+ DEF listnode=NIL:PTR TO ln, msg=NIL:PTR TO mn/*rexxmsg*/, hostport:PTR TO mp,
+     command=NIL:PTR TO CHAR,args=NIL:PTR TO CHAR, wasack=FALSE
+
+	hostport:=self.hostport
+	IF hostport						->sanity check port pointer
+		listnode:=hostport.ln
+		IF listnode.name THEN RemPort(hostport)		->if public then remove from public port list (so no new messages)
+
+		WHILE self.allunconfirmed>0			->now wait till everyone expecting the port to be there has sent acknowledgement
+			command,args,wasack:=self.waitForRexxMsg(TRUE)
+			IF command THEN self.ackRexxMsg(TRUE)	->(this shouldn't ever happen now!) pretend to know about message so we can exit quickly
+		ENDWHILE
+
+		self.hostport:=NIL				->indicate now a totally non-ARexx & private port
+		Forbid()					->no more messages while...
+		WHILE msg:=GetMsg(hostport)			->...acknowledge each message, and...
+			->IF msg.mn.ln.type AND NT_MESSAGE THEN ReplyMsg(msg)	->ought to work as below, but needs "msg=NIL:PTR TO rexxmsg"; does not work for some reason :(
+			IF msg.replyport<>hostport		->reply "recieved" if did not send it...
+				ReplyMsg(msg) 			->needs "msg=NIL:PTR TO mn"
+			/*ELSE
+				->I think OUGHT to delete rexx msg, but not done in orig.src code plus need "msg=NIL:PTR TO rexxmsg"*/
+			ENDIF
+		ENDWHILE
+		DeleteMsgPort(hostport)				->...delete the port
+		Permit()
+
+		IF rexxsysbase					->if library open then close it
+			CloseLibrary(rexxsysbase); rexxsysbase:=NIL
+		ENDIF
+	ENDIF
+ENDPROC

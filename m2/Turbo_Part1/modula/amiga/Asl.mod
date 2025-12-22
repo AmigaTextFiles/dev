@@ -1,0 +1,6 @@
+IMPLEMENTATION MODULE Asl ;
+
+IMPORT M2Lib ;
+
+BEGIN AslBase := M2Lib.OpenLib( AslName , VERSION )
+END Asl.

@@ -1,0 +1,1486 @@
+;;; -*- Lisp-Interaction -*-
+;;; Version: $VER: GCC-Install 2.11 (22.08.95)
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  GNU C Installation script for AmigaDOS
+;;;
+;;;  This program is free software; you can redistribute it and/or modify
+;;;  it under the terms of the GNU General Public License as published by
+;;;  the Free Software Foundation; either version 2 of the License, or
+;;;  (at your option) any later version.
+;;;
+;;;  This program is distributed in the hope that it will be useful,
+;;;  but WITHOUT ANY WARRANTY; without even the implied warranty of
+;;;  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+;;;  GNU General Public License for more details.
+;;;
+;;;  You should have received a copy of the GNU General Public License
+;;;  along with this program; if not, write to the Free Software
+;;;  Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+;;;
+;;;
+;;;  Author:    Jochen Wiedmann
+;;;             Am Eisteich 9
+;;;             72555 Metzingen
+;;;             Germany
+;;;
+;;;             Phone: (0049) +7123 / 14881
+;;;             Internet: wiedmann@neckar-alb.de
+;;;
+;;;
+;;;
+;;;  History:   2.0     07-Apr-95       Initial version
+;;;
+;;;             2.2     14-Apr-95       Added CHECK, OFF and SET
+;;;                                     options to GNU:s/User-Startup
+;;;                                     CopyEnvironment procedure does
+;;;                                     no longer depend on the
+;;;                                     existence of GNU:envarc.
+;;;
+;;;             2.3     20-Apr-95       Assign GNUINCLUDE: now optional.
+;;;                                     User may switch between modifying
+;;;                                     specs file and using
+;;;                                     C_INCLUDE_PATH.
+;;;
+;;;             2.4     13-May-95       Fixed bug in the specs file
+;;;                                     modification. Added existence
+;;;                                     checks to Rename020Binaries.
+;;;
+;;;             2.5     20-May-95       Removed GCCSTACK variable (No
+;;;                                     longer needed by gcc 2.7.0)
+;;;
+;;;             2.6     20-Jun-95       Fixed typo; no longer setting
+;;;                                     ENVARC:PAGER by default; fixed
+;;;                                     wrong path removal in
+;;;                                     GNU:s/User-Startup
+;;;
+;;;             2.7     29-Jul-95       Fixed bug in the specs file
+;;;                                     modification: Edit removed
+;;;                                     blanks from the end of a line.
+;;;
+;;;
+;;;             2.8     31-Jul-95       Added GCCSTACK variable again.
+;;;                                     (Sigh!)
+;;;
+;;;             2.9     02-Aug-95       Added "Upgrade" options to
+;;;                                     DeinstallGNU function
+;;;
+;;;             2.10    04-Aug-95       Fixed minor bugs in message
+;;;                                     strings.
+;;;
+;;;             2.11    22-Aug-95       Typos and my bad english :-)
+;;;                                     fixed.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  Variable settings
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(set installName "gcc")
+(set installVersion "2.7.0")
+(set installVersionShort "270")
+(set minOsVersion 37)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  SelectInstallDir procedure
+;;;
+;;;  Allows the user to select an installation directory (full path),
+;;;  which will be stored in the installDir variable.
+;;;
+;;;  Uses:  installDir      old installation directory path
+;;;
+;;;  Sets:  installDir      installation directory path
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(set askedInstallDir 0)
+(set configSubDir 0)
+(procedure SelectInstallDir
+
+    (if (NOT askedInstallDir)
+    (   (if configSubDir
+	(   (set installDir (expandpath (askdir
+		(prompt "Please select the directory to configure. ")
+		(help "GNU C is installed in one directory, Work:GNU "
+		      "or something similar. Please select this "
+		      "directory, so that I can reconfigure it.\n\n"
+		)
+		(default installDir)
+		(newpath)
+	    )))
+
+	    (set installDirParent (pathonly installDir))
+	)
+	(   (set installDirParent (expandpath (askdir
+		(prompt "Please select the installation directory. "
+			"A drawer GNU will be created."
+		)
+		(help "GNU C is installed in a directory called `GNU:'. "
+		      "For example, binaries go into `GNU:bin', link "
+		      "libraries in `GNU:lib' and so on.\n\n"
+		      "A typical place for GNU: is something like "
+		      "`Work:GNU' or something similar. In this "
+		      "example you should select the directory "
+		      "`Work:'.\n\n"
+		      @askdir-help
+		)
+		(default (pathonly installDir))
+		(newpath)
+	    )))
+
+	    (set installDir (tackon installDirParent "GNU"))
+
+	    (message "Installing GNU C in " installDir ".\n\n"
+		     "Binaries will be in " (tackon installDir "bin")
+		     ", link libraries in " (tackon installDir "lib")
+		     ", header files in " (tackon installDir "include")
+		     "."
+	    )
+	))
+	(set @default-dest installDir)
+	(CompleteStep)
+
+	(set askedInstallDir 1)
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  SelectVersion procedure
+;;;
+;;;  Allows the user to select a version to install.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(set askedInstallVersion 0)
+(procedure SelectVersion
+
+    (if (NOT askedInstallVersion)
+    (   (set installVersion (askstring
+	    (prompt "Enter the version of GNU C to install.")
+	    (help "Certain files and directories contain the version "
+		  "of GNU C in the path, thus I need to know them. "
+		  "Please enter the GNU C version in the form "
+		  installVersion ".\n\n"
+		  @askstring-help
+	    )
+	    (default installVersion)
+	))
+
+	(set installVersionShort (cat
+	    (substr installVersion 0 1)
+	    (substr installVersion 2 1)
+	    (substr installVersion 4 1)
+	))
+
+	(set askedInstallVersion 1)
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  SelectDeinstallDir procedure
+;;;
+;;;  Allows the user to select a directory to be deinstalled.
+;;;
+;;;  Uses: oldInstallDir    directory of recent GNU C installation
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure SelectDeinstallDir
+
+    (set deinstallDir (askdir
+	(prompt "Select the directory where to deinstall GNU C.")
+	(help "If your GNU C version is installed in Work:GNU, for "
+	      "example, select Work:GNU, so that I can remove it.\n\n"
+	      @askdir-help
+	)
+	(default oldInstallDir)
+    ))
+    (CompleteStep)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  CheckObsoleteDir procedure
+;;;
+;;;  Asks the user if he wants an "obsolete" directory and creates it,
+;;;  if this is the case. The name will be stored in installObsoleteDir
+;;;  in that case, otherwise this variable will receive the value "".
+;;;
+;;;  Uses: installDir   name of installation directory
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(set installObsoleteDirChecked 0)
+(procedure CheckObsoleteDir
+
+    (if (NOT installObsoleteDirChecked)
+    (   (set installObsoleteDir (tackon installDir "obsolete"))
+	(if (<> (exists installObsoleteDir) 2)
+	(   (makedir installObsoleteDir
+		(prompt "Creating a directory " installObsoleteDir " to keep "
+			"old prefs files and icons."
+		)
+		(help "Old user-editabe files may be prevented from "
+		      "deletion by copying them to " installObsoleteDir
+		      ". You may skip this part, if you don't want this.\n\n"
+		      @makedir-help
+		)
+		(confirm 2)
+		(infos)
+	    )
+	    (if (<> (exists installObsoleteDir) 2)
+	    (   (set installObsoleteDir "")
+	    ))
+	))
+	(set installObsoleteDirChecked 1)
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  CheckObsoleteFile procedure
+;;;
+;;;  Uses: checkObsoleteFileName    name of file to be copyied into the
+;;;                                 obsolete directory (relative to
+;;;                                 installDir)
+;;;        installObsoleteDir       name of the "obsolete" directory
+;;;        installDir               name of the installation directory
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure CheckObsoleteFile
+
+    (if (exists checkObsoleteFileName)
+    (   (CheckObsoleteDir)
+
+	(if installObsoleteDir
+	(   (copyfiles
+		(prompt ("Preserving old file %s ..." checkObsoleteFileName))
+		(help "The old file " checkObsoleteName " may be preserved "
+		      "by copying it to " installObsoleteDir ". You may skip "
+		      "this part, if you don't want this.\n\n"
+		      @copyfiles-help
+		)
+		(source checkObsoleteFileName)
+		(dest installObsoleteDir)
+		(infos)
+		(confirm 2)
+		(optional "oknodelete" "force" "askuser")
+	    )
+	))
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  CheckOsVersion procedure
+;;;
+;;;  Aborts, if OS version is lower than the variable minOsVersion.
+;;;  Sets osVersion variable.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure CheckOsVersion
+    (set osVersion (/ (getversion "exec.library" (resident)) 65536))
+    (if (< osVersion minOsVersion)
+    (   (abort "Sorry, " installName
+	       " needs Kickstart/Workbench 2.04 or higher.")
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  ShowCopyrightMessage procedure
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure ShowCopyrightMessage
+    (message "GNU C:    The GNU Project C and C++ Compiler\n\n"
+	"V" installVersion "     © 1995 Free Software Foundation  \n\n"
+	"This program is FREE SOFTWARE; you can redistribute it and/or "
+	"modify it under the terms of the GNU General Public License as "
+	"published by the Free Software Foundation; either version 2 "
+	"or any later version.\n\n"
+	"This program is distributed in the hope that it will be useful, "
+	"but WITHOUT ANY WARRANTY! See the GNU General Public License "
+	"(in the file COPYING) for details."
+    )
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  CheckGNUDir procedure
+;;;
+;;;  Checks, if GNU: or GCC: assign exists; stores value in
+;;;  installDir sets boolean variable oldInstallationSeen.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure CheckGNUDir
+
+    (set installDir (getassign "GNU" "va"))
+    (if (= installDir "")
+    (   (set installDir (getassign "GCC" "va"))
+    ))
+
+    (if (<> installDir "")
+    (   (set installDir (expandpath installDir))
+	(set oldInstallationSeen 1)
+	(set oldInstallDir installDir)
+	(transcript "Existing GNU C installation in " installDir
+		    " detected.")
+    )
+    (   (set installDir "SYS:GNU")
+	(set oldInstallationSeen 0)
+	(transcript "Performing initial GNU C installation.")
+    ))
+    (set @default-dest installDir)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  RenameFile procedure
+;;;
+;;;  Renames a file by creating the directory of the new location,
+;;;  if this is needed.
+;;;
+;;;  Uses: oldFileName
+;;;        newFileName
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure RenameFile
+
+    (if (exists oldFileName)
+    (   (if (NOT (exists (pathonly newFileName)))
+	(   (makedir (pathonly newFileName))
+	))
+	(rename oldFileName newFileName)
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  DeinstallGNU procedure
+;;;
+;;;  Deletes GNU:lib/gcc-lib or GNU: (if the GNU: path was changed by
+;;;  the user)
+;;;
+;;;  Uses: deinstallDir     Directory where to deinstall GNU C.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure DeinstallGNU
+
+    (set deinstallKind (askchoice
+	(prompt "Which kind of deinstallation do you want?")
+	(help "Selecting \"Complete removal\" means removing "
+	      "the complete directory " deinstallDir ". This is "
+	      "usually selected, if you want to remove GNU C or "
+	      "want to install a new version in another directory.\n\n"
+	      "If you just want to replace the existing version with "
+	      "a new one in the same directory, it should be "
+	      "sufficient to select \"Partial removal\": This "
+	      "will only remove " (tackon deinstallDir "lib/gcc-lib")
+	      ", as other files will be overwritten when installing "
+	      "the new version.\n\n"
+	      "\"Preserve old version\" will just rename gcc and gccv "
+	      "to gcc-2.6.3 (for example), so that you can have "
+	      "different versions of gcc installed at the same "
+	      "time.\n\n"
+	      @askchoice-help
+	)
+	(choices "Complete removal"
+		 "Partial removal"
+		 "Preserve old version"
+	)
+	(default 0)
+    ))
+    (if (AND (<> deinstallKind 2)
+	     (patmatch deinstallDir oldInstallDir))
+    (   (startup "GNU stuff"
+	    (prompt "Removing GNU C from s:User-Startup.")
+	    (help "Your version of GNU C in " deinstallDir
+		  "will be no longer usable. If there are any lines in "
+		  "your S:User-Startup concerning GNU C, they should "
+		  "probably be removed.\n\n"
+		  @startup-help
+	    )
+	)
+    ))
+    (CompleteStep)
+
+    (select deinstallKind
+    (   (set deleteFileName deinstallDir)
+	(DeleteFile)
+	(if (patmatch deinstallDir oldInstallDir)
+	(   (message "I was not able to remove the directory "
+		     deinstallDir " and some of its subdirectories, "
+		     "as there are still assigns pointing to them.\n\n"
+		     "You should remove them manually later.\n"
+	    )
+	))
+    )
+    (   (set n 0)
+	(while (set file (select n "lib/gcc-lib"
+				   "lib/libgcc.a"
+				   "lib/libb/libgcc.a"
+				   "lib/libm020/libgcc.a"
+				   "lib/libb/libm020/libgcc.a"
+				   ""
+	       ))
+	(   (set deleteFileName (tackon deinstallDir file))
+	    (DeleteFile)
+	    (set n (+ n 1))
+	))
+    )
+    (   (set deinstallBinary (tackon deinstallDir "bin/gcc"))
+	(set deinstallBinaryOk 0)
+	(if (exists deinstallBinary)
+	(   (run (cat "setenv INSTALLED_GCC_BINARY_VERSION `"
+		      deinstallBinary " -v`"
+	    ))
+	    (set deinstallBinaryVersion
+		 (getenv "INSTALLED_GCC_BINARY_VERSION"))
+	    (set n 0)
+	    (while (AND (< n (strlen deinstallBinaryVersion))
+			(<> (substr deinstallBinaryVersion n 11) "lib/gcc-lib"))
+	    (   (set n (+ n 1))
+	    ))
+	    (if (< n (strlen deinstallBinaryVersion))
+	    (   (set deinstallBinaryVersion
+		     (substr deinstallBinaryVersion n))
+		(set n 0)
+		(while (AND (< n (strlen deinstallBinaryVersion))
+			    (<> (substr deinstallBinaryVersion n 6) "/specs"))
+		(   (set n (+ n 1))
+		))
+		(if (< n (strlen deinstallBinaryVersion))
+		(   (set deinstallBinaryVersion
+			 (substr deinstallBinaryVersion 0 n))
+		    (set deinstallVersion (fileonly deinstallBinaryVersion))
+		    (set n 0)
+		    (set oldFile 1)
+		    (while (set file (select n "bin/gcc" (cat "bin/gcc-" deinstallVersion)
+					       "bin/gccv" (cat "bin/gccv-" deinstallVersion)
+					       "lib/libgcc.a" (cat deinstallBinaryVersion "/libgcc.a")
+					       "lib/libb/libgcc.a" (cat deinstallBinaryVersion "/libb/libgcc.a")
+					       "lib/libm020/libgcc.a" (cat deinstallBinaryVersion "/libm020/libgcc.a")
+					       "lib/libb/libm020/libgcc.a" (cat deinstallBinaryVersion "/libb/libm020/libgcc.a")
+					       ""
+			   ))
+		    (   (if oldFile
+			(   (set oldFileName (tackon deinstallDir file))
+			)
+			(   (set newFileName (tackon deinstallDir file))
+			    (RenameFile)
+			))
+			(set oldFile (NOT oldFile))
+			(set n (+ n 1))
+		    ))
+		    (set deinstallBinaryOk 1)
+		))
+	    ))
+
+	))
+	(if (NOT deinstallBinaryOk)
+	(   (message "Cannot find GNU C in " deinstallDir ". A "
+		     "possible reason is a missing or wrong GNU: "
+		     "assign.")
+	))
+    ))
+    (CompleteStep)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  DeleteFile procedure
+;;;
+;;;  Deletes a file
+;;;
+;;;  Uses: deleteFileName   file to delete
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure DeleteFile
+
+    (select (exists deleteFileName)
+    (   (set deleteFileName deleteFileName)
+    )
+    (   (delete deleteFileName
+	    (prompt "Deleting " deleteFileName "...")
+	    (optional "force" "askuser")
+	)
+    )
+    (   (working "Deleting directory " deleteFileName)
+	(run (cat "C:Delete \"" deleteFileName "\" ALL QUIET"))
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  SelectLHAProgram procedure
+;;;
+;;;  Lets the user select the LHA binary; sets the variable lhaProgram.
+;;;
+;;;  Sets: lhaProgram   path of LhA binary
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure SelectLHAProgram
+
+    (set l 1)
+    (while l
+    (   (set lhaProgram (askfile
+	    (prompt "Please select your LhA program.")
+	    (help "Unfortunately the Installer program ignores "
+		  "your path settings. Thus I need to know the "
+		  "complete path of your LhA program.\n\n"
+		  @askfile-help
+	    )
+	    (default "LhA")
+	))
+	(if (exists lhaProgram)
+	(   (set l 0)
+	))
+    ))
+    (CompleteStep)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  SelectPackages procedure
+;;;
+;;;  Allows the user to select the archives that should be unarchived.
+;;;  Result is stored in the gnuPackagesChoice variable.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure SelectPackages
+
+    (set gnuPackagesChoice (askoptions
+	(prompt "Which parts of gcc should be installed?")
+	(choices "Base distribution"
+		 "Includes & Libraries"
+		 "C"
+		 "C++"
+		 "Objective-C"
+		 "Additional Utilities"
+		 "On-line Documentation"
+		 "Utilities On-line Documentation"
+		 "Source Diffs"
+		 "Documentation sources")
+	(default 71)
+	(help "gcc is distributed in different LhA archives. "
+	      "I will unarchive those parts to " installDir
+	      " that you select.\n\n"
+	      "A minimal installation requires base distribution, "
+	      "Includes & Libraries and the C distribution. This will take "
+	      "about 7.5 MB of harddisk space. However, I recommend at least "
+	      "adding the on-line documentation, so you get a minimum of "
+	      "10 MB.\n\n"
+	      @askoptions-help
+	)
+    ))
+    (CompleteStep)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  Ask020Binaries procedure
+;;;
+;;;  Asks the user, if he wants the 68020 binaries. Result stored in
+;;;  install020 variable.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(set asked020Binaries 0)
+(procedure Ask020Binaries
+
+    (if (NOT asked020Binaries)
+    (   (set install020 "")
+	(if (NOT (OR (= (database "cpu") "68000")
+		     (= (database "cpu") "68010")
+	    ))
+	(   (if (askbool
+		    (prompt "Do you like to have the 68020 binaries "
+			    "installed?\n\n"
+			    "Of course you need to have the 68020 binaries "
+			    "(packages "
+			    "gcc" installVersionShort "-c-020.lha, "
+			    "gcc" installVersionShort "-c++-020.lha and "
+			    "gcc" installVersionShort "-objc020.lha, "
+			    "respectively) available.\n\n"
+		    )
+		    (help "The GNU C distribution offers two different "
+			  "binary versions. If your machine's CPU is a "
+			  "68020 or above, then you should install the "
+			  "68020 binaries and select \"Yes\". This won't "
+			  "affect the binaries created by you. It only "
+			  "increases the compilers speed.\n\n"
+			  "Otherwise you should select \"No\".\n\n"
+			  @askbool-help
+		    )
+		    (default 1)
+		)
+	    (   (set install020 "-020")
+	    ))
+	))
+	(CompleteStep)
+
+	(set asked020Binaries 1)
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  UnpackArchive procedure
+;;;
+;;;  Unpacks one LhA file.
+;;;
+;;;  Uses: installArchiveName   name of archive file
+;;;        lhaCommand           command to execute for dearchiving
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(set defaultArchivePath "")
+(procedure UnPackArchive
+
+
+    (set l 1)
+    (while l
+    (   (set installArchive (askfile
+	    (prompt "Please select the archive file "
+		     installArchiveName " for unpacking."
+	    )
+	    (help "Please select the archive file " installArchiveName ". "
+		  "I will unpack this archive to " installDir ".\n\n"
+		  @askfile-help
+	    )
+	    (default (tackon defaultArchivePath installArchiveName))
+	))
+	(set defaultArchivePath (pathonly installArchive))
+	(if (exists installArchive)
+	(   (set l 0)
+	    (if (run (lhaCommand installArchive)
+		    (prompt ("\n\nUnpacking %s ..." installArchive))
+		)
+	    (   (abort "\n\n" (lhaCommand installArchive)
+		       "\n\nshowed an error."
+		)
+	    ))
+	)
+	(   (message "File " installArchive " does not exist.")
+	    (set installArchive "")
+	))
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  CopyEnvironment procedure
+;;;
+;;;  Creates environment variables
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure CopyEnvironment
+
+    (SelectOSHeadersDir)
+
+    (set varsToCreatePrompt "Installing environment variables in \"ENVARC:\"")
+    (set varsToCreateHelp
+	(cat "Some environment variables are required or encouraged.\n\n"
+	     "GCCSTACK ensures that gcc won't run out of stack. "
+	     "GCCPRIORITY is the priority of gcc's child processes.\n"
+	     "LESSCHARSET, PAGER and TERM usually aren't needed, "
+	     "except, if you are using \"less\" or similar programs.\n\n"
+    ))
+
+    (if (AND (<> osHeadersDir "")
+	     (= osHeadersInstallStyle 1))
+
+    (   (if useGNUINCLUDE
+	(   (set includePath "/GNUINCLUDE")
+	)
+	(   (set includePath osHeadersDir)
+	))
+
+	(set varsToCreate (askoptions
+	    (prompt varsToCreatePrompt)
+	    (help varsToCreateHelp
+		  "C_INCLUDE_PATH, CPLUS_INCLUDE_PATH, OBJC_INCLUDE_PATH "
+		  "and OBJCPLUS_INCLUDEPATH tell gcc, where to find the "
+		  "OS headers.\n\n"
+		  @askoptions-help
+	    )
+	    (choices "GCCPRIORITY"
+		     "GCCSTACK"
+		     "LESSCHARSET"
+		     "PAGER"
+		     "TERM"
+		     "C_INCLUDE_PATH"
+		     "CPLUS_INCLUDE_PATH"
+		     "OBJC_INCLUDE_PATH"
+		     "OBJCPLUS_INCLUDE_PATH"
+	    )
+	    (default 503)
+	))
+    )
+    (   (set varsToCreate (askoptions
+	    (prompt varsToCreatePrompt)
+	    (help varsToCreateHelp @askoptions-help)
+	    (choices "GCCPRIORITY"
+		     "GCCSTACK"
+		     "LESSCHARSET"
+		     "PAGER"
+		     "TERM"
+	    )
+	    (default 23)
+	))
+    ))
+
+
+    (set n 0)
+    (set bit 1)
+    (while (set word (select n "GCCPRIORITY"            "-1"
+			       "GCCSTACK"               "350000"
+			       "LESSCHARSET"            "latin"
+			       "PAGER"                  "/usr/bin/more"
+			       "TERM"                   "amiga"
+			       "C_INCLUDE_PATH"         includePath
+			       "CPLUS_INCLUDE_PATH"     includePath
+			       "OBJC_INCLUDE_PATH"      includePath
+			       "OBJCPLUS_INCLUDE_PATH"  includePath
+			       ""
+	   ))
+    (   (if (BITAND n 1)
+	(   (if (BITAND bit varsToCreate)
+	    (   (set checkObsoleteFileName (tackon "ENVARC:" varName))
+		(CheckObsoleteFile)
+		(textfile
+		    (prompt "Creating environment variable " varName)
+		    (help @textfile-help)
+		    (dest (tackon "ENVARC:" varName))
+		    (append word)
+		)
+	    ))
+	    (set bit (shiftleft bit 1))
+	)
+	(   (set varName word)
+	))
+	(set n (+ n 1))
+    ))
+
+;    (if (exists "ENVARC:GCCSTACK")
+;    (   (if (askbool
+;                (prompt "The environment variable GCCSTACK is no longer "
+;                        "needed as of gcc 2.7.0.\n\n"
+;                        "Do you want to remove it?\n"
+;                )
+;                (help "Recent versions of gcc (2.6.0-2.6.3) needed an "
+;                      "environment variable GCCSTACK to ensure sufficient "
+;                      "stack. This variable is no longer needed, as gcc "
+;                      "extends its stack dynamically now.\n\n"
+;                      "Select \"Yes\", if you want to remove this "
+;                      "obsolete variable or \"No\", if you want to "
+;                      "keep it for recent versions."
+;                )
+;                (default 1)
+;            )
+;        (   (set deleteFileName "ENVARC:GCCSTACK")
+;            (DeleteFile)
+;        ))
+;    ))
+
+    (CompleteStep)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  ModifyUserStartup procedure
+;;;
+;;;  Modifies s:User-Startup and creates GNU:s/User-Startup
+;;;
+;;;  Uses: installDir   installation directory
+;;;        osHeadersDir path of OS headers
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure ModifyUserStartup
+
+    (SelectOSHeadersDir)
+
+    (startup "GNU stuff"
+	(command "Assign GNU: " installDir "\n")
+	(command "Execute GNU:s/User-Startup\n")
+	(prompt "The following lines should be added to your s:User-Startup:\n\n"
+		"Assign GNU: " installDir "\n"
+		"Execute GNU:s/User-Startup\n\n"
+		"Shall I do this now?"
+	)
+	(help "gcc needs a special environment, some assigns for example. "
+	      "The easiest way to get this environment is to meodify your "
+	      "User-Startup file, so that it is created automatically when "
+	      "your machine boots.\n\n"
+	      @startup-help
+	)
+    )
+
+    (if (AND (<> osHeadersDir "")
+	     (= osHeadersInstallStyle 0))
+    (   (SelectVersion)
+	(Ask020Binaries)
+	(if (<> install020 "")
+	(   (set specsFile (tackon installDir
+				   (cat "lib/gcc-lib/mc68020-cbm-amigados/"
+					installVersion "/specs"))
+	    )
+	)
+	(   (set specsFile (tackon installDir
+				   (cat "lib/gcc-lib/mc68000-cbm-amigados/"
+					installVersion "/specs"))
+	    )
+	))
+
+	(if (AND (exists "C:Edit")
+		 (exists specsFile))
+	(   (if useGNUINCLUDE
+	    (   (set specsString "-IGNUINCLUDE:")
+	    )
+	    (   (set specsString (cat "-I" osHeadersDir))
+	    ))
+
+	    (set checkObsoleteFileName specsFile)
+	    (CheckObsoleteFile)
+	    (textfile
+		(prompt "Creating batch file for C:Edit.")
+		(help "A batchfile with commands for C:Edit must be "
+		      "created."
+		      @textfile-help
+		)
+		(dest "t:specsFileEdit")
+		(append "TR+\n"
+			"F B/*cpp:/\n"
+			"N\n"
+			"DTB /%{m68881/\n"
+			"B,%{m68881,%{!nostdinc:" specsString " },\n"
+			"Q\n"
+		)
+	    )
+	    (run (cat "C:Edit " specsFile " WITH t:specsFileEdit OPT W4096"))
+	    (set deleteFileName "t:specsFileEdit")
+	    (DeleteFile)
+	)
+	(   (message
+		"C:Edit or specs file " specsFile
+		"not found. You must edit the specs file "
+		"manually and add \"" specsString "\" to "
+		"the cpp entry. The line should look as follows:\n\n"
+		"    *cpp:\n"
+		"    %{!nostdinc:" specsString " }%{m68881 ...\n\n"
+		"Otherwise you need to add \"" specsString "\" to your "
+		"command line each time you are using Commodore "
+		"headers."
+	    )
+	))
+    )
+    (   (set osHeadersString "")
+    ))
+
+    (if (<> (exists (tackon installDir "s")) 2)
+    (   (makedir (tackon installDir "s")
+	    (prompt "Creating GNU:s directory.")
+	    (help "A directory GNU:s will be created which contains "
+		  "the files that are executed at startup time."
+		  @makedir-help
+	    )
+	)
+    ))
+
+    (set checkObsoleteFileName (tackon installDir "s/User-Startup"))
+    (CheckObsoleteFile)
+    (if useGNUINCLUDE
+    (   (set installGNUINCLUDE
+	    (cat "            Assign GNUINCLUDE: \"" osHeadersDir "\"\n")
+	)
+	(set deinstallGNUINCLUDE
+	    (cat "        Assign GNUINCLUDE: REMOVE >nil:\n")
+	)
+    )
+    (   (set installGNUINCLUDE "")
+	(set deinstallGNUINCLUDE "")
+    ))
+
+    (textfile
+	(prompt "Creating the GNU startup file GNU:s/user-startup.")
+	(help "The file GNU:s/user-startup must be executed before "
+	      "using gcc, usually from s:User-Startup."
+	)
+	(dest (tackon installDir "s/User-Startup"))
+	(append ".key ON/S,OFF/S,SET/S,CHECK/S\n"
+		".bra {\n"
+		".ket }\n"
+		"\n"
+		";  GNU User-Startup\n"
+		";\n"
+		";      User-Startup ON     for installing GNU assigns. (default)\n"
+		";      User-Startup OFF    for removing GNU assigns.\n"
+		";      User-Startup CHECK  for checking, if assigns exist.\n"
+		";      User-Startup SET    for setting paths only.\n"
+		"\n"
+		"IF \"{OFF}\" EQ \"\"\n"
+		"    IF \"{CHECK}\" EQ \"\"\n"
+		"        IF \"{SET}\" EQ \"\"\n"
+		"            Assign GNU: EXISTS >nil:\n"
+		"            IF WARN\n"
+		"                Assign GNU: \"" installDir "\"\n"
+		"            ENDIF\n"
+		"            Assign BIN:        GNU:bin\n"
+		"            Assign ETC:        GNU:etc\n"
+		"            Assign DEV:        GNU:dev\n"
+		"            Assign TMP:        t:\n"
+		"            Assign LIBS:       GNU:Libs ADD\n"
+		"            Assign LOCAL:      GNU:\n"
+		installGNUINCLUDE
+		"            Assign L:          GNU:ixpipe ADD\n"
+		"        ENDIF\n"
+		"        Set ESHELL \"GNU:bin/sh\"\n"
+		"        Path GNU:bin add\n"
+		"    ELSE\n"
+		"        Assign GNU: EXISTS >nil:\n"
+		"        IF WARN\n"
+		"            Echo \"Assign GNU: doesn't exist.\"\n"
+		"            QUIT 5\n"
+		"        ELSE\n"
+		"            Echo \"Assign GNU: exists.\"\n"
+		"        ENDIF\n"
+		"    ENDIF\n"
+		"ELSE\n"
+		"    Assign GNU: EXISTS >nil:\n"
+		"    IF NOT WARN\n"
+		"        Path GNU:bin REMOVE >nil:\n"
+		"        UnSet ESHELL\n"
+		"        Assign L: GNU:ixpipe REMOVE >nil:\n"
+		deinstallGNUINCLUDE
+		"        Assign LOCAL: REMOVE >nil:\n"
+		"        Assign LIBS: GNU:Libs REMOVE\n"
+		"        Assign TMP: REMOVE\n"
+		"        Assign DEV: REMOVE\n"
+		"        Assign ETC: REMOVE\n"
+		"        Assign BIN: REMOVE\n"
+		"        Assign GNU: REMOVE\n"
+		"    ENDIF\n"
+		"ENDIF\n"
+	)
+    )
+    (protect (tackon installDir "s/User-Startup") "+s")
+
+    (CompleteStep)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  CreateLink procedure
+;;;
+;;;  Creates one link
+;;;
+;;;  Uses: useLinks         1, if "C:MakeLink" should be used, 0 for copy
+;;;        linkDestFile     file to be created (absolute path)
+;;;        linkSourceFile   file to be copied (absolute path)
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure CreateLink
+
+    (if (exists linkSourceFile)
+    (   (if (exists linkDestFile)
+	(   (set deleteFileName linkDestFile)
+	    (DeleteFile)
+	))
+	(if useLinks
+	(   (run (cat "C:MakeLink \"" linkDestFile "\" \"" linkSourceFile))
+	)
+	(   (copyfiles
+		(prompt "Faking link from " linkSourceFile " to "
+			linkDestFile "."
+		)
+		(source linkSourceFile)
+		(dest (pathonly linkDestFile))
+		(newname (fileonly linkDestFile))
+		(optional "askuser" "force")
+	    )
+	))
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  CreateNeededLinks procedure
+;;;
+;;;  Creates needed links.
+;;;
+;;;  Uses: installDir
+;;;
+;;;  Sets: useLinks
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure CreateNeededLinks
+
+    (set useLinks (askchoice
+	(prompt "\n\nSome files may be installed either as links "
+		"or copied. What do you prefer?"
+	)
+	(help "\n\nAmigaDOS is still having problems with links. "
+	      "Thus you might prefer to copy files."
+	      "\n\nOn the other hand links save disk space. "
+	      "(Not very much.)"
+	      @askbool-help
+	)
+	(choices "Copy them anyway"
+		 "Use Links"
+	)
+	(default 0)
+    ))
+
+    (set n 0)
+    (set left 0)
+    (while (set file (select n "bin/gzip"           "bin/gunzip"
+			       "bin/gzip"           "bin/zcat"
+			       "bin/zdiff"          "bin/zcmp"
+			       "bin/grep"           "bin/fgrep"
+			       "bin/grep"           "bin/egrep"
+			       "bin/dir"            "bin/d"
+			       "bin/dir"            "bin/v"
+			       "bin/dir"            "bin/vdir"
+			       "bin/flex"           "bin/flex++"
+			       "bin/install"        "bin/ginstall"
+			       "bin/sh"             "bin/ksh"
+			       "bin/awk"            "bin/gawk"
+			       "bin/test"           "bin/["
+			       "man/man1/gzip.1"    "man/man1/gunzip.1"
+			       "man/man1/gzip.1"    "man/man1/zcat.1"
+			       "man/man1/zdiff.1"   "man/man1/zcmp.1"
+			       ""
+	   ))
+    (   (if left
+	(   (set linkDestFile (tackon installDir file))
+	    (CreateLink)
+	)
+	(   (set linkSourceFile (tackon installDir file))
+	))
+	(set left (NOT left))
+	(set n (+ n 1))
+    ))
+
+    (CompleteStep)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  Rename020Binaries procedure
+;;;
+;;;  Renames gcc-020, g++-020, ... to gcc, g++, ..., respectively
+;;;
+;;;  Uses: install020   set, if 68020 binaries to be installed
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure Rename020Binaries
+
+    (Ask020Binaries)
+
+    (if (<> install020 "")
+    (   (if (askbool
+		(prompt "\n\nDo you want me to rename the binaries "
+			"gcc-020, g++-020, ... to gcc, g++, ..., "
+			"respectively?"
+		)
+		(help "Some users have both 68000 and 68020 binaries "
+		      "available. This requires that certain binaries "
+		      "like gcc, g++ ... have the ending \"-020\" "
+		      "appended to their name.\n\n"
+		      "Most others won't prefer to use the names gcc, "
+		      "g++, ..., however. If you do, select \"Yes\", "
+		      "and I will rename them, otherwise select "
+		      "\"No\".\n\n "
+		      @askbool-help
+		)
+		(default 1)
+	    )
+	(   (set n 0)
+	    (while (set file (select n "bin/gcc"
+				       "bin/c++"
+				       "bin/g++"
+				       "bin/gccv"
+				       "bin/protoize"
+				       "bin/unprotoize"
+				       ""
+		   ))
+	    (   (set newFileName (tackon installDir file))
+		(set oldFileName (cat newFileName "-020"))
+		(if (exists oldFileName)
+		(   (set deleteFileName newFileName)
+		    (DeleteFile)
+		    (rename oldFileName newFileName)
+		))
+		(set n (+ n 1))
+	    ))
+	))
+    ))
+    (CompleteStep)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  SelectOSHeadersDir procedure
+;;;
+;;;  Allows the user to select a directory with OS header files.
+;;;
+;;;  Sets: osHeadersDir     path to the directory with OS headers.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(set osHeadersDirSelected 0)
+(procedure SelectOSHeadersDir
+
+    (if (NOT osHeadersDirSelected)
+    (   (set osHeadersDir "")
+	(set osHeadersDirDefault (getassign "GNUINCLUDE" "a"))
+	(set useGNUINCLUDE 0)
+	(set done 0)
+	(while (NOT done)
+	(   (if (askbool
+		(prompt "Do you have the Commodore OS headers installed?")
+		(help "Using the Commodore OS headers may be simplified "
+		      "by creating an assign \"GNUINCLUDE:\". Select "
+		      "\"Yes\", if you want me to create this assign, "
+		      "\"No\" otherwise.\n\n"
+		      @askbool-help
+		))
+	    (   (set osHeadersDir (askfile
+		    (prompt "Please select the directory with the "
+			    "Commodore OS headers."
+		    )
+		    (help "Using the Commodore OS headers may be simplified "
+			  "by creating an assign \"GNUINCLUDE:\", which "
+			  "will lead to the directory with the Commodore "
+			  "OS headers. Please select this directory, so that "
+			  "I can create this assign.\n\n"
+			  @askfile-help
+		    )
+		    (default osHeadersDirDefault)
+		))
+		(if (exists (tackon osHeadersDir "exec/types.h"))
+		(   (set done 1)
+		)
+		(   (message "The directory " osHeadersDir " doesn't "
+			     "contain the Commodore OS headers: Cannot "
+			     "find "
+			     (tackon osHeadersDir "exec/types.h")
+		    )
+		    (set osHeadersDirDefault osHeadersDir)
+		    (set osHeadersDir "")
+		))
+	    )
+	    (   (message "You won't be able to write real Amiga applications "
+		     "without the Commodore OS headers.\n\n"
+		     "You can get them, for example, on the Fish CD's or "
+		     "buy them (including the Commodore AutoDocs). Please "
+		     "read the Amiga FAQ for details."
+		)
+		(set done 1)
+	    ))
+	))
+
+	(if (<> osHeadersDir "")
+	(   (set osHeadersInstallStyle (askchoice
+		(prompt "How should I install the OS headers?")
+		(choices "Modify specs file"
+			 "Create environment variables"
+			 "None of the above"
+		)
+		(help
+		"The OS headers can be installed in different ways.\n\n"
+		      "The simplest and safest is to copy them to "
+		      (tackon installDir "os-include") ".\n\n"
+		      "Another possibility would be to setup certain "
+		      "environment variables, so that gcc will always "
+		      "look into " osHeadersDir " when searching header "
+		      "files.\n\n"
+		      "The same result is accomplished by modifying the "
+		      "so-called specs file. This is the recommended "
+		      "method, although it is less visible for the user.\n\n"
+		      @askchoice-help
+		)
+		(default 0)
+	    ))
+
+	    (if (< osHeadersInstallStyle 2)
+	    (   (if (askbool
+			(prompt "Do you want to create a \"GNUINCLUDE\" assign?")
+			(help "Many people like to have an assign "
+			      "\"GNUINCLUDE:\" with the directories where gcc "
+			      "should always look for header files. Select \"yes\","
+			      "if you do.\n\n"
+			      "Others don't want to have much assigns and prefer "
+			      "to use the name " osHeadersDir " immediately.\n\n"
+			      @askbool-help
+			)
+			(default 0)
+		    )
+		(   (set useGNUINCLUDE 1)
+		))
+
+	    )
+	    (   (message "You can still use the OS headers, either by "
+			 "adding -I" osHeadersDir " to your gcc command "
+			 "line or by copying them to "
+			 (tackon installDir "os-include") ".\n\n"
+			 "Be sure that you don't override gcc header "
+			 "files in the latter case, especially the "
+			 "proto directory might be overwritten."
+		)
+	    ))
+	))
+	(CompleteStep)
+
+	(set osHeadersDirSelected 1)
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  CompleteStep procedure
+;;;
+;;;  Shows how much of the work is completed.
+;;;
+;;;  Uses: completeLevel        Percent of work already done
+;;;        completeIncrement    Percent to add for this step
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure CompleteStep
+
+    (set completeLevel (+ completeLevel completeIncrement))
+    (complete completeLevel)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  UnpackArchives procedure
+;;;
+;;;  Allows the user to select and unpack LhA archives.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure UnpackArchives
+
+    (SelectVersion)
+    (Ask020Binaries)
+
+    (if (askbool
+	    (prompt "\n\nShould I unpack the archives for you?")
+	    (help "GNU C is distributed in different archives. These "
+		  "must be unpacked using the program LhA. We'll do "
+		  "this now in case you didn't already."
+	    )
+	    (default 1)
+	)
+    (   (SelectLHAProgram)
+
+	(SelectPackages)
+	(CompleteStep)
+
+	(set @Default-Archive-Path "")
+	(if (<> (substr installDirParent (- (strlen installDirParent) 1)) ":")
+	(   (set installDirParent (cat installDirParent "/"))
+	))
+	(set lhaCommand (cat lhaProgram " x -q -I \"%s\" " installDirParent))
+
+	(set n 0)
+	(set bit 1)
+	(while (set installArchiveName (select n "base"
+						 "inclib"
+						 (cat "c" install020)
+						 (cat "c++" install020)
+						 (cat "objc" (substr install020 1))
+						 "utils"
+						 "doc"
+						 "utildoc"
+						 "diffs"
+						 "texi"
+						 ""
+	   ))
+	(   (set installArchiveName (cat installName installVersionShort "-"
+					 installArchiveName ".lha"))
+	    (if (BITAND gnuPackagesChoice bit)
+	    (   (UnpackArchive)
+	    ))
+	    (CompleteStep)
+	    (set bit (shiftleft bit 1))
+	    (set n (+ n 1))
+	))
+    )
+    (   (set completeLevel (+ completeLevel (* completeIncrement 10)))
+	(CompleteStep)
+    ))
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  ActionInstallation procedure
+;;;
+;;;  Executes the work which is unique for installing a new package:
+;;;  Unpacking the archive and renaming 020 binaries.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure ActionInstallation
+
+    (SelectInstallDir)
+    (UnpackArchives)
+    (CreateNeededLinks)
+    (Rename020Binaries)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  ActionDeinstallation procedure
+;;;
+;;;  performs all steps needed for deinstalling an existing package.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure ActionDeinstallation
+
+    (SelectDeinstallDir)
+    (DeinstallGNU)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;  ActionConfiguration procedure
+;;;
+;;;  performs all steps needed for configuring an existing package.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(procedure ActionConfiguration
+
+    (SelectInstallDir)
+    (CopyEnvironment)
+    (SelectOSHeadersDir)
+    (ModifyUserStartup)
+    (CompleteStep)
+)
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;   main program
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(CheckOsVersion)
+(ShowCopyrightMessage)
+
+(CheckGNUDir)
+
+(if oldInstallationSeen
+(   (complete 0)
+
+    (set repeatIt 1)
+    (set defaultChoice 3)
+    (while repeatIt
+    (   (set actionChoice (askchoice
+	    (prompt "Please select actions to perform.")
+	    (help "Select \"Deinstall existing version\", if you want "
+		  "to remove an existing package.\n\n"
+		  "Select \"Install new version\", if you want to "
+		  "replace the existing version with a new version. "
+		  "Installing a new version implies reconfiguring it "
+		  "later.\n\n"
+		  "Select \"Configure existing version\", if you don't "
+		  "want to install a new version and just reconfigure "
+		  "an existing version.\n\n"
+		  "Select \"Done\", if you want to exit.\n\n"
+		  @askchoices-help
+	    )
+	    (choices "Deinstall existing version."
+		     "Install and configure new version"
+		     "Configure existing version"
+		     "All of the above"
+		     "Done"
+	    )
+	    (default defaultChoice)
+	))
+
+	(set installDirAsked 0)
+	(set asked020Binaries 0)
+	(set askedInstallVersion 0)
+	(set osHeadersDirSelected 0)
+
+	(select actionChoice
+	(   (set completeLevel 1)
+	    (set completeIncrement 33)
+	    (ActionDeinstallation)
+	    (set defaultChoice 1)
+	)
+	(   (set completeLevel -5)
+	    (set completeIncrement 5)
+	    (ActionInstallation)
+	    (ActionConfiguration)
+	    (set defaultChoice 4)
+	)
+	(   (set completeLevel 0)
+	    (set completeIncrement 20)
+	    (set configSubDir 1)
+	    (ActionConfiguration)
+	    (set configSubDir 0)
+	    (set defaultChoice 4)
+	)
+	(   (set completeLevel 4)
+	    (set completeIncrement 4)
+	    (ActionDeinstallation)
+	    (ActionInstallation)
+	    (ActionConfiguration)
+	    (set defaultChoice 4)
+	)
+	(   (set repeatIt 0)
+	))
+    ))
+)
+(   (set completeLevel 0)
+    (set completeIncrement 5)
+
+    (message "GNU C is completely installed in one directory called GNU. "
+	     "Typical places are Work:GNU or similar.\n\n"
+	     "We start with selecting the parent directory of GNU, "
+	     "so that I can unarchive the LhA files to this place.\n"
+	     "An assign GNU: will lead to this directory later, binaries "
+	     "will be in GNU:bin, link libraries in GNU:lib and so on.\n\n"
+	     "If you have any problems with this installation script, send "
+	     "mail to\n"
+	     "jochen.wiedmann@neckar-alb.de"
+    )
+
+    (ActionInstallation)
+    (ActionConfiguration)
+
+    (message "Initial installation done. You may rerun me at any time "
+	     "to perform deinstallation, installing new versions or "
+	     "reconfiguring the existing package.\n\n"
+	     "Now you have to reboot to activate new environment.\n"
+	     "In case of errors, problems or whatever, please contact "
+	     "me at:\n\n"
+	     "email: phb@colombo.telesys-innov.fr\n"
+	     "fidonet: 2:320/104.21 Ramses The Amiga Flying BBS"
+    )
+))

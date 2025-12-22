@@ -1,0 +1,10 @@
+int CountChar(char *S, char C);
+char *StrCpyChar(char *Dest, char *Src, char Stop);
+int StripCrudd(char *S);
+int RemoveChar(char *S, char T);
+int RemoveSpace(char *S);
+int RemoveSpaceTSF(char *S);
+int Validate(char *Str, char *Comp);
+int StripDontCare(char *Str);
+void StrUpr(char *String);
+void SwapStrings(char *StrA, char *StrB);

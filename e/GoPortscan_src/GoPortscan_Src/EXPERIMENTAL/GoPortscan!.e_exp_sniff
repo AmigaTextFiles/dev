@@ -1,0 +1,3291 @@
+OPT PREPROCESS, LARGE, OSVERSION=37
+
+/*
+    Program:     Go Portscan
+    Version:     V1.1
+    Author :     Ian Chapman
+    Description: TCP/UDP Portscanner with service lookup, ICMP & UDP Traceroute,
+                 ICMP & UDP Ping, Forward & Reverse Resolving, Ping Sweep,
+                 MUI Interface, Localisation
+
+    LICENSE: Permission is granted to use this source code in whole or in part,
+             providing that the author (Ian Chapman) is credited in your project
+             in either the documentation, or the program itself. This applies to
+             both free and commercial software. In the case of commercial
+             software (including ShareWare), I am entitled to a free, fully
+             functional copy of the software.
+
+             NO WARRANTY EITHER EXPRESSED OR IMPLIED AS TO THE FITNESS OF THIS
+             CODE FOR ANY PURPOSE. ALL USE IS ENTIRELY AND WHOLLY AT YOUR OWN
+             RISK
+
+    Quick Notes About Code:
+
+    1. Quite a large amount of code duplication, an unfortunate side effect of
+       the way GP has been developed. Ie bolt on a new feature without worrying
+       about rewriting existing code for better reusability. It's quite
+       monolithic too.
+
+    2. MUI code would probably have been better done using hooks.
+
+    3. The way the AREXX interface has been written is less than great.
+
+    4. Comments are sparse. Just like 99% of other programs out there :-)
+
+    5. This program probably doesn't do everything the best way or perhaps the
+       most elegant way, but on the whole it works. I ain't an expert! :-)
+
+*/
+
+
+
+
+MODULE  'miami/netinclude/pragmas/socket',
+        ->'miami/netinclude/pragmas/miamibpf',
+        ->'miami/netinclude/pragmas/miamipcap',
+        'miami/netinclude/pragmas/miami',
+        'muimaster',
+        'reqtools',
+        'icon',
+        '*servicetable',
+        '*texts',
+        '*prefs',
+        '*gplogo',
+        '*gpobjects',
+        'amitcp/sys/socket',
+        'amitcp/sys/types',
+        'amitcp/sys/time',
+        'amitcp/sys/errno',
+        'amitcp/netdb',
+        'amitcp/netinet/in',
+        'amitcp/netinet/ip_icmp',
+        'amitcp/netinet/ip',
+        'amitcp/netinet/tcp',
+        'amitcp/netinet/udp',
+        'amigalib/boopsi',
+        'libraries/gadtools',
+        'libraries/mui',
+        'libraries/reqtools',
+        'mui/busy_mcc',
+        'mui/betterstring_mcc',
+        'intuition/classusr',
+        'dos/dos',
+        'utility/tagitem',
+        'utility/hooks',
+        'tools/installhook',
+        'oomodules/softtimer_oo',
+        'timer',
+        'devices/timer',
+        'exec/io',
+        'exec/memory',
+        'tools/inithook'
+
+OBJECT if_nameindex
+    if_index:LONG
+    if_name:PTR TO CHAR
+ENDOBJECT
+
+->Pcap Packet Header Object
+OBJECT pcap_pkthdr
+    ts:compatible_timeval
+    caplen:LONG
+    len:LONG
+ENDOBJECT
+
+->Object for Miami's custom link header
+OBJECT linkheader
+packettype:CHAR
+linktype:CHAR
+padding[14]:ARRAY OF CHAR
+ENDOBJECT
+
+
+#define ibu(i)\
+ ImageObject,\
+    ImageButtonFrame,\
+    MUIA_Background, MUII_ButtonBack,\
+    MUIA_InputMode , MUIV_InputMode_RelVerify,\
+    MUIA_Image_Spec, i,\
+    MUIA_CycleChain, 1,\
+    End
+
+ENUM ERR_NOERROR=0, ERR_NOMUI=50, ERR_ARSE, ERR_NOAPP, ERR_NOASL, ERR_NOBSD, ERR_NOMIAMI, ERR_NOPCAP, ERR_NOICON,
+     ERR_NODNSRESULT, ERR_NOSOCK, ERR_NOMEM, ERR_USERABORT, ERR_NOTIMER, ERR_NOLOCALE=1000,
+     ERR_NOMIAMI, ERR_NOPCAP
+
+ENUM ID_GO=1, ID_LIST, ID_RANGE, ID_ABOUT, ID_MUIABOUT, ID_MUISET, ID_LOOKUP, ID_ICONIFY, ID_UNICONIFY, ID_CANCEL, ID_LOOKUPCYC, ID_PREFS, ID_SAVEPREF,
+     ID_CANCELPREF, ID_DOUBLECLICK, ID_CLOSEBOOK, ID_BOOKDOUBLE, ID_OPENLOOKUP, ID_OPENBOOK, ID_OPENFREQ, ID_OPENCUSTOM, ID_CLOSECUSTOM,
+     ID_OKCUSTOM, ID_SCANTYPE, ID_PING, ID_RESOLVE, ID_REALQUIT, ID_TRACE, ID_PINGSWEEP, ID_WRITELOG, ID_UDPPING
+
+ENUM TERM_NONE=0, TERM_NORMAL, TERM_USER
+
+CONST ICMPIDNUM=1066, TCPSEQNUM=19901000, TH_OFFSET=5, TCP_WINDOW_SIZE=512
+
+->Exception handlers
+
+RAISE ERR_NOMEM IF NewM()=NIL,
+      ERR_NOSOCK IF Socket()=-1
+
+
+DEF app,
+    mui_outputlist,
+    mui_wakeup,
+    mui_timeout,
+    mui_verbose,
+    mui_readcheck,
+    mui_savepath,
+    mui_server,
+    mui_portrange,
+    mui_freq,
+    mui_showtrojan,
+    mui_bookmarkwindow,-> WINDOW
+    mui_lookupwindow,  -> WINDOW
+    mui_customrangewin,-> WINDOW
+    mui_prefswindow,   -> WINDOW
+    mui_bookmarklist,
+    mui_scantypecyc,
+    mui_bookmarklv,
+    mui_workingon,
+    mui_delay,
+    mui_delayup,
+    mui_delaydown,
+    mui_pingsweepnum,
+    running=TRUE,
+    servicedesc[500]:STRING,
+    site[81]:STRING,
+    portrange[200]:STRING,
+    workonstr[40]:STRING,
+    savepath[150]:STRING,
+    telpath[150]:STRING,
+    ftppath[150]:STRING,
+    webpath[150]:STRING,
+    othpath[150]:STRING,
+    arsehole[100]:STRING,
+    preflogstr[150]:STRING,
+    preftelstr[150]:STRING,
+    prefftpstr[150]:STRING,
+    prefwebstr[150]:STRING,
+    prefotherstr[150]:STRING,
+    pingvalstr[3]:STRING,
+    trojanflag=MUI_TRUE,
+    readportflag=0,
+    wakeupflag=0,
+    timeflag=2,
+    delayflag=0,
+    abortflag=FALSE,
+    serviceflag=MUI_TRUE,
+    tracednsflag=MUI_TRUE,
+    tracemaxhopsflag=30,
+    pingsweepdnsflag=FALSE,
+    pingsweepshowicmpflag=FALSE,
+    pingsweeptype=0,
+    scantype=0,
+    troutetype=0,
+    helperchoice=0,
+    timerdelay:PTR TO softtimer,
+    verboseflag=MUI_TRUE,
+    runningrexx=FALSE,
+    gplogo=NIL,
+    diskobj=NIL,
+    tr:PTR TO timerequest,
+    timereq1:PTR TO timeval,
+    timereq2:PTR TO timeval
+
+
+    ->##Procedure to initialise various gadgets on startup, from the prefs file##
+PROC initguivar()
+    StrCopy(site, getprefs_host())
+    StrCopy(savepath, getprefs_log())
+    StrCopy(portrange, getprefs_ports())
+    StrCopy(telpath, getprefs_telnet())
+    StrCopy(ftppath, getprefs_ftp())
+    StrCopy(webpath, getprefs_web())
+    StrCopy(othpath, getprefs_other())
+    verboseflag:=getprefs_verbose()
+    readportflag:=getprefs_read()
+    wakeupflag:=getprefs_wakeup()
+    timeflag:=getprefs_time()
+    trojanflag:=getprefs_trojan()
+    serviceflag:=getprefs_service()
+    StrCopy(pingvalstr, getprefs_ping())
+ENDPROC
+
+PROC main() HANDLE
+DEF mui_mainwindow,    -> WINDOW
+    mui_outputlv,
+    mui_display,
+    mui_portrangecyc,
+    mui_scan,
+    mui_abort,
+    mui_rangeval,
+    mui_openbookmarks,
+    mui_busybar,
+    mui_opencustom,
+    mui_ping,
+    mui_udpping,
+    mui_pingsweep,
+    mui_resolve,
+    mui_trace,
+    mui_pages,
+    mui_tabs,
+    mui_tracedns,
+    mui_tracemaxhops,
+    mui_troutetype,
+    mui_pingsweepdns,
+    mui_pingsweeptype,
+    mui_pingsweepshowicmp,
+    mui_logviewbutton,
+    cyctxt_range[25]:ARRAY OF LONG,
+    cyctxt_values[25]:ARRAY OF LONG,
+    cyctxt_scantype,
+    cyctxt_pingsweeptype,
+    result,
+    signal,
+    menu,
+
+    ->BOOKMARK WINDOW VARIABLES
+    mui_bookmarkdel,
+    mui_bookmarkadd,
+    mui_bookmarkstr,
+    bookstr[81]:STRING,
+    bookfh,
+    bookinstr[81]:STRING,
+    bookoutstr[81]:STRING,
+    i,
+    entries,
+
+    ->LOOKUP WINDOW VARIABLES
+    mui_lookupbutton,
+    mui_lookupstring,
+    mui_lookupcyc,
+    mui_lookupcycval,
+    lookupstr[51]:STRING,
+    buildstr[500]:STRING,
+    lookupport,
+    cyctxt_lookup,
+    index,
+
+    ->CUSTOM RANGE WINDOW
+    customname[21]:STRING,
+    mui_customcancel,
+    mui_customok,
+    mui_customstr,
+    customfh,
+    customtemp,
+    x=0,
+
+    ->HELPER WINDOW
+    mui_helperwindow,
+    mui_helperbutftp,
+    mui_helperbutweb,
+    mui_helperbuttel,
+    mui_helperbutoth,
+
+    ->AREXX VARIABLES
+    rxcommandarr[30]:ARRAY OF mui_command,
+    rexxhooks[30]:ARRAY OF hook
+
+-> Initialisation
+
+inittexts()
+loadprefs()
+initguivar()
+StrCopy(workonstr, txt_Face_Workingon10)
+
+cyctxt_range[0]:=txt_Face_PortCyc1
+cyctxt_range[1]:=txt_Face_PortCyc2
+cyctxt_range[2]:=txt_Face_PortCyc3
+cyctxt_range[3]:=txt_Face_PortCyc4
+cyctxt_range[4]:=txt_Face_PortCyc5
+
+->Initialise the list for safety's sake
+FOR x:=5 TO 25 DO cyctxt_range[x]:=NIL
+
+->Read the entries from the custom ranges file.
+IF (customfh:=Open('envarc:goportscan.ranges', MODE_OLDFILE))>0
+    customtemp:=String(21)
+    x:=5
+    WHILE Fgets(customfh, customtemp, 21)>NIL
+        StrCopy(customtemp, customtemp, StrLen(customtemp)-1)
+        StringF(customtemp, '\eb\d: \s', x-4, customtemp)
+        cyctxt_range[x]:=customtemp
+        customtemp:=String(200)
+        Fgets(customfh, customtemp, 200)
+        StrCopy(customtemp, customtemp, StrLen(customtemp)-1)
+        cyctxt_values[x]:=customtemp
+        customtemp:=String(21)
+        x++
+    ENDWHILE
+    Close(customfh)
+ENDIF
+
+cyctxt_lookup:=[txt_Face_LookupCyc1, txt_Face_LookupCyc2, txt_Face_LookupCyc3, NIL]
+cyctxt_scantype:=[txt_Face_ScanTypeCyc1, txt_Face_ScanTypeCyc2, txt_Face_ScanTypeCyc3, txt_Face_ScanTypeCyc4, NIL]
+cyctxt_pingsweeptype:=[txt_Face_PingSweepCyc1, txt_Face_PingSweepCyc2, NIL]
+mui_pages:=[txt_Face_Pages1, txt_Face_Pages2, txt_Face_Pages3, txt_Face_Pages4, NIL]
+
+menu:=[ NM_TITLE,0, txt_MenuTitle_Project ,0,0,0,0,
+        NM_ITEM ,0, txt_MenuItem_About ,'?',0,0, ID_ABOUT,
+        NM_ITEM ,0, txt_MenuItem_AboutMUI ,0,0,0,ID_MUIABOUT,
+        NM_ITEM ,0,  NM_BARLABEL, 0,0,0,0,
+        NM_ITEM ,0, txt_MenuItem_ServiceLook , 'S', 0,0,ID_OPENLOOKUP,
+        NM_ITEM ,0, txt_MenuItem_Bookmarks, 'B',0,0, ID_OPENBOOK,
+        NM_ITEM ,0, NM_BARLABEL, 0,0,0,0,
+        NM_ITEM ,0, txt_MenuItem_Iconify , 'I', 0, 0, ID_ICONIFY,
+        NM_ITEM ,0, txt_MenuItem_Quit , 'Q' ,0,0, MUIV_Application_ReturnID_Quit,
+        NM_TITLE,0, txt_MenuTitle_Settings ,0,0,0,0,
+        NM_ITEM ,0, txt_MenuItem_MuiSettings ,0,0,0,ID_MUISET,
+        NM_ITEM ,0, txt_MenuItem_Prefs, 'P',0,0,ID_PREFS,
+        NM_END  ,0, NIL, 0,0,0,0]:newmenu
+
+IF (socketbase:=OpenLibrary('bsdsocket.library', 2)) = NIL THEN Raise(ERR_NOBSD)
+IF (miamibase:=OpenLibrary('miami.library', NIL)) = NIL THEN WriteF('No Miami\n')
+->IF (miamipcapbase:=OpenLibrary('miamipcap.library', NIL)) = NIL THEN WriteF('No Pcap\n')
+->MiamiPCapInit(miamibase, socketbase)
+IF (muimasterbase:=OpenLibrary('muimaster.library',19))=NIL THEN Raise(ERR_NOMUI)
+IF (reqtoolsbase:=OpenLibrary('reqtools.library',38))=NIL THEN Raise(ERR_NOASL)
+IF (iconbase:=OpenLibrary('icon.library', 33))=NIL THEN Raise(ERR_NOICON)
+
+    ->##HOOKS ETC FOR AREXX
+installhook (rexxhooks[0], {rx_newscan})
+rxcommandarr[0].mc_name:='newscan'
+rxcommandarr[0].mc_template:='HOST/A,PORTS/A,TYPE/N'
+rxcommandarr[0].mc_parameters:=3
+rxcommandarr[0].mc_hook:=rexxhooks[0]
+
+installhook (rexxhooks[1], {rx_setflags})
+rxcommandarr[1].mc_name:='setflags'
+rxcommandarr[1].mc_template:='FLAG/A,VALUE/N'
+rxcommandarr[1].mc_parameters:=2
+rxcommandarr[1].mc_hook:=rexxhooks[1]
+
+rxcommandarr[2].mc_name:='goscan'
+rxcommandarr[2].mc_template:=MC_TEMPLATE_ID
+rxcommandarr[2].mc_parameters:=ID_GO
+rxcommandarr[2].mc_hook:=NIL
+
+rxcommandarr[3].mc_name:='listknown'
+rxcommandarr[3].mc_template:=MC_TEMPLATE_ID
+rxcommandarr[3].mc_parameters:=ID_LIST
+rxcommandarr[3].mc_hook:=NIL
+
+rxcommandarr[4].mc_name:='iconify'
+rxcommandarr[4].mc_template:=MC_TEMPLATE_ID
+rxcommandarr[4].mc_parameters:=ID_ICONIFY
+rxcommandarr[4].mc_hook:=NIL
+
+rxcommandarr[5].mc_name:='uniconify'
+rxcommandarr[5].mc_template:=MC_TEMPLATE_ID
+rxcommandarr[5].mc_parameters:=ID_UNICONIFY
+rxcommandarr[5].mc_hook:=NIL
+
+installhook (rexxhooks[6], {rx_opengpwin})
+rxcommandarr[6].mc_name:='opengpwin'
+rxcommandarr[6].mc_template:='WINDOW/A'
+rxcommandarr[6].mc_parameters:=1
+rxcommandarr[6].mc_hook:=rexxhooks[6]
+
+installhook (rexxhooks[7], {rx_closegpwin})
+rxcommandarr[7].mc_name:='closegpwin'
+rxcommandarr[7].mc_template:='WINDOW/A'
+rxcommandarr[7].mc_parameters:=1
+rxcommandarr[7].mc_hook:=rexxhooks[7]
+
+installhook (rexxhooks[8], {rx_isscanning})
+rxcommandarr[8].mc_name:='isscanning'
+rxcommandarr[8].mc_template:=NIL
+rxcommandarr[8].mc_parameters:=NIL
+rxcommandarr[8].mc_hook:=rexxhooks[8]
+
+installhook (rexxhooks[9], {rx_iswinopen})
+rxcommandarr[9].mc_name:='iswinopen'
+rxcommandarr[9].mc_template:='WINDOW/A'
+rxcommandarr[9].mc_parameters:=1
+rxcommandarr[9].mc_hook:=rexxhooks[9]
+
+installhook (rexxhooks[10], {rx_addbookmark})
+rxcommandarr[10].mc_name:='addbookmark'
+rxcommandarr[10].mc_template:='BOOKMARK/A'
+rxcommandarr[10].mc_parameters:=1
+rxcommandarr[10].mc_hook:=rexxhooks[10]
+
+installhook (rexxhooks[11], {rx_clearbookmarks})
+rxcommandarr[11].mc_name:='clearbookmarks'
+rxcommandarr[11].mc_template:=NIL
+rxcommandarr[11].mc_parameters:=NIL
+rxcommandarr[11].mc_hook:=rexxhooks[11]
+
+installhook (rexxhooks[12], {rx_getnumbookmarks})
+rxcommandarr[12].mc_name:='getnumbookmarks'
+rxcommandarr[12].mc_template:=NIL
+rxcommandarr[12].mc_parameters:=NIL
+rxcommandarr[12].mc_hook:=rexxhooks[12]
+
+installhook (rexxhooks[13], {rx_getbookmark})
+rxcommandarr[13].mc_name:='getbookmark'
+rxcommandarr[13].mc_template:='ENTRYNUM/A'
+rxcommandarr[13].mc_parameters:=1
+rxcommandarr[13].mc_hook:=rexxhooks[13]
+
+installhook (rexxhooks[14], {rx_setlog})
+rxcommandarr[14].mc_name:='setlog'
+rxcommandarr[14].mc_template:='LOGFILE/A'
+rxcommandarr[14].mc_parameters:=1
+rxcommandarr[14].mc_hook:=rexxhooks[14]
+
+installhook (rexxhooks[15], {rx_settimeout})
+rxcommandarr[15].mc_name:='settimeout'
+rxcommandarr[15].mc_template:='TIME/A'
+rxcommandarr[15].mc_parameters:=1
+rxcommandarr[15].mc_hook:=rexxhooks[15]
+
+installhook (rexxhooks[16], {rx_setdelay})
+rxcommandarr[16].mc_name:='setdelay'
+rxcommandarr[16].mc_template:='DELAY/A'
+rxcommandarr[16].mc_parameters:=1
+rxcommandarr[16].mc_hook:=rexxhooks[16]
+
+installhook (rexxhooks[17], {rx_annotate})
+rxcommandarr[17].mc_name:='annotate'
+rxcommandarr[17].mc_template:='TEXT/A'
+rxcommandarr[17].mc_parameters:=1
+rxcommandarr[17].mc_hook:=rexxhooks[17]
+
+installhook (rexxhooks[18], {rx_saveprefs})
+rxcommandarr[18].mc_name:='saveprefs'
+rxcommandarr[18].mc_template:=NIL
+rxcommandarr[18].mc_parameters:=NIL
+rxcommandarr[18].mc_hook:=rexxhooks[18]
+
+installhook (rexxhooks[19], {rx_sendabort})
+rxcommandarr[19].mc_name:='sendabort'
+rxcommandarr[19].mc_template:=NIL
+rxcommandarr[19].mc_parameters:=NIL
+rxcommandarr[19].mc_hook:=rexxhooks[19]
+
+installhook (rexxhooks[20], {rx_ping})
+rxcommandarr[20].mc_name:='ping'
+rxcommandarr[20].mc_template:='HOST/A'
+rxcommandarr[20].mc_parameters:=1
+rxcommandarr[20].mc_hook:=rexxhooks[20]
+
+installhook (rexxhooks[21], {rx_resolve})
+rxcommandarr[21].mc_name:='resolve'
+rxcommandarr[21].mc_template:='HOST/A'
+rxcommandarr[21].mc_parameters:=1
+rxcommandarr[21].mc_hook:=rexxhooks[21]
+
+rxcommandarr[22].mc_name:=NIL
+rxcommandarr[22].mc_template:=NIL
+rxcommandarr[22].mc_parameters:=NIL
+rxcommandarr[22].mc_hook:=NIL
+
+
+    ->##THESE ARE THE GADGET CREATIONS FOR THE MAIN WINDOW
+
+gplogo:=imgGplogoObject()
+
+mui_openbookmarks:=ibu(MUII_PopUp)
+mui_opencustom:=ibu(MUII_ArrowRight)
+mui_freq:=ibu(MUII_PopFile)
+mui_logviewbutton:=ibu(MUII_Disk)
+
+mui_server:=BetterStringObject, StringFrame,
+    MUIA_String_AdvanceOnCR, MUI_TRUE,
+    MUIA_String_Contents, site,
+    MUIA_ShortHelp, txt_Bubble_Server,
+    MUIA_CycleChain, 1,
+    End
+
+mui_savepath:=BetterStringObject, StringFrame,
+    MUIA_String_AdvanceOnCR, MUI_TRUE,
+    MUIA_String_Contents, savepath,
+    MUIA_String_MaxLen, 149,
+    MUIA_ShortHelp, txt_Bubble_Savepath,
+    MUIA_CycleChain, 1,
+    End
+
+mui_portrange:=BetterStringObject, StringFrame,
+    MUIA_String_AdvanceOnCR, MUI_TRUE,
+    MUIA_String_Contents, portrange,
+    MUIA_String_Accept, '0123456789-,',
+    MUIA_String_MaxLen, 199,
+    MUIA_ShortHelp, txt_Bubble_Portrange,
+    MUIA_CycleChain, 1,
+    End
+
+mui_workingon:=BetterStringObject, ImageButtonFrame,
+    MUIA_String_AdvanceOnCR, MUI_TRUE,
+    MUIA_String_Contents, workonstr,
+    MUIA_ShortHelp, txt_Bubble_Workingon,
+    MUIA_CycleChain, 1,
+    MUIA_BetterString_NoInput, MUI_TRUE,
+    End
+
+mui_pingsweepnum:=BetterStringObject, StringFrame,
+    MUIA_String_AdvanceOnCR, MUI_TRUE,
+    MUIA_String_MaxLen, 5,
+    MUIA_String_Integer, 255,
+    MUIA_String_Accept, '1234567890',
+    MUIA_ShortHelp, txt_Bubble_Pingsweepnum,
+    MUIA_CycleChain, 1,
+    End
+
+mui_delayup:=ibu(MUII_ArrowUp)
+
+mui_delay:=NumericbuttonObject,
+                MUIA_Numeric_Min, 0,
+                MUIA_Numeric_Max, 20,
+                MUIA_Numeric_Value, delayflag,
+                MUIA_Numeric_Format, '%lds',
+                MUIA_ShortHelp, txt_Bubble_Delay,
+                MUIA_CycleChain, 1,
+                End
+
+mui_delaydown:=ibu(MUII_ArrowDown)
+
+mui_outputlv:=ListviewObject,
+                MUIA_Listview_Input, MUI_TRUE,
+                MUIA_CycleChain, 1,
+                MUIA_Listview_List, mui_outputlist:=ListObject,
+                    ReadListFrame,
+                        MUIA_List_ConstructHook, MUIV_List_ConstructHook_String,
+                        MUIA_List_DestructHook, MUIV_List_DestructHook_String,
+                        MUIA_ShortHelp, txt_Bubble_OutputLV,
+                    End, ->ReadlistFrame
+                End ->Lstviewobject
+
+mui_busybar:=BusyObject,
+                MUIA_Busy_Speed, MUIV_Busy_Speed_User,
+                End
+
+mui_ping:=SimpleButton(txt_Face_Ping)
+mui_udpping:=SimpleButton(txt_Face_UDPPing)
+mui_resolve:=SimpleButton(txt_Face_Resolve)
+mui_trace:=SimpleButton(txt_Face_Traceroute)
+mui_pingsweep:=SimpleButton(txt_Face_Pingsweep)
+mui_display:=SimpleButton(txt_Face_ListKnown)
+mui_scan:=SimpleButton(txt_Face_Scan)
+mui_abort:=SimpleButton(txt_Face_Abort)
+mui_readcheck:=CheckMark(readportflag)
+mui_verbose:=CheckMark(verboseflag)
+mui_wakeup:=CheckMark(wakeupflag)
+mui_showtrojan:=CheckMark(trojanflag)
+mui_tracedns:=CheckMark(tracednsflag)
+mui_pingsweepdns:=CheckMark(pingsweepdnsflag)
+mui_pingsweepshowicmp:=CheckMark(pingsweepshowicmpflag)
+
+mui_tracemaxhops:=SliderObject,
+                    MUIA_Slider_Min, 1,
+                    MUIA_Slider_Max, 255,
+                    MUIA_Slider_Level, tracemaxhopsflag,
+                    MUIA_ShortHelp, txt_Bubble_Tracemaxhops,
+                    MUIA_CycleChain, 1,
+                    End
+
+mui_timeout:=SliderObject,
+                MUIA_Slider_Min, 1,
+                MUIA_Slider_Max, 20,
+                MUIA_Slider_Level, timeflag,
+                MUIA_ShortHelp, txt_Bubble_Timeout,
+                MUIA_CycleChain, 1,
+                End
+
+mui_troutetype:=KeyCycle(['ICMP', 'UDP', NIL, NIL], "t")
+
+mui_portrangecyc:=KeyCycle(cyctxt_range, "r")
+mui_scantypecyc:=KeyCycle(cyctxt_scantype, "t")
+mui_pingsweeptype:=KeyCycle(cyctxt_pingsweeptype, "p")
+
+    ->##THESE ARE THE GADGET CREATIONS FOR THE BOOKMARK WINDOW
+
+mui_bookmarklv:=ListviewObject,
+                    MUIA_Listview_Input, MUI_TRUE,
+                    MUIA_CycleChain, 1,
+                    MUIA_Listview_List, mui_bookmarklist:=ListObject,
+                        ReadListFrame,
+                            MUIA_List_ConstructHook, MUIV_List_ConstructHook_String,
+                            MUIA_List_DestructHook, MUIV_List_DestructHook_String,
+                            MUIA_ShortHelp, txt_Bubble_BookmarkLV,
+                        End,
+                    End
+
+mui_bookmarkstr:=BetterStringObject, StringFrame,
+                    MUIA_String_AdvanceOnCR, MUI_TRUE,
+                    MUIA_String_Contents, bookstr,
+                    MUIA_ShortHelp, txt_Bubble_Bookmarkstr,
+                    MUIA_CycleChain, 1,
+                    End
+
+mui_bookmarkadd:=SimpleButton(txt_Face_Bookmarkadd)
+mui_bookmarkdel:=SimpleButton(txt_Face_Bookmarkdel)
+
+    ->##THESE ARE THE GADGETS FOR THE LOOKUP WINDOW
+
+mui_lookupstring:=BetterStringObject, StringFrame,
+    MUIA_String_AdvanceOnCR, MUI_TRUE,
+    MUIA_String_Contents, lookupstr,
+    MUIA_String_Accept, '0123456789-,',
+    MUIA_String_MaxLen, 50,
+    MUIA_ShortHelp, txt_Bubble_Lookupstring1,
+    MUIA_CycleChain, 1,
+    End
+
+mui_lookupbutton:=SimpleButton(txt_Face_Lookup)
+mui_lookupcyc:=KeyCycle(cyctxt_lookup, "l")
+
+    ->##THESE ARE THE GADGETS FOR THE CUSTOM WINDOW
+
+mui_customstr:=BetterStringObject, StringFrame,
+    MUIA_String_AdvanceOnCR, MUI_TRUE,
+    MUIA_String_Contents, customname,
+    MUIA_String_MaxLen, 20,
+    MUIA_ShortHelp, 'Name',
+    MUIA_CycleChain, 1,
+    End
+
+mui_customok:=SimpleButton(txt_Face_OK)
+mui_customcancel:=SimpleButton(txt_Face_Cancel)
+
+    ->##THESE ARE THE SET FUNCTIONS FOR THE MAIN WINDOW
+SetAttrsA(mui_display, [MUIA_ShortHelp, txt_Bubble_ListKnown, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_scan, [MUIA_ShortHelp, txt_Bubble_Scan, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_resolve, [MUIA_ShortHelp, txt_Bubble_Resolve, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_abort, [MUIA_ShortHelp, txt_Bubble_Abort, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_readcheck, [MUIA_ShortHelp, txt_Bubble_Readcheck, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_verbose, [MUIA_ShortHelp, txt_Bubble_Verbose, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_wakeup, [MUIA_ShortHelp, txt_Bubble_Wakeup, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_showtrojan, [MUIA_ShortHelp, txt_Bubble_Showtrojan, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_portrangecyc, [MUIA_ShortHelp, txt_Bubble_Portrangecyc, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_opencustom, [MUIA_ShortHelp, txt_Bubble_Opencustom, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_scantypecyc, [MUIA_ShortHelp, txt_Bubble_Scantype, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_ping, [MUIA_ShortHelp, txt_Bubble_Ping, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_udpping, [MUIA_ShortHelp, txt_Bubble_UDPPing, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_trace, [MUIA_ShortHelp, txt_Bubble_Traceroute, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_tracedns, [MUIA_ShortHelp, txt_Bubble_Tracedns, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_troutetype, [MUIA_ShortHelp, txt_Bubble_TrouteType, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_pingsweepdns, [MUIA_ShortHelp, txt_Bubble_Pingsweepdns, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_pingsweepshowicmp, [MUIA_ShortHelp, txt_Bubble_Pingsweepshowicmp, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_pingsweeptype, [MUIA_ShortHelp, txt_Bubble_Pingsweeptype, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_logviewbutton, [MUIA_ShortHelp, txt_Bubble_Logviewbutton, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_freq, [MUIA_ShortHelp, txt_Bubble_Freq, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_pingsweep, [MUIA_ShortHelp, txt_Bubble_Pingsweep, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_openbookmarks, [MUIA_ShortHelp, txt_Bubble_Openbookmarks, MUIA_CycleChain, 1, TAG_DONE])
+
+    ->##THESE ARE THE SET FUNCTIONS FOR THE BOOKMARKS WINDOW
+SetAttrsA(mui_bookmarkadd, [MUIA_ShortHelp, txt_Bubble_Bookmarkadd, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_bookmarkdel, [MUIA_ShortHelp, txt_Bubble_Bookmarkdel, MUIA_CycleChain, 1, TAG_DONE])
+
+    ->##THESE ARE THE SET FUNCTIONS FOR THE LOOKUP WINDOW
+SetAttrsA(mui_lookupbutton, [MUIA_ShortHelp, txt_Bubble_Lookup, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_lookupcyc, [MUIA_ShortHelp, txt_Bubble_Lookupcyc1, MUIA_CycleChain, 1, TAG_DONE])
+
+    ->##THESE ARE THE SET FUNCTIONS FOR THE CUSTOM RANGE WINDOW
+SetAttrsA(mui_customok, [MUIA_ShortHelp, txt_Bubble_Customok, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_customcancel, [MUIA_ShortHelp, txt_Bubble_Customcancel, MUIA_CycleChain, 1, TAG_DONE])
+SetAttrsA(mui_customstr, [MUIA_ShortHelp, txt_Bubble_Customstr, MUIA_CycleChain, 1, TAG_DONE])
+
+app:=ApplicationObject,
+    MUIA_Application_Title      , 'Go Portscan!',
+    MUIA_Application_Version    , '$VER: Go Portscan! 1.1',
+    MUIA_Application_Copyright  , 'Written By Ian Chapman (2001-2003)',
+    MUIA_Application_Author     , 'Ian Chapman',
+    MUIA_Application_Description, 'TCP/UDP Portscanner',
+    MUIA_Application_Base       , 'GOPORTSCAN',
+    MUIA_Application_Commands   , rxcommandarr,
+    MUIA_Application_SingleTask , FALSE,
+    MUIA_Application_DiskObject , diskobj:=GetDiskObject('ENVARC:sys/def_goportscan'),
+    MUIA_Application_Menustrip  , Mui_MakeObjectA(MUIO_MenustripNM,[menu,0]),
+    MUIA_Application_HelpFile   , txt_HelpFile,
+    MUIA_Application_Iconified  , MUI_TRUE,
+    
+    SubWindow, mui_mainwindow:=WindowObject,
+    MUIA_Window_Title           , txt_MainWindow_Title,
+    MUIA_Window_ID              , "GOPO",
+    MUIA_Window_Activate        , MUI_TRUE,
+    MUIA_Window_Width           , MUIV_Window_Width_Screen(50),
+    MUIA_Window_Height          , MUIV_Window_Height_Screen(50),
+    MUIA_HelpNode               , 'Main Window',
+
+    WindowContents, VGroup,
+                        Child, HGroup,
+                            Child, TextObject,
+                                    TextFrame,
+                                        MUIA_Text_Contents, txt_Text_Main,
+                                        MUIA_Background, MUII_FILL,
+                                    End,
+                            Child, gplogo,
+                        End, ->HGroup
+                        Child, ColGroup(2), 
+                            Child, Label(txt_Label_Host),
+                            Child, HGroup,
+                                Child, mui_server,
+                                Child, mui_openbookmarks,
+                            End, ->HGroup
+                        End, ->ColGroup
+                        Child, mui_tabs:=RegisterGroup(mui_pages),
+                            Child, VGroup,
+                                Child, ColGroup(2),
+                                    Child, Label(txt_Label_Ports),
+                                    Child, HGroup,
+                                        Child, mui_portrange,
+                                        Child, mui_opencustom,
+                                    End, ->Hgroup
+
+                                    Child, KeyLabel1(txt_Label_Range,"r"),
+                                    Child, mui_portrangecyc,
+
+                                    Child, Label(txt_Label_Log),
+                                    Child, HGroup,
+                                        Child, mui_savepath,
+                                        Child, mui_freq,
+                                    End, ->HGroup
+
+                                    Child, Label(txt_Label_Timeout),
+                                    Child, mui_timeout,
+
+                                End, ->ColGroup
+
+                                Child, HGroup,
+                                    Child, ColGroup(4),
+                                        Child, Label(txt_Label_Verbose),
+                                        Child, mui_verbose,
+                                        Child, Label(txt_Label_Readports),
+                                        Child, mui_readcheck,
+                                        Child, Label(txt_Label_Wakeup),
+                                        Child, mui_wakeup,
+                                        Child, Label(txt_Label_Showtrojan),
+                                        Child, mui_showtrojan,
+                                    End,
+                                    Child, VGroup,
+                                        Child, HGroup,
+                                            Child, HSpace(0),
+                                            Child, KeyLabel1(txt_Label_Scantype, "t"),
+                                            Child, HSpace(0),
+                                        End,
+                                        Child, mui_scantypecyc,
+                                    End,
+                                End, ->HGroup
+                                Child, mui_scan,
+                            End, ->VGroup
+
+                            Child, VGroup,
+                                Child, ColGroup(2),
+                                    Child, Label(txt_Label_Maxhops),
+                                    Child, mui_tracemaxhops,
+                                    Child, KeyLabel1(txt_Label_TrouteType, "t"),
+                                    Child, mui_troutetype,
+                                    Child, Label(txt_Label_Dnslookup),
+                                    Child, HGroup,
+                                        Child, mui_tracedns,
+                                        Child, HSpace(0),
+                                    End, ->HGroup
+                                End, ->ColGroup
+                                Child, mui_trace,
+                            End, ->VGroup
+
+                            Child, VGroup,
+                                Child, ColGroup(2),
+                                    Child, Label(txt_Label_Numaddresses),
+                                    Child, mui_pingsweepnum,
+                                    Child, Label(txt_Label_Sweeptype),
+                                    Child, mui_pingsweeptype,
+                                    Child, Label(txt_Label_Dnslookup),
+                                    Child, HGroup,
+                                        Child, mui_pingsweepdns,
+                                        Child, HSpace(0),
+                                    End,
+                                    Child, Label(txt_Label_Reportnonecho),
+                                    Child, HGroup,
+                                        Child, mui_pingsweepshowicmp,
+                                        Child, HSpace(0),
+                                    End, ->HGroup
+                                End, ->ColGroup
+                                Child, mui_pingsweep,
+                            End, ->VGroup
+
+                            Child, VGroup,
+                                Child, HGroup,
+                                    Child, mui_ping,
+                                    Child, mui_udpping,
+                                End, ->HGroup
+                                Child, mui_resolve,
+                                Child, mui_display,
+                            End, ->VGroup
+
+                        End, ->Register
+                        Child, BalanceObject,
+                        End, ->BalObj
+                        Child, HGroup,
+                            Child, Label(txt_Label_Workingon),
+                            Child, mui_workingon,
+                            Child, mui_busybar,
+                        End, -> HGroup
+                        Child, HGroup,
+                            Child, VGroup,
+                                Child, VSpace(0),
+                                Child, mui_delayup,
+                                Child, mui_delay,
+                                Child, mui_delaydown,
+                                Child, VSpace(0),
+                                Child, mui_logviewbutton,
+                            End, ->VGroup
+                                Child, mui_outputlv,
+                        End, ->HGroup
+                        Child, mui_abort,
+              End, ->Vgroup
+    End, ->WindowContents
+
+    SubWindow, mui_bookmarkwindow:=WindowObject,
+    MUIA_Window_Title      , txt_BookmarkWindow_Title,
+    MUIA_Window_ID         , "BOOK",
+    MUIA_Window_Activate   , MUI_TRUE,
+    MUIA_HelpNode          , 'Bookmarks Window',
+
+    WindowContents, VGroup,
+                        Child, TextObject,
+                                TextFrame,
+                                    MUIA_Text_Contents, txt_Text_Bookmarks,
+                                    MUIA_Background, MUII_FILL,
+                                    End,
+                        Child, mui_bookmarklv,
+                        Child, mui_bookmarkstr,
+                        Child, HGroup,
+                            Child, mui_bookmarkadd,
+                            Child, mui_bookmarkdel,
+                        End,
+
+                    End,
+              End, ->WindowContents
+
+    SubWindow, mui_lookupwindow:=WindowObject,
+    MUIA_Window_Title       , txt_LookWindow_Title,
+    MUIA_Window_ID          , "LOOK",
+    MUIA_Window_Activate    , MUI_TRUE,
+    MUIA_HelpNode           , 'Service Lookup Window',
+
+    WindowContents, VGroup,
+                        Child, TextObject,
+                                TextFrame,
+                                    MUIA_Text_Contents, txt_Text_Lookup,
+                                    MUIA_Background, MUII_FILL,
+                                    End,
+                        Child, HGroup,
+                                Child, mui_lookupcyc,
+                                Child, mui_lookupstring,
+                                End,
+
+                        Child, mui_lookupbutton,
+                    End,
+    End,
+
+    SubWindow, mui_customrangewin:=WindowObject,
+    MUIA_Window_Title       , txt_CustomrangeWindow_Title,
+    MUIA_Window_ID          , "CUST",
+    MUIA_Window_Activate    , MUI_TRUE,
+    MUIA_HelpNode           , 'Main Window',
+
+    WindowContents, VGroup,
+                        Child, Label(txt_Text_Customrange),
+                        Child, HGroup,
+                            Child, Label(txt_Label_Customrange),
+                            Child, mui_customstr,
+                        End, ->HGroup,
+                        Child, HGroup,
+                            Child, mui_customok,
+                            Child, mui_customcancel,
+                        End, ->HGroup
+                    End,
+    End,
+
+    SubWindow, mui_helperwindow:=WindowObject,
+    MUIA_Window_Title       , txt_HelperWindow_Title,
+    MUIA_Window_ID          , "HELP",
+    MUIA_Window_Activate    , MUI_TRUE,
+    MUIA_Window_DepthGadget , FALSE,
+    MUIA_Window_SizeGadget  , FALSE,
+    MUIA_HelpNode           , 'Helper Window',
+    MUIA_Window_NoMenus     , MUI_TRUE,
+
+    WindowContents, VGroup,
+                        Child, mui_helperbuttel:=SimpleButton('Telnet'),
+                        Child, mui_helperbutftp:=SimpleButton('FTP'),
+                        Child, mui_helperbutweb:=SimpleButton('Web (HTTP)'),
+                        Child, mui_helperbutoth:=SimpleButton('Other'),
+                    End, ->VGroup
+    End,
+
+End ->Application
+
+IF (app=NIL) THEN Raise(ERR_NOAPP)
+
+    ->##THESE ARE THE DOMETHODS FOR THE MAIN WINDOW
+doMethodA(mui_portrangecyc,         [MUIM_Notify, MUIA_Cycle_Active,         MUIV_EveryTime, app,                   2, MUIM_Application_ReturnID, ID_RANGE])
+doMethodA(mui_scantypecyc,          [MUIM_Notify, MUIA_Cycle_Active,         MUIV_EveryTime, app,                   2, MUIM_Application_ReturnID, ID_SCANTYPE])
+doMethodA(mui_verbose,              [MUIM_Notify, MUIA_Selected,             MUIV_EveryTime, mui_verbose,           3, MUIM_WriteLong,            MUIV_TriggerValue, {verboseflag}])
+doMethodA(mui_showtrojan,           [MUIM_Notify, MUIA_Selected,             MUIV_EveryTime, mui_showtrojan,        3, MUIM_WriteLong,            MUIV_TriggerValue, {trojanflag}])
+doMethodA(mui_wakeup,               [MUIM_Notify, MUIA_Selected,             MUIV_EveryTime, mui_wakeup,            3, MUIM_WriteLong,            MUIV_TriggerValue, {wakeupflag}])
+doMethodA(mui_wakeup,               [MUIM_Notify, MUIA_Selected,             MUI_TRUE,       mui_readcheck,         3, MUIM_Set,                  MUIA_Selected,     MUI_TRUE])
+doMethodA(mui_tracedns,             [MUIM_Notify, MUIA_Selected,             MUIV_EveryTime, mui_tracedns,          3, MUIM_WriteLong,            MUIV_TriggerValue, {tracednsflag}])
+doMethodA(mui_pingsweepdns,         [MUIM_Notify, MUIA_Selected,             MUIV_EveryTime, mui_pingsweepdns,      3, MUIM_WriteLong,            MUIV_TriggerValue, {pingsweepdnsflag}])
+doMethodA(mui_pingsweepshowicmp,    [MUIM_Notify, MUIA_Selected,             MUIV_EveryTime, mui_pingsweepshowicmp, 3, MUIM_WriteLong,            MUIV_TriggerValue, {pingsweepshowicmpflag}])
+doMethodA(mui_timeout,              [MUIM_Notify, MUIA_Slider_Level,         MUIV_EveryTime, mui_timeout,           3, MUIM_WriteLong,            MUIV_TriggerValue, {timeflag}])
+->doMethodA(mui_delay,              [MUIM_Notify, MUIA_Slider_Level,         MUIV_EveryTime, mui_delay,             3, MUIM_WriteLong,            MUIV_TriggerValue, {delayflag}])
+doMethodA(mui_delay,                [MUIM_Notify, MUIA_Numeric_Value,        MUIV_EveryTime, mui_delay,             3, MUIM_WriteLong,            MUIV_TriggerValue, {delayflag}])
+doMethodA(mui_delayup,              [MUIM_Notify, MUIA_Selected,             FALSE,          mui_delay,             2, MUIM_Numeric_Increase,     1])
+doMethodA(mui_delaydown,            [MUIM_Notify, MUIA_Selected,             FALSE,          mui_delay,             2, MUIM_Numeric_Decrease,     1])
+doMethodA(mui_tracemaxhops,         [MUIM_Notify, MUIA_Slider_Level,         MUIV_EveryTime, mui_tracemaxhops,      3, MUIM_WriteLong,            MUIV_TriggerValue, {tracemaxhopsflag}])
+doMethodA(mui_abort,                [MUIM_Notify, MUIA_Pressed,              FALSE,          mui_abort,             3, MUIM_WriteLong,            TERM_USER,         {abortflag}])
+doMethodA(mui_readcheck,            [MUIM_Notify, MUIA_Selected,             MUIV_EveryTime, mui_readcheck,         3, MUIM_WriteLong,            MUIV_TriggerValue, {readportflag}])
+doMethodA(mui_readcheck,            [MUIM_Notify, MUIA_Selected,             FALSE,          mui_wakeup,            3, MUIM_Set,                  MUIA_Selected,     FALSE])
+doMethodA(mui_mainwindow,           [MUIM_Notify, MUIA_Window_CloseRequest,  MUI_TRUE,       app,                   2, MUIM_Application_ReturnID, MUIV_Application_ReturnID_Quit])
+doMethodA(mui_server,               [MUIM_Notify, MUIA_String_Contents,      MUIV_EveryTime, mui_server,            3, MUIM_WriteString,          MUIV_TriggerValue, site])
+doMethodA(mui_savepath,             [MUIM_Notify, MUIA_String_Contents,      MUIV_EveryTime, mui_savepath,          3, MUIM_WriteString,          MUIV_TriggerValue, savepath])
+doMethodA(mui_portrange,            [MUIM_Notify, MUIA_String_Contents,      MUIV_EveryTime, mui_portrange,         3, MUIM_WriteString,          MUIV_TriggerValue, portrange])
+doMethodA(mui_scan,                 [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_GO])
+doMethodA(mui_logviewbutton,        [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_WRITELOG])
+doMethodA(mui_ping,                 [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_PING])
+doMethodA(mui_udpping,              [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_UDPPING])
+doMethodA(mui_pingsweep,            [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_PINGSWEEP])
+doMethodA(mui_pingsweeptype,        [MUIM_Notify, MUIA_Cycle_Active,         MUIV_EveryTime, mui_pingsweeptype,     3, MUIM_WriteLong,            MUIV_TriggerValue, {pingsweeptype}])
+doMethodA(mui_trace,                [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_TRACE])
+doMethodA(mui_resolve,              [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_RESOLVE])
+doMethodA(mui_openbookmarks,        [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_OPENBOOK])
+doMethodA(mui_opencustom,           [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_OPENCUSTOM])
+doMethodA(mui_freq,                 [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_OPENFREQ])
+doMethodA(mui_display,              [MUIM_Notify, MUIA_Pressed,              FALSE,          app,                   2, MUIM_Application_ReturnID, ID_LIST])
+doMethodA(mui_outputlv,             [MUIM_Notify, MUIA_Listview_DoubleClick, MUI_TRUE,       app,                   2, MUIM_Application_ReturnID, ID_DOUBLECLICK])
+
+    ->##THESE ARE THE DOMETHODS FOR THE BOOKMARKS WINDOW
+doMethodA(mui_bookmarkwindow,   [MUIM_Notify, MUIA_Window_CloseRequest, MUI_TRUE,       app,             2, MUIM_Application_ReturnID, ID_CLOSEBOOK])
+doMethodA(mui_bookmarkadd,      [MUIM_Notify, MUIA_Pressed,             FALSE,          mui_bookmarklist,3, MUIM_List_InsertSingle,    bookstr,           MUIV_List_Insert_Sorted])
+doMethodA(mui_bookmarkdel,      [MUIM_Notify, MUIA_Pressed,             FALSE,          mui_bookmarklist,2, MUIM_List_Remove,          MUIV_List_Remove_Active])
+doMethodA(mui_bookmarklv,       [MUIM_Notify, MUIA_Listview_DoubleClick,MUI_TRUE,       app,             2, MUIM_Application_ReturnID, ID_BOOKDOUBLE])
+doMethodA(mui_bookmarkstr,      [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_bookmarkstr, 3, MUIM_WriteString,          MUIV_TriggerValue, bookstr])
+
+    ->##THESE ARE THE DOMETHODS FOR THE LOOKUP WINDOW
+doMethodA(mui_lookupwindow, [MUIM_Notify, MUIA_Window_CloseRequest, MUI_TRUE,       app,              2, MUIM_Application_ReturnID, ID_CANCEL])
+doMethodA(mui_lookupstring, [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_lookupstring, 3, MUIM_WriteString,          MUIV_TriggerValue, lookupstr])
+doMethodA(mui_lookupbutton, [MUIM_Notify, MUIA_Pressed,             FALSE,          app,              2, MUIM_Application_ReturnID, ID_LOOKUP])
+doMethodA(mui_lookupcyc,    [MUIM_Notify, MUIA_Cycle_Active,        MUIV_EveryTime, app,              2, MUIM_Application_ReturnID, ID_LOOKUPCYC])
+
+    ->##THESE ARE THE DOMETHODS FOR THE CUSTOM RANGE WINDOW
+doMethodA(mui_customrangewin, [MUIM_Notify, MUIA_Window_CloseRequest, MUI_TRUE,       app,              2, MUIM_Application_ReturnID, ID_CLOSECUSTOM])
+doMethodA(mui_customcancel,   [MUIM_Notify, MUIA_Pressed,             FALSE,          app,              2, MUIM_Application_ReturnID, ID_CLOSECUSTOM])
+doMethodA(mui_customok,       [MUIM_Notify, MUIA_Pressed,             FALSE,          app,              2, MUIM_Application_ReturnID, ID_OKCUSTOM])
+doMethodA(mui_customstr,      [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_customstr,    3, MUIM_WriteString,          MUIV_TriggerValue, customname])
+
+    ->##THESE ARE THE DOMETHODS FOR THE HELPER WINDOW
+doMethodA(mui_helperwindow, [MUIM_Notify, MUIA_Window_CloseRequest, MUI_TRUE,       mui_helperwindow,              3, MUIM_Set, MUIA_Window_Open, FALSE])
+doMethodA(mui_helperwindow, [MUIM_Notify, MUIA_Window_CloseRequest, MUI_TRUE,       mui_helperwindow,              3, MUIM_WriteLong, 100, {helperchoice}])
+doMethodA(mui_helperbuttel, [MUIM_Notify, MUIA_Pressed,             FALSE,          mui_helperwindow,              3, MUIM_Set, MUIA_Window_Open, FALSE])
+doMethodA(mui_helperbuttel, [MUIM_Notify, MUIA_Pressed,             FALSE,          mui_helperbuttel,              3, MUIM_WriteLong, 1, {helperchoice}])
+doMethodA(mui_helperbutftp, [MUIM_Notify, MUIA_Pressed,             FALSE,          mui_helperwindow,              3, MUIM_Set, MUIA_Window_Open, FALSE])
+doMethodA(mui_helperbutftp, [MUIM_Notify, MUIA_Pressed,             FALSE,          mui_helperbutftp,              3, MUIM_WriteLong, 2, {helperchoice}])
+doMethodA(mui_helperbutweb, [MUIM_Notify, MUIA_Pressed,             FALSE,          mui_helperwindow,              3, MUIM_Set, MUIA_Window_Open, FALSE])
+doMethodA(mui_helperbutweb, [MUIM_Notify, MUIA_Pressed,             FALSE,          mui_helperbutweb,              3, MUIM_WriteLong, 3, {helperchoice}])
+doMethodA(mui_helperbutoth, [MUIM_Notify, MUIA_Pressed,             FALSE,          mui_helperwindow,              3, MUIM_Set, MUIA_Window_Open, FALSE])
+doMethodA(mui_helperbutoth, [MUIM_Notify, MUIA_Pressed,             FALSE,          mui_helperbutoth,              3, MUIM_WriteLong, 4, {helperchoice}])
+
+doMethodA(mui_helperwindow, [MUIM_Window_SetCycleChain, mui_helperbuttel, mui_helperbutftp, mui_helperbutweb, mui_helperbutoth, NIL])
+
+    ->##THESE ARE THE SET FUNCTIONS WHICH NEED TO BE DONE, JUST BEFORE OPENING THE MAIN WINDOW
+set(mui_lookupwindow, MUIA_Window_ActiveObject, mui_lookupcyc)
+set(mui_abort, MUIA_Disabled, MUI_TRUE)
+set(mui_busybar, MUIA_ShowMe, FALSE)
+SetAttrsA(mui_mainwindow, [MUIA_Window_ActiveObject, mui_server, MUIA_Window_Open, MUI_TRUE, TAG_DONE])
+
+doMethodA(mui_bookmarklist, [MUIM_List_Clear])
+StrCopy(bookstr, site)
+set(mui_bookmarkstr, MUIA_String_Contents, bookstr)
+IF (bookfh:=Open('ENVARC:goportscan.bookmarks', MODE_OLDFILE))>NIL
+    WHILE Fgets(bookfh, bookinstr, 81)>NIL
+        SetStr(bookinstr, StrLen(bookinstr)-1)
+        doMethodA(mui_bookmarklist, [MUIM_List_InsertSingle, bookinstr, MUIV_List_Insert_Sorted])
+    ENDWHILE
+    Close(bookfh)
+ENDIF
+
+WHILE running
+    result:= doMethodA(app, [MUIM_Application_Input,{signal}])
+    WaitTOF()
+
+    SELECT result
+       
+        CASE MUIV_Application_ReturnID_Quit
+            doMethodA(app, [MUIM_Application_ReturnID, ID_CLOSEBOOK])
+            doMethodA(app, [MUIM_Application_ReturnID, ID_REALQUIT])
+
+        CASE ID_REALQUIT
+            running:=FALSE
+
+        CASE ID_GO
+            runningrexx:=MUI_TRUE
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, MUI_TRUE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, MUI_TRUE, mui_server, mui_openbookmarks, mui_tabs, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, FALSE)
+            set(mui_busybar, MUIA_ShowMe, MUI_TRUE)
+            clearlist()
+            inittcpip(parseport())
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, FALSE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, FALSE, mui_server, mui_openbookmarks, mui_tabs, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, MUI_TRUE)
+            set(mui_busybar, MUIA_ShowMe, FALSE)
+            runningrexx:=FALSE
+
+        CASE ID_PINGSWEEP
+            runningrexx:=MUI_TRUE
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, MUI_TRUE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, MUI_TRUE, mui_server, mui_openbookmarks, mui_tabs, mui_delay, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, FALSE)
+            set(mui_busybar, MUIA_ShowMe, MUI_TRUE)
+            clearlist()
+            pingsweep()
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, FALSE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, FALSE, mui_server, mui_openbookmarks, mui_tabs, mui_delay, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, MUI_TRUE)
+            set(mui_busybar, MUIA_ShowMe, FALSE)
+            runningrexx:=FALSE
+
+        CASE ID_PING
+            runningrexx:=MUI_TRUE
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, MUI_TRUE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, MUI_TRUE, mui_server, mui_openbookmarks, mui_tabs, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, FALSE)
+            set(mui_busybar, MUIA_ShowMe, MUI_TRUE)
+            clearlist()
+            icmpping()
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, FALSE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, FALSE, mui_server, mui_openbookmarks, mui_tabs, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, MUI_TRUE)
+            set(mui_busybar, MUIA_ShowMe, FALSE)
+            runningrexx:=FALSE
+
+        CASE ID_UDPPING
+            runningrexx:=MUI_TRUE
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, MUI_TRUE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, MUI_TRUE, mui_server, mui_openbookmarks, mui_tabs, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, FALSE)
+            set(mui_busybar, MUIA_ShowMe, MUI_TRUE)
+            clearlist()
+            udpping()
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, FALSE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, FALSE, mui_server, mui_openbookmarks, mui_tabs, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, MUI_TRUE)
+            set(mui_busybar, MUIA_ShowMe, FALSE)
+            runningrexx:=FALSE
+
+        CASE ID_TRACE
+            runningrexx:=MUI_TRUE
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, MUI_TRUE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, MUI_TRUE, mui_server, mui_openbookmarks, mui_tabs, mui_delay, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, FALSE)
+            set(mui_busybar, MUIA_ShowMe, MUI_TRUE)
+            clearlist()
+            GetAttr(MUIA_Cycle_Active,mui_troutetype,{troutetype})
+            IF troutetype=0
+                traceroute()
+            ELSE
+                udptraceroute()
+            ENDIF
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, FALSE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, FALSE, mui_server, mui_openbookmarks, mui_tabs, mui_delay, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, MUI_TRUE)
+            set(mui_busybar, MUIA_ShowMe, FALSE)
+            runningrexx:=FALSE
+
+        CASE ID_LIST
+            runningrexx:=MUI_TRUE
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, MUI_TRUE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, MUI_TRUE, mui_server, mui_openbookmarks, mui_tabs, mui_delay, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, FALSE)
+            set(mui_busybar, MUIA_ShowMe, MUI_TRUE)
+            clearlist()
+            listknown()
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, FALSE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, FALSE, mui_server, mui_openbookmarks, mui_tabs, mui_delay, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, MUI_TRUE)
+            set(mui_busybar, MUIA_ShowMe, FALSE)
+            runningrexx:=FALSE
+
+        CASE ID_RESOLVE
+            runningrexx:=MUI_TRUE
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, MUI_TRUE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, MUI_TRUE, mui_server, mui_openbookmarks, mui_tabs, mui_delay, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, FALSE)
+            set(mui_busybar, MUIA_ShowMe, MUI_TRUE)
+            clearlist()
+            resolve()
+            doMethodA(app, [MUIM_MultiSet, MUIA_Window_Sleep, FALSE, mui_bookmarkwindow, mui_lookupwindow, NIL])
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, FALSE, mui_server, mui_openbookmarks, mui_tabs, mui_delay, mui_logviewbutton, NIL])
+            set(mui_abort, MUIA_Disabled, MUI_TRUE)
+            set(mui_busybar, MUIA_ShowMe, FALSE)
+            runningrexx:=FALSE
+
+        CASE ID_RANGE
+            get(mui_portrangecyc, MUIA_Cycle_Active, {mui_rangeval})
+            SELECT mui_rangeval
+                CASE 0
+                    StrCopy(portrange, getprefs_ports())
+                CASE 1
+                    StrCopy(portrange,'7,9,11,13,15,17,19-21,23,25,37,79-80,110,137-139')
+                CASE 2
+                    StrCopy(portrange,'1-1023')
+                CASE 3
+                    StrCopy(portrange,'1024-49151')
+                CASE 4
+                    StrCopy(portrange,'1-65535')
+                DEFAULT
+                    StrCopy(portrange, cyctxt_values[mui_rangeval])
+            ENDSELECT
+            set(mui_portrange, MUIA_String_Contents, portrange)
+
+        CASE ID_SCANTYPE
+            get(mui_scantypecyc, MUIA_Cycle_Active, {scantype})
+
+        CASE ID_ICONIFY
+            set(app, MUIA_Application_Iconified, MUI_TRUE)
+
+        CASE ID_UNICONIFY
+            set(app, MUIA_Application_Iconified, FALSE)
+
+        CASE ID_ABOUT
+                Mui_RequestA(app, mui_mainwindow, 0, 'About Go Portscan!','*_OK','\ecGo Portscan! by Ian Chapman (2003)\nVersion 1.1\n\nTCP/UDP Portscanner with service lookup,\nPing, Ping Sweep, Resolve and Traceroute\n\nhttp://software.scm.tees.ac.uk\nhttp://software.electric-dreams.org',NIL)
+        CASE ID_MUIABOUT
+            doMethodA(app, [MUIM_Application_AboutMUI, mui_mainwindow])
+
+        CASE ID_MUISET
+            doMethodA(app, [MUIM_Application_OpenConfigWindow,0])
+
+        CASE ID_OPENLOOKUP
+            set(mui_lookupwindow, MUIA_Window_Open, MUI_TRUE)
+
+        CASE ID_PREFS
+            prefs()
+
+        CASE ID_DOUBLECLICK
+            set(mui_helperwindow, MUIA_Window_Open, MUI_TRUE)
+            set(mui_mainwindow, MUIA_Window_Sleep, MUI_TRUE)
+            WHILE helperchoice = 0
+                WaitTOF()
+                doMethodA(app, [MUIM_Application_Input,{signal}])
+            ENDWHILE
+            SELECT helperchoice
+                CASE 1
+                    callhelper(telpath)
+                CASE 2
+                    callhelper(ftppath)
+                CASE 3
+                    callhelper(webpath)
+                CASE 4
+                    callhelper(othpath)
+                DEFAULT
+                    ->This is where it comes if we just want the window to close
+            ENDSELECT
+            set(mui_mainwindow, MUIA_Window_Sleep, FALSE)
+            helperchoice:=0
+
+        CASE ID_OPENFREQ
+            openreq(mui_mainwindow)
+            set(mui_savepath, MUIA_String_Contents, savepath)
+
+        ->##THESE CASE STATEMENTS ARE RELATED TO THE BOOKMARKS WINDOW
+
+        CASE ID_OPENBOOK 
+            doMethodA(mui_bookmarklist, [MUIM_List_Clear])
+            StrCopy(bookstr, site)
+            set(mui_bookmarkstr, MUIA_String_Contents, bookstr)
+            set(mui_bookmarkwindow, MUIA_Window_ActiveObject, mui_bookmarkadd)
+
+            IF (bookfh:=Open('ENVARC:goportscan.bookmarks', MODE_OLDFILE))>NIL
+                WHILE Fgets(bookfh, bookinstr, 81)>NIL
+                    SetStr(bookinstr, StrLen(bookinstr)-1)
+                    doMethodA(mui_bookmarklist, [MUIM_List_InsertSingle, bookinstr, MUIV_List_Insert_Sorted])
+                ENDWHILE
+                Close(bookfh)
+            ENDIF
+
+            set(mui_bookmarkwindow, MUIA_Window_Open, MUI_TRUE)
+
+        CASE ID_CLOSEBOOK
+            GetAttr(MUIA_List_Entries,mui_bookmarklist,{entries})
+
+            IF (bookfh:=Open('ENVARC:goportscan.bookmarks', MODE_NEWFILE))>NIL
+               FOR i:=0 TO (entries-1)
+                    doMethodA(mui_bookmarklist,[MUIM_List_GetEntry,i,{arsehole}])
+                    Write(bookfh,arsehole,StrLen(arsehole))
+                    Write(bookfh, '\n', 1)
+                ENDFOR
+                Close(bookfh)
+
+            ENDIF
+
+            set(mui_bookmarkwindow, MUIA_Window_Open, FALSE)
+
+        CASE ID_BOOKDOUBLE
+            doMethodA(mui_bookmarklist,[MUIM_List_GetEntry,MUIV_List_GetEntry_Active,{bookoutstr}])
+            StrCopy(site, bookoutstr)
+            doMethodA(mui_server, [MUIM_Set, MUIA_String_Contents, site])
+            set(mui_bookmarkwindow, MUIA_Window_Open, FALSE)
+
+        CASE ID_CANCEL
+            set(mui_lookupwindow, MUIA_Window_Open, FALSE)
+
+        CASE ID_LOOKUP
+            clearlist()
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, MUI_TRUE, mui_lookupbutton, mui_lookupcyc, mui_lookupstring, NIL])
+            set(mui_busybar, MUIA_ShowMe, MUI_TRUE)
+            set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon4)
+            set(app, MUIA_Application_Sleep,MUI_TRUE)
+            get(mui_lookupcyc, MUIA_Cycle_Active, {mui_lookupcycval})
+            SELECT mui_lookupcycval
+                CASE 0
+                    doMethodA(app, [MUIM_Application_Input,{signal}])
+                    lookupport:=Val(lookupstr)
+                    findservice(lookupport)
+                    doMethodA(app, [MUIM_Application_Input,{signal}])
+                    StringF(buildstr, '\eb\d\en --\s',lookupport, servicedesc)
+                    outlist(buildstr)
+                DEFAULT
+                    IF mui_lookupcycval=2 THEN LowerStr(lookupstr)
+                    FOR lookupport:=1 TO 65535
+                        doMethodA(app, [MUIM_Application_Input,{signal}])
+                        findservice(lookupport)
+                        IF mui_lookupcycval=2 THEN LowerStr(servicedesc)
+                        index:=InStr(servicedesc, lookupstr)
+                        IF index >-1
+                            StringF(buildstr, '\eb\d\en --\s',lookupport, servicedesc)
+                            outlist(buildstr)
+                        ENDIF
+                    ENDFOR
+            ENDSELECT
+            doMethodA(app, [MUIM_MultiSet, MUIA_Disabled, FALSE, mui_lookupbutton, mui_lookupcyc, mui_lookupstring, NIL])
+            set(app, MUIA_Application_Sleep, FALSE)
+            set(mui_busybar, MUIA_ShowMe, FALSE)
+            set(mui_workingon, MUIA_String_Contents, 'Done!')
+
+        CASE ID_LOOKUPCYC
+            get(mui_lookupcyc, MUIA_Cycle_Active, {mui_lookupcycval})
+            SELECT mui_lookupcycval
+                CASE 0
+                    SetAttrsA(mui_lookupstring, [MUIA_ShortHelp, txt_Bubble_Lookupstring1, MUIA_String_Accept, '0123456789', TAG_DONE])
+                    set(mui_lookupcyc, MUIA_ShortHelp, txt_Bubble_Lookupcyc1)
+                CASE 1
+                    SetAttrsA(mui_lookupstring, [MUIA_ShortHelp, txt_Bubble_Lookupstring2, MUIA_String_Accept, FALSE, TAG_DONE])
+                    set(mui_lookupcyc, MUIA_ShortHelp, txt_Bubble_Lookupcyc3)
+                CASE 2
+                    SetAttrsA(mui_lookupstring, [MUIA_ShortHelp, txt_Bubble_Lookupstring2, MUIA_String_Accept, FALSE])
+                    set(mui_lookupcyc, MUIA_ShortHelp, txt_Bubble_Lookupcyc2)
+            ENDSELECT
+            StrCopy(lookupstr, '')
+            set(mui_lookupstring, MUIA_String_Contents, lookupstr)
+
+        CASE ID_OPENCUSTOM
+            set(mui_mainwindow, MUIA_Window_Sleep, MUI_TRUE)
+            set(mui_customrangewin, MUIA_Window_Open, MUI_TRUE)
+
+        CASE ID_CLOSECUSTOM
+            set(mui_customrangewin, MUIA_Window_Open, FALSE)
+            set(mui_mainwindow, MUIA_Window_Sleep, FALSE)
+
+        CASE ID_OKCUSTOM
+            IF (customfh:=Open('ENVARC:goportscan.ranges', MODE_READWRITE))<>0
+                IF StrLen(customname)>0
+                    IF StrLen(portrange)>0
+                        Seek(customfh, 0, OFFSET_END)
+                        Write(customfh, customname,StrLen(customname))
+                        Write(customfh, '\n', 1)
+                        Write(customfh, portrange, StrLen(portrange))
+                        Write(customfh, '\n', 1)
+                    ENDIF
+                ENDIF
+                Close(customfh)
+            ENDIF
+            set(mui_customrangewin, MUIA_Window_Open, FALSE)
+            set(mui_mainwindow, MUIA_Window_Sleep, FALSE)
+
+        CASE ID_WRITELOG
+            set(mui_mainwindow, MUIA_Window_Sleep, MUI_TRUE)
+            addlog('===Manual Log Write===')
+            savelog()
+            addlog('===End Manual Log Write===')
+            set(mui_mainwindow, MUIA_Window_Sleep, FALSE)
+            Mui_RequestA(app, mui_mainwindow, 0, '','*_OK',txt_Text_WrittenToLog,NIL)
+        ENDSELECT
+
+    IF (running AND signal) THEN Wait(signal)
+ENDWHILE
+
+
+EXCEPT DO
+    ->IF (miamipcapbase) THEN CloseLibrary(miamipcapbase)
+    IF (miamibase) THEN CloseLibrary(miamibase)
+    IF (socketbase) THEN CloseLibrary(socketbase)
+    IF (app) THEN Mui_DisposeObject(app)
+    IF (muimasterbase) THEN CloseLibrary(muimasterbase)
+    IF (diskobj) THEN FreeDiskObject(diskobj)
+    IF (iconbase) THEN CloseLibrary(iconbase)
+    IF (reqtoolsbase) THEN CloseLibrary(reqtoolsbase)
+    IF (localebase) THEN CloseLibrary(localebase)
+SELECT exception
+    CASE ERR_NOERROR
+    -> Normal exception on exit
+    CASE ERR_NOMUI
+        WriteF(txt_Error_NoMUI)
+    CASE ERR_NOAPP
+        WriteF(txt_Error_NoApp)
+    CASE ERR_NOASL
+        WriteF(txt_Error_NoAsl)
+    CASE ERR_NOICON
+        WriteF(txt_Error_NoIcon)
+    CASE ERR_NOBSD
+        WriteF(txt_Error_NoTCP)
+    CASE ERR_NOLOCALE
+        WriteF(txt_Error_NoLocale)
+    DEFAULT
+        WriteF(txt_Error_Exception, 'main()', exception)
+ENDSELECT
+
+ENDPROC
+
+    ->##Procedure to print a string to the listview and jump to the end##
+PROC outlist(str:PTR TO CHAR)
+    doMethodA(mui_outputlist, [MUIM_List_InsertSingle,str,MUIV_List_Insert_Bottom ])
+    doMethodA(mui_outputlist, [MUIM_List_Jump, MUIV_List_Jump_Bottom])
+ENDPROC
+
+    ->##Procedure to clear the listview of entires##
+PROC clearlist() IS doMethodA(mui_outputlist, [MUIM_List_Clear])
+
+
+    ->##Procedure to call the appropriate helper and parse the variables
+PROC callhelper(helper)
+DEF line[200]:STRING,
+    a[200]:STRING,
+    b[200]:STRING,
+    exestr[200]:STRING,
+    chopped[10]:STRING,
+    helperpath[150]:STRING,
+    port,
+    retval,
+    index
+
+    StrCopy(helperpath, helper)
+    doMethodA(mui_outputlist,[MUIM_List_GetEntry,MUIV_List_GetEntry_Active,{line}])
+    StrCopy(chopped, line, StrLen(line))
+    chopped[0]:=32
+    chopped[1]:=32
+    retval:=StrToLong(chopped, {port})
+
+    IF port>0
+        index:=InStr(helperpath, '%h')
+        IF (index > -1) THEN StringF(exestr, '\s\s\s', MidStr(a, helperpath, 0, index), site, MidStr(b, helperpath, index+2, ALL))
+        index:=InStr(exestr, '%p')
+        IF (index > -1) THEN StringF(exestr, 'run \s\d\s', MidStr(a, exestr, 0, index), port, MidStr(b, exestr, index+2, ALL))
+        Execute(exestr, NIL, NIL)
+    ELSE
+        outlist('Helpers can only be run from a portscan.')
+    ENDIF
+
+ENDPROC
+
+    ->##Procedure to list known services to the listview
+PROC listknown()
+DEF port=0,
+    buildstr[500]:STRING,
+    index,
+    signal
+
+    WHILE abortflag=TERM_NONE
+        WaitTOF()
+        port:=port+1
+        doMethodA(app, [MUIM_Application_Input,{signal}])
+        IF port=65336 THEN abortflag:=TERM_NORMAL
+        StringF(workonstr, 'Listing (\d)',port)
+        set(mui_workingon, MUIA_String_Contents, workonstr)
+        findservice(port)
+        index:=InStr(servicedesc, 'UNKNOWN')
+        IF index=-1
+            StringF(buildstr, '\eb\d\en--\s',port, servicedesc)
+            outlist(buildstr)
+        ENDIF
+    ENDWHILE
+
+    SELECT abortflag
+        CASE TERM_NORMAL
+            set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon1)
+        CASE TERM_USER
+            set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon2)
+    ENDSELECT
+
+    abortflag:=TERM_NONE
+ENDPROC
+
+
+    ->##Procedure to parse the port ranges for scanning
+    -> , = ASII 44  - = ASCII 45
+PROC parseport()
+DEF ports[1000]:STRING,
+    temp[12]:STRING,
+    temp2[12]:STRING,
+    q[1]:STRING,
+    len=0 ,x=0, pos=0,
+    next:PTR TO portentry,
+    start:PTR TO portentry
+
+    StrCopy(ports, portrange)
+    start:=NewM(SIZEOF portentry, MEMF_PUBLIC OR MEMF_CLEAR)
+    next:=start
+    len:=StrLen(ports)
+
+    FOR x:=0 TO (len-1) 
+        IF ports[x] = 44
+            IF (pos:=InStr(temp,'-')) > -1
+                next.lower:=Val(MidStr(temp2, temp, 0, pos))
+                next.upper:=Val(MidStr(temp2, temp, pos+1, ALL))
+                next.next:=NewM(SIZEOF portentry, MEMF_PUBLIC OR MEMF_CLEAR)
+                next:=next.next
+                StrCopy(temp,'')
+            ELSE
+                next.upper:=Val(temp)
+                next.lower:=Val(temp)
+                next.next:=NewM(SIZEOF portentry, MEMF_PUBLIC OR MEMF_CLEAR)
+                next:=next.next
+                StrCopy(temp,'')
+            ENDIF
+        ELSE
+            StringF(q,'\c',ports[x])
+            StrAdd(temp,q)
+        ENDIF
+    ENDFOR
+
+    IF (pos:=InStr(temp,'-')) > -1
+        next.lower:=Val(MidStr(temp2, temp, 0, pos))
+        next.upper:=Val(MidStr(temp2, temp, pos+1, ALL))
+        next.next:=NIL
+        StrCopy(temp,'')
+    ELSE
+        next.upper:=Val(temp)
+        next.lower:=Val(temp)
+        next.next:=NIL
+        next:=next.next
+        StrCopy(temp,'')
+    ENDIF
+
+    ->inittcpip(start)
+ENDPROC start
+
+    ->##Procedure to select the appropriate scan type
+PROC inittcpip(start:PTR TO portentry)
+   
+    SELECT scantype
+        CASE 0
+            tcpscan(start)
+        CASE 1
+            udpscan(start)
+        CASE 2
+            tcpscan(start)
+            udpscan(start)
+        CASE 3
+            udpscan(start)
+            tcpscan(start)
+        DEFAULT
+            tcpscan(start)
+    ENDSELECT
+
+ENDPROC
+
+    ->##Procedure to perform a TCP scan
+PROC tcpscan(portptr:PTR TO portentry) HANDLE
+DEF port=0,
+    sock,
+    index,
+    sain:PTR TO sockaddr_in,
+    buildstr[1000]:STRING,
+    buf[1024]:STRING,
+    displaystr[1024]:STRING,
+    logstr[2048]:STRING,
+    recvlen=0,
+    readfds:fd_set,
+    tv:timeval,
+    err,
+    signal
+    
+    NEW timerdelay.softtimer()
+
+    StringF(buildstr, '===New TCP Scan (Host: \s)===', site)
+    addlog(buildstr)
+    set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon8)
+    sain:=NewM(SIZEOF sockaddr_in, MEMF_PUBLIC OR MEMF_CLEAR)
+    sain.family:=AF_INET
+    sain.addr.addr:=giveipbyhost(site)
+    IF (sain.addr.addr = NIL) THEN Raise(ERR_NODNSRESULT)
+
+    WHILE (portptr <> NIL)
+        doMethodA(app, [MUIM_Application_Input,{signal}])
+        IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+        FOR port:=portptr.lower TO portptr.upper
+                    
+            doMethodA(app, [MUIM_Application_Input,{signal}])
+            IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+            StringF(workonstr, '\d (TCP)', port)
+            set(mui_workingon, MUIA_String_Contents, workonstr)
+            sock:=Socket(AF_INET, SOCK_STREAM,0)
+            sain.port:=port
+
+            IF Connect(sock, sain, SIZEOF sockaddr_in)<>-1
+                IF verboseflag=MUI_TRUE
+                    findservice(port)
+                    IF trojanflag=FALSE
+                        index:=InStr(servicedesc, '[TROJAN',0)
+                        IF (index>-1) THEN StrCopy(servicedesc, servicedesc, index)
+                    ENDIF
+                    StringF(buildstr, '\eb\d\en TCP--\s',port, servicedesc)
+                    outlist(buildstr)
+                ELSE
+                    StringF(buildstr,'\eb\d\en TCP',port)
+                    outlist(buildstr)
+                ENDIF
+
+                IF readportflag=MUI_TRUE
+                    StrAdd(workonstr, txt_Face_Workingon5)
+                    set(mui_workingon, MUIA_String_Contents, workonstr)
+                    IF (wakeupflag=MUI_TRUE) THEN Send(sock, '\n\n',2, MSG_WAITALL)
+                    fd_zero(readfds)
+                    fd_set(sock, readfds)
+                    tv.sec:=timeflag
+                    tv.usec:=5
+                    IF WaitSelect(sock+1, readfds, NIL, NIL, tv, NIL)>0
+                        recvlen:=Recv(sock, buf, 1024 ,0)
+                        StrCopy(displaystr, buf, recvlen)
+                        StringF(logstr, '##BEGIN \d##\n\s##END \d##\n', port, displaystr, port)
+                        addlog(logstr)
+                    ELSE
+                        StringF(logstr, '##PORT \d NO REPLY##\n', port)
+                        addlog(logstr)
+                    ENDIF
+                    StrCopy(buf, '', ALL)
+                ENDIF
+            ELSE
+                IF (err:=Errno())=ECONNREFUSED
+                    ->This is normal if no port is open
+                ELSEIF (err=ETIMEDOUT)
+                    outlist(txt_Error_Firewalled)
+                ELSEIF (err=ENETUNREACH)
+                    outlist(txt_Error_Netunreach)
+                ELSEIF (err=EHOSTUNREACH)
+                    outlist(txt_Error_Hostunreach)
+                ELSE
+                    outlist(txt_Error_Timedout)
+                ENDIF
+            ENDIF
+
+            IF (sock) THEN CloseSocket(sock)
+            IF delayflag > 0
+                timerdelay.startTimer(delayflag)
+                StringF(workonstr, '\s (Delaying \d secs)', workonstr, delayflag)
+                set(mui_workingon, MUIA_String_Contents, workonstr)
+
+                WHILE timerdelay.getTimerMsg()<>TRUE
+                    doMethodA(app, [MUIM_Application_Input,{signal}])
+                    IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+                ENDWHILE
+
+                timerdelay.stopTimer()
+            ENDIF
+
+        ENDFOR
+        portptr:=portptr.next
+    ENDWHILE
+
+    EXCEPT DO
+        END timerdelay
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon1)
+        IF (sock) THEN CloseSocket(sock)
+        addlog('===Open Port List===')
+        savelog()
+
+        SELECT exception
+            CASE ERR_NOERROR
+                ->Normal Exception
+            CASE ERR_NODNSRESULT
+                outlist(txt_Error_NoDNSRes)
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon3)
+            CASE ERR_NOSOCK
+                outlist(txt_Error_NoSocket)
+            CASE ERR_NOMEM
+                outlist(txt_Error_NoMem)
+            CASE ERR_USERABORT
+                abortflag:=TERM_NONE
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon2)
+            DEFAULT
+                WriteF(txt_Error_Exception, 'tcpscan()', exception)
+        ENDSELECT
+ENDPROC
+
+    ->##Procedure to peform a UDP scan
+PROC udpscan(portptr:PTR TO portentry) HANDLE
+DEF port=0,
+    sendsock,
+    recvsock,
+    sain:PTR TO sockaddr_in,
+    readfds:fd_set,
+    tv:timeval,
+    packetbuffer[1024]:STRING,
+    buildstr[1000]:STRING,
+    displaystr[1024]:STRING,
+    logstr[2048]:STRING,
+    index,
+    signal,
+    recvlen
+
+    NEW timerdelay.softtimer()
+    StringF(buildstr, '===New UDP Scan (Host: \s)===', site)
+    addlog(buildstr)
+    set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon1)
+    sain:=NewM(SIZEOF sockaddr, MEMF_PUBLIC OR MEMF_CLEAR)
+    sain.family:=AF_INET
+    sain.addr.addr:=giveipbyhost(site)
+    IF (sain.addr.addr = NIL) THEN Raise(ERR_NODNSRESULT)
+
+    WHILE (portptr <> NIL)
+        doMethodA(app, [MUIM_Application_Input,{signal}])
+        IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+        FOR port:=portptr.lower TO portptr.upper
+            doMethodA(app, [MUIM_Application_Input,{signal}])
+            IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+            StringF(workonstr, '\d (UDP)', port)
+            set(mui_workingon, MUIA_String_Contents, workonstr)
+            sendsock:=Socket(AF_INET, SOCK_DGRAM, 0)
+            recvsock:=Socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)
+            sain.port:=port
+            Sendto(sendsock, '\n\n',2, NIL, sain, SIZEOF sockaddr_in)
+            fd_zero(readfds)
+            fd_set(recvsock, readfds)
+            tv.sec:=3
+            tv.usec:=500
+            IF WaitSelect(recvsock+1, readfds, NIL, NIL, tv, NIL)>0
+                ->These section waits for an ICMP message, if it arrives then the port is closed.
+                Recvfrom(recvsock, packetbuffer, 1024, NIL, NIL, NIL)
+            ELSE
+                fd_zero(readfds)
+                fd_set(sendsock, readfds)
+                tv.sec:=2
+                tv.usec:=500
+                IF WaitSelect(sendsock+1, readfds, NIL, NIL, tv, NIL)>0
+                    ->This section waits for a UDP message, only if an ICMP message
+                    ->has not arrived. If a UDP message does arrive then the port is open
+                    ->recvlen:=Recvfrom(sendsock, packetbuffer, 1024, NIL, sain, SIZEOF sockaddr_in)
+                    recvlen:=Recvfrom(sendsock, packetbuffer, 1024, NIL, NIL, NIL)
+                    IF verboseflag=MUI_TRUE
+                        findservice(port)
+                        IF trojanflag=FALSE
+                            index:=InStr(servicedesc, '[TROJAN',0)
+                            IF (index>-1) THEN StrCopy(servicedesc, servicedesc, index)
+                        ENDIF
+                        StringF(buildstr, '\eb\d\en UDP--\s',port, servicedesc)
+                        outlist(buildstr)
+                    ELSE
+                        StringF(buildstr,'\eb\d\en UDP',port)
+                        outlist(buildstr)
+                    ENDIF
+                    IF readportflag=MUI_TRUE
+                        StrAdd(workonstr, txt_Face_Workingon5)
+                        set(mui_workingon, MUIA_String_Contents, workonstr)
+                        StrCopy(displaystr, packetbuffer, recvlen)
+                        StringF(logstr, '##BEGIN \d##\n\s##END \d##\n', port, displaystr, port)
+                        addlog(logstr)
+                    ENDIF
+                ENDIF
+            ENDIF
+            IF (sendsock) THEN CloseSocket(sendsock)
+            IF (recvsock) THEN CloseSocket(recvsock)
+            IF delayflag > 0
+                timerdelay.startTimer(delayflag)
+                StringF(workonstr, '\s (Delaying \d secs)', workonstr, delayflag)
+                set(mui_workingon, MUIA_String_Contents, workonstr)
+                WHILE timerdelay.getTimerMsg()<>TRUE
+                    doMethodA(app, [MUIM_Application_Input,{signal}])
+                    IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+                ENDWHILE
+                timerdelay.stopTimer()
+            ENDIF
+        ENDFOR
+        portptr:=portptr.next
+    ENDWHILE
+
+    EXCEPT DO
+        END timerdelay
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon1)
+        IF (sendsock) THEN CloseSocket(sendsock)
+        IF (recvsock) THEN CloseSocket(recvsock)
+        addlog('===Open Port List===')
+        savelog()
+
+        SELECT exception
+            CASE ERR_NOERROR
+                ->Normal Exception
+            CASE ERR_NODNSRESULT
+                outlist(txt_Error_NoDNSRes)
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon3)
+            CASE ERR_NOSOCK
+                outlist(txt_Error_NoSocket)
+            CASE ERR_NOMEM
+                outlist(txt_Error_NoMem)
+            CASE ERR_USERABORT
+                abortflag:=TERM_NONE
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon2)
+            DEFAULT
+                WriteF(txt_Error_Exception, 'udpscan()', exception)
+        ENDSELECT
+ENDPROC
+
+
+    ->##Procedure to save entries in the listview to the logfile.
+PROC savelog()
+DEF entries,
+    i,
+    ent[500]:STRING,
+    entry[500]:STRING
+
+    GetAttr(MUIA_List_Entries,mui_outputlist,{entries})
+
+    FOR i:=0 TO (entries-1)
+        doMethodA(mui_outputlist,[MUIM_List_GetEntry,i,{ent}])
+        StringF(entry,'\s',ent)
+        addlog(entry)
+    ENDFOR
+ENDPROC
+
+    ->##Procedure to handle the preferences window
+PROC prefs()
+DEF mui_prefhost,
+    mui_prefport,
+    mui_preflog,
+    mui_preftel,
+    mui_prefftp,
+    mui_prefweb,
+    mui_prefother,
+    mui_preftime,
+    mui_prefverbose,
+    mui_prefread,
+    mui_prefwake,
+    mui_preftrojan,
+    mui_prefsave,
+    mui_prefcancel,
+    mui_preffreq,
+    mui_prefping,
+    mui_prefservice,
+    prefhoststr[81]:STRING,
+    prefportstr[200]:STRING,
+    prefpingstr[3]:STRING,
+    preftimeflag=1,
+    prefreadflag=0,
+    prefverboseflag=0,
+    prefwakeflag=0,
+    preftrojanflag=0,
+    running=TRUE,
+    result,
+    signal
+
+    set(app, MUIA_Application_Sleep,MUI_TRUE)
+
+    ->Setup preferences
+    loadprefs()
+    StrCopy(prefhoststr, getprefs_host())
+    StrCopy(preflogstr, getprefs_log())
+    StrCopy(prefportstr, getprefs_ports())
+    StrCopy(preftelstr, getprefs_telnet())
+    StrCopy(prefftpstr, getprefs_ftp())
+    StrCopy(prefwebstr, getprefs_web())
+    StrCopy(prefotherstr, getprefs_other())
+    prefverboseflag:=getprefs_verbose()
+    prefreadflag:=getprefs_read()
+    prefwakeflag:=getprefs_wakeup()
+    preftimeflag:=getprefs_time()
+    preftrojanflag:=getprefs_trojan()
+    serviceflag:=getprefs_service()
+    StrCopy(prefpingstr, getprefs_ping())
+
+    ->Setup gadgets
+    mui_prefhost:=BetterStringObject, StringFrame,
+                MUIA_String_AdvanceOnCR, MUI_TRUE,
+                MUIA_String_Contents, prefhoststr,
+                MUIA_String_MaxLen, 81,
+                MUIA_ShortHelp, txt_Bubble_PrefHost,
+                MUIA_CycleChain, 1,
+                End
+
+    mui_prefport:=BetterStringObject, StringFrame,
+                MUIA_String_AdvanceOnCR, MUI_TRUE,
+                MUIA_String_Contents, prefportstr,
+                MUIA_String_MaxLen, 199,
+                MUIA_String_Accept, '0123456789,-',
+                MUIA_ShortHelp, txt_Bubble_PrefPort,
+                MUIA_CycleChain, 1,
+                End
+
+    mui_preflog:=BetterStringObject, StringFrame,
+                MUIA_String_AdvanceOnCR, MUI_TRUE,
+                MUIA_String_Contents, preflogstr,
+                MUIA_String_MaxLen, 149,
+                MUIA_ShortHelp, txt_Bubble_PrefLog,
+                MUIA_CycleChain, 1,
+                End
+
+    mui_preftel:=BetterStringObject, StringFrame,
+                MUIA_String_AdvanceOnCR, MUI_TRUE,
+                MUIA_String_Contents, preftelstr,
+                MUIA_String_MaxLen, 149,
+                MUIA_ShortHelp, txt_Bubble_PrefTel,
+                MUIA_CycleChain, 1,
+                End
+
+    mui_prefftp:=BetterStringObject, StringFrame,
+                MUIA_String_AdvanceOnCR, MUI_TRUE,
+                MUIA_String_Contents, prefftpstr,
+                MUIA_String_MaxLen, 149,
+                MUIA_ShortHelp, txt_Bubble_PrefFTP,
+                MUIA_CycleChain, 1,
+                End
+
+    mui_prefweb:=BetterStringObject, StringFrame,
+                MUIA_String_AdvanceOnCR, MUI_TRUE,
+                MUIA_String_Contents, prefwebstr,
+                MUIA_String_MaxLen, 149,
+                MUIA_ShortHelp, txt_Bubble_PrefWeb,
+                MUIA_CycleChain, 1,
+                End
+
+    mui_prefother:=BetterStringObject, StringFrame,
+                MUIA_String_AdvanceOnCR, MUI_TRUE,
+                MUIA_String_Contents, prefotherstr,
+                MUIA_String_MaxLen, 149,
+                MUIA_ShortHelp, txt_Bubble_PrefOther,
+                MUIA_CycleChain, 1,
+                End
+
+    mui_prefping:=BetterStringObject, StringFrame,
+                MUIA_String_AdvanceOnCR, MUI_TRUE,
+                MUIA_String_Accept, '0123456789',
+                MUIA_String_Contents, prefpingstr,
+                MUIA_String_MaxLen, 4,
+                MUIA_String_Format, MUIV_String_Format_Right,
+                MUIA_ShortHelp, txt_Bubble_PrefPing,
+                MUIA_CycleChain, 1,
+                End
+
+    mui_preftime:=SliderObject,
+                MUIA_Slider_Min, 1,
+                MUIA_Slider_Max, 20,
+                MUIA_Slider_Level, preftimeflag,
+                MUIA_ShortHelp, txt_Bubble_PrefTime,
+                MUIA_CycleChain, 1,
+                End
+
+    mui_preffreq:=ibu(MUII_PopFile)
+    mui_prefsave:=SimpleButton(txt_Face_PrefSave)
+    mui_prefcancel:=SimpleButton(txt_Face_PrefCancel)
+    mui_prefread:=CheckMark(prefreadflag)
+    mui_prefverbose:=CheckMark(prefverboseflag)
+    mui_prefwake:=CheckMark(prefwakeflag)
+    mui_preftrojan:=CheckMark(preftrojanflag)
+    mui_prefservice:=CheckMark(serviceflag)
+    SetAttrsA(mui_prefsave, [MUIA_ShortHelp, txt_Bubble_PrefSave, MUIA_CycleChain, 1, TAG_DONE])
+    SetAttrsA(mui_prefcancel, [MUIA_ShortHelp, txt_Bubble_PrefCancel, MUIA_CycleChain, 1, TAG_DONE])
+    SetAttrsA(mui_prefread, [MUIA_ShortHelp, txt_Bubble_PrefRead, MUIA_CycleChain, 1, TAG_DONE])
+    SetAttrsA(mui_prefverbose, [MUIA_ShortHelp, txt_Bubble_PrefVerbose, MUIA_CycleChain, 1, TAG_DONE])
+    SetAttrsA(mui_prefwake, [MUIA_ShortHelp, txt_Bubble_PrefWake, MUIA_CycleChain, 1, TAG_DONE])
+    SetAttrsA(mui_preftrojan, [MUIA_ShortHelp, txt_Bubble_Preftrojan, MUIA_CycleChain, 1, TAG_DONE])
+    SetAttrsA(mui_prefservice, [MUIA_ShortHelp, txt_Bubble_Prefservice, MUIA_CycleChain, 1, TAG_DONE])
+    set(mui_preffreq, MUIA_CycleChain, 1)
+    ->Setup Window
+    mui_prefswindow:=WindowObject,
+        MUIA_Window_Title       , txt_PrefsWindow_Title,
+        MUIA_Window_ID          , "PREF",
+        MUIA_Window_Activate    , MUI_TRUE,
+        MUIA_HelpNode           , 'Preferences Window',
+        MUIA_Window_NoMenus     , MUI_TRUE,
+
+        WindowContents, VGroup,
+                        Child, TextObject,
+                            TextFrame,
+                                MUIA_Text_Contents, txt_Text_Prefs,
+                                MUIA_Background, MUII_FILL,
+                                End,
+                        Child, ColGroup(2),
+                            Child, Label(txt_Label_Host),
+                            Child, mui_prefhost,
+                            Child, Label(txt_Label_Ports),
+                            Child, mui_prefport,
+                            Child, Label(txt_Label_Log),
+                            Child, HGroup,
+                                Child, mui_preflog,
+                                Child, mui_preffreq,
+                            End, ->HGroup
+                            Child, Label(txt_Label_Telnet),
+                            Child, mui_preftel,
+                            Child, Label(txt_Label_FTP),
+                            Child, mui_prefftp,
+                            Child, Label(txt_Label_Web),
+                            Child, mui_prefweb,
+                            Child, Label(txt_Label_Other),
+                            Child, mui_prefother,
+                            Child, Label(txt_Label_Timeout),
+                            Child, mui_preftime,
+                            Child, Label(txt_Label_Ping),
+                            Child, mui_prefping,
+                        End, ->Col
+                            Child, HGroup,
+                                Child, ColGroup(2),
+                                    Child, Label(txt_Label_Verbose),
+                                    Child, mui_prefverbose,
+                                    Child, Label(txt_Label_Readports),
+                                    Child, mui_prefread,
+                                End, ->HG
+                                Child, ColGroup(2),
+                                    Child, Label(txt_Label_Wakeup),
+                                    Child, mui_prefwake,
+                                    Child, Label(txt_Label_Showtrojan),
+                                    Child, mui_preftrojan,
+                                End, ->HG
+                                Child, HGroup,
+                                    Child, Label(txt_Label_Service),
+                                    Child, mui_prefservice,
+                                    Child, HSpace(0),
+                                End, ->HG
+                            End, ->HGroup
+                        Child, VSpace(0),
+                        Child, HGroup,
+                            Child, mui_prefsave,
+                            Child, mui_prefcancel,
+                        End, -> HGroup
+                    End, ->VGroup
+                End ->WindowObject
+
+        ->##Setup DoMethods
+    doMethodA(app,              [OM_ADDMEMBER, mui_prefswindow])
+    doMethodA(mui_prefswindow,  [MUIM_Notify, MUIA_Window_CloseRequest, MUI_TRUE,       app,            2, MUIM_Application_ReturnID,   ID_CANCELPREF])
+    doMethodA(mui_prefhost,     [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_prefhost,   3, MUIM_WriteString,            MUIV_TriggerValue, prefhoststr])
+    doMethodA(mui_prefport,     [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_prefport,   3, MUIM_WriteString,            MUIV_TriggerValue, prefportstr])
+    doMethodA(mui_preflog,      [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_preflog,    3, MUIM_WriteString,            MUIV_TriggerValue, preflogstr])
+    doMethodA(mui_preftel,      [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_preftel,    3, MUIM_WriteString,            MUIV_TriggerValue, preftelstr])
+    doMethodA(mui_prefftp,      [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_prefftp,    3, MUIM_WriteString,            MUIV_TriggerValue, prefftpstr])
+    doMethodA(mui_prefweb,      [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_prefweb,    3, MUIM_WriteString,            MUIV_TriggerValue, prefwebstr])
+    doMethodA(mui_prefother,    [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_prefother,  3, MUIM_WriteString,            MUIV_TriggerValue, prefotherstr])
+    doMethodA(mui_prefping,     [MUIM_Notify, MUIA_String_Contents,     MUIV_EveryTime, mui_prefping,   3, MUIM_WriteString,            MUIV_TriggerValue, prefpingstr])
+    doMethodA(mui_prefsave,     [MUIM_Notify, MUIA_Pressed,             FALSE,          app,            2, MUIM_Application_ReturnID,   ID_SAVEPREF])
+    doMethodA(mui_prefcancel,   [MUIM_Notify, MUIA_Pressed,             FALSE,          app,            2, MUIM_Application_ReturnID,   ID_CANCELPREF])
+    doMethodA(mui_prefverbose,  [MUIM_Notify, MUIA_Selected,            MUIV_EveryTime, mui_prefverbose,3, MUIM_WriteLong,              MUIV_TriggerValue, {prefverboseflag}])
+    doMethodA(mui_prefservice,  [MUIM_Notify, MUIA_Selected,            MUIV_EveryTime, mui_prefservice,3, MUIM_WriteLong,              MUIV_TriggerValue, {serviceflag}])
+    doMethodA(mui_preftrojan,   [MUIM_Notify, MUIA_Selected,            MUIV_EveryTime, mui_preftrojan ,3, MUIM_WriteLong,              MUIV_TriggerValue, {preftrojanflag}])
+    doMethodA(mui_preftime,     [MUIM_Notify, MUIA_Slider_Level,        MUIV_EveryTime, mui_timeout,    3, MUIM_WriteLong,              MUIV_TriggerValue, {preftimeflag}])
+    doMethodA(mui_prefwake,     [MUIM_Notify, MUIA_Selected,            MUIV_EveryTime, mui_prefwake,   3, MUIM_WriteLong,              MUIV_TriggerValue, {prefwakeflag}])
+    doMethodA(mui_prefwake,     [MUIM_Notify, MUIA_Selected,            MUI_TRUE,       mui_prefread,   3, MUIM_Set,                    MUIA_Selected,     MUI_TRUE])
+    doMethodA(mui_prefread,     [MUIM_Notify, MUIA_Selected,            FALSE,          mui_prefwake,   3, MUIM_Set,                    MUIA_Selected,     FALSE])
+    doMethodA(mui_prefread,     [MUIM_Notify, MUIA_Selected,            MUIV_EveryTime, mui_prefread,   3, MUIM_WriteLong,              MUIV_TriggerValue, {prefreadflag}])
+    doMethodA(mui_preffreq,     [MUIM_Notify, MUIA_Pressed,             FALSE,          app,            2, MUIM_Application_ReturnID,   ID_OPENFREQ])
+    set(mui_prefswindow, MUIA_Window_ActiveObject, mui_prefhost)
+
+    set(mui_prefswindow, MUIA_Window_Open, MUI_TRUE)
+
+    WHILE running=TRUE
+        result:=doMethodA(app, [MUIM_Application_Input,{signal}])
+        WaitTOF()
+
+        SELECT result
+            CASE ID_SAVEPREF
+                StrCopy(telpath, preftelstr)
+                StrCopy(ftppath, prefftpstr)
+                StrCopy(webpath, prefwebstr)
+                StrCopy(othpath, prefotherstr)
+                StrCopy(pingvalstr, prefpingstr)
+                saveprefs(prefhoststr, prefportstr, preflogstr, preftelstr, preftimeflag, prefreadflag, prefverboseflag, prefwakeflag, preftrojanflag, prefftpstr, prefwebstr, prefotherstr, prefpingstr, serviceflag)
+                set(mui_prefswindow, MUIA_Window_Open, FALSE)
+                doMethodA(app, [OM_REMMEMBER, mui_prefswindow])
+                Mui_DisposeObject(mui_prefswindow)
+                set(app,MUIA_Application_Sleep,FALSE)
+                running:=FALSE
+            CASE ID_CANCELPREF
+                set(mui_prefswindow, MUIA_Window_Open, FALSE)
+                doMethodA(app, [OM_REMMEMBER, mui_prefswindow])
+                Mui_DisposeObject(mui_prefswindow)
+                set(app,MUIA_Application_Sleep,FALSE)
+                running:=FALSE
+            CASE ID_OPENFREQ
+                openprefreq(mui_prefswindow)
+                set(mui_preflog, MUIA_String_Contents, preflogstr)
+        ENDSELECT
+        IF (running AND signal) THEN Wait(signal)
+    ENDWHILE
+ENDPROC
+
+    ->##Procedure to open the log file requester
+PROC openreq(window)
+DEF req:PTR TO rtfilerequester,
+    fname[108]:STRING,
+    q,
+    ret,
+    wptr
+
+    StrCopy(fname, 'goportscan.log')
+    set(app, MUIA_Application_Sleep,MUI_TRUE)
+    req:=RtAllocRequestA(RT_FILEREQ,NIL)
+    GetAttr(MUIA_Window_Window, window, {wptr})
+    RtChangeReqAttrA(req, [RTFI_DIR, 'ram:', TAG_END])
+    ret:=RtFileRequestA(req, fname, 'Choose Logfile', [RT_WINDOW, wptr, RTFI_FLAGS, FREQF_SAVE OR FREQF_PATGAD, TAG_END])
+
+    IF ret<>FALSE
+        StrCopy(savepath, req.dir)
+        q:=EstrLen(savepath)
+        IF (savepath[q-1]<>47)
+            IF (savepath[q-1]<>58) THEN StrAdd(savepath,'/', ALL)
+        ENDIF
+        StrAdd(savepath,fname, ALL)
+    ENDIF
+
+    IF req THEN RtFreeRequest(req)
+    set(app, MUIA_Application_Sleep, FALSE)
+ENDPROC
+
+    ->##Procedure to open the preferences log file requester
+PROC openprefreq(window)
+DEF req:PTR TO rtfilerequester,
+    fname[108]:STRING,
+    q,
+    ret,
+    wptr
+
+    StrCopy(fname, 'goportscan.log')
+    set(window, MUIA_Window_Sleep, MUI_TRUE)
+    req:=RtAllocRequestA(RT_FILEREQ,NIL)
+    GetAttr(MUIA_Window_Window, window, {wptr})
+    RtChangeReqAttrA(req, [RTFI_DIR, 'ram:', TAG_END])
+    ret:=RtFileRequestA(req, fname, 'Choose Logfile', [RT_WINDOW, wptr, RTFI_FLAGS, FREQF_SAVE OR FREQF_PATGAD, TAG_END])
+
+    IF ret<>FALSE
+        StrCopy(preflogstr, req.dir)
+        q:=EstrLen(preflogstr)
+        IF (preflogstr[q-1]<>47)
+            IF (preflogstr[q-1]<>58) THEN StrAdd(preflogstr,'/', ALL)
+        ENDIF
+        StrAdd(preflogstr, fname, ALL)
+    ENDIF
+
+    IF req THEN RtFreeRequest(req)
+    set(window, MUIA_Window_Sleep, FALSE)
+ENDPROC
+
+    ->##Procedure to resolve a hostname or IP address
+PROC resolve() HANDLE
+DEF hstblock:PTR TO hostent,
+    buildstr[200]:STRING,
+    ipaddr:PTR TO in_addr,
+    address:in_addr,
+    x=0
+
+    set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon8)
+    IF (site[0] > 47) AND (site[0] < 58)
+        address.addr:=Inet_addr(site)
+        IF address.addr = INADDR_NONE THEN Raise(ERR_NODNSRESULT)
+        IF (hstblock:=Gethostbyaddr(address, SIZEOF in_addr, AF_INET)) = NIL THEN Raise(ERR_NODNSRESULT)
+    ELSE
+        IF (hstblock:=Gethostbyname(site)) = NIL THEN Raise(ERR_NODNSRESULT)
+    ENDIF
+
+    StringF(buildstr, '\ebOfficial Name:\en \s', hstblock.name)
+    outlist(buildstr)
+    x:=0
+    WHILE (ipaddr:=hstblock.addr_list[x]) <> NIL
+        StringF(buildstr, '\ebIP Address:\en \s', Inet_NtoA(ipaddr.addr))
+        outlist(buildstr)
+        x++
+    ENDWHILE
+    x:=0
+    IF hstblock.aliases[x] <> 0
+        StringF(buildstr, '\ebAlias:\en \s', hstblock.aliases[x])
+        outlist(buildstr)
+        x++
+        WHILE hstblock.aliases[x] <> 0
+            StringF(buildstr, '\ebAlias:\en \s', hstblock.aliases[x])
+            outlist(buildstr)
+            x++
+        ENDWHILE
+    ENDIF
+
+    EXCEPT DO
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon1)
+
+        SELECT exception
+            CASE ERR_NOERROR
+                ->Normal exception on exit
+            CASE ERR_NODNSRESULT
+                outlist(txt_Error_NoDNSRes)
+            DEFAULT
+                WriteF(txt_Error_Exception, 'resolve()', exception)
+        ENDSELECT
+
+ENDPROC
+
+    ->##Procedure to add a line of text to the log file
+PROC addlog(txt)
+DEF logfh,
+    text[2048]:STRING,
+    len
+
+    StrCopy(text, txt)
+    StrAdd(text, '\n')
+    len:=StrLen(text)
+
+    IF logfh:=Open(savepath, MODE_READWRITE)
+        Seek(logfh, 0, OFFSET_END)
+        Write(logfh,text,len)
+        Close(logfh)
+    ELSE
+        outlist(txt_Error_NoLog)
+    ENDIF
+
+ENDPROC
+
+    ->##Procedure to perform an ICMP ping
+PROC icmpping() HANDLE
+DEF icmphdr:PTR TO icmp,
+    ricmp:PTR TO icmp,
+    sain:PTR TO sockaddr_in,
+    riphdr:PTR TO ip,
+    readfds:fd_set,
+    tv:compatible_timeval,
+    buildstr[200]:STRING,
+    lost=0,
+    cnt=0,
+    type,
+    rcvbuffer,
+    sock,
+    recvlen,
+    loop,
+    hops=NIL,
+    signal
+    NEW timerdelay.softtimer()
+    NEW tr
+    
+    IF OpenDevice('timer.device', UNIT_VBLANK, tr, 0)<>NIL THEN Raise(ERR_NOTIMER)
+    timerbase:=tr.node.device
+
+    set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon8)
+    sock:=Socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)
+    sain:=NewM(SIZEOF sockaddr, MEMF_PUBLIC OR MEMF_CLEAR)
+    sain.family:=AF_INET
+    sain.addr.addr:=giveipbyhost(site)
+    IF (sain.addr.addr=NIL) THEN Raise(ERR_NODNSRESULT)
+
+    StringF(buildstr, 'ICMP Ping : \s : Sending \d bytes', site, (SIZEOF ip) + (SIZEOF icmp))
+    outlist(buildstr)
+
+    FOR loop:=1 TO Val(pingvalstr)
+
+        NEW timereq1, timereq2
+        doMethodA(app, [MUIM_Application_Input,{signal}])
+        IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+        icmphdr:=NewM(SIZEOF icmp, MEMF_PUBLIC OR MEMF_CLEAR)
+        riphdr:=NewM(SIZEOF ip, MEMF_PUBLIC OR MEMF_CLEAR)
+        icmphdr.type:=ICMP_ECHO
+        icmphdr.code:=0
+        icmphdr.idseq.id:=ICMPIDNUM
+        icmphdr.idseq.seq:=loop
+        icmphdr.cksum:=cksum(icmphdr, SIZEOF icmp)
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon6)
+        GetSysTime(timereq1)
+        Sendto(sock, icmphdr, SIZEOF icmp, NIL, sain, SIZEOF sockaddr_in)
+        cnt++
+        fd_zero(readfds)
+        fd_set(sock, readfds)
+        tv.sec:=3
+        tv.usec:=500
+
+        IF WaitSelect(sock+1, readfds, NIL, NIL, tv, NIL)>0
+            GetSysTime(timereq2)
+            SubTime(timereq2, timereq1)
+            set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon7)
+            rcvbuffer:=NewM((SIZEOF ip) + (SIZEOF icmp), MEMF_PUBLIC OR MEMF_CLEAR)
+            recvlen:=Recvfrom(sock, rcvbuffer, (SIZEOF ip) + (SIZEOF icmp), NIL, NIL, NIL)
+            riphdr:=rcvbuffer
+            ricmp:=rcvbuffer + (SIZEOF ip)
+
+            IF (riphdr.ttl < 32)
+                hops:=32-(riphdr.ttl)
+            ELSEIF (riphdr.ttl < 64)
+                hops:=64-(riphdr.ttl)
+            ELSEIF (riphdr.ttl < 128)
+                hops:=128-(riphdr.ttl)
+            ELSE
+                hops:=255-(riphdr.ttl)
+            ENDIF
+
+            type:=ricmp.type
+            ->IF ricmp.idseq.id = ICMPIDNUM
+                SELECT type
+                    CASE ICMP_ECHOREPLY
+                        StringF(buildstr,'\d Bytes From \s : PN=\d : TTL=\d : ENH=\d : TPL=\d (\d%) : Time=\dms',recvlen, Inet_NtoA(riphdr.src.addr), ricmp.idseq.seq, riphdr.ttl, hops, lost, (lost*100)/ricmp.idseq.seq, timereq2.micro/1000)
+                    CASE ICMP_UNREACH
+                        StringF(buildstr,'[Destination Unreachable] From \s : TTL=\d : ENH=\d : TPL=\d', Inet_NtoA(riphdr.src.addr), riphdr.ttl, hops, lost)
+                    CASE ICMP_TIMXCEED
+                        StringF(buildstr,'[Time To Live Exceeded] From \s : TTL=\d : ENH=\d : TPL=\d', Inet_NtoA(riphdr.src.addr), riphdr.ttl, hops, lost)
+                    DEFAULT
+                        StringF(buildstr,'[ICMP type \d] From \s : TTL=\d : ENH=\d : TPL=\d', type, Inet_NtoA(riphdr.src.addr), riphdr.ttl, hops, lost)
+                ENDSELECT
+
+                outlist(buildstr)
+            ->ENDIF
+
+            doMethodA(app, [MUIM_Application_Input,{signal}])
+
+            IF (delayflag > 0)
+                timerdelay.startTimer(delayflag)
+                StringF(workonstr, '(Delaying \d secs)', delayflag)
+                set(mui_workingon, MUIA_String_Contents, workonstr)
+                WHILE timerdelay.getTimerMsg()<>TRUE
+                    doMethodA(app, [MUIM_Application_Input,{signal}])
+                    IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+                ENDWHILE
+                timerdelay.stopTimer()
+            ENDIF
+        ELSE
+            lost++
+            StringF(buildstr,'Received No Reply [Packet Lost] : PN=\d : TPL=\d (\d%)', cnt, lost, (lost*100)/cnt)
+            outlist(buildstr)
+        ENDIF
+
+        IF (icmphdr) THEN Dispose(icmphdr)
+        IF (riphdr) THEN Dispose(riphdr)
+        IF (rcvbuffer) THEN Dispose(rcvbuffer)
+        END timereq1, timereq2
+
+    ENDFOR
+
+    EXCEPT DO
+        CloseDevice(tr)
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon1)
+        END timereq1, timereq2, timerdelay
+        IF (icmphdr) THEN Dispose(icmphdr)
+        IF (riphdr) THEN Dispose(riphdr)
+        IF (rcvbuffer) THEN Dispose(rcvbuffer)
+        IF (sock) THEN CloseSocket(sock)
+        SELECT exception
+            CASE ERR_NOERROR
+                ->Normal Exception
+            CASE ERR_NODNSRESULT
+                outlist(txt_Error_NoDNSRes)
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon3)
+            CASE ERR_NOSOCK
+                outlist(txt_Error_NoSocket)
+            CASE ERR_NOMEM
+                outlist(txt_Error_NoMem)
+            CASE ERR_USERABORT
+                abortflag:=TERM_NONE
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon2)
+            CASE ERR_NOTIMER
+                outlist('Unable to open timer.device')
+            DEFAULT
+                WriteF(txt_Error_Exception, 'icmpping()', exception)
+        ENDSELECT
+ENDPROC
+
+    ->##Procedure for doing a UDP ping
+PROC udpping() HANDLE
+DEF udpheader:PTR TO udphdr,
+    ricmp:PTR TO icmp,
+    sain:PTR TO sockaddr_in,
+    stamp:datestamp,
+    riphdr:PTR TO ip,
+    readfds:fd_set,
+    tv:compatible_timeval,
+    buildstr[200]:STRING,
+    lost=0,
+    cnt=0,
+    type,
+    subtype,
+    rcvbuffer,
+    sock,
+    rsock,
+    recvlen=0,
+    loop,
+    hops=NIL,
+    signal
+
+    NEW timerdelay.softtimer()
+    NEW tr
+
+    IF OpenDevice('timer.device', UNIT_VBLANK, tr, 0)<>NIL THEN Raise(ERR_NOTIMER)
+    timerbase:=tr.node.device
+
+    set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon8)
+    sock:=Socket(AF_INET, SOCK_RAW, IPPROTO_UDP)
+    rsock:=Socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)
+    sain:=NewM(SIZEOF sockaddr, MEMF_PUBLIC OR MEMF_CLEAR)
+    sain.family:=AF_INET
+    sain.addr.addr:=giveipbyhost(site)
+    IF (sain.addr.addr=NIL) THEN Raise(ERR_NODNSRESULT)
+
+    StringF(buildstr, 'UDP Ping : \s : Sending \d bytes', site, (SIZEOF ip) + (SIZEOF udphdr))
+    outlist(buildstr)
+
+    FOR loop:=1 TO Val(pingvalstr)
+
+        NEW timereq1, timereq2
+        doMethodA(app, [MUIM_Application_Input,{signal}])
+        IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+        udpheader:=NewM(SIZEOF udphdr, MEMF_PUBLIC OR MEMF_CLEAR)
+        riphdr:=NewM(SIZEOF ip, MEMF_PUBLIC OR MEMF_CLEAR)
+        DateStamp(stamp)
+        Rnd(stamp.tick * -1 )
+        udpheader.sport:=(Rnd(9999) + 40000)
+        DateStamp(stamp)
+        Rnd(stamp.tick * -1 )
+        udpheader.dport:=(Rnd(9998) + 40000)
+        udpheader.ulen:=(SIZEOF udphdr)
+        udpheader.sum:=0
+
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon6)
+        GetSysTime(timereq1)
+        Sendto(sock, udpheader, SIZEOF udphdr, NIL, sain, SIZEOF sockaddr_in)
+        cnt++
+        fd_zero(readfds)
+        fd_set(rsock,readfds)
+        tv.sec:=3
+        tv.usec:=500
+
+        IF WaitSelect(rsock+1, readfds, NIL, NIL, tv,NIL)>0
+
+            GetSysTime(timereq2)
+            SubTime(timereq2, timereq1)
+            set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon7)
+            rcvbuffer:=NewM((SIZEOF ip) + (SIZEOF icmp) +28, MEMF_PUBLIC OR MEMF_CLEAR)
+            recvlen:=Recvfrom(rsock, rcvbuffer, (SIZEOF ip) + (SIZEOF icmp) + 28, NIL, NIL, NIL)
+            riphdr:=rcvbuffer
+            ricmp:=rcvbuffer + (SIZEOF ip)
+
+            IF (riphdr.ttl < 32)
+                hops:=32-(riphdr.ttl)
+            ELSEIF (riphdr.ttl < 64)
+                hops:=64-(riphdr.ttl)
+            ELSEIF (riphdr.ttl < 128)
+                hops:=128-(riphdr.ttl)
+            ELSE
+                hops:=255-(riphdr.ttl)
+            ENDIF
+
+            type:=ricmp.type
+            subtype:=ricmp.code
+
+            SELECT type
+                CASE ICMP_TIMXCEED
+                    StringF(buildstr, '\s [Time To Live Exceeded]', Inet_NtoA(riphdr.src.addr))
+                CASE ICMP_UNREACH
+                    SELECT subtype
+                        CASE ICMP_UNREACH_NET
+                            StringF(buildstr, '\s [Network Unreachable]', Inet_NtoA(riphdr.src.addr))
+                        CASE ICMP_UNREACH_HOST
+                            StringF(buildstr, '\s [Host Unreachable]', Inet_NtoA(riphdr.src.addr))
+                        CASE ICMP_UNREACH_PROTOCOL
+                            StringF(buildstr, '\s [Protocol Not Supported]', Inet_NtoA(riphdr.src.addr))
+                        CASE ICMP_UNREACH_NEEDFRAG
+                            StringF(buildstr, '\s [IP Needs Fragmenting]', Inet_NtoA(riphdr.src.addr))
+                        CASE ICMP_UNREACH_SRCFAIL
+                            StringF(buildstr, '\s [Source Route Failure]', Inet_NtoA(riphdr.src.addr))
+                        CASE ICMP_UNREACH_PORT
+                            StringF(buildstr, '\d Bytes From \s : PN=\d : TTL=\d : ENH=\d : TPL=\d (\d%) : Time=\dms', recvlen, Inet_NtoA(riphdr.src.addr), cnt, riphdr.ttl, hops, lost, (lost*100)/cnt, timereq2.micro/1000)
+                        DEFAULT
+                            StringF(buildstr, '\s [Reply Code=\d]', Inet_NtoA(riphdr.src.addr), subtype)
+                    ENDSELECT
+                DEFAULT
+                    StringF(buildstr, '\s [Sent Reply Type \d]', Inet_NtoA(riphdr.src.addr), type)
+            ENDSELECT
+
+            outlist(buildstr)
+            doMethodA(app, [MUIM_Application_Input,{signal}])
+
+            IF (delayflag > 0)
+                timerdelay.startTimer(delayflag)
+                StringF(workonstr, '(Delaying \d secs)', delayflag)
+                set(mui_workingon, MUIA_String_Contents, workonstr)
+                WHILE timerdelay.getTimerMsg()<>TRUE
+                    doMethodA(app, [MUIM_Application_Input,{signal}])
+                    IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+                ENDWHILE
+                timerdelay.stopTimer()
+            ENDIF
+        ELSE
+            lost++
+            StringF(buildstr,'Received No Reply [Packet Lost] : PN=\d : TPL=\d (\d%)', cnt, lost, (lost*100)/cnt)
+            outlist(buildstr)
+        ENDIF
+        IF (udpheader) THEN Dispose(udpheader)
+        IF (riphdr) THEN Dispose(riphdr)
+        IF (rcvbuffer) THEN Dispose(rcvbuffer)
+        END timereq1, timereq2
+    ENDFOR
+
+    EXCEPT DO
+        CloseDevice(tr)
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon1)
+        END timereq1, timereq2
+        END timerdelay
+        IF (udpheader) THEN Dispose(udpheader)
+        IF (riphdr) THEN Dispose(riphdr)
+        IF (rcvbuffer) THEN Dispose(rcvbuffer)
+        IF (sain) THEN Dispose(sain)
+        IF (sock) THEN CloseSocket(sock)
+        IF (rsock) THEN CloseSocket(rsock)
+        SELECT exception
+            CASE ERR_NOERROR
+                ->Normal Exception
+            CASE ERR_NODNSRESULT
+                outlist(txt_Error_NoDNSRes)
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon3)
+            CASE ERR_NOSOCK
+                outlist(txt_Error_NoSocket)
+            CASE ERR_NOMEM
+                outlist(txt_Error_NoMem)
+            CASE ERR_USERABORT
+                abortflag:=TERM_NONE
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon2)
+            CASE ERR_NOTIMER
+                outlist('Unable to open timer.device')
+            DEFAULT
+                WriteF(txt_Error_Exception, 'udpping()', exception)
+         ENDSELECT
+ENDPROC
+
+    ->##Procedure for calculation the IP and TCP checksums
+PROC cksum(hdr:PTR TO intfold, hdrsize:LONG)
+DEF accumulator=0:LONG,
+    loop
+
+    FOR loop:=0 TO ((hdrsize-1)/2) DO accumulator:=accumulator+hdr.arr[loop]
+    accumulator:=(Shr(accumulator, 16)) + (Eor(accumulator, $FFFF))
+    accumulator:=accumulator + (Shr(accumulator, 16))
+
+ENDPROC accumulator
+
+    ->##Procedure for looking up a service by port number using the TCP/IP stacks own service table
+PROC servbyport(prt:PTR TO LONG)
+DEF serv:PTR TO servent,
+    buildstr[200]:STRING,
+    x=0
+
+    IF (serv:=Getservbyport(prt, NIL)) <> NIL
+        StringF(buildstr, '\s : ', serv.name)
+        x:=0
+        WHILE serv.aliases[x] <> NIL
+            StrAdd(buildstr, serv.aliases[x])
+            StrAdd(buildstr, ' ; ')
+            x++
+        ENDWHILE
+        StrCopy(servicedesc, buildstr)
+    ELSE
+        StrCopy(servicedesc, 'UNKNOWN')
+    ENDIF
+ENDPROC
+
+    ->##Procedure for looking up a service by port using the internal service table
+PROC findservice(portnum:LONG)
+
+    IF (portnum > 65535)
+        StrCopy(servicedesc, txt_Error_Badport)
+    ELSE
+        IF serviceflag=MUI_TRUE
+            IF portnum < 201
+                service(portnum)
+            ELSEIF portnum < 401
+                service2(portnum)
+            ELSEIF portnum < 601
+                service3(portnum)
+            ELSEIF portnum < 801
+                service4(portnum)
+            ELSEIF portnum < 1124
+                service5(portnum)
+            ELSEIF portnum < 1401
+                service6(portnum)
+            ELSEIF portnum < 1601
+                service7(portnum)
+            ELSEIF portnum < 2101
+                service8(portnum)
+            ELSEIF portnum < 2601
+                service9(portnum)
+            ELSEIF portnum < 3101
+                service10(portnum)
+            ELSEIF portnum < 7001
+                service11(portnum)
+            ELSE
+                service12(portnum)
+            ENDIF
+        ELSE
+            servbyport(portnum)
+        ENDIF
+    ENDIF
+
+ENDPROC
+
+
+    ->##Procedure for performing an ICMP traceroute
+PROC traceroute() HANDLE
+DEF iphdr:PTR TO ip,
+    riphdr:PTR TO ip,
+    icmphdr:PTR TO icmp,
+    ricmphdr:PTR TO icmp,
+    sain:PTR TO sockaddr_in,
+    readfds:fd_set,
+    srchost[81]:STRING,
+    srcip[15]:STRING,
+    tv:compatible_timeval,
+    buildstr[1024]:STRING,
+    sock,
+    rsock,
+    rcvbuffer,
+    type,
+    subtype,
+    on:PTR TO CHAR,
+    signal,
+    ttl,
+    ipaddr:in_addr
+
+    NEW timerdelay.softtimer()
+    
+    sock:=Socket(AF_INET, SOCK_RAW, IPPROTO_RAW)
+    rsock:=Socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)
+    Setsockopt(sock, IPPROTO_IP, IP_HDRINCL, {on}, 4)
+    sain:=NewM(SIZEOF sockaddr, MEMF_PUBLIC OR MEMF_CLEAR)
+    sain.family:=AF_INET
+    sain.addr.addr:=giveipbyhost(site)
+    IF (sain.addr.addr = NIL) THEN Raise(ERR_NODNSRESULT)
+    tv.sec:=3
+    tv.usec:=500
+
+    FOR ttl:=1 TO tracemaxhopsflag
+        doMethodA(app, [MUIM_Application_Input,{signal}])
+        IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon9)
+        iphdr:=NewM((SIZEOF ip + (SIZEOF icmp)), MEMF_PUBLIC OR MEMF_CLEAR)
+        icmphdr:=iphdr + (SIZEOF ip)
+        iphdr.id:=500
+        ipaddr.addr:=giveipbyhost(site)
+        iphdr.p:=IPPROTO_ICMP
+        ->We dont need to specify src address as this is filled in by the stack
+        ->and made appropriate to outgoing interface
+        iphdr.dst.addr:=ipaddr.addr
+        icmphdr.type:=ICMP_ECHO
+        icmphdr.code:=0
+        icmphdr.idseq.seq:=ttl+1
+        set_ip_hl(iphdr, 5)
+        set_ip_v(iphdr, IPVERSION)
+        iphdr.ttl:=ttl
+        iphdr.sum:=cksum(iphdr, SIZEOF ip)
+        icmphdr.idseq.id:=ICMPIDNUM
+        icmphdr.cksum:=cksum(icmphdr, SIZEOF icmp)
+
+        Sendto(sock, iphdr, (SIZEOF ip) + (SIZEOF icmp), NIL, sain, SIZEOF sockaddr)
+        fd_zero(readfds)
+        fd_set(rsock, readfds)
+
+        IF WaitSelect(rsock+1, readfds, NIL, NIL, tv, NIL)>0
+            rcvbuffer:=NewM((SIZEOF ip) + (SIZEOF icmp), MEMF_PUBLIC OR MEMF_CLEAR)
+            Recvfrom(rsock, rcvbuffer, (SIZEOF ip) + (SIZEOF icmp), NIL, NIL, NIL)
+            riphdr:=rcvbuffer
+            ricmphdr:=rcvbuffer + (SIZEOF ip)
+            type:=ricmphdr.type
+            subtype:=ricmphdr.code
+
+            IF tracednsflag=MUI_TRUE
+                StrCopy(srchost, givehostbyip(Inet_NtoA(riphdr.src.addr)))
+            ELSE
+                StrCopy(srchost, '(-)')
+            ENDIF
+
+            StrCopy(srcip, Inet_NtoA(riphdr.src.addr))
+
+            SELECT type
+                CASE ICMP_TIMXCEED
+                    StringF(buildstr, '\d: \s (\s)', ttl, srchost, srcip)
+                CASE ICMP_ECHOREPLY
+                    StringF(buildstr, '\d: \s (\s) [Final Destination]', ttl, srchost, srcip)
+                    outlist(buildstr)
+                    Raise(ERR_NOERROR)
+                CASE ICMP_UNREACH
+                    SELECT subtype
+                        CASE ICMP_UNREACH_NET
+                            StringF(buildstr, '\d: \s (\s) [Network Unreachable]', ttl, srchost, srcip)
+                        CASE ICMP_UNREACH_HOST
+                            StringF(buildstr, '\d: \s (\s) [Host Unreachable]', ttl, srchost, srcip)
+                        CASE ICMP_UNREACH_PROTOCOL
+                            StringF(buildstr, '\d: \s (\s) [Protocol Not Supported]', ttl, srchost, srcip)
+                        CASE ICMP_UNREACH_NEEDFRAG
+                            StringF(buildstr, '\d: \s (\s) [IP Needs Fragmenting]', ttl, srchost, srcip)
+                        CASE ICMP_UNREACH_SRCFAIL
+                            StringF(buildstr, '\d: \s (\s) [Source Route Failure]', ttl, srchost, srcip)
+                        DEFAULT
+                            StringF(buildstr, '\d: \s (\s) [Destination Unreachable]', ttl, srchost, srcip)
+                    ENDSELECT
+
+                    outlist(buildstr)
+                    Raise(ERR_NOERROR)
+                DEFAULT
+                    StringF(buildstr, '\d: \s (\s) [Sent Reply Type \d]', ttl, srchost, type, srcip)
+            ENDSELECT
+
+            outlist(buildstr)
+
+        ELSE
+            StringF(buildstr, '\d: - (-) [Host failed to respond]', ttl)
+            outlist(buildstr)
+        ENDIF
+
+    ENDFOR
+
+    EXCEPT DO
+        END timerdelay
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon1)
+        IF (sock) THEN CloseSocket(sock)
+        IF (rsock) THEN CloseSocket(rsock)
+
+        SELECT exception
+            CASE ERR_NOERROR
+                ->Normal Exit
+            CASE ERR_NODNSRESULT
+                outlist(txt_Error_NoDNSRes)
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon3)
+            CASE ERR_NOSOCK
+                outlist(txt_Error_NoSocket)
+            CASE ERR_NOMEM
+                outlist(txt_Error_NoMem)
+            CASE ERR_USERABORT
+                abortflag:=TERM_NONE
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon2)
+        ENDSELECT
+
+ENDPROC
+
+
+    ->##Procedure for performing a UDP traceroute
+PROC udptraceroute() HANDLE
+DEF iphdr:PTR TO ip,
+    riphdr:PTR TO ip,
+    udpheader:PTR TO udphdr,
+    ricmphdr:PTR TO icmp,
+    sain:PTR TO sockaddr_in,
+    readfds:fd_set,
+    stamp:datestamp,
+    srchost[81]:STRING,
+    srcip[15]:STRING,
+    tv:compatible_timeval,
+    buildstr[1024]:STRING,
+    sock,
+    rsock,
+    rcvbuffer,
+    type,
+    subtype,
+    on:PTR TO CHAR,
+    signal,
+    ttl,
+    ipaddr:in_addr
+
+    NEW timerdelay.softtimer()
+
+    sock:=Socket(AF_INET, SOCK_RAW, IPPROTO_RAW)
+    rsock:=Socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)
+    Setsockopt(sock, IPPROTO_IP, IP_HDRINCL, {on}, 4)
+    sain:=NewM(SIZEOF sockaddr, MEMF_PUBLIC OR MEMF_CLEAR)
+    sain.family:=AF_INET
+    sain.addr.addr:=giveipbyhost(site)
+    IF (sain.addr.addr =NIL) THEN Raise(ERR_NODNSRESULT)
+    tv.sec:=3
+    tv.usec:=500
+
+    FOR ttl:=1 TO tracemaxhopsflag
+        doMethodA(app, [MUIM_Application_Input,{signal}])
+        IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon9)
+        iphdr:=NewM((SIZEOF ip + (SIZEOF udphdr) + 10), MEMF_PUBLIC OR MEMF_CLEAR)
+        udpheader:=iphdr + (SIZEOF ip)
+        iphdr.id:=500
+        ipaddr.addr:=giveipbyhost(site)
+        iphdr.p:=IPPROTO_UDP
+        ->We don't need to specify src address as this is filled in by the stack
+        ->and made appropriate to outgoing interface
+        iphdr.dst.addr:=ipaddr.addr
+        DateStamp(stamp)
+        Rnd(stamp.tick * -1 )
+        udpheader.sport:=40001 + Rnd(3000)
+        DateStamp(stamp)
+        Rnd(stamp.tick * -1 )
+        udpheader.dport:=30001 + Rnd(3000)
+        udpheader.ulen:=SIZEOF udphdr + 10
+        udpheader.sum:=0
+        set_ip_hl(iphdr, 5)
+        set_ip_v(iphdr, IPVERSION)
+        iphdr.ttl:=ttl
+        iphdr.sum:=cksum(iphdr, SIZEOF ip)
+        Sendto(sock, iphdr, (SIZEOF ip) + (SIZEOF udphdr) +10, NIL, sain, SIZEOF sockaddr)
+        fd_zero(readfds)
+        fd_set(rsock, readfds)
+
+        IF WaitSelect(rsock+1, readfds, NIL, NIL, tv,NIL)>0
+            rcvbuffer:=NewM((SIZEOF ip) + (SIZEOF icmp) +10, MEMF_PUBLIC OR MEMF_CLEAR)
+            Recvfrom(rsock, rcvbuffer, (SIZEOF ip) + (SIZEOF icmp) +10, NIL,NIL,NIL)
+            riphdr:=rcvbuffer
+            ricmphdr:=rcvbuffer + (SIZEOF ip)
+            type:=ricmphdr.type
+            subtype:=ricmphdr.code
+
+            IF tracednsflag=MUI_TRUE
+                StrCopy(srchost, givehostbyip(Inet_NtoA(riphdr.src.addr)))
+            ELSE
+                StrCopy(srchost, '(-)')
+            ENDIF
+
+            StrCopy(srcip, Inet_NtoA(riphdr.src.addr))
+
+            SELECT type
+                CASE ICMP_TIMXCEED
+                    StringF(buildstr, '\d: \s (\s)', ttl, srchost, srcip)
+                CASE ICMP_UNREACH
+                    SELECT subtype
+                        CASE ICMP_UNREACH_NET
+                            StringF(buildstr, '\d: \s (\s) [Network Unreachable]', ttl, srchost, srcip)
+                        CASE ICMP_UNREACH_HOST
+                            StringF(buildstr, '\d: \s (\s) [Host Unreachable]', ttl, srchost, srcip)
+                        CASE ICMP_UNREACH_PROTOCOL
+                            StringF(buildstr, '\d: \s (\s) [Protocol Not Supported]', ttl, srchost, srcip)
+                        CASE ICMP_UNREACH_NEEDFRAG
+                            StringF(buildstr, '\d: \s (\s) [IP Needs Fragmenting]', ttl, srchost, srcip)
+                        CASE ICMP_UNREACH_SRCFAIL
+                            StringF(buildstr, '\d: \s (\s) [Source Route Failure]', ttl, srchost, srcip)
+                        CASE ICMP_UNREACH_PORT
+                            StringF(buildstr, '\d: \s (\s) [Final Destination]', ttl, srchost, srcip)
+                        DEFAULT
+                            StringF(buildstr, '\d: \s (\s) [Destination Unreachable]', ttl, srchost, srcip)
+                    ENDSELECT
+
+                    outlist(buildstr)
+                    Raise(ERR_NOERROR)
+
+                DEFAULT
+                    StringF(buildstr, '\d: \s (\s) [Sent Reply Type \d]', ttl, srchost, type, srcip)
+            ENDSELECT
+
+            outlist(buildstr)
+        ELSE
+            StringF(buildstr, '\d: - (-) [Host failed to respond]', ttl)
+            outlist(buildstr)
+        ENDIF
+    ENDFOR
+
+    EXCEPT DO
+        END timerdelay
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon1)
+        IF (sock) THEN CloseSocket(sock)
+        IF (rsock) THEN CloseSocket(rsock)
+
+        SELECT exception
+            CASE ERR_NOERROR
+                ->Normal Exit
+            CASE ERR_NODNSRESULT
+                outlist(txt_Error_NoDNSRes)
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon3)
+            CASE ERR_NOSOCK
+                outlist(txt_Error_NoSocket)
+            CASE ERR_NOMEM
+                outlist(txt_Error_NoMem)
+            CASE ERR_USERABORT
+                abortflag:=TERM_NONE
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon2)
+        ENDSELECT
+ENDPROC
+
+    ->##Procedure for returning the hostname if given IP
+PROC givehostbyip(txtip)
+DEF hstblock:PTR TO hostent,
+    machinename[81]:STRING,
+    machineip[15]:STRING,
+    address:in_addr
+
+    set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon8)
+    StrCopy(machineip, txtip)
+    address.addr:=Inet_addr(machineip)
+    IF (hstblock:=Gethostbyaddr(address, SIZEOF in_addr, AF_INET)) = NIL
+        StrCopy(machinename, machineip)
+    ELSE
+        StrCopy(machinename, hstblock.name)
+    ENDIF
+
+ENDPROC machinename
+
+    ->##Procedure for returning the IP if given the hostname
+PROC giveipbyhost(host)
+DEF hstblock:PTR TO hostent,
+    machinename[81]:STRING,
+    address:in_addr
+
+    StrCopy(machinename, host)
+
+    IF (hstblock:=Gethostbyname(machinename))=NIL
+        address.addr:=NIL
+    ELSE
+        address:=hstblock.addr_list[0]
+    ENDIF
+
+ENDPROC address.addr
+
+    ->##Procedure for performing a ping sweep.
+PROC pingsweep() HANDLE
+DEF icmphdr:PTR TO icmp,
+    ricmp:PTR TO icmp,
+    sain:PTR TO sockaddr_in,
+    iphdr:PTR TO ip,
+    readfds:fd_set,
+    tv:compatible_timeval,
+    hostname[81]:STRING,
+    buildstr[200]:STRING,
+    type,
+    rcvbuffer,
+    sock,
+    loop,
+    signal,
+    ipadd,
+    maxsweep=0,
+    srchost[81]:STRING,
+    srcip[15]:STRING
+
+    set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon8)
+    sock:=Socket(AF_INET, SOCK_RAW, IPPROTO_ICMP)
+    StrCopy(hostname, site)
+    IF (ipadd:=giveipbyhost(hostname)) = NIL THEN Raise(ERR_NODNSRESULT)
+    GetAttr(MUIA_String_Integer,mui_pingsweepnum,{maxsweep})
+
+    FOR loop:=0 TO maxsweep
+
+        sain:=NewM(SIZEOF sockaddr, MEMF_PUBLIC OR MEMF_CLEAR)
+        sain.family:=AF_INET
+
+        IF pingsweeptype=0
+            sain.addr.addr:=ipadd+loop
+        ELSE 
+            sain.addr.addr:=ipadd-loop
+        ENDIF
+
+        doMethodA(app, [MUIM_Application_Input,{signal}])
+        IF abortflag=TERM_USER THEN Raise(ERR_USERABORT)
+        icmphdr:=NewM(SIZEOF icmp, MEMF_PUBLIC OR MEMF_CLEAR)
+        iphdr:=NewM(SIZEOF ip, MEMF_PUBLIC OR MEMF_CLEAR)
+        icmphdr.type:=ICMP_ECHO
+        icmphdr.code:=0
+        icmphdr.idseq.id:=ICMPIDNUM
+        icmphdr.idseq.seq:=loop
+        icmphdr.cksum:=cksum(icmphdr, SIZEOF icmp)
+
+        StringF(buildstr, '\s \d (\s)', txt_Face_Workingon6, loop, Inet_NtoA(sain.addr.addr))
+        set(mui_workingon, MUIA_String_Contents, buildstr)
+        Sendto(sock, icmphdr, SIZEOF icmp, NIL, sain, SIZEOF sockaddr_in)
+        fd_zero(readfds)
+        fd_set(sock, readfds)
+        tv.sec:=0
+        tv.usec:=500
+
+        WHILE WaitSelect(sock+1, readfds, NIL, NIL, tv, NIL)>0
+            set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon7)
+            rcvbuffer:=NewM((SIZEOF ip) + (SIZEOF icmp), MEMF_PUBLIC OR MEMF_CLEAR)
+            Recvfrom(sock, rcvbuffer, (SIZEOF ip) + (SIZEOF icmp), NIL, NIL, NIL)
+            iphdr:=rcvbuffer
+            ricmp:=rcvbuffer + (SIZEOF ip)
+            type:=ricmp.type
+
+            IF (type = ICMP_ECHOREPLY)
+                IF (pingsweepdnsflag = MUI_TRUE)
+                    StrCopy(srchost, givehostbyip(Inet_NtoA(iphdr.src.addr)))
+                ELSE
+                    StrCopy(srchost, '(-)')
+                ENDIF
+                StrCopy(srcip, Inet_NtoA(iphdr.src.addr))
+                StringF(buildstr, '\s (\s) is alive', srchost, srcip)
+                outlist(buildstr)
+            ELSE
+                IF (pingsweepshowicmpflag = MUI_TRUE)
+                    IF (pingsweepdnsflag = MUI_TRUE)
+                        StrCopy(srchost, givehostbyip(Inet_NtoA(iphdr.src.addr)))
+                    ELSE
+                        StrCopy(srchost, '(-)')
+                    ENDIF
+                    StrCopy(srcip, Inet_NtoA(iphdr.src.addr))
+                    SELECT type
+                        CASE ICMP_UNREACH
+                            StringF(buildstr,'\s (\s) [Destination Unreachable]', srchost, srcip)
+                        CASE ICMP_TIMXCEED
+                            StringF(buildstr,'\s (\s) [TTL Expired]', srchost, srcip)
+                        DEFAULT
+                            StringF(buildstr,'\s (\s) [Reply Type \d]', srchost, srcip, type)
+                    ENDSELECT
+                    outlist(buildstr)
+                 ENDIF
+            ENDIF
+            
+            doMethodA(app, [MUIM_Application_Input,{signal}])
+
+        ENDWHILE
+    ENDFOR
+
+    EXCEPT DO
+        set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon1)
+        IF (sock) THEN CloseSocket(sock)
+
+        SELECT exception
+            CASE ERR_NOERROR
+                ->Normal Exception
+            CASE ERR_NODNSRESULT
+                outlist(txt_Error_NoDNSRes)
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon3)
+            CASE ERR_NOSOCK
+                outlist(txt_Error_NoSocket)
+            CASE ERR_NOMEM
+                outlist(txt_Error_NoMem)
+            CASE ERR_USERABORT
+                abortflag:=TERM_NONE
+                set(mui_workingon, MUIA_String_Contents, txt_Face_Workingon2)
+            DEFAULT
+                WriteF(txt_Error_Exception, 'pingsweep()', exception)
+        ENDSELECT
+
+ENDPROC
+
+->#######################AREXX COMMANDS FOLLOW#########################
+
+PROC rx_newscan()
+DEF a[3]:ARRAY OF LONG
+
+    MOVE.L A1, a
+
+    StrCopy(site, a[0])
+    StrCopy(portrange, a[1])
+    IF (scantype:=Val(a[2]))>3 THEN scantype:=3
+    set(mui_server, MUIA_String_Contents, site)
+    set(mui_portrange, MUIA_String_Contents, portrange)
+    set(mui_scantypecyc, MUIA_Cycle_Active, scantype)
+
+ENDPROC 0
+
+PROC rx_setflags()
+DEF a[2]:ARRAY OF LONG,
+    retval=0
+
+    MOVE.L A1, a
+
+    a[1]:=Val(a[1])
+    IF a[1]<0 THEN a[1]:=0
+    IF a[1]>1 THEN a[1]:=1
+
+    IF StrCmp('verbose',LowerStr(a[0]))
+        doMethodA(mui_verbose, [MUIM_Set, MUIA_Selected, a[1]])
+    ELSEIF StrCmp('read',LowerStr(a[0]))
+        doMethodA(mui_readcheck, [MUIM_Set, MUIA_Selected, a[1]])
+    ELSEIF StrCmp('wakeup',LowerStr(a[0]))
+        doMethodA(mui_wakeup, [MUIM_Set, MUIA_Selected, a[1]])
+    ELSEIF StrCmp('trojans',LowerStr(a[0]))
+        doMethodA(mui_showtrojan, [MUIM_Set, MUIA_Selected, a[1]])
+    ELSE
+        retval:=1
+    ENDIF
+
+ENDPROC retval
+
+PROC rx_opengpwin()
+DEF a[1]:ARRAY OF LONG,
+    retval=0
+
+    MOVE.L A1, a
+
+    IF runningrexx=MUI_TRUE
+        retval:=1
+    ELSE
+        IF StrCmp('bookmark', LowerStr(a[0]))
+            doMethodA(app, [MUIM_Application_ReturnID, ID_OPENBOOK])
+        ELSEIF StrCmp('lookup', LowerStr(a[0]))
+            doMethodA(app, [MUIM_Application_ReturnID, ID_OPENLOOKUP])
+        ELSEIF StrCmp('prefs', LowerStr(a[0]))
+            doMethodA(app, [MUIM_Application_ReturnID, ID_PREFS])
+        ELSEIF StrCmp('about', LowerStr(a[0]))
+            doMethodA(app, [MUIM_Application_ReturnID, ID_ABOUT])
+        ELSEIF StrCmp('muiabout', LowerStr(a[0]))
+            doMethodA(app, [MUIM_Application_ReturnID, ID_MUIABOUT])
+        ELSEIF StrCmp('customrange', LowerStr(a[0]))
+            doMethodA(app, [MUIM_Application_ReturnID, ID_OPENCUSTOM])
+        ELSE
+            retval:=2
+        ENDIF
+
+    ENDIF
+
+ENDPROC retval
+
+PROC rx_closegpwin()
+DEF a[1]:ARRAY OF LONG,
+    retval=0
+
+    MOVE.L A1, a
+
+    IF runningrexx=MUI_TRUE
+        retval:=1
+    ELSE
+        IF StrCmp('bookmark', LowerStr(a[0]))
+            doMethodA(app, [MUIM_Application_ReturnID, ID_CLOSEBOOK])
+        ELSEIF StrCmp('lookup', LowerStr(a[0]))
+            doMethodA(app, [MUIM_Application_ReturnID, ID_CANCEL])
+        ELSEIF StrCmp('prefs', LowerStr(a[0]))
+            doMethodA(app, [MUIM_Application_ReturnID, ID_CANCELPREF])
+        ELSEIF StrCmp('customrange', LowerStr(a[0]))
+            doMethodA(app, [MUIM_Application_ReturnID, ID_CLOSECUSTOM])
+        ELSE
+            retval:=2
+        ENDIF
+    ENDIF
+
+ENDPROC retval
+
+PROC rx_isscanning()
+    IF (runningrexx=MUI_TRUE) THEN set(app, MUIA_Application_RexxString, '1') ELSE set(app, MUIA_Application_RexxString, '0')
+ENDPROC 0
+
+PROC rx_iswinopen()
+DEF a[1]:ARRAY OF LONG,
+    open=0,
+    retval=0
+
+    MOVE.L A1, a
+
+    IF StrCmp('bookmark', LowerStr(a[0]))
+        GetAttr(MUIA_Window_Open, mui_bookmarkwindow, {open})
+    ELSEIF StrCmp('lookup', LowerStr(a[0]))
+        GetAttr(MUIA_Window_Open, mui_lookupwindow, {open})
+    ELSEIF StrCmp('prefs', LowerStr(a[0]))
+        GetAttr(MUIA_Window_Open, mui_prefswindow, {open})
+    ELSEIF StrCmp('customrange', LowerStr(a[0]))
+        GetAttr(MUIA_Window_Open, mui_customrangewin, {open})
+    ELSE
+        retval:=2
+    ENDIF
+
+    IF (open=MUI_TRUE) THEN set(app, MUIA_Application_RexxString, '1') ELSE set(app, MUIA_Application_RexxString, '0')
+
+ENDPROC retval
+
+PROC rx_addbookmark()
+DEF a[1]:ARRAY OF LONG,
+    str[81]:STRING,
+    open=0,
+    retval=0
+
+    MOVE.L A1, a
+
+    GetAttr(MUIA_Window_Open, mui_bookmarkwindow, {open})
+
+    IF open=MUI_TRUE
+        StrCopy(str, a[0])
+        doMethodA(mui_bookmarklist, [MUIM_List_InsertSingle, str, MUIV_List_Insert_Sorted])
+    ELSE
+        retval:=1
+    ENDIF
+
+ENDPROC retval
+
+PROC rx_clearbookmarks()
+DEF open=0,
+    retval=0
+
+    GetAttr(MUIA_Window_Open, mui_bookmarkwindow, {open})
+    IF (open=MUI_TRUE) THEN doMethodA(mui_bookmarklist, [MUIM_List_Clear]) ELSE retval:=1
+
+ENDPROC retval
+
+PROC rx_getnumbookmarks()
+DEF entries,
+    str[7]:STRING
+
+    GetAttr(MUIA_List_Entries,mui_bookmarklist,{entries})
+    StringF(str,'\d',entries)
+    set(app, MUIA_Application_RexxString, str)
+
+ENDPROC 0
+
+
+PROC rx_getbookmark()
+DEF a[1]:ARRAY OF LONG,
+    str[81]:STRING,
+    entries=0,
+    retval=0
+
+    MOVE.L A1, a
+
+    a[0]:=Val(a[0])
+    GetAttr(MUIA_List_Entries,mui_bookmarklist,{entries})
+
+    IF entries = 0
+        retval:=1
+    ELSEIF a[0] > entries
+        retval:=2
+    ELSE
+        doMethodA(mui_bookmarklist,[MUIM_List_GetEntry,a[0],{str}])
+        set(app, MUIA_Application_RexxString, str)
+    ENDIF
+
+ENDPROC retval
+
+PROC rx_setlog()
+DEF a[1]:ARRAY OF LONG,
+    retval=0
+
+    MOVE.L A1, a
+
+    IF runningrexx=MUI_TRUE
+        retval:=1
+    ELSE
+        StrCopy(savepath, a[0])
+        set(mui_savepath, MUIA_String_Contents, savepath)
+    ENDIF
+
+ENDPROC retval
+
+PROC rx_settimeout()
+DEF a[1]:ARRAY OF LONG,
+    retval=0
+
+    MOVE.L A1, a
+
+    IF runningrexx=MUI_TRUE
+        retval:=1
+    ELSEIF Val(a[0]) > 20
+        retval:=2
+    ELSEIF Val(a[0]) < 0
+        retval:=2
+    ELSE
+        timeflag:=Val(a[0])
+        set(mui_timeout, MUIA_Slider_Level, timeflag)
+    ENDIF
+
+ENDPROC retval
+
+PROC rx_setdelay()
+DEF a[1]:ARRAY OF LONG,
+    retval=0,
+    del=0
+
+    MOVE.L A1, a
+
+    del:=Val(a[0])
+
+    IF del > 20
+        retval:=1
+    ELSEIF del < 0
+        retval:=1
+    ELSE
+        delayflag:=del
+        set(mui_delay, MUIA_Numeric_Value, delayflag)
+        ->set(mui_delay, MUIA_Slider_Level, delayflag)
+    ENDIF
+
+ENDPROC retval
+
+PROC rx_annotate()
+DEF a[1]:ARRAY OF LONG,
+    str[100]:STRING
+
+    MOVE.L A1,a
+
+    StrCopy(str, a[0])
+    outlist(str)
+
+ENDPROC 0
+
+PROC rx_saveprefs()
+DEF retval=0,
+    open=0
+
+    GetAttr(MUIA_Window_Open, mui_prefswindow, {open})
+
+    IF (open=MUI_TRUE) THEN doMethodA(app, [MUIM_Application_ReturnID, ID_SAVEPREF]) ELSE retval:=1
+
+ENDPROC retval
+
+PROC rx_sendabort()
+DEF retval=0
+
+    IF (runningrexx=MUI_TRUE) THEN abortflag:=TERM_USER ELSE retval:=1
+
+ENDPROC retval
+
+PROC rx_ping()
+DEF a[1]:ARRAY OF LONG,
+    retval=0
+
+    MOVE.L A1, a
+
+    IF runningrexx=MUI_TRUE
+        retval:=1
+    ELSE
+        StrCopy(site, a[0])
+        set(mui_server, MUIA_String_Contents, site)
+        doMethodA(app, [MUIM_Application_ReturnID, ID_PING])
+    ENDIF
+ENDPROC retval
+
+PROC rx_resolve()
+DEF a[1]:ARRAY OF LONG,
+    retval=0
+
+    MOVE.L A1, a
+
+    IF runningrexx=MUI_TRUE
+        retval:=1
+    ELSE
+        StrCopy(site, a[0])
+        set(mui_server, MUIA_String_Contents, site)
+        doMethodA(app, [MUIM_Application_ReturnID, ID_RESOLVE])
+    ENDIF
+ENDPROC retval
+
+/*
+PROC snuff()
+DEF errbuf[255]:STRING,
+    device[10]:STRING,
+    p=NIL,
+    sp=NIL,
+    h:PTR TO pcap_pkthdr,
+    lnkhdr:PTR TO linkheader,
+    ipheader:PTR TO ip,
+    filehandle=NIL
+
+StrCopy(device, MiamiPCapLookupdev(errbuf))
+
+IF (p:=MiamiPCapOpenLive(device, 1500, NIL, 500, errbuf))=NIL THEN WriteF('jjjjj\s\n', errbuf)
+
+filehandle:=MiamiPCapAmigaDumpOpen(p, 'RAM:DUMMP')
+
+sp:=MiamiPCapNext(p,h)
+/*
+->IF (sp:=MiamiPCapNext(p, h)) = NIL
+->    WriteF('No Packet\n')
+->ELSE
+    ->lnkhdr:=sp
+    ->ipheader:=sp+(SIZEOF linkheader)
+    /*
+    IF lnkhdr.packettype=0
+        PrintF('Packet = IP\n')
+    ELSE
+        PrintF('Packet = ARP\n')
+    ENDIF
+    */
+    MiamiPCapAmigaDump(filehandle, h, sp)
+->ENDIF
+*/
+MiamiPCapAmigaDumpClose(filehandle)
+
+IF p THEN MiamiPCapClose(p)
+
+ENDPROC
+*/

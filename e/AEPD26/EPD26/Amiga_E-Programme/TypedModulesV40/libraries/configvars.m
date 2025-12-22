@@ -1,0 +1,30 @@
+OPT MODULE
+OPT EXPORT
+
+MODULE 'exec/nodes'
+
+CONST CD_RESET=1,
+      CD_READ=2,
+      CD_WRITE=3,
+      CD_UPDATE=4,
+      CD_CLEAR=5,
+      CD_STOP=6,
+      CD_START=7,
+      CD_FLUSH=8,
+      CD_MOTOR=9,
+      CD_SEEK=10,
+      CD_FORMAT=11,
+      CD_REMOVE=12,
+      CD_CHANGENUM=13,
+      CD_CHANGESTATE=14,
+      CD_PROTSTATUS=15,
+      CD_GETDRIVETYPE=18,
+      CD_GETNUMTRACKS=19,
+      CD_ADDCHANGEINT=20,
+      CD_REMCHANGEINT=21,
+      CD_GETGEOMETRY=22,
+      CD_EJECT=23,
+      CD_INFO=32,
+      CD_CONFIG=33,
+      CD_TOCMSF=34,
+      CD_

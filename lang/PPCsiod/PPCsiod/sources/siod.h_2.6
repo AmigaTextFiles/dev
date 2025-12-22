@@ -1,0 +1,444 @@
+/* Scheme In One Defun, but in C this time.
+ 
+ *                        COPYRIGHT (c) 1989 BY                             *
+ *        PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+ *        See the source file SLIB.C for more information.                  *
+
+*/
+#include <setjmp.h>
+#include <stdlib.h>
+
+struct obj
+{char gc_mark;
+ char type;
+ union {struct {struct obj * car;
+		struct obj * cdr;} cons;
+	struct {double data;} flonum;
+	struct {long inte;} intnum;
+	struct {float real;
+                float immag;} compnum;
+	struct {long num;
+                unsigned long denom;} ratnum;
+	struct {char character;} charval;
+	struct {char *pname;
+		struct obj * vcell;} symbol;
+	struct {char *sname;
+		char small_string[4];} string;
+	struct {struct obj ** objvector;
+		long vector_size;} vector;
+	struct {struct obj * parent;
+		struct obj * bindings;} environment;
+	struct {long open_flag;
+		FILE * fp;} port;
+	struct {char *name;
+		struct obj * (*f)(void);} subr;
+	struct {char *name;
+		struct obj * (*f)(struct obj *);} subr1;
+	struct {char *name;
+		struct obj * (*f)(struct obj *,struct obj *);} subr2;
+	struct {char *name;
+		struct obj * (*f)(struct obj *,struct obj *,struct obj *);} subr3;
+	struct {char *name;
+		struct obj * (*f)(struct obj **,struct obj **);} msubr;
+	struct {struct obj *env;
+		struct obj *code;} closure;}
+ storage_as;};
+
+#define PARENT(x) ((*x).storage_as.environment.parent)
+#define BINDINGS(x) ((*x).storage_as.environment.bindings)
+#define CODE(x) ((*x).storage_as.closure.code)
+#define DEFENV(x) ((*x).storage_as.closure.env)
+#define CAR(x) ((*x).storage_as.cons.car)
+#define CDR(x) ((*x).storage_as.cons.cdr)
+#define PNAME(x) ((*x).storage_as.symbol.pname)
+#define TCELL(x) ((*x).storage_as.symbol.vcell)
+#define VCELL(x) CAR(((*x).storage_as.symbol.vcell))
+#define PROPL(x) CDR(((*x).storage_as.symbol.vcell))
+#define MNAME(x) ((*x).storage_as.symbol.pname)
+#define EXPANDER(x) ((*x).storage_as.symbol.vcell)
+#define SNAME(x) ((*x).storage_as.string.sname)
+#define SSMALL(x) ((*x).storage_as.string.small_string)
+#define VECTOR(x) ((*x).storage_as.vector.objvector)
+#define VECSIZE(x) ((*x).storage_as.vector.vector_size)
+#define SUBRF(x) (*((*x).storage_as.subr.f))
+#define SUBR1F(x) (*((*x).storage_as.subr1.f))
+#define SUBR2F(x) (*((*x).storage_as.subr2.f))
+#define SUBR3F(x) (*((*x).storage_as.subr3.f))
+#define MSUBRF(x) (*((*x).storage_as.msubr.f))
+#define FLONM(x) ((*x).storage_as.flonum.data)
+#define RATNUM(x) ((*x).storage_as.ratnum.num)
+#define RATDEN(x) ((*x).storage_as.ratnum.denom)
+#define COMPRE(x) ((*x).storage_as.compnum.real)
+#define COMPIM(x) ((*x).storage_as.compnum.immag)
+#define INTNM(x) ((*x).storage_as.intnum.inte)
+#define CHARV(x) ((*x).storage_as.charval.character)
+#define PORTPTR(x) ((*x).storage_as.port.fp)
+#define PORTFLAG(x) ((*x).storage_as.port.open_flag)
+
+#define NIL ((struct obj *)0)
+#define EQ(x,y) ((x) == (y))
+#define NEQ(x,y) ((x) != (y))
+#define NULLP(x) EQ(x,NIL)
+#define NNULLP(x) NEQ(x,NIL)
+
+#define TYPE(x) (((x)==NIL) ? 0 : (*(x)).type)
+
+#define TYPEP(x,y) (TYPE(x) == (y))
+#define NTYPEP(x,y) (TYPE(x) != (y))
+
+#define tc_nil    0
+#define tc_cons   1
+#define tc_environment 2
+#define tc_symbol 3
+#define tc_subr_0 4
+#define tc_subr_1 5
+#define tc_subr_2 6
+#define tc_subr_3 7
+#define tc_lsubr  8
+#define tc_fsubr  9
+#define tc_msubr  10
+#define tc_closure 11
+#define tc_free_cell 12
+#define tc_string 13
+#define tc_char 14
+#define tc_rec 15
+#define tc_intnum 16
+#define tc_ratnum 17
+#define tc_flonum 18
+#define tc_compnum 19
+#define tc_port 20
+#define tc_fluidclosure 21
+#define tc_macro 22
+#define tc_vector 23
+
+typedef struct obj* LISP;
+
+#define MISPARP(x)  EQ(x,missing_parameter)
+#define NUMBERP(x)  (nump(x))
+#define PORTP(x)    TYPEP(x,tc_port)
+#define CONSP(x)    TYPEP(x,tc_cons)
+#define FLONUMP(x)  TYPEP(x,tc_flonum)
+#define INTNUMP(x)  TYPEP(x,tc_intnum)
+#define RATNUMP(x)  TYPEP(x,tc_ratnum)
+#define COMPNUMP(x) TYPEP(x,tc_compnum)
+#define CHARP(x)    TYPEP(x,tc_char)
+#define STRINGP(x)  TYPEP(x,tc_string)
+#define SYMBOLP(x)  TYPEP(x,tc_symbol)
+#define VECTORP(x)  TYPEP(x,tc_vector)
+#define ENVP(x)     TYPEP(x,tc_environment)
+
+#define NMISPARP(x)  NEQ(x,missing_parameter)
+#define NNUMBERP(x)  (!(nump(x)))
+#define NPORTP(x)    NTYPEP(x,tc_port)
+#define NCONSP(x)    NTYPEP(x,tc_cons)
+#define NFLONUMP(x)  NTYPEP(x,tc_flonum)
+#define NINTNUMP(x)  NTYPEP(x,tc_intnum)
+#define NRATNUMP(x)  NTYPEP(x,tc_ratnum)
+#define NCOMPNUMP(x) NTYPEP(x,tc_compnum)
+#define NCHARP(x)    NTYPEP(x,tc_char)
+#define NSTRINGP(x)  NTYPEP(x,tc_string)
+#define NSYMBOLP(x)  NTYPEP(x,tc_symbol)
+#define NENVP(x)     NTYPEP(x,tc_environment)
+#define NVECTORP(x)  NTYPEP(x,tc_vector)
+
+#define TKBUFFERN 1024
+
+#define ERR_NSYM 1
+#define ERR_NINT 2
+#define ERR_NNUM 4
+#define ERR_IND_RAN 8
+#define ERR_NENV 16
+#define ERR_NPOR 32
+#define ERR_NPAI 64
+#define ERR_NCHA 128
+#define ERR_NPRO 256
+#define ERR_FIRST 512
+#define ERR_SECOND 1024
+#define ERR_THIRD 2048
+#define ERR_GEN 4096
+#define ERR_GEN_ARG 8192
+#define ERR_NSTR 16384
+#define ERR_NVEC 32768
+#define ERR_NFIL 65536
+#define ERR_MEM 131072
+
+extern char *must_malloc(unsigned long);
+
+extern LISP cons(LISP,LISP),envcons(LISP,LISP);
+extern LISP gen_intern(char *,long);
+
+extern LISP environment_bindings(LISP),environment_parent(LISP);
+extern LISP envp(LISP),proc_env(LISP),make_environment(LISP,LISP);
+extern LISP proc_code(LISP);
+
+extern LISP append(LISP),append_rec(LISP,LISP);
+extern LISP appendI(LISP),appendI_rec(LISP,LISP);
+extern LISP last_pair(LISP),list_ref(LISP,LISP),list_tail(LISP,LISP);
+extern LISP delete(LISP,LISP),delq(LISP,LISP);
+
+extern LISP car(LISP), cdr(LISP), setcar(LISP,LISP);
+extern LISP setcdr(LISP,LISP),consp(LISP);
+extern LISP llist(LISP),dotlist(LISP),cxr(LISP,LISP),lenght(LISP);
+extern long leng(LISP);
+
+extern LISP symcons(char *, LISP),rintern(char *), cintern(char *);
+extern LISP symbolp(LISP),macrop(LISP),gensym(LISP),symtoasc(LISP),asctosym(LISP);
+extern LISP proplist(LISP), getprop(LISP,LISP), putprop(LISP, LISP,LISP);
+extern LISP remprop(LISP, LISP),inspect(LISP);
+
+extern double myruntime(void);
+extern LISP lruntime(),install(LISP,LISP),disinstall(LISP);
+extern LISP getnumer(LISP),getdenom(LISP),makerat(LISP,LISP);
+extern LISP makecomp(LISP,LISP),getreal(LISP),getimag(LISP);
+extern LISP flocons(double), atomp(LISP), procp(LISP);
+extern LISP procedurep(LISP),closurep(LISP);
+extern LISP torational(LISP),tofloat(LISP),tocomplex(LISP),complexp(LISP);
+extern LISP ltorational(LISP),ltofloat(LISP),ltocomplex(LISP);
+extern LISP intcons(long),ratcons(double,double),compcons(float,float);
+extern LISP floco(double),ratco(long,unsigned long),compco(float,float);
+extern double cal_gcd_double(double,double),myatan(double,double);
+extern LISP integerp(LISP),rationalp(LISP),floatp(LISP),numberp(LISP);
+extern LISP plus(LISP),ltimes(LISP),difference(LISP);
+extern LISP converti(LISP,short),plus2(LISP,LISP),minus2(LISP,LISP);
+extern LISP divide2(LISP,LISP),times2(LISP,LISP),realp(LISP);
+extern int nump(LISP);
+extern LISP quotient(LISP), lquotient(LISP,LISP), greaterp(LISP,LISP);
+extern LISP lessp(LISP,LISP), lmax(LISP), lmin(LISP), lsqrt(LISP), zerop(LISP);
+extern LISP gcd(LISP), lcm(LISP), lround(LISP), ltruncate(LISP), lltruncate(LISP);
+extern LISP negative(LISP), positive(LISP), even(LISP), odd(LISP);
+extern LISP add1(LISP), sub1(LISP), diverso(LISP,LISP), uguale(LISP,LISP);
+extern LISP greatereqp(LISP,LISP), lesseqp(LISP,LISP),demoivre(double,double,double);
+extern LISP lsin(LISP),lcos(LISP),ltan(LISP),lasin(LISP),latan(LISP,LISP),lacos(LISP);
+extern LISP remainder(LISP,LISP),expt(LISP,LISP),lexp(LISP),llog(LISP,LISP);
+extern LISP ceiling(LISP), lfloor(LISP), Labs(LISP),minus(LISP),modulo(LISP,LISP);
+
+extern LISP eq(LISP,LISP),eql(LISP,LISP),equal(LISP,LISP);
+extern LISP floatp(LISP),transon(LISP),transoff();
+extern LISP assq(LISP,LISP),assoc(LISP,LISP),assv(LISP,LISP);
+extern LISP memq(LISP,LISP),member(LISP,LISP),memv(LISP,LISP);
+extern LISP vec_sort(LISP,LISP,LISP),listmerge(LISP,LISP);
+extern LISP lsort(LISP,LISP),mergesort(LISP);
+extern int do_test(LISP,LISP);
+
+extern int checksym(char *);
+extern LISP leval(LISP,LISP);
+extern LISP fast_leval(LISP,LISP),std_leval(LISP,LISP);
+extern LISP lread(LISP),lleval(LISP,LISP),lprint(LISP,LISP);
+extern LISP lprin(LISP,LISP),lwritechar(LISP,LISP),lprintlenght(LISP,LISP),lwrite(LISP,LISP);
+extern LISP setfileposition(LISP,LISP,LISP),getfileposition(LISP);
+extern LISP writeln(LISP),lreadchar(LISP),lreadline(LISP),file_exist(LISP);
+extern LISP lprin1f(LISP,FILE*),ldisplayf(LISP,FILE*),f_getstr(FILE*);
+extern int flush_ws(FILE *,char *);
+extern int f_getc(FILE*);
+extern void f_ungetc(int, FILE *);
+
+extern LISP subrcons(long,char *,LISP (*)());
+extern LISP closure(LISP,LISP);
+extern LISP rec_closure(LISP,LISP);
+
+extern LISP makevector(LISP,LISP),vectorref(LISP,LISP),vectorset(LISP,LISP,LISP);
+extern LISP vectorlenght(LISP),vectorp(LISP),vectorcons(long,LISP);
+extern LISP vectortolist(LISP),listtovector(LISP),vectorm(LISP);
+extern LISP leval_catch(LISP,LISP),lthrow(LISP,LISP),vectorfill(LISP,LISP);
+extern FILE *get_cur_in(void),*get_cur_out(void);
+
+extern LISP save_forms(LISP,LISP,LISP),symbolconc(LISP);
+extern LISP curr_input(void),curr_output(void);
+extern LISP with_input(LISP,LISP),with_output(LISP,LISP);
+extern LISP call_with_input(LISP,LISP),call_with_output(LISP,LISP);
+extern LISP leval_define(LISP,LISP),leval_lambda(LISP,LISP);
+extern LISP leval_named_lambda(LISP,LISP),leval_macro(LISP,LISP);
+extern LISP leval_if(LISP *,LISP *),leval_cond(LISP *,LISP *);
+extern LISP leval_case(LISP *,LISP *),leval_apply(LISP,LISP);
+extern LISP leval_applyif(LISP,LISP),leval_foreach(LISP,LISP);
+extern LISP leval_map(LISP,LISP),apply_proc(LISP,LISP,LISP);
+extern LISP leval_progn0(LISP *,LISP *),leval_when(LISP *,LISP *);
+extern LISP leval_while(LISP *,LISP *),leval_aut_fr_fi(LISP,LISP);
+extern void do_increment(LISP,LISP);
+extern LISP leval_do(LISP *,LISP *),env_prep(LISP);
+
+extern LISP leval_progn(LISP *,LISP *),leval_setq(LISP,LISP);
+extern LISP leval_let(LISP *,LISP *),leval_let_env(LISP,LISP);
+extern LISP leval_let_star(LISP *,LISP *),leval_let_star_env(LISP,LISP);
+extern LISP leval_letrec(LISP *,LISP *),leval_letrec_env(LISP,LISP);
+extern void env_test(LISP);
+extern LISP leval_args(LISP,LISP),extend_env(LISP,LISP);
+extern LISP leval_args_env(LISP,LISP,LISP),assoc_args_env(LISP,LISP,LISP);
+extern LISP setvar(LISP,LISP,LISP),leval_quasiquote(LISP *,LISP *);
+extern LISP leval_quote(LISP,LISP),leval_and(LISP *,LISP *);
+extern LISP leval_or(LISP *,LISP *);
+extern LISP syntax_define(LISP),setv(LISP,LISP);
+
+extern LISP fluid(LISP,LISP),fluid_boundp(LISP,LISP);
+extern LISP leval_fluidlet(LISP,LISP),leval_setfluid(LISP,LISP);
+extern LISP fluid_extend_env(LISP),fluidenvlookup(LISP,LISP);
+extern LISP leval_lambda_fluid(LISP,LISP),fluidclosure(LISP,LISP);
+extern LISP setfluidvar(LISP,LISP);
+extern LISP oblistfn(void),copy_list(LISP),reset(void),freesp(void);
+extern void scan_newspace(LISP),gc_stop_and_copy(void);
+extern LISP gc_relocate(LISP),get_newspace(void),gc_status(LISP);
+extern void gc_for_newcell(void),gc_mark_and_sweep(void);
+extern void gc_ms_stats_start(void), gc_ms_stats_end(void);
+extern void gc_mark(LISP ptr), gc_sweep(void),gc_sweep_array(void),mark_cons(LISP);
+extern void mark_protected_registers(void),mark_locations(LISP *,LISP *);
+extern void mark_locations_array(LISP [],long);
+extern LISP user_gc(LISP),breakpoint(LISP,LISP);
+extern LISP vload(char *,LISP),load(LISP,LISP),prerr(LISP);
+extern LISP leval_tenv(LISP,LISP),lerr(LISP),quit(void),nullp(LISP);
+extern LISP symbol_boundp(LISP,LISP),symbol_value(LISP,LISP);
+extern LISP envlookup(LISP,LISP),arglchk(LISP),reverse(LISP),reverseI(LISP);
+extern LISP newcell(long),laccess(LISP,LISP),unboundp(LISP,LISP),framelookup(LISP,LISP);
+
+extern LISP strcons(long),charcons(long),charupcase(LISP),chardowncase(LISP);
+extern LISP string_append(LISP),string_to_symbol(LISP),makestring(LISP,LISP);
+extern LISP string_to_number(LISP,LISP,LISP),string_to_list(LISP),list_to_string(LISP);
+extern int rfs_getc(unsigned char **);
+extern void rfs_putc(unsigned char,unsigned char **);
+extern LISP read_from_string(LISP),string_to_un_symbol(LISP);
+extern LISP stringp(LISP),string_set(LISP,LISP,LISP);
+extern LISP charp(LISP),number_to_string(LISP,LISP),integer_to_string(LISP,LISP);
+extern LISP charcmp(LISP,LISP),chartoint(LISP),inttochar(LISP);
+extern LISP string_lenght(LISP),symbol_to_string(LISP);
+extern LISP string_copy(LISP);
+extern int strcmpCI(char *,char *);
+extern LISP string_cmpCI(LISP,LISP);
+extern LISP string_fill(LISP,LISP);
+extern LISP dos_call(LISP),random(LISP),randomize(LISP);
+extern LISP string_cmp(LISP,LISP),callasm(LISP);
+extern LISP string_ref(LISP,LISP),substring(LISP,LISP,LISP);
+extern LISP lreadr(FILE *),lreadparen(FILE *);
+extern LISP lreadtk(long),lreadf(FILE *),lflushinput(LISP);
+extern LISP readtl(FILE *);
+extern LISP error_han(void);
+extern LISP portcons(FILE *),open_port(char *,char *,int),close_port(LISP);
+extern LISP openport(LISP,LISP,LISP),portp(LISP),lflush(LISP);
+extern LISP input_portp(LISP),output_portp(LISP);
+
+extern void gc_protect(LISP *);
+extern void gc_protect_n(LISP *,long);
+extern void gc_protect_sym(LISP *,char *);
+extern void scan_registers(void);
+extern void init_storage(void);
+
+extern long no_interrupt(long);
+
+extern void init_subr(char *,long,LISP (*)()),init_subrs(void),init_subr_fond(void);
+extern void repl_driver(void);
+extern void handle_sigfpe(int);
+extern void handle_sigabort(int);
+extern void handle_sigint(int);
+extern void err_ctrl_c(void);
+extern void fput_st(FILE *, char *);
+extern void put_st(char *);
+extern void grepl_puts(char *);
+extern void repl(void);
+extern void err(char *, LISP, int);
+extern void gc_fatal_error(void);
+extern void prinerr(int);
+
+extern LISP eof_valp(LISP),scheme_reset(void),scheme_top_level(void);
+extern LISP reset_scheme_top_lev(void);
+extern double myruntime(void);
+
+extern long cal_gcd(long,long);
+extern void process_cla(int, char **);
+extern int process_env(void);
+void print_welcome(void);
+
+extern void print_hs_1(void),print_hs_2(void);
+
+#define GETC_FCN(x) (f_getc(x))
+#define UNGETC_FCN(c,x) (f_ungetc(c,x))
+
+struct catch_frame
+{LISP tag;
+ LISP retval;
+ jmp_buf cframe;
+ struct catch_frame *next;};
+
+struct gc_protected
+{LISP *location;
+ long length;
+ struct gc_protected *next;};
+
+extern LISP heap_1;
+extern LISP heap,heap_end,heap_org;
+
+extern long heap_size;
+extern long full_set;
+extern long quiet;
+extern char *init_file;
+extern char tkbuffer[TKBUFFERN];
+
+extern long gc_status_flag;
+extern long gc_cells_allocated;
+extern double gc_time_taken;
+extern LISP *stack_start_ptr;
+extern LISP freelist;
+extern FILE *transfile;
+extern jmp_buf errjmp;
+extern long errjmp_ok;
+extern long nointerrupt;
+extern long interrupt_differed;
+
+extern LISP sym_alloc_strings;
+extern LISP sym_alloc_vectors;
+extern LISP sym_open_port;
+extern LISP sym_repl_mode;
+extern LISP sym_debug_mode;
+extern LISP sym_gc_mode;
+extern LISP sym_stdin;
+extern LISP sym_stdout;
+extern LISP sym_scheme_top_level;
+extern LISP sym_input_port;
+extern LISP sym_output_port;
+extern LISP val_scheme_top_level;
+extern LISP val_input_port;
+extern LISP val_output_port;
+extern LISP sym_standard_input;
+extern LISP sym_standard_output;
+extern LISP sym_fluid_environment;
+extern LISP sym_user_environment;
+extern LISP sym_initial_environment;
+extern LISP truth;
+extern LISP nil;
+extern LISP eof_val;
+extern LISP sym_the_non_printing;
+extern LISP sym_errobj;
+extern LISP sym_inspect;
+extern LISP sym_err_han;
+extern LISP sym_on_reset;
+extern LISP sym_err_string;
+extern LISP sym_progn;
+extern LISP sym_else;
+extern LISP sym_lambda;
+extern LISP sym_quote;
+extern LISP sym_dot;
+extern LISP unbound_marker;
+extern LISP missing_parameter;
+extern LISP cur_exp;
+extern LISP cur_env;
+
+extern LISP *chararray;
+extern LISP *fixarray;
+extern LISP *obarray;
+extern LISP oblistvar;
+extern long fixarray_dim;
+extern long obarray_dim;
+
+extern struct catch_frame *catch_framep;
+extern struct gc_protected *protected_registers;
+
+extern jmp_buf save_regs_gc_mark;
+
+extern double gc_rt;
+extern long gc_cells_collected;
+
+#define NEWCELL(_into,_type)          \
+{if NULLP(freelist)                   \
+      gc_for_newcell();               \
+    _into = freelist;                 \
+    freelist = CDR(freelist);         \
+    ++gc_cells_allocated;             \
+ (*_into).gc_mark = 0;                \
+ (*_into).type = _type;}

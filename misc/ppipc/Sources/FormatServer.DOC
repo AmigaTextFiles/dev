@@ -1,0 +1,169 @@
+
+                            FormatServer
+                              _______
+
+                 Formatted output IPC Server Module
+
+
+This program is a Server for IPC that both provides a demonstration of
+technique and has a useful function.  It accepts a message containing
+numeric, character and string items, together with appropriate
+format-specifying items, and generates a formatted output string.  This
+string may be sent to the server's own console window, or may be returned
+to the client, or may be written to a supplied file handle.
+
+This server avoids each module having to have its own output mechanisms.
+In a lot of cases -- error messages and so on -- it will probably  be
+convenient to send reports (suitably tagged with an identifying string) to
+the common FormatServer window.  Where a module does need its own window it
+still does not have to be burdened with the space needed for 'printf' if it
+uses this server.
+
+The IPCPort served by this module is named "Print_Format".  Only one
+IPCMessage ID ('CNVA'), as described below, is handled by this version
+(except for 'QUIT'), but there can be many variations on the items
+included, to determine the contents, format, and destination of the output
+string.
+
+The server will run until either it is sent a 'QUIT' message by any client,
+or the number of current clients drops to zero (from non-zero, so that it
+doesn't terminate if there are initially no clients).  It will also
+terminate immediately if the user gives the process a ctrl-C break.
+
+
+Message Format:
+
+The IPCMessage Type ID accepted by FormatServer is 'CNVA' ("CoNVert to
+Ascii"). It may contain an arbitrary number of items.  Optionally, the
+first may be a "disposition control" item (see below); if it is absent, the
+formatted string will be displayed in the FormatServer console window.
+
+Items to be formatted may be of the following types:
+
+    INTG    -- ii_Ptr contains a 32-bit integer value to be converted to
+               its ASCII representation (ii_Size = 0).
+
+    REAL    -- ii_Ptr contains a 32-bit floating-point value to be
+               converted (ii_Size = 0).  (Note -- care will be needed
+               when inserting the original 'float' value into ii_Ptr, to
+               make sure that the compiler doesn't apply an unintended
+               conversion!  FormatServer converts the supplied value to
+               'double' and uses the "%g" format to output it.)
+
+    STRG
+    LINE
+    TEXT    -- equivalent IDs representing ASCII strings to be inserted in
+               the output.  (Although FormatServer treats them equivalently,
+               they may have different meanings in other environments: in
+               particular, LINE is a conplete single line of text without
+               its terminating newline, TEXT is an arbitrary block of text
+               that may contain newline characters, and STRG is possibly a
+               partial line.)
+
+    CHAR    -- A single ASCII character (in the least-significant byte of
+               ii_Ptr; ii_Size = 0).
+
+
+If no format-specifying items are supplied, default formats are used ("%ld"
+for integer, "%g" for floats (cast to double by FormatServer), "%s" for
+strings, and "%c" for characters).  For further control, you can either
+prefix an item with a single-item format string, or include a multi-item
+format specification.
+
+    PAT1    -- ii_Ptr points to a "printf" type format string containing
+               exactly one conversion specifier, which must be appropriate
+               for the immediately following item.  Aside from the single
+               specifier that must be present, the contents of the string
+               are arbitrary.
+
+    PATS    -- ii_Ptr points to a format string that contains conversion
+               specifiers for ALL the remaining items in the message; no
+               other format or extraneous item may appear after this. There
+               is no check that the number of items matches the number of
+               specifiers; any unmatched items won't be converted; extra
+               specifiers will produce garbage.
+               There is one restriction on this form: REAL items cannot
+               be included (because there is no easy way to do the
+               conversion to double on individual items of a set -- all
+               other types are passed as 32-bit quantities); use PAT1
+               instead, which does not have this restriction.
+
+As stated earlier, by default the converted string is displayed in the
+FormatServer window, but if the first item is one of the following the
+destination will be changed appropriately.
+
+    RETS    -- (RETurn String) When the message is replied to the client
+               (successfully), this item will contain a pointer to a data
+               block containing the converted string.  The client can
+               select one of two possible options for the source of this
+               data block: a) if the original message contains a non-NULL
+               ii_Ptr value, the converted string will be placed at that
+               address, PROVIDED that the supplied value of ii_Size is
+               large enough to hold it; otherwise the item will be flagged
+               IPC_FAILED | IPC_NOTKNOWN and no conversion will be done;
+               b) if the supplied ii_Ptr value is NULL, a suitably large
+               block of memory will be allocated for the string; the item
+               will be flagged IPC_TRANSFER to indicate that the Client
+               MUST dispose of the memory block when done.
+
+
+    FILH    -- (FILe Handle) If present, this must have a valid AmigaDOS
+               file handle in ii_Ptr (ii_Size = 0).  The converted string
+               will be written to this file (which might for instance be
+               the Client's Output() console or file).  (Note that under
+               AmigaDOS multiple processes can write to a single file
+               handle without problems; the system takes care of locking.)
+
+It is possible for both RETS and FILH itmes to be included in the message,
+in which case both paths will be used; if either is present, no output ever
+is sent to the FormatServer window. There cannot be more than one of each
+kind of item, though.  It is actually not necessary that they be the first
+items, but that is the preferred position for clarity.
+
+Any item Ids other than those mentioned above will be ignored, UNLESS they
+appear in positions following a format item (PAT1 or PATS) where a value is
+expected, in which case an error will be flagged and no conversion will be
+performed.
+
+
+Example:
+
+A message sent to FormatServer containing
+
+    ipc_Id          CNVA
+    ipc_ItemCount   4
+
+    item 1  ii_Id       RETS
+            ii_Size     0       (will be set to block size on return)
+            ii_Ptr      NULL    (will point to data block on return)
+
+    item 2  ii_Id       PAT1
+            ii_Size     0       (indicates MYOB to server)
+            ii_Ptr      pointer to string "Test line #%3d "
+
+    item 3  ii_Id       INTG
+            ii_Size     0
+            ii_Ptr      1       (some integer value)
+
+    item 4  ii_Id       STRG
+            ii_Size     0
+            ii_Ptr      pointer to string "...that's it\n"
+
+would return
+
+    "Test line #  1 ...that's it"
+
+to the client.
+
+Note the use of 0 values for string sizes; this is permissible where the
+pointer is to a client-owned area of memory that the server must not alter;
+the size field WOULD be necessary if the item was being passed to a more
+general server, or the server was to take over management of the item --
+then of course the block would also have to be in public memory.  The
+ii_Size field in any case does NOT represent the length of the string
+itself: if non-zero it would represent the data-block containing the
+string, which could be considerably bigger than the string.
+
+                            % % % % % % %
+
+

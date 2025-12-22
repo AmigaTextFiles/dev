@@ -1,0 +1,142 @@
+/* NotifyChime 1.02 */
+/* Copyright © Michael Tanzer, 1991, 1992 */
+/* See additional notices in accompanying documentation */
+
+interval = 60                              /* Minutes between chimes       */
+
+/* Make sure the necessary libraries are available */
+if ~show('L','rexxsupport.library') then
+  call addlib('rexxsupport.library',0,-30)
+if ~show('L','rexxarplib.library') then
+  call addlib('rexxarplib.library',0,-30)
+
+/* Test for asynchronous execution */
+if getenv('NotifyChime.asynchsw')=1 then do
+  call asynch
+  exit
+  end
+
+/* Process user request */
+arg minutes .                              /* Was an arg specified?        */
+if words(minutes)>0 then do                /* Yes, check it out            */
+  if minutes='HELP' | minutes='?' then do  /*   Handle call for help       */
+    call help
+    exit
+    end
+  if minutes='STATUS' then do              /*   Handle status request      */
+    interval = getenv('NotifyChime.interval')   /* Get current interval    */
+    if words(interval)>0 then msg = 'Current interval is' interval 'minutes.'
+    else msg = 'NotifyChime is not active.'
+    call post                             /*       Go post the message     */
+    exit
+    end
+  if minutes='QUIT' then do                /*   Handle quit request        */
+    call bumpcount                         /*     Go increment call count  */
+    call setenv('NotifyChime.interval')    /*     Clear interval           */
+    msg = 'NotifyChime terminated.'        /*     Set a message            */
+    call post                              /*     Go post it               */
+    exit
+    end
+  if ~datatype(minutes,'W') | minutes<1 then do /* Handle invalid value    */
+    call request(0,0,'Invalid number of minutes specified.',,'Drat!')
+    exit 79
+    end
+  interval = minutes                       /*   Get new interval           */
+  w = getenv('NotifyChime.interval')       /*   See if interval set        */
+  if words(w)>0 then w = 'changed'         /*   Handle changed interval    */
+  else w = 'set'                           /*   Handle new interval        */
+  msg = 'NotifyChime interval' w 'to' interval 'minutes.'
+  call post                                /*   Go post the message        */
+  end
+else do                                    /* No interval specified        */
+  w = getenv('NotifyChime.interval')       /*   See if interval set        */
+  if words(w)>0 then do                    /*   If so, QUIT                */
+    call bumpcount                         /*     Go increment call count  */
+    call setenv('NotifyChime.interval')    /*     Clear interval           */
+    msg = 'NotifyChime terminated.'        /*     Set a message            */
+    call post                              /*     Go post it               */
+    exit
+    end
+  msg = 'NotifyChime interval set to' interval 'minutes.'
+  call post                                /*  Go post the message         */
+  end
+call setenv('NotifyChime.interval',interval)  /* Store interval            */
+call setenv('NotifyChime.asynchsw',1)      /* Set switch for asynch task   */
+address arexx 'NotifyChime'                /* Start asynch task            */
+exit                                       /* Free up CLI task             */
+
+/* Handle asynchronous execution */
+asynch:
+  call setenv('NotifyChime.asynchsw',0)    /* Clear asynch switch          */
+  call bumpcount                           /* Go increment call count      */
+  interval = getenv('NotifyChime.interval')/* Get interval                 */
+  now = time()                             /* Get the current time         */
+  cm = substr(now,1,2)*60+substr(now,4,2)  /* Get current time in minutes  */
+  call calibrate                           /* Go get end of 1st interval   */
+  do forever
+    do forever
+      mm = dm-cm                           /* Get minutes to wait          */
+      if mm<0 then mm=mm+1440              /* Handle midnight crossing     */
+      if mm<10 then leave                  /* Leave loop if <10 min        */
+      mm = mm*9%10                         /* Get 90% of minutes           */
+      call wait                            /* Go wait 90% of time          */
+      now = time()                         /* Get current time             */
+      cm = substr(now,1,2)*60+substr(now,4,2) /* Get current time in mins  */
+      end                                  /*  Go handle remaining 10%     */
+    call wait                              /* Wait for end of interval     */
+    w = getenv('NotifyChime.count')        /* Get call count               */
+    if w~=callcount then exit              /* Exit if new interval set     */
+    now = time()                           /* Get the current time         */
+    cm = substr(now,1,2)*60+substr(now,4,2)/* Get current time in minutes  */
+    address arexx 'NotifyNoise' substr(now,1,5) /* Announce the time       */
+    dm = dm+interval                       /* Get new desired minute       */
+    if dm>=1440 then dm = dm-1440          /* Adjust for midnight crossing */
+    end
+
+wait:                                      /* Wait for time to pass        */
+  ss = mm*60-substr(now,7)                 /* Get seconds to wait          */
+  signal on halt                           /* Disable halt interrupt       */
+  call delay(ss*50)                        /* Catch some Z's               */
+halt:
+  signal off halt                          /* Enable halt interrupt        */
+  return
+
+calibrate:                                 /* Set for first interval       */
+  dm = cm+interval                         /* Assume no adjustment required*/
+  if dm>=1440 then dm = dm-1440            /* Adjust for midnight crossing */
+  if 60//interval>0 then return            /* Irregular interval           */
+  mm = substr(now,4,2)                     /* Get current minutes into hour*/
+  if mm//interval=0 then return            /* Cur mm is mult of interval   */
+  dm = dm-mm//interval                     /* Set for short interval       */
+  if dm<0 then dm = dm+1440                /* Adjust for no midnight cross */
+  return
+
+bumpcount:                                 /* Bump call count              */
+  callcount = getenv('NotifyChime.count')  /* Get previous count           */
+  if words(callcount)=0 then callcount = 1 /* Use 1 first time             */
+  else callcount = callcount+1             /* Bump count                   */
+  call setenv('NotifyChime.count',callcount)  /* Store result              */
+  return
+
+post:                                      /* Post a message               */
+  call postmsg(0,0,msg)                    /* Show the message             */
+  call delay(100)                          /* Wait a couple seconds        */
+  call postmsg()                           /* Clear the message            */
+  return
+
+help:                                      /* Give some help               */
+  if interval=30 then w = 15
+  else w = 30
+  w = 'NotifyChime announces the time every' interval 'minutes.\'       || ,
+      'To start NotifyChime, enter:\'                                   || ,
+      '   rx NotifyChime\'                                              || ,
+      'You may specify a different interval (in minutes) on the\'       || ,
+      'command line.  For example, enter:\'                             || ,
+      '   rx NotifyChime' w'\'                                          || ,
+      'to change the interval to' w 'minutes.\'                         || ,
+      'In order to display the current interval, enter:\'               || ,
+      '   rx NotifyChime status\'                                       || ,
+      'In order to terminate NotifyChime, enter:\'                      || ,
+      '   rx NotifyChime quit\'
+  call request(0,0,w,,'I understand.')
+  return

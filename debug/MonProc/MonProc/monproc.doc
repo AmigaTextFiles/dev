@@ -1,0 +1,184 @@
+OVERVIEW:
+
+MONPROC is a utility that monitors the AmigaDOS message activity for any 
+process.  This is useful when debugging device handlers or other such
+processes, or just for seeing how AmigaDOS works.
+
+MONPROC was originally written by Phillip Lindsay of Commodore-Amiga, Inc.
+using the Manx Aztec C compiler.  I have re-organized the routines, although
+the algorithms are basically the same, and have used the Lattice C compiler
+version 3.10.  I hope that it still works with Manx, but I do not own that
+compiler, so I can not test it.
+
+I have retained Phillips original copywrite notice, and have added my own when
+appropriate.  I hope that this satisfies Phillip's request to use the code but
+keep the copywrite notice intact.  I have included his original mail message
+at the end of this document.
+
+
+HOW TO USE MONPROC:
+
+To start MONPROC, type
+
+    1> MONPROC
+
+MONPROC will show you a list of the processes currently running, and request
+that you choose one from the list by typing its number.  Once you have
+selected a process to monitor, MONPROC inserts its own PacketWait() routine in
+the pr_PktWait field of the monitored process' Process structure.  Every time
+the monitored process calls the AmigaDOS taskwait() routine to wait for a
+message to be issued or returned, MONPROC prints the contents of the message,
+and then returns it to the monitored process for its own use.  (See the
+comments within the code for details of how this is done).
+
+Usually, you get lots of packets when anything interesting happens.  For
+instance, if you monitor a CLI process, you'll see the command-line prompts,
+then the command that was typed, then file lookups as the CLI searches the
+current PATH for the command, then file opens and file reads as the scatter
+loader brings the command into memory, then a close file, and then file
+look ups as the re-direction files are openned, and finally the output 
+from the command.
+
+In order to slow down the printed packets so that you can read them, just
+click in the CLI window where the monitor is running (and the messages are
+printing) and press the space-bar.  This will halt the output until you 
+press the back-space key.  Note that the monitored process will block until
+you press the back-space because it is waiting for the monitor process to
+return its AmigaDOS message to it.
+
+When you are done monitoring the process, click in the window where the
+packets are being displayed and press CTRL-C.  You should receive a message
+stating that the monitor is waiting for one more packet or for a CTRL-E.
+Try to force some DOS activity to occur in the monitored process (i.e., if the
+monitored process is a CLI, give it a command; if it's a disk handler, read
+something from the disk, etc.).  MONPROC should end when the next packet
+arrives.
+
+If, for some reason, you can not force an AmigaDOS message to the monitored
+process, you can type CTRL-E to stop MONPROC.  The next message that arrives
+for the monitored processd is likely to cause it to crash, however.
+
+The reason for this is simple, when you press CTRL-C, MONPROC removes its
+PacketWait() routine from the pr_PktWait field of the monitored process, but
+the monitored process probably IS STILL USING THE PacketWait() ROUTINE, so we
+can't let the monitor die just yet. (If we did, it's code would be removed 
+from memory, and the monitored process would crash when it received the next 
+message and tried to run the rest of the PacketWait() routine).  To solve this,
+we simply wait for one more message to be signalled, and then die.  Since
+we've already removed our code from pr_PktWiat, we can be assured that after
+the monitored process finishes using our PacketWait() routine, it will go
+back to using the normal one, so we can delete our code from memory without 
+causing a crash.
+
+
+COMMAND OPTIONS:
+
+MONPROC takes two optional arguments.  The first controls the way large data
+buffers are displayed, and the second controls how FileLocks are displayed.
+
+Normally, MONPROC tries to display data buffers as character strings within
+quotes.  When the buffer is very long, however (e.g., when a disk handler is
+returning a request for 1728 characters from a file), MONPROC will print
+the data buffer as a HEX dump (HEX codes followed by ASCII representations of
+these codes).  Since these take up a lot of space, you might not want to see
+them.  To suppress HEX dumps, use the NODUMP option when calling MONPROC:
+
+    1> MONPROC NODUMP
+
+Any data buffer that is over 50 characters will not be printed when you use
+the NODUMP option.
+
+The second command line option is NOLOCK.  Normally when an AmigaDOS packet
+includes a FileLock structure, MONPROC tries to look up the name of the file
+associated with the lock and prints that rather than the lock itself. 
+Usually, this gives the most information about the lock.  In order to look up
+the name, however, MONPROC calls AmigaDOS routines like DupLock(),
+ParentDir(), and Examine().  If you are monitoring a file system handler, it
+will not be able to respond to these calls, because it is waiting for the
+monitor process to return the packet containing the FileLock in question.
+If MONPROC waits for the handler to finish with ParentDir() or Examine()
+before returing the packet, we have a deadlock situation, and both processes
+freeze.
+
+To avoid this problem, use the NOLOCK option whenever you monitor file system
+processes (like those associated with DF0:, DF1:, RAM:, and VD0:):
+
+    1> MONPROC NOLOCK
+
+When NOLOCK is used, MONPROC will not try to look up the names of the locks,
+but will print just the volume name for the given lock.  In addition, it will
+give the access type (shared or exclusive) for the lock.  This information
+normally is not shown, because MONPROC can not look up the name associated
+with an exclusive lock.
+
+The NODUMP and NOLOCK options can be used together, and can be supplied in any
+order.  The defaults are to show Locks and perform HEX dumps when needed. 
+These defaults can be changed in the file PrintPkt.c
+
+
+COMPILING AND LINKING MONPROC:
+
+For Lattice C, use the following commands to compile and link the files:
+
+    1> LC -v -L MONPROC GETPROCS GETDIR PRINTPKT
+
+The -v option is required; MONPROC will not work without it.   I do not have 
+the Manx copmiler, so I can't tell you how to compile MONPROC with it.  I
+suspect that if any changes are required to make it run with Manx, they are
+probably minor.  I have retained all of Phillip Lindsay's #ifdef MANX code, so
+the transition should be pretty easy.
+
+
+SOME INTERESTING USES FOR THIS PROGRAM:
+
+I saw MONPROC basically as an interesting tool for learning about how AmigaDOS
+works.  For instance, you can use it to see how the scatter-loader actually
+loads your program.  I was shocked to see how many parts my programs
+contained.  You can see what effect the SMALLDATA and SMALLCODE options have
+on your executables.
+
+A more interesting use is to see how some of the CLI commands work.  You can
+follow the ParentDir calls for the CD command, and can see how the CLI looks
+down the PATH directories for your commands.
+
+You can use MONPROC to help you debug device handlers (for instance, I used it
+to help me understand Matt Dillon's PIPE device).
+
+You can use it to help debug file actions from within your own programs (see
+when your program opens files, and whether they are for reading or writing;
+see the data as it is sent to the files; see where you end up after a Seek(),
+see when it closes the files; etc.).
+
+Finally, you can use MONPROC to produce a hardcopy listing of the I/O activity
+to particular devices.  For instance, I used MONPROC as the basis for my own
+program called HARDCOPY, which produces a hardcopy transcript of any CLI 
+session (i.e., all the text that appears in the CLI window is sent to a file 
+as well as to the CLI window).
+
+Davide P. Cervone
+University of Rochester Computing Center            DPVC@UORDBV.BITNET
+Taylor Hall                                         dpvc@tut.cc.rochester.EDU
+Rochester, New York  14627                          dpvc@ur-tut.UUCP
+(716) 275-2811
+
+
+PHILLIP LINDSAY'S ORIGINAL COMMENTS:
+
+    In the process structure you will find a field labeled "pr_PktWait." This
+is a pointer for a alternate wait routine for AmigaDOS message handling.
+Everytime the AmigaDOS taskwait() routine is called a check is made to see
+if the process PktWait field is non-zero...if non-zero a subroutine call is
+made to that address. The requirement of the subroutine is to wait for a
+message to arrive at the process port (pr_MsgPort) and to return the address
+of the message (NOT PACKET!) in D0.
+Anyway, what follows is a simple program that will allow you to monitor any
+process for packet activity. A binary is available for the asking. (uuencoded)
+    BTW, When you call a AmigaDOS routine [like Read()] that talks to a
+AmigaDOS handler you can monitor a process receiving packets.
+-phil [ I promise this time no two signatures ]
+==============================================================================
+  Phillip Lindsay - Commodore Business Machines - Amiga Technical Support
+  UUCP: {ihnp4|seismo|caip}!cbmvax!phillip      - Phone: (215) 431-9180
+  No warranty is implied or otherwise given in the form of suggestion or 
+  example. Any opinions found here are of my making.
+

@@ -1,0 +1,192 @@
+%		WARPLAN robot problem solver
+%		written by David Warren
+%
+%		% prolog warplan robot.plan
+%		: run!
+
+op(650, yfx, =>)!
+
+% Create plans to achieve C given starting state T.
+% A plan can only be made if goals are consistent.
+
+plans(Goal, Trace) :-
+	not(consistent(Goal, true)), !,
+	print(impossible).
+plans(Goal, Start_Trace) :-
+	plan(Goal, true, Start_Trace, Finish_Trace), !,
+	print_plan(Finish_Trace),
+	nl.
+
+% plan(Goal, ProtectList, TraceTillNow, ResultTrace)
+% Make a plan to solve a Goal making sure that the conditions
+% in ProtectList are never vio;ated by the plan.
+% Trace Till Now is the trace of all actions so far performed.
+% ResultTrace is the new trace after Goal has been achieved.
+
+plan(Goal1 & Other_Goals, Protect, Start_Trace, Final_Trace) :- !,
+	solve(Goal1, Protect, Start_Trace, Next_Protect, Next_Trace),
+	plan(Other_Goals, Next_Protect, Next_Trace, Final_Trace).
+plan(Goal, Protect, Start_Trace, Final_Trace) :-
+	solve(Goal, Protect, Start_Trace, _, Final_Trace).
+
+% solve(Goal, ProtBefore, Trace Before, ProtAfter, TraceAfter)
+% solve Goal, giving the new protect list and trace after finding
+% the solution.
+% Goal may always be true => solved already.
+% Goal may already be true => add it to the protect list.
+% otherwise try to achive Goal with Action 
+
+solve(Goal, Protect, Trace, Protect, Trace) :-
+	always(Goal).
+solve(Goal, Protect, Trace, Protect1, Trace) :-
+	holds(Goal, Trace),
+	and(Goal, Protect, Protect1).
+solve(Goal, Protect, Trace, Goal & Protect, Trace1) :-
+	add(Goal, Action),
+	achieve(Goal, Action, Protect, Trace, Trace1).
+
+% achive(Goal, Action, Protect, OldTrace, NewTrace)
+% Try to achieve Goal using Action.
+% Make sure tht Actio preserves conditios in protect list.
+% make sure that Action can be done in the world and plan
+% actions for preconditions of action.
+% If performing action at end of OldTrace does not preserve
+% protected goals, try to perform Action earlier in plan.
+% This is done by removing the last action, Action1, making
+% sure that doing Action1 would not undo Goal.
+% retrace is used to find the protect list with Action1 removed.
+% Try to achieve Goal given the new trace.
+
+achieve(Goal, Action, Protect, Trace, Trace1 => Action) :-
+	preserves(Action, Protect),
+	can(Action, Precondition),
+	consistent(Precondition, Protect),
+	plan(Precondition, Protect, Trace, Trace1),
+	preserves(Action, Protect).
+achieve(Goal, Action, Protect, Trace => Action1, Trace1 => Action1) :-
+	preserved(Goal, Action1),
+	retrace(Protect, Action1, Protect1),
+	achieve(Goal, Action, Protect1, Trace, Trace1),
+	preserved(Goal, Action1).
+
+% Condition is preserved by Action if Conditio is not in
+% Actions delete list
+
+preserved(Condition, Action) :-
+	numbervars(Condition & Action, 0, N),
+	del(Condition, Action), !,
+	fail.
+preserved(_, _).
+
+% Action preserves all goals in a protect list if each goal
+% is preserved by Action.
+
+preserves(Action, Condition & C) :-
+	preserved(Condition, Action),
+	preserves(Action, C).
+preserves(Action, true).
+
+% Condition is true in the current trace if Condition was added
+% the the last Action.
+% Otherwise, Condition is preserved by Action and Conditio holds
+% because of the earlier trace.
+% Finally, Condition may be true because it is given as initial data.
+
+holds(Condition, Trace => Action) :-
+	add(Condition, Action).
+holds(Condition, Trace => Action) :- !,
+	preserved(Condition, Action),
+	holds(Condition, Trace),
+	preserved(Condition, Action).
+holds(Condition, Trace) :-
+	given(Trace, Condition).
+
+% Goal is not consistent with the Protected goals if:
+%  S is a condition which is impossible to achiev in this world and
+%  the intersection of Goal and S is non-empty and
+%  S is implied by Goal & Protect.
+
+consistent(Goal, Protect) :-
+	numbervars(Goal & Protect, 0, N),
+	imposs(S),
+	not(not(intersect(Goal, S))),
+	implied(S, Goal & Protect),
+	!,
+	fail.
+consistent(_, _).
+
+% Retrace the Protect list, removing goals which have been
+% achieved by Action. The resu;t is the list Protect2.
+% Also put preconditions for Action at start of the new protect
+% list. This keeps protected goals in the same order as actions
+% in trace?
+
+retrace(Protect, Action, Protect2) :-
+	can(Action, Preconditions),
+	retrace1(Protect, Action, Preconditions, Protect1),
+	append1(Preconditions, Protect1, Protect2).
+
+% If Condition is equivalent to a condition in the add list of
+% Action then skip it.
+% If Condition is equivalent to a condition in the preconditions
+% of Action then skip it.
+% Otherwise add Action to the new protect list.
+
+retrace1(Condition & Protect, Action, Preconditions, Protect1) :-
+	add(Condition1, Action),
+	equiv(Condition, Condition1),
+	!,
+	retrace1(Protect, Action, Preconditions, Protect1).
+retrace1(Condition & Protect, Action, Preconditions, Protect1) :-
+	elem(Condition1, Preconditions),
+	equiv(Condition, Condition1),
+	!,
+	retrace1(Protect, Action, Preconditions, Protect1).
+retrace1(Condition & Protect, Action2, C, Condition & P1) :-
+	retrace1(Protect, Action2, C, P1).
+retrace1(true, Action2, C, true).
+
+% Condition AND Protect is Protect if Condition is equivalent to Y,
+% an element of Protect.
+% Otherwise Condition AND Protect is Condition & Protect.
+
+and(Condition, Protect, Protect) :-
+	elem(Y, Protect),
+	equiv(Condition, Y), !.
+and(Condition, Protect, Condition & Protect).
+
+% The equivalent of list append except that terms are conjunctions,
+% not lists.
+
+append1(Condition & C, Protect, Condition & P1) :- !,
+	append1(C, Protect, P1).
+append1(Condition, Protect, Condition & Protect).
+
+% elem(X, Y): X is a member of Y.
+% The equivalent of list member.
+
+elem(Condition, Y & C) :- elem(Condition, Y).
+elem(Condition, Y & C) :- !, elem(Condition, C).
+elem(Condition, Condition).
+
+% S1 intersects S2 if a member of S1, X, is also a member of S2.
+
+intersect(S1, S2) :- elem(Condition, S1), elem(Condition, S2).
+
+% Implied(P, Q): P is implied by Q if every member of P is in Q
+% or that member is true anyway.
+
+implied(S1 & S2, C) :- !, implied(S1, C), implied(S2, C).
+implied(Condition, C) :- elem(Condition, C).
+implied(Condition, C) :- Condition.
+
+equiv(Condition, Y) :- not(nonequiv(Condition, Y)).
+
+nonequiv(Condition, Y) :-
+	numbervars(Condition & Y, 0, N),
+	Condition = Y, !,
+	fail.
+nonequiv(Condition, Y).
+
+print_plan(Condition => Y) :- print_plan(Condition), print(Y).
+print_plan(Condition) :- print(Condition).

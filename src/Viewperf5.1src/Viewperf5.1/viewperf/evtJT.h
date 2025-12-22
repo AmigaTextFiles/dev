@@ -1,0 +1,18 @@
+static void (*EventTable[])(int threadNum) = {
+evtI,
+evtD,
+evtIM,
+evtDM,
+evtIA,
+evtDA,
+evtIMA,
+evtDMA,
+evtIW,
+evtDW,
+evtIMW,
+evtDMW,
+evtIAW,
+evtDAW,
+evtIMAW,
+evtDMAW,
+};

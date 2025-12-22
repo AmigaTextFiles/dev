@@ -1,0 +1,122 @@
+# Generated automatically from Makefile.in by configure.
+# Makefile for trampoline
+
+#### Start of system configuration section. ####
+
+HOST = m68k-cbm-amigados
+CPU = m68k
+
+# Directories used by "make":
+srcdir = /WB/usr/source/clisp/ffcall/trampoline
+
+# Directories used by "make install":
+prefix = /usr/local
+local_prefix = /usr/local
+exec_prefix = $(prefix)
+libdir = $(exec_prefix)/lib
+includedir = $(local_prefix)/include
+mandir = $(exec_prefix)/man
+
+# Programs used by "make":
+CC = gcc
+CFLAGS = -g -O -DFOR_AMIGA_CLISP
+CPP = gcc -E
+INCLUDES = -I. -I$(srcdir)
+AR = ar
+AR_FLAGS = rc
+RANLIB = ranlib
+RM = rm -f
+LN = ln -s
+
+
+# Programs used by "make install":
+INSTALL = /bin/install -c
+INSTALL_PROGRAM = $(INSTALL)
+INSTALL_DATA = $(INSTALL) -m 644
+
+#### End of system configuration section. ####
+
+SHELL = /bin/sh
+
+OBJECTS = trampoline.o 
+
+all : $(OBJECTS) libtrampoline.a trampoline.h $(srcdir)/trampoline.3 $(srcdir)/trampoline.html
+
+trampoline.h : $(srcdir)/trampoline.h.in
+	-$(LN) $(srcdir)/trampoline.h.in trampoline.h
+
+trampoline.o : $(srcdir)/trampoline.c trampoline.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c $(srcdir)/trampoline.c
+
+tramp-$(CPU).o : tramp-$(CPU).s
+	$(CC) -c tramp-$(CPU).s
+
+tramp-rs6000.s : $(srcdir)/tramp-rs6000.S
+	$(CPP) $(srcdir)/tramp-rs6000.S > tramp-rs6000.s
+
+cache-$(CPU).o : $(srcdir)/cache-$(CPU).s
+	$(CC) -c $(srcdir)/cache-$(CPU).s
+
+libtrampoline.a : $(OBJECTS)
+	$(RM) libtrampoline.a
+	$(AR) $(AR_FLAGS) libtrampoline.a $(OBJECTS)
+	$(RANLIB) libtrampoline.a
+
+install : all force
+	if [ ! -d $(libdir) ] ; then mkdir $(libdir) ; fi
+	$(INSTALL_DATA) libtrampoline.a $(libdir)/libtrampoline.a
+	if [ ! -d $(includedir) ] ; then mkdir $(includedir) ; fi
+	$(INSTALL_DATA) trampoline.h $(includedir)/trampoline.h
+	if [ ! -d $(mandir) ] ; then mkdir $(mandir) ; fi
+	if [ ! -d $(mandir)/man3 ] ; then mkdir $(mandir)/man3 ; fi
+	$(INSTALL_DATA) $(srcdir)/trampoline.3 $(mandir)/man3/trampoline.3
+	if [ ! -d $(mandir)/html ] ; then mkdir $(mandir)/html ; fi
+	$(INSTALL_DATA) $(srcdir)/trampoline.html $(mandir)/html/trampoline.html
+
+installdirs : force
+	if [ ! -d $(libdir) ] ; then mkdir $(libdir) ; fi
+	if [ ! -d $(includedir) ] ; then mkdir $(includedir) ; fi
+	if [ ! -d $(mandir) ] ; then mkdir $(mandir) ; fi
+	if [ ! -d $(mandir)/man3 ] ; then mkdir $(mandir)/man3 ; fi
+	if [ ! -d $(mandir)/html ] ; then mkdir $(mandir)/html ; fi
+
+uninstall : force
+	$(RM) $(libdir)/libtrampoline.a
+	$(RM) $(includedir)/trampoline.h
+	$(RM) $(mandir)/man3/trampoline.3
+	$(RM) $(mandir)/html/trampoline.html
+
+test1.o : $(srcdir)/test1.c trampoline.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c $(srcdir)/test1.c
+
+test1 : test1.o $(OBJECTS)
+	$(CC) $(CFLAGS) test1.o $(OBJECTS) -o test1
+
+test2.o : $(srcdir)/test2.c trampoline.h
+	$(CC) $(CFLAGS) $(INCLUDES) -c $(srcdir)/test2.c
+
+test2 : test2.o $(OBJECTS)
+	$(CC) $(CFLAGS) test2.o $(OBJECTS) -o test2
+
+check1 : all test1
+	./test1
+
+check : all test1 test2
+	./test1
+	./test2
+	touch tests.passed.$(HOST)
+
+mostlyclean : clean
+
+clean : force
+	$(RM) $(OBJECTS) tramp-rs6000.s libtrampoline.a core
+	$(RM) test1.o test1 test2.o test2
+
+distclean : clean
+	$(RM) config.status config.log config.cache Makefile config.h trampoline.h tests.passed.*
+
+maintainer-clean : distclean
+
+force :
+
+

@@ -1,0 +1,275 @@
+<html>
+<head>
+  <title>Dice arbitrarily nests ARexx commands</title>
+  <meta name="Generator" content="GuideML V1.6">
+  <meta http-equiv="Content-Type" content="text/html">
+</head>
+<body>
+<a href="main.html">CONTENTS</a> | <a href="dice_index/main.html">INDEX</a> | <a href="example1.html">PREV</a> | <a href="example3.html">NEXT</a>
+<hr>
+<pre>
+
+
+
+ This example shows off DICE's capability to arbitrarily nest ARexx
+ commands.
+
+ To test, run the program in one CLI and the rexx script in another.
+ Try running the rexx script without typing ^E from the test program,
+ then try running the rexx script after typing ^E from the test program
+ (to enable the second ARexx port).
+
+ Finally, just for fun, try ^C (BREAKing) your test program while it's
+ in the middle of processing ARexx commands.
+
+ 1&#062; dcc test.c -o test
+ 1&#062; test
+ ...
+
+ 2&#062; rx xx.rexx
+ etc...
+
+
+
+ #include &#060;lib/rexx.h&#062;
+ #include &#060;clib/exec_protos.h&#062;
+ #include &#060;string.h&#062;
+ #include &#060;stdlib.h&#062;
+ #include &#060;stdio.h&#062;
+ #include &#060;dos/dos.h&#062;
+
+ char Buf[256];
+
+ /*
+  *  This program shows off using two ports.  The first is created
+  *  automatically by DICE using RexxHostName as the template.  The
+  *  second we create manually.  You can dynamically create as many
+  *  ports as you wish.  In this example, hitting ^E creates the second
+  *  port and hitting ^F deletes it.
+  *
+  *  Note that DICE automatically creates an application port.. that is,
+  *  in a slot number &#060;portname&#062;.00 through &#060;portname&#062;.99  If you want
+  *  to create a global public port, i.e. just &#060;portname&#062;, specify NULL
+  *  for RexxHostName then use CreateGlobalDiceRexxPort().  DICE will
+  *  automatically stuff a NULL RexxHostName with your global port name
+  *  For future PlaceRexxCommand() calls.
+  */
+
+ struct MsgPort TmpPort;
+ short TmpPortValid;
+
+ /*
+  *  You MUST have an INITIALIZED declaration to specify the master
+  *  port name.  DICE references this variable *before* _main or
+  *  even __main is run!!!!  Therefore, only static initialization
+  *  as that shown below will work.
+  */
+
+ char *RexxHostName = &quot;FUBAR&quot;;
+
+ /*
+  *  This little variable limits the nesting levels for our tests
+  */
+
+ long Cnts;
+
+ main(ac, av)
+ char *av[];
+ {
+ /*
+  *  DICE automatically opens rexxsyslib.library if we
+  *  reference it's base variable or DICE's ARexx support
+  *  routines.
+  *
+  *  However, DICE does not automatically abort if it cannot
+  *  open the library so we must check for success here.
+  *  (DICE normally aborts the program automatically if any
+  *  autoinit library fails to open, rexxsyslib is an exception)
+  */
+
+ if (RexxSysBase == NULL) {
+     puts(&quot;Unable to open rexxsyslib.library !&quot;);
+     exit(20);
+ }
+
+ /*
+  *  The program demonstrates both waiting for an incomming
+  *  ARexx command (on any number of ports) and dispatching REXX
+  *  commands.
+  *
+  *  To handle incomming ARexx commands you wait for your ARexx
+  *  signal to come in (1 &#060;&#060; RexxSigBit) then call
+  *  ProcessRexxCommands(NULL) which forces DICE to scan all
+  *  known ARexx ports belonging to this program.  Alternately
+  *  you can specify a pointer to a message port to process the
+  *  commands associated with a single port, but beware that
+  *  you must be sure to handle all pending input before going
+  *  back to your Wait() or you may lock yourself out!
+  *
+  *  To dispatch a REXX command you call PlaceRexxCommand() with
+  *  appropriate arguments.  If you pass a non-NULL char ** to
+  *  hold the result then DICE will put the result string in
+  *  the returned pointer.  You must free() this string when
+  *  you are done with it.  The string might be returned as NULL
+  *  if no result string is returned from the ARexx command, so
+  *  check for that condition too!
+  *
+  *  Note that DICE will automatically clean up in-progress REXX
+  *  messages if you ^C !  Do NOT attempt to reply these messages
+  *  yourself!
+  */
+
+ puts(&quot;Type ^D followed by a rexx command&quot;);
+ puts(&quot;or run a rex script using host FUBAR with commands 'hello' or 'test'&quot;);
+ puts(&quot;or type ^C to exit&quot;);
+
+ for (;;) {
+     long mask = Wait(SIGBREAKF_CTRL_C | SIGBREAKF_CTRL_D |
+     SIGBREAKF_CTRL_E | SIGBREAKF_CTRL_F | (1 &#060;&#060; RexxSigBit));
+
+     if (mask &amp; SIGBREAKF_CTRL_E) {
+     if (TmpPortValid == 0) {
+         puts(&quot;CREATE FU2&quot;);
+         CreateDiceRexxPort(&amp;TmpPort, &quot;FU2&quot;);
+         TmpPortValid = 1;
+     }
+     }
+
+     /*
+      *  WARNING!  You may only call DeleteDiceRexxPort() from
+      *  the top level.  You CANNOT call DeleteDiceRexxPort()
+      *  while nested within an ARexx command as you might delete
+      *  the port out from under yourself.  In a real application
+      *  this means that you need to handle your CLOSE command
+      *  (to close a project within an application) as a special
+      *  case since you cannot call DeleteDiceRexxPort() for that
+      *  project while in the middle of ARexx processing!
+      */
+
+     if (mask &amp; SIGBREAKF_CTRL_F) {
+     if (TmpPortValid == 1) {
+         puts(&quot;DELETE FU2&quot;);
+         DeleteDiceRexxPort(&amp;TmpPort);
+         TmpPortValid = 0;
+     }
+     }
+
+     if (mask &amp; SIGBREAKF_CTRL_D) {
+     char *res;
+     long rc;
+     long ec;
+
+     printf(&quot;rexx command? &quot;);
+     fflush(stdout);
+     gets(Buf);
+
+     rc = PlaceRexxCommand(NULL, Buf, &amp;res, &amp;ec);
+     printf(&quot;result: rc=%d res=%sn&quot;, rc, ec, res ? res : &quot;&#060;null&#062;&quot;);
+     if (res)
+         free(res);
+     }
+     if (mask &amp; SIGBREAKF_CTRL_C)
+     exit(1);
+     if (mask &amp; (1 &#060;&#060; RexxSigBit))
+     ProcessRexxCommands(NULL);
+ }
+ return(0);
+ }
+
+ /*
+  *  We must supply a DoRexxCommand() routine, it returns the
+  *  return code.  A pointer to the RexxMsg structure is passed
+  *  though in most cases you will not need to reference it.  DICE
+  *  will AUTOMATICALLY reply the message based on how you set *pres
+  *  and what error code you return.
+  *
+  *  It is perfectly legal to call PlaceRexxCommand() from this
+  *  routine.  However, you must be careful NEVER to call
+  *  DeleteDiceRexxPort() from this routine!
+  *
+  *  A pointer to hte MsgPort structure that the message came in
+  *  on is passed allowing you to determine which project the
+  *  message applies to.
+  */
+
+ long
+ DoRexxCommand(msg, port, arg0, pres)
+ void *msg;          /*  RexxMsg structure if we need it     */
+ struct MsgPort *port;   /*  MsgPort structure if we need it     */
+ char *arg0;     /*  arg0                    */
+ char **pres;    /*  where to put our result if rc==0    */
+ {
+ printf(&quot;PORT %-10s received %sn&quot;, port-&#062;mp_Node.ln_Name, arg0);
+ if (stricmp(arg0, &quot;hello&quot;) == 0) {
+     *pres = &quot;goodbye!&quot;;
+     return(0);
+ } else if (stricmp(arg0, &quot;test&quot;) == 0) {
+     *pres = &quot;test on you too!&quot;;
+     return(0);
+ } else if (strnicmp(arg0, &quot;recurse&quot;, 7) == 0) {
+     long rc = 1;
+
+     ++Cnts;
+     if (Cnts &#060; 10) {
+     rc = PlaceRexxCommand(NULL, arg0 + 8, pres, NULL);
+     printf(&quot;tried to run %s, got rc=%d res=%sn&quot;, arg0 + 8, rc,
+     *pres ? *pres : &quot;&#060;null&#062;&quot;);
+     }
+     --Cnts;
+     return(rc);
+ }
+
+ /*
+  *  unrecognized command
+  */
+
+ return(5);
+ }
+
+
+
+ --------- xx.rexx --------
+ /* xx */
+
+ OPTIONS RESULTS
+
+ address FUBAR.01
+
+ RESULT = 'no result'
+ hello
+ say RC ',' RESULT
+
+ RESULT = 'no result'
+ test
+ say RC ',' RESULT
+
+ RESULT = 'no result'
+ xxx
+ say RC ',' RESULT
+
+ recurse yy.rexx
+
+ --------- yy.rexx --------
+ /* yy */
+
+ OPTIONS RESULTS
+
+ address FU2.01
+
+ RESULT = 'no result'
+ hello
+ say RC ',' RESULT
+
+ RESULT = 'no result'
+ test
+ say RC ',' RESULT
+
+ RESULT = 'no result'
+ xxx
+ say RC ',' RESULT
+
+ recurse xx.rexx
+
+</pre>
+</body>
+</html>

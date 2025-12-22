@@ -1,0 +1,379 @@
+DEFINITION FOR LIBRARY MODULE IFFParse ;
+
+FROM SYSTEM	IMPORT ADDRESS, LONGSET, MAKEID, STRING ;
+FROM Exec	IMPORT MinNode, MsgPort ;
+FROM Clipboard	IMPORT IOClipReq ;
+FROM Utility	IMPORT HookPtr ;
+
+TYPE
+  IFFHandlePtr		= POINTER TO IFFHandle ;
+  IFFStreamCmdPtr	= POINTER TO IFFStreamCmd ;
+  ContextNodePtr	= POINTER TO ContextNode ;
+  LocalContextItemPtr	= POINTER TO LocalContextItem ;
+  StoredPropertyPtr	= POINTER TO StoredProperty ;
+  CollectionItemPtr	= POINTER TO CollectionItem ;
+  ClipboardHandlePtr	= POINTER TO ClipboardHandle ;
+
+(*===========================================================================*)
+
+
+(* Structure associated with an active IFF stream.			    *)
+(* "iff_Stream" is a value used by the client's read/write/seek functions - *)
+(* it will not be accessed by the library itself and can have any value	    *)
+(* (could even be a pointer or a BPTR).					    *)
+(* This structure can only be allocated by iffparse.library		    *)
+
+  IFFHandle = RECORD
+    iff_Stream : ADDRESS ;
+    iff_Flags  : LONGSET ;
+    iff_Depth  : LONGINT ; (*  Depth of context stack *)
+  END ;
+
+(* bit masks for "iff_Flags" field *)
+CONST
+  IFFF_READ	= { } ;			 (* read mode - default    *)
+  IFFF_WRITE	= {0} ;			 (* write mode		   *)
+  IFFF_RWBITS	= IFFF_READ+IFFF_WRITE ; (* read/write bits	   *)
+  IFFF_FSEEK	= {1} ;			 (* forward seek only	   *)
+  IFFF_RSEEK	= {2} ;			 (* random seek		   *)
+  IFFF_RESERVED	= LONGSET(0FFFF0000H) ;	 (* Don't touch these bits *)
+
+
+(*===========================================================================*)
+
+
+(* When the library calls your stream handler, you'll be passed a pointer *)
+(* to this structure as the "message packet".				  *)
+
+TYPE
+  IFFStreamCmd = RECORD
+    sc_Command : LONGINT ;	(* Operation to be performed (IFFCMD_) *)
+    sc_Buf     : ADDRESS ;	(* Pointer to data buffer	       *)
+    sc_NBytes  : LONGINT ;	(* Number of bytes to be affected      *)
+  END ;
+
+
+(*===========================================================================*)
+
+
+(* A node associated with a context on the iff_Stack. Each node		*)
+(* represents a chunk, the stack representing the current nesting	*)
+(* of chunks in the open IFF file. Each context node has associated	*)
+(* local context items in the (private) LocalItems list.  The ID, type,	*)
+(* size and scan values describe the chunk associated with this node.	*)
+(* This structure can only be allocated by iffparse.library		*)
+
+
+  ContextNode = RECORD
+    cn_Node : MinNode ;
+    cn_ID   : LONGINT ;
+    cn_Type : LONGINT ;
+    cn_Size : LONGINT ;	(*  Size of this chunk		   *)
+    cn_Scan : LONGINT ;	(*  # of bytes read/written so far *)
+  END ;
+
+
+(*===========================================================================*)
+
+
+(* Local context items live in the ContextNode's.  Each class is identified *)
+(* by its lci_Ident code and has a (private) purge vector for when the	    *)
+(* parent context node is popped.					    *)
+(* This structure can only be allocated by iffparse.library		    *)
+
+  LocalContextItem = RECORD
+    lci_Node  : MinNode ;
+    lci_ID    : LONGINT ;
+    lci_Type  : LONGINT ;
+    lci_Ident : LONGINT ;
+  END ;
+
+
+(*===========================================================================*)
+
+
+(* StoredProperty: a local context item containing the data stored	*)
+(* from a previously encountered property chunk.			*)
+
+  StoredProperty = RECORD
+    sp_Size : LONGINT ;
+    sp_Data : ADDRESS ;
+  END ;
+
+
+(*===========================================================================*)
+
+
+(* Collection Item: the actual node in the collection list at which	*)
+(* client will look. The next pointers cross context boundaries so	*)
+(* that the complete list is accessable.				*)
+
+  CollectionItem = RECORD
+    ci_Next : CollectionItemPtr ;
+    ci_Size : LONGINT ;
+    ci_Data : ADDRESS ;
+  END ;
+
+
+(*===========================================================================*)
+
+
+(* Structure returned by OpenClipboard(). You may do CMD_POSTs and such	   *)
+(* using this structure. However, once you call OpenIFF(), you may not	   *)
+(* do any more of your own I/O to the clipboard until you call CloseIFF(). *)
+
+  ClipboardHandle = RECORD
+    cbh_Req	    : IOClipReq ;
+    cbh_CBport	    : MsgPort   ;
+    cbh_SatisfyPort : MsgPort   ;
+  END ;
+
+
+(*===========================================================================*)
+
+
+(* IFF return codes. Most functions return either zero for success or	   *)
+(* one of these codes. The exceptions are the read/write functions which   *)
+(* return positive values for number of bytes or records read or written,  *)
+(* or a negative error code. Some of these codes are not errors per sae,   *)
+(* but valid conditions such as EOF or EOC (End of Chunk).		   *)
+
+CONST
+  IFFERR_EOF		=  -1 ;	(* Reached logical end of file	*)
+  IFFERR_EOC		=  -2 ;	(* About to leave context	*)
+  IFFERR_NOSCOPE	=  -3 ;	(* No valid scope for property	*)
+  IFFERR_NOMEM		=  -4 ;	(* Internal memory alloc failed *)
+  IFFERR_READ		=  -5 ;	(* Stream read error		*)
+  IFFERR_WRITE		=  -6 ;	(* Stream write error		*)
+  IFFERR_SEEK		=  -7 ;	(* Stream seek error		*)
+  IFFERR_MANGLED	=  -8 ;	(* Data in file is corrupt	*)
+  IFFERR_SYNTAX		=  -9 ;	(* IFF syntax error		*)
+  IFFERR_NOTIFF		= -10 ;	(* Not an IFF file		*)
+  IFFERR_NOHOOK		= -11 ;	(* No call-back hook provided	*)
+  IFF_RETURN2CLIENT	= -12 ;	(* Client handler normal return *)
+
+
+(*===========================================================================*)
+
+CONST
+(* Universal IFF identifiers *)
+  ID_FORM		= MAKEID("FORM") ;
+  ID_LIST		= MAKEID("LIST") ;
+  ID_CAT		= MAKEID("CAT ") ;
+  ID_PROP		= MAKEID("PROP") ;
+  ID_NULL		= MAKEID("    ") ;
+
+(* Identifier codes for universally recognized local context items *)
+  IFFLCI_PROP		= MAKEID("prop") ;
+  IFFLCI_COLLECTION	= MAKEID("coll") ;
+  IFFLCI_ENTRYHANDLER	= MAKEID("enhd") ;
+  IFFLCI_EXITHANDLER	= MAKEID("exhd") ;
+
+
+(*===========================================================================*)
+
+
+(* Control modes for ParseIFF() function *)
+  IFFPARSE_SCAN		= 0 ;
+  IFFPARSE_STEP		= 1 ;
+  IFFPARSE_RAWSTEP	= 2 ;
+
+
+(*===========================================================================*)
+
+
+(* Control modes for StoreLocalItem() function *)
+  IFFSLI_ROOT		= 1 ; (* Store in default context	  *)
+  IFFSLI_TOP		= 2 ; (* Store in current context	  *)
+  IFFSLI_PROP		= 3 ; (* Store in topmost FORM or LIST	  *)
+
+
+(*===========================================================================*)
+
+
+(* Magic value for writing functions. If you pass this value in as a size *)
+(* to PushChunk() when writing a file, the parser will figure out the	  *)
+(* size of the chunk for you. If you know the size, is it better to	  *)
+(* provide as it makes things faster.					  *)
+
+  IFFSIZE_UNKNOWN 	= -1 ;
+
+
+(*===========================================================================*)
+
+
+(* Possible call-back command values *)
+  IFFCMD_INIT		= 0 ;	(* Prepare the stream for a session *)
+  IFFCMD_CLEANUP	= 1 ;	(* Terminate stream session	    *)
+  IFFCMD_READ		= 2 ;	(* Read bytes from stream	    *)
+  IFFCMD_WRITE		= 3 ;	(* Write bytes to stream	    *)
+  IFFCMD_SEEK		= 4 ;	(* Seek on stream		    *)
+  IFFCMD_ENTRY		= 5 ;	(* You just entered a new context   *)
+  IFFCMD_EXIT		= 6 ;	(* You're about to leave a context  *)
+  IFFCMD_PURGELCI	= 7 ;	(* Purge a LocalContextItem	    *)
+
+
+(*===========================================================================*)
+
+
+(* Obsolete IFFParse definitions, here for source code compatibility only. *)
+(* Please do NOT use in new code.					   *)
+(*   IFFPARSE_V37_NAMES_ONLY to remove these older names		   *)
+
+CONST
+  IFFSCC_INIT	 = IFFCMD_INIT ;
+  IFFSCC_CLEANUP = IFFCMD_CLEANUP ;
+  IFFSCC_READ	 = IFFCMD_READ ;
+  IFFSCC_WRITE	 = IFFCMD_WRITE ;
+  IFFSCC_SEEK	 = IFFCMD_SEEK ;
+
+
+(*===========================================================================*)
+
+VAR
+  IFFParseBase : ADDRESS ;
+
+(*--- functions in V36 or higher (Release 2.0) ---*)
+
+(* Basic functions *)
+
+PROCEDURE AllocIFF( ) : IFFHandlePtr ;
+PROCEDURE OpenIFF ( iff : IFFHandlePtr ; rwMode : LONGSET ) : LONGINT ;
+PROCEDURE ParseIFF( iff : IFFHandlePtr ; control : LONGSET ) : LONGINT ;
+PROCEDURE CloseIFF( iff : IFFHandlePtr ) ;
+PROCEDURE FreeIFF ( iff : IFFHandlePtr ) ;
+
+(* Read/Write functions *)
+
+PROCEDURE ReadChunkBytes( iff : IFFHandlePtr ;
+			  buf : ADDRESS ;
+			  numBytes : LONGINT ) : LONGINT ;
+
+PROCEDURE WriteChunkBytes( iff : IFFHandlePtr ;
+			   buf : ADDRESS ;
+			   numBytes : LONGINT ) : LONGINT ;
+
+PROCEDURE ReadChunkRecords( iff : IFFHandlePtr ;
+			    buf : ADDRESS ;
+			    bytesPerRecord : LONGINT ;
+			    numRecords : LONGINT ) : LONGINT ;
+
+PROCEDURE WriteChunkRecords( iff : IFFHandlePtr ;
+			     buf : ADDRESS ;
+			     bytesPerRecord : LONGINT ;
+			     numRecords : LONGINT ) : LONGINT ;
+
+(* Context entry/exit *)
+
+PROCEDURE PushChunk( iff  : IFFHandlePtr ;
+		     type : LONGINT ;
+		     id   : LONGINT ;
+		     size : LONGINT ) : LONGINT ;
+
+PROCEDURE PopChunk( iff : IFFHandlePtr ) : LONGINT ;
+
+(* Low-level handler installation *)
+
+PROCEDURE EntryHandler( iff	 : IFFHandlePtr ;
+			type	 : LONGINT  ;
+			id	 : LONGINT ;
+			position : LONGINT ;
+			handler  : HookPtr ;
+			object   : ADDRESS ) : LONGINT ;
+
+PROCEDURE ExitHandler( iff	: IFFHandlePtr ;
+		       type	: LONGINT ;
+		       id	: LONGINT ;
+		       position : LONGINT ;
+		       handler	: HookPtr ;
+		       object	: ADDRESS ) : LONGINT ;
+
+(* Built-in chunk/property handlers *)
+
+PROCEDURE PropChunk( iff  : IFFHandlePtr ;
+		     type : LONGINT ;
+		     id   : LONGINT ) : LONGINT ;
+
+PROCEDURE PropChunks( iff       : IFFHandlePtr ;
+		      propArray : ADDRESS ;
+		      numPairs  : LONGINT ) : LONGINT ;
+
+PROCEDURE StopChunk( iff : IFFHandlePtr ; type, id : LONGINT ) : LONGINT ;
+
+PROCEDURE StopChunks( iff	: IFFHandlePtr ;
+		      propArray : ADDRESS ;
+		      numPairs  : LONGINT ) : LONGINT ;
+
+PROCEDURE CollectionChunk( iff : IFFHandlePtr ;
+			   type, id : LONGINT ) : LONGINT ;
+
+PROCEDURE CollectionChunks( iff	      : IFFHandlePtr ;
+			    propArray : ADDRESS ;
+			    numPairs  : LONGINT ) : LONGINT ;
+
+PROCEDURE StopOnExit( iff  : IFFHandlePtr ;
+		      type : LONGINT ;
+		      id   : LONGINT ) : LONGINT ;
+
+(* Context utilities *)
+
+PROCEDURE FindProp( iff  : IFFHandlePtr ;
+		    type : LONGINT ;
+		    id   : LONGINT ) : StoredPropertyPtr ;
+
+PROCEDURE FindCollection( iff  : IFFHandlePtr ;
+			  type : LONGINT ;
+			  id   : LONGINT ) : CollectionItemPtr ;
+
+PROCEDURE FindPropContext( iff : IFFHandlePtr ) : ContextNodePtr ;
+PROCEDURE CurrentChunk( iff : IFFHandlePtr ) : ContextNodePtr ;
+PROCEDURE ParentChunk( contextNode : ContextNodePtr ) : ContextNodePtr ;
+
+(* LocalContextItem support functions *)
+
+PROCEDURE AllocLocalItem( type	   : LONGINT ;
+			  id	   : LONGINT ;
+			  ident	   : LONGINT ;
+			  dataSize : LONGINT ) : LocalContextItemPtr ;
+
+PROCEDURE LocalItemData( localItem : LocalContextItemPtr ) : ADDRESS ;
+
+PROCEDURE SetLocalItemPurge( localItem : LocalContextItemPtr ;
+			     purgeHook : HookPtr ) ;
+
+PROCEDURE FreeLocalItem( localItem : LocalContextItemPtr ) ;
+
+PROCEDURE FindLocalItem( iff  : IFFHandlePtr ;
+			 type : LONGINT ;
+			 id   : LONGINT ;
+			 ident: LONGINT ) : LocalContextItemPtr ;
+
+PROCEDURE StoreLocalItem( iff	    : IFFHandlePtr ;
+			  localItem : LocalContextItemPtr ;
+			  position  : LONGINT ) : LONGINT ;
+
+PROCEDURE StoreItemInContext( iff	  : IFFHandlePtr ;
+			      localItem	  : LocalContextItemPtr ;
+			      contextNode : ContextNodePtr ) ;
+
+(* IFFHandle initialization *)
+
+PROCEDURE InitIFF( iff   : IFFHandlePtr ;
+		   flags : LONGSET ;
+		   streamHook : HookPtr ) ;
+
+PROCEDURE InitIFFasDOS( iff : IFFHandlePtr ) ;
+PROCEDURE InitIFFasClip( iff : IFFHandlePtr ) ;
+
+(* Internal clipboard support *)
+
+PROCEDURE OpenClipboard( unitNumber : LONGINT ) : ClipboardHandlePtr ;
+PROCEDURE CloseClipboard( clipHandle : ClipboardHandlePtr ) ;
+
+(* Miscellaneous *)
+
+PROCEDURE GoodID( id : LONGINT ) : LONGINT ;
+PROCEDURE GoodType( type : LONGINT ) : LONGINT ;
+PROCEDURE IDtoStr( id : LONGINT ; buf : STRING ) : STRING ;
+
+END IFFParse.

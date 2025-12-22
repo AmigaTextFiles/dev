@@ -1,0 +1,925 @@
+*************************************************
+*						*
+*		 (C)opyright 1992		*
+*						*
+*		by  Tomi Blinnikka		*
+*						*
+*	Don´t try to understand the code	*
+*						*
+* Version 0.01	09/06/1992			*
+*	 -0.99ö					*
+*						*
+*************************************************
+
+	INCLUDE	"JMPLibs.i"
+	INCLUDE	"exec/types.i"
+	INCLUDE	"exec/nodes.i"
+	INCLUDE	"exec/lists.i"
+	INCLUDE	"exec/ports.i"
+	INCLUDE	"exec/memory.i"
+	INCLUDE	"exec/devices.i"
+	INCLUDE	"exec/io.i"
+	INCLUDE	"exec/tasks.i"
+	INCLUDE	"libraries/dosextens.i"
+	INCLUDE	"libraries/dos.i"
+	INCLUDE	"devices/serial.i"
+	INCLUDE	"dos/dostags.i"
+
+	INCLUDE	"XREF:2.0.xref"
+	INCLUDE	"XREF:exec.xref"
+	INCLUDE	"XREF:dos.xref"
+;	INCLUDE	"XREF:intuition.xref"
+
+	XREF	_CreatePort
+	XREF	_DeletePort
+	XREF	_CreateExtIO
+	XREF	_DeleteExtIO
+
+	XDEF	_DOSBase
+	XDEF	_SysBase
+
+	XREF	_LVOCurrentTime
+	XREF	_LVOSystemTagList
+
+TRUE:		EQU	1
+
+		section	MU,CODE
+
+		push	d2-d7/a2-a6
+		push	d0/a0
+
+		sub.l	a1,a1			;Find our task
+		lib	Exec,FindTask
+		move.l	d0,OurTask
+
+		openlib	Dos,NoDos		;Keep at beginning
+
+CLIStart:	lib	Dos,Output
+		move.l	d0,_stdout
+		pull	d0/a0
+		clr.b	-1(a0,d0.l)
+		cmp.b	#'?',(a0)
+		beq	Usage
+		cmp.w	#'-?',(a0)
+		beq	Usage
+		cmp.w	#'-h',(a0)
+		beq	Usage
+
+Cont0.2:	bsr	ConvASCII
+		tst.w	d0
+		beq	Cont1
+		move.w	d0,SerUnit
+Cont1:		cmp.b	#' ',(a0)
+		bne	Cont1.1
+		add.l	#1,a0
+Cont1.1:	tst.b	(a0)
+		beq	Cont1.2
+		move.l	a0,SerName
+Cont1.2:
+
+MainStart:	move.l	_DosBase,_DOSBase
+		move.l	$4,_SysBase
+		openlib	Intuition,NoInt
+
+;Create read reply port for serial.device (or modem0.device etc.)
+
+		move.l	#0,-(sp)
+		pea	SRRPortName		;S(erial)R(ead)R(eply)PortName
+		jsr	_CreatePort
+		add.l	#8,sp
+		move.l	d0,SRRPort
+		beq	ShutDown
+
+;Create read IOReq for serial.device (or for other device, but size is EXTSER)
+
+		move.l	#IOEXTSER_SIZE,-(sp)
+		move.l	d0,-(sp)
+		jsr	_CreateExtIO
+ 		add.l	#8,sp
+		move.l	d0,IORRequest
+		beq	NoIOReq
+
+;Create write reply port for serial.device (or modem0.device etc.)
+
+		move.l	#0,-(sp)
+		pea	SWRPortName		;S(erial)W(rite)R(eply)PortName
+		jsr	_CreatePort
+		add.l	#8,sp
+		move.l	d0,SWRPort
+		beq	ShutDown
+
+;Create write IOReq for serial.device (or for other device, but size is EXTSER)
+
+		move.l	#IOEXTSER_SIZE,-(sp)
+		move.l	d0,-(sp)
+		jsr	_CreateExtIO
+ 		add.l	#8,sp
+		move.l	d0,IOWRequest
+		beq	NoIOReq
+
+;open serial.device
+
+		move.l	SerName,a0
+		move.l	SerUnit,d0
+		move.l	IORRequest,a1
+		move.b	#SERF_SHARED,IO_SERFLAGS(a1)
+		clr.l	d1				;no flags
+		lib	Exec,OpenDevice
+		tst.l	d0
+		bne	NoSerial
+		move.w	#$1,SerOpen		;just to tell if open
+
+;Copy info from one req to the other
+
+		move.l	IORRequest,a0
+		move.l	IOWRequest,a1
+		move.l	IO_DEVICE(a0),IO_DEVICE(a1)
+		move.l	IO_UNIT(a0),IO_UNIT(a1)
+
+;
+;Main loop here
+;
+;1.  Reset modem
+;2.  Setup read
+;3.  Wait for RING
+;4.  Answer with ATA
+;5.  Wait for CONNECT
+;6.  Delay of 1 SEC
+;7.  Display welcome.txt
+;8.  Ask login
+;9.  Ask for password
+;10. Test password with login
+;11. Loop if incorrect or null
+;12. Parser
+
+StartLoop:	bsr	Reset
+		bsr	Reader
+
+StartLoop2:	clr.w	BufCount
+		bsr	WaitForRing
+		tst.l	d0
+		beq	ShutDown
+
+		bsr	Answer
+		clr.w	BufCount
+		bsr	WaitForConnect
+		tst.l	d0
+		beq	ShutDown
+		cmp.l	#1111111,d0
+		beq	StartLoop2
+
+;Login part starts here
+
+Logging:	lea.l	LoginSeconds,a0
+		lea.l	MicrosTemp,a1
+		lib	Intuition,CurrentTime
+
+		clr.w	LogFailCount
+		bsr	Delay1SEC
+
+		bsr	Welcome
+Logging1:	bsr	AskLogin
+		tst.l	d0
+		beq	ShutDown
+		tst.b	Buffer3
+		beq	Logging1
+		bsr	AskPassword
+		tst.l	d0
+		beq	ShutDown
+
+		lea.l	RootName,a0
+		lea.l	TempBuf1,a1
+		bsr	CmpStrings
+		tst.l	d0
+		bne	Logging2
+		add.w	#1,LogFailCount
+		bsr	IncorrectLogin
+		cmp.w	#5,LogFailCount
+		beq	LoginFailure
+		bra	Logging1
+
+Logging2:	lea.l	RootPass,a0
+		lea.l	Buffer3,a1
+		bsr	CmpStrings
+		tst.l	d0
+		bne	LoggedOn
+		add.w	#1,LogFailCount
+		bsr	IncorrectLogin
+		cmp.w	#5,LogFailCount
+		beq	LoginFailure
+		bra	Logging1
+
+LoggedOn:	bsr	Welcome2
+		lea.l	LoginSeconds,a0
+		lea.l	MicrosTemp,a1
+		lib	Intuition,CurrentTime
+
+;From here on should be command line parser
+
+Parser:		bsr	Prompt
+
+		clr.w	BufCount
+		move.l	#1,d0
+		bsr	WaitUntilLF
+		tst.l	d0
+		beq	ShutDown
+
+		lea.l	CMD_LogOut,a0
+		bsr	TestCmd
+		tst.l	d0
+		bne	LogOut
+
+		tst.b	Buffer3
+		beq	Parser
+
+		bsr	DoCommand
+		tst.l	d0
+		beq	ShutDown
+
+		bra	Parser
+
+TestCmd:	lea.l	Buffer3,a1
+		bsr	CmpStrings
+		rts
+
+LogOut:		bsr	OnTime
+
+		bsr	HangUp
+		bra	StartLoop
+
+OnTime:		lea.l	LogoutSeconds,a0
+		lea.l	MicrosTemp,a1
+		lib	Intuition,CurrentTime
+
+		move.l	LoginSeconds,d0
+		move.l	LogoutSeconds,d1
+		sub.l	d0,d1
+		divu.w	#60,d1			;Minutes
+		clr.l	d0
+		move.w	d1,d0			;test moving it straight to mins...
+		move.w	d0,OnTimeMins
+
+		lea.l	fstrl,a0		;HEX->ASCII
+		lea.l	OnTimeMins,a1		;Number2Print
+		lea.l	PutChProc,a2
+		lea.l	OnTimeText2,a3		;Destination
+		lib	Exec,RawDoFmt
+
+		lea.l	OnTimeText1,a0
+		bsr	GetLength
+		bsr	Writer
+		rts
+
+;Waits for login
+;
+;INPUT
+;
+;OUTPUT
+;
+
+;Waits for RING
+;
+;INPUT
+;
+;OUTPUT
+;
+;D0 = -1 if OK
+;D0 =  0 if Break
+;
+;ACTION
+;
+;1. Wait for input, serial or CTRL_C
+;2. If CTRL_C then break
+;3. If serial test for ring
+;4. If D0 = -1 then RING -> OUT
+;5. If not then loop
+
+WaitForRing:	bsr	CheckEvent
+		tst.l	d0
+		beq	WaitForRing_OUT
+
+		bsr	TestRing
+		tst.l	d0
+		beq	WaitForRing		;No RING so get more chars
+WaitForRing_OUT: rts
+
+TestRing:	tst.w	BufCount
+		bne	TestRing2
+		cmp.b	#'R',Buffer1
+		bne	TestRing4
+TestRing2:	lea.l	Buffer2,a0
+		add.w	BufCount,a0
+		move.b	Buffer1,(a0)
+		add.w	#1,BufCount
+		cmp.w	#4,BufCount
+		bne	TestRing4
+		clr.w	BufCount
+		cmp.l	#'RING',Buffer2
+		bne	TestRing4
+TestRing3:	bsr	ClearSer
+		bsr	Reader
+		move.l	#-1,d0			;indicate ring
+		rts
+TestRing4:	bsr	ClearSer		;Abort possible prev. read
+		bsr	Reader			;Set up new read
+		clr.l	d0
+		rts
+
+;Waits for CONNECT
+;
+;INPUT
+;
+;OUTPUT
+;
+;D0 = -1 if OK
+;D0 =  0 if Break
+;
+;ACTION
+;
+;1. Wait for input, serial or CTRL_C
+;2. If CTRL_C then break
+;3. If serial test for connect
+;4. If D0 = -1 then CONNECT -> OUT
+;5. If not then loop
+
+WaitForConnect:	bsr	CheckEvent
+		tst.l	d0
+		beq	WaitForConnect_OUT
+
+		bsr	TestConnect
+		tst.l	d0
+		beq	WaitForConnect		;No CONNECT so get more chars
+WaitForConnect_OUT: rts
+
+TestConnect:	tst.w	BufCount
+		bne	TestConnect2
+		cmp.b	#'C',Buffer1
+		bne	TestConnect4
+TestConnect2:	lea.l	Buffer2,a0
+		add.w	BufCount,a0
+		move.b	Buffer1,(a0)
+		add.w	#1,BufCount
+		cmp.w	#7,BufCount
+		bne	TestConnect4
+		clr.w	BufCount
+		cmp.l	#'CONN',Buffer2
+		bne	TestConnect5
+		cmp.w	#'EC',Buffer2+4
+		bne	TestConnect5
+		cmp.b	#'T',Buffer2+6
+		bne	TestConnect5
+TestConnect3:	bsr	ClearSer
+		bsr	Reader
+		move.l	#-1,d0			;indicate CONNECT
+		rts
+TestConnect4:	bsr	ClearSer		;Abort possible prev. read
+		bsr	Reader			;Set up new read
+		clr.l	d0
+		rts
+TestConnect5:	bsr	ClearSer		;Abort possible prev. read
+		bsr	Reader			;Set up new read
+		move.l	#1111111,d0
+		rts
+
+Reset:		lea.l	ResetString,a0
+		bsr	GetLength
+		bsr	Writer
+		rts
+
+Answer:		lea.l	AnswerString,a0
+		bsr	GetLength
+		bsr	Writer
+		rts
+
+Welcome:	lea.l	WelcomeText1,a0
+		bsr	GetLength
+		bsr	Writer
+		rts
+
+;Add date redirected to some file and reloaded to display login last used
+
+Welcome2:	lea.l	WelcomeText2,a0
+		bsr	GetLength
+		bsr	Writer
+		rts
+
+AskLogin:	lea.l	LoginText1,a0
+		bsr	GetLength
+		bsr	Writer
+
+		clr.w	BufCount
+		move.l	#1,d0
+		bsr	WaitUntilLF
+		tst.l	d0
+		beq	AskLogin_OUT
+
+		lea.l	Buffer3,a0
+		lea.l	TempBuf1,a1
+		move.l	#32,d0
+		lib	Exec,CopyMem
+		move.l	#-1,d0
+		rts
+AskLogin_OUT:	clr.l	d0
+		rts
+
+AskPassword:	lea.l	PasswordText1,a0
+		bsr	GetLength
+		bsr	Writer
+		clr.w	BufCount
+		clr.l	d0
+		bsr	WaitUntilLF
+		rts
+
+IncorrectLogin:	lea.l	IncorrectText1,a0
+		bsr	GetLength
+		bsr	Writer
+		rts
+
+LoginFailure:	bsr	IncorrectLogin
+		lea.l	LogFailureText1,a0
+		bsr	GetLength
+		bsr	Writer
+		bra	LogOut
+
+Prompt:		lea.l	PromptText1,a0
+		bsr	GetLength
+		bsr	Writer
+		rts
+
+UnknownCMD:	lea.l	CRLFText1,a0
+		bsr	GetLength
+		bsr	Writer
+
+		lea.l	Buffer3,a0
+		bsr	GetLength
+		bsr	Writer
+
+		lea.l	UnknownCMDText1,a0
+		bsr	GetLength
+		bsr	Writer
+		rts
+
+Echo:		lea.l	Buffer1,a0
+		move.l	#1,d0
+		bsr	Writer
+		rts
+
+HangUp:		lea.l	HangUpString1,a0
+		bsr	GetLength
+		bsr	Writer
+		bsr	Delay1SEC
+		lea.l	HangUpString2,a0
+		bsr	GetLength
+		bsr	Writer
+		rts
+
+Delay1SEC:	move.l	#50,d1
+		lib	Dos,Delay
+		rts
+
+Break:		lea.l	BreakText1,a0
+		bsr	Printer
+		clr.l	d0
+		rts
+
+ClearSer:	move.l	IORRequest,a1
+		lib	Exec,CheckIO
+		tst.l	d0
+		beq	ClearSer1
+		move.l	IORRequest,a1
+		lib	Exec,WaitIO
+
+ClearSer1:	move.l	IORRequest,a1
+		ABORTIO
+		move.l	IORRequest,a1
+		lib	Exec,WaitIO
+		rts
+
+Reader:		move.l	IORRequest,a1
+		move.w	#CMD_READ,IO_COMMAND(a1)
+		move.l	#1,IO_LENGTH(a1)
+		lea.l	Buffer1,a0
+		move.l	a0,IO_DATA(a1)
+		lib	Exec,SendIO
+		rts
+
+;Writes string to serial port
+;
+;D0 = Length
+;A0 = String
+
+Writer:		move.l	IOWRequest,a1
+		move.w	#CMD_WRITE,IO_COMMAND(a1)
+		move.l	d0,IO_LENGTH(a1)
+		move.l	a0,IO_DATA(a1)
+		lib	Exec,DoIO		;May freeze, too bad
+		rts
+
+PutChProc:	tst.b	d0
+		beq	PutChProc_OUT
+		move.b	d0,(a3)+
+PutChProc_OUT:	rts
+
+;Open AUX device (should ask for the name of the device...)
+
+DoCommand:	lea.l	CRLFText1,a0
+		bsr	GetLength
+		bsr	Writer
+
+		lea.l	AUXName,a0
+		move.l	a0,d1
+		move.l	#MODE_NEWFILE,d2
+		lib	Dos,Open
+		move.l	d0,AUXFile
+		bne	DoCommand2
+
+		bsr	NoAUX
+		clr.l	d0
+		rts
+
+DoCommand2:	move.l	d0,CMDAUXFile1
+
+		lea.l	CMDTags,a0
+		move.l	a0,d2
+		lea.l	Buffer3,a0
+		move.l	a0,d1
+		lib	Dos,SystemTagList
+		cmp.l	#-1,d0
+		bne	DoCommand3
+
+		bsr	UnknownCMD
+
+DoCommand3:	move.l	AUXFile,d1
+		lib	Dos,Close
+		clr.l	AUXFile
+
+		move.l	#-1,d0
+		rts
+
+ShutDown:	tst.w	SerOpen
+		beq	ShutDown9000
+		bsr	ClearSer
+		move.l	IORRequest,a1
+		lib	Exec,CloseDevice
+
+ShutDown9000:	move.l	IORRequest,d0
+		tst.l	d0
+		beq	ShutDown8000
+		move.l	#IOEXTSER_SIZE,-(sp)
+		move.l	d0,-(sp)
+		jsr	_DeleteExtIO
+		add.l	#8,sp
+
+ShutDown8000:	move.l	SRRPort,d0
+		tst.l	d0
+		beq	ShutDown7000
+		move.l	d0,-(sp)
+		jsr	_DeletePort
+		add.l	#4,sp
+
+ShutDown7000:	move.l	IOWRequest,d0
+		tst.l	d0
+		beq	ShutDown6000
+		move.l	#IOEXTSER_SIZE,-(sp)
+		move.l	d0,-(sp)
+		jsr	_DeleteExtIO
+		add.l	#8,sp
+
+ShutDown6000:	move.l	SWRPort,d0
+		tst.l	d0
+		beq	ShutDown5000
+		move.l	d0,-(sp)
+		jsr	_DeletePort
+		add.l	#4,sp
+
+ShutDown5000:	tst.l	AUXFile
+		beq	ShutDown4000
+		move.l	AUXFile,d1
+		lib	Dos,Close
+
+ShutDown4000:
+ShutDown1000:	closlib	Intuition
+		closlib	Dos
+		pull	d2-d7/a2-a6
+		clr.l	d0
+		rts
+
+;CheckEvent gets messages from serial.device and keyboard (CTRL_C)
+;
+;Input
+;
+;Output
+;
+;D0 = -1 if serial returned
+;D0 = 0  if CTRL_C given
+
+CheckEvent:	clr.l	d0
+		clr.l	d1
+		move.l	SRRPort,a1		;serial.device
+		move.b	MP_SIGBIT(a1),d1
+		bset.l	d1,d0
+		bset.l	#SIGBREAKB_CTRL_C,d0	;and CTRL_C
+		lib	Exec,Wait
+
+		cmp.l	#SIGBREAKF_CTRL_C,d0	;If CTRL_C
+		beq	Break			;go break
+
+		move.l	#-1,d0			;Serial returned
+		rts
+
+;Wait until LF,CR received or buffer full from serial. Buffer all
+;input with DEL removal
+;
+;INPUT
+;
+;D0 = 1 if echoing is desired
+;
+;OUTPUT
+;
+;Buffer 3 = Data received.
+
+WaitUntilLF:	move.l	d0,d5
+
+WaitUntilLF1:	bsr	CheckEvent
+		tst.l	d0
+		beq	WaitUntilLF_OUT
+
+		bsr	BufferInput
+		tst.l	d0
+		beq	WaitUntilLF1		;No LF so get more chars
+WaitUntilLF_OUT: rts
+
+BufferInput:	cmp.b	#4,Buffer1		;Test for CTRL_D
+		beq	CTRL_D
+		cmp.b	#8,Buffer1		;Test for BS
+		bne	BufferInput2
+		bsr	DoBS
+		bsr	ClearSer
+		bsr	Reader
+		clr.l	d0
+		rts
+BufferInput2:	lea.l	Buffer3,a2
+		add.w	BufCount,a2
+		move.b	Buffer1,(a2)
+		tst.l	d5
+		beq	BufferInput2.1
+		bsr	Echo
+
+BufferInput2.1:	add.w	#1,BufCount
+		cmp.w	#32,BufCount		;Test for full buffer
+		beq	BufferInput3		;Buffer is full
+
+		cmp.b	#10,Buffer1
+		beq	BufferInput3
+		cmp.b	#13,Buffer1
+		beq	BufferInput3
+		bsr	ClearSer
+		bsr	Reader
+		clr.l	d0
+		rts
+BufferInput3:	lea.l	Buffer3,a2
+		add.w	BufCount,a2
+		clr.b	-1(a2)
+		bsr	ClearSer
+		bsr	Reader
+		move.l	#-1,d0
+		rts
+
+CTRL_D:		lea.l	ExitText1,a0
+		bsr	GetLength
+		bsr	Writer
+		move.l	#'logo',Buffer3
+		move.w	#'ut',Buffer3+4
+		move.b	#0,Buffer3+6
+		bsr	ClearSer
+		bsr	Reader
+		move.l	#-1,d0
+		rts
+
+DoBS:		tst.w	BufCount
+		beq	DoBS_OUT
+		tst.l	d5
+		beq	DoBS1
+		bsr	Echo
+DoBS1:		sub.w	#1,BufCount
+DoBS_OUT:	rts
+
+;Get length of text in given address
+;
+;Input a0 = Address of null terminated text string
+;
+;Result d0 = Length
+
+GetLength:	push	a0
+		clr.l	d0
+		cmp.l	#$00,a0		;fixes enforcer hit
+		beq	GetLength_OUT
+GetLength2:	add.l	#1,d0
+		tst.b	(a0)+
+		bne	GetLength2
+		sub.l	#1,d0		;don't include NULL
+GetLength_OUT:	pull	a0
+		rts
+
+ConvASCII:	clr.l	d0
+		clr.l	d1
+		cmp.b	#' ',(a0)
+		bne	ConvASCII2
+		add.l	#1,a0
+ConvASCII2:	move.b	(a0),d1
+		cmp.b	#'0',d1
+		bcs	ConvASCII_OUT
+		cmp.b	#'9',d1
+		bhi	ConvASCII_OUT
+		sub.b	#'0',d1
+		mulu.w	#10,d0
+		add.l	d1,d0
+		add.l	#1,a0
+		bra	ConvASCII2
+ConvASCII_OUT:	rts
+
+
+;Compares two strings.
+;
+;INPUT
+;
+;A0 String 1
+;A1 String 2
+;
+;OUTPUT
+;
+;D0 = 0 if not same
+;
+;BUGS
+;
+;If String 2 is longer but correct upto length of
+;String 1, routine will say String 1 = String 2
+;String 1 has to have NULL at end!
+;
+
+CmpStrings:	tst.b	(a0)
+		beq	CmpStrings2
+		cmp.b	(a0)+,(a1)+
+		beq	CmpStrings
+		clr.l	d0
+		rts
+CmpStrings2:	move.l	#-1,d0
+		rts
+
+;Error etc. messages
+
+Usage:		lea.l	UsageText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoDos:		add.l	#8,sp
+		pull	d2-d7/a2-a6
+		move.l	#RETURN_FAIL,d0
+		rts
+
+NoInt:		lea.l	NoIntText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoIOReq:	lea.l	NoIOReqText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoSerial:	lea.l	NoSerialText1,a0
+		bsr	Printer
+		move.l	SerName,a0
+		bsr	Printer
+		lea.l	NoSerialText2,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoAUX:		lea.l	NoAUXText1,a0
+		bsr	Printer
+		rts
+
+Printer:	printa	a0,_stdout
+		rts
+
+;Structures
+
+;lib stuff
+
+_SysBase:	dc.l	0
+_DOSBase:	dc.l	0
+
+		libnames
+
+;Other stuff, part I
+
+OurTask:	dc.l	0
+SRRPort:	dc.l	0
+IORRequest:	dc.l	0
+SWRPort:	dc.l	0
+IOWRequest:	dc.l	0
+_stdout:	dc.l	0
+;_stdin:	dc.l	0
+AUXFile:	dc.l	0
+BufCount:	dc.w	0
+LogFailCount:	dc.w	0
+LoginSeconds:	dc.l	0
+LogoutSeconds:	dc.l	0
+OnTimeMins:	dc.l	0
+MicrosTemp:	dc.l	0
+
+;Serial device stuff
+
+SerName:	dc.l	SerName2		;A pointer!
+SerUnit:	dc.l	0
+SerOpen:	dc.w	0
+
+;Strings, error
+
+BreakText1:	dc.b	"***Break",10,0
+NoIntText1:	dc.b	"ERROR: Couldn't open intuition.library!",13,10,0
+NoIOReqText1:	dc.b	"ERROR: Couldn't get SerialIOReq!",13,10,0
+NoSerialText1:	dc.b	"ERROR: Couldn't open ",0
+SerName2:	dc.b	"serial.device",0
+NoSerialText2:	dc.b	10,0
+NoAUXText1:	dc.b	"ERROR: Couldn't open AUX:!",13,10,0
+
+;Strings, names
+
+STVersion:	dc.b	"$VER: "
+UsageText1:	dc.b	"MUnix v0.01. (C)opyright Tomi Blinnikka 1992",13,10,13,10
+		dc.b	10,"           !!! BETA TESTER VERSION !!!",13,10,13,10,13,10
+		dc.b	"USAGE: MUnix [Unit] [Device]",13,10,13,10
+		dc.b	"       Where: [Unit] is the unit number",13,10
+		dc.b	"              [Device] is the device name",13,10,13,10
+		dc.b	"       Default [Device] is serial.device",13,10,13,10
+		dc.b	"A PhoneLineWatcher clone.",13,10
+		dc.b	"See docs for more information.",13,10,0
+SRRPortName:	dc.b	"MUnix read port",0
+SWRPortName:	dc.b	"MUnix write port",0
+DEVICEText1:	dc.b	"DEVICE",0
+UNITText1:	dc.b	"UNIT",0
+YESText1:	dc.b	"YES",0
+AUXName:	dc.b	"AUX:",0
+
+;Modem control strings
+
+ResetString:	dc.b	"ATZ",13,10,0
+AnswerString:	dc.b	"ATA",13,10,0
+HangUpString1:	dc.b	"+++",0
+HangUpString2:	dc.b	"ATH",13,10,0
+
+;Texts to output
+
+WelcomeText1:	dc.b	"Welcome to the INTERACTIVE Systems Corporation",13,10
+		dc.b	"       INTERACTIVE UNIX Operating System",13,10,13,10
+		dc.b	"System name: tits",13,10,0
+WelcomeText2:	dc.b	13,10,"UNIX System V/Amiga UNIX Release 3.2",13,10
+		dc.b	"tits",13,10
+		dc.b	"Copyright (C) 1984, 1986, 1987, 1988 AT&T",13,10
+		dc.b	"Copyright (C) 1988, 1989, 1990, 1991 Commodore-Amiga, Inc.",13,10
+		dc.b	"All Rights Reserved",13,10
+		dc.b	"Login last used: ",13,10,0
+LoginText1:	dc.b	13,10,"login: ",0
+PasswordText1:	dc.b	13,10,"Password: ",0
+IncorrectText1:	dc.b	13,10,"Login incorrect",13,10,0
+LogFailureText1: dc.b	13,10,"Login failure",13,10,0
+UnknownCMDText1: dc.b	": Command not found.",13,10,0
+PromptText1:	dc.b	13,10,"/usr/users/docbliny % ",0
+ExitText1:	dc.b	"^D",8,8,"exit",13,10,0
+CRLFText1:	dc.b	13,10,0
+OnTimeText1:	dc.b	"Minutes used: "
+OnTimeText2:	dc.b	"    0"
+OnTimeText3:	dc.b	13,10,0
+fstrl:		dc.b	"%5.d",0
+
+;Users (?!?)
+
+RootName:	dc.b	"jlaine",0
+RootPass:	dc.b	"cocacola",0
+;RootName:	dc.b	"tsarvela",0
+;RootPass:	dc.b	"kukka",0
+;RootName:	dc.b	"root",0
+;RootPass:	dc.b	"enigma111",0
+
+
+;Commands
+
+CMD_LogOut:	dc.b	"logout",0
+
+		ds.l	0
+
+CMDTags:	dc.l	SYS_Output
+CMDAUXFile1:	dc.l	0
+		dc.l	TAG_DONE
+
+;Buffers
+;
+;Buffers 1 - 2 used by WaitForRing, WaitForConnect WaitUntilLF
+;Buffer 3 used by WaitUntilLF
+
+Buffer1:	dcb.b	2,0
+Buffer2:	dcb.b	16,0
+Buffer3:	dcb.b	34,0
+
+TempBuf1:	dcb.b	34,0
+		end
+

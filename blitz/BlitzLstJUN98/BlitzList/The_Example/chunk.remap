@@ -1,0 +1,259 @@
+;Chunky Palette Remapping example
+;by Curt Esser   camge@ix.netcom.com
+;last modified Mar 31 1998
+;use any part of this in any way you like
+;but please, if you make any improvements or find any errors
+;let me know.  Thanx!
+;NOTE : BDGFX library only works on AGA systems, not ECS!
+;NOTE : NEEDS  BDGFX library! (C) BadDolls Production
+;You can find this small library in Aminet/dev/basic
+;or at http://www.a2points.com/homepage/3698138
+
+;----------Chunky Library commands for reference --------------------------
+
+;  BLITZ library 'chunkylib.obj' (#72)
+;    Chunky
+;    InitChunky Chunky#,width,height,flags (1=24bit 2=8bit)
+;    FreeChunky Chunky#
+;    LoadChunky Chunky#,IFFfilename$
+;    SaveChunky Chunky#,IFFfilename$
+;    ReadChunky Chunky#,rawfilename$
+;    WriteChunky Chunky#,rawfilename$
+;    ProcessChunky Chunky#,contrast
+;    AdjustChunky Chunky#,DeltaRed,DeltaGreen,DeltaBlue,
+;    ScaleChunkyX srcchunky#,destchunky#,newwidth
+;    ScaleChunkyY srcchunky#,destchunky#,newheight
+;    CopyChunky srcchunky#,destchunky#,[sx,sy,w,h,dx,dy]
+;    GreyChunky Chunky#
+;    KillGreyChunky Chunky#
+;    ColorChunky Chunky#
+;    ChunkyLoc Chunky#
+;    ChunkyConvert Chunky#[,Palette]|[,array.l(),numcols]
+;    ChunkyToBitMap Chunky#,BitMap#
+;    CPlot Chunky#,x,y[,color.l],[Red.b,Green.b,Blue.b]
+;    GPlot Chunky#,x,y,color.b
+;    CPoint (Chunky#,x,y)
+;    GPoint (Chunky#,x,y)
+;    Col8 (array.l(),numcols,RGB.l)
+
+;-------------------------------------------------------------------------
+
+
+WBStartup                       ;just in case!
+WBenchToFront_                  ;make sure it shows
+WbToScreen 0                    ;grab the wb screen
+ScreensBitMap 0,0
+NoCli                           ;don't need that!
+
+
+;==== Get info about current Workbench Screen and grab it's palette =======
+
+Dim col.w(255)                  ;table for storing colour matches
+maxw=WBWidth                    ;these are used to set our window
+maxh=WBHeight                   ;size later
+wd.w=WBDepth                    ;number of bitplanes of WB
+WBcolors.w=2^wd                 ;convert this to number of colours
+aga.b=CheckAGA                  ;see if system is AGA
+MaxLen fi$=200                  ;these are needed for the
+MaxLen chfil$=200
+MaxLen svpath$=200
+MaxLen iff$=200
+MaxLen pa$=200                  ;ASL requestor
+accuracy.w=0                    ;accuracy of remapping - 0-255
+                                ;higher = faster but less accurate
+
+;------------- Store the WB palette as palette #0 -------------------------
+
+InitPalette 0,WBcolors          ;set up palette 0 to WB depth
+
+ For i=0 To WBcolors-1
+   AGAPalRGB 0,i,AGARed(i),AGAGreen(i),AGABlue(i)
+ Next
+
+;++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+Repeat                          ;TEST LOOP STARTS HERE!
+
+  Window 0,0,0,1,1,$1000,"",1,0 ;needed for requestors
+  CatchDosErrs                  ;show requestors here!
+
+  If NOT aga
+    Request "Sorry","This example for AGA machines only","Damn!"
+    End
+  EndIf
+                                ;first we need an iff picture
+  picpath$=ASLFileRequest$("Select IFF picture",pa$,fi$)
+  If picpath$="" Then End       ;exit program when "cancel" is selected
+
+;----------- CHECK SELECTED FILE FOR A USABLE IFF PICTURE ---------------
+
+  error$=""
+  If ReadFile(0,picpath$)       ;make sure it is a valid iff picture file!
+    FileInput 0
+    header$ = Inkey$(2000)      ;Read 2000 bytes of the header
+    CloseFile 0
+    WindowInput 0
+
+    ;IFF picture header should read: FORM....ILBM
+
+    If Left$(header$,4)<> "FORM" OR Mid$(header$,9,4) <> "ILBM"
+      If Left$(header$,3)="GIF" Then error$="GIF "
+      If Mid$(header$,7,4)="JFIF" Then error$="JPEG"
+      If Mid$(header$,9,4)="ANIM" Then error$="ANIM"
+      If error$="" Then error$="ERROR"
+
+    Else                        ;Valid IFF header found!
+      ham=False                 ;we can't remap HAM pic, so check
+      x.w=Instr(header$,"CAMG")
+      If x<>0
+        a$=Left$(Right$(Hex$(Peek.l(&header$+x+7) AND $88A4),3),1)
+        If a$="8" Then error$="HAM "
+      EndIf
+      x=Instr(header$,"CMAP")   ;24 bit pics will crash!
+      If x=0 Then error$="True Color (24 bit)"
+    EndIf
+  Else                          ;couldn't even find the file!
+    error$="NF"
+  EndIf
+
+  If error$=""                  ;Valid iff picture selected!
+
+; ------ check for enough chip & fast  memory for the conversion -----------
+
+    ILBMInfo picpath$           ;read the pictures size information
+
+    sd.w=ILBMDepth
+    sh.w=ILBMHeight
+    sw.w=ILBMWidth
+    planemem.l=sh*sw/8          ;bytes needed for 1 bitplane of this pic
+    If sd>wd
+      gd.b=sd
+    Else
+      gd=wd
+    EndIf
+    planes.b=gd                 ;calculate total bitplanes needed
+    mem.l=planes*planemem+20000 ;total chipmem required & some padding
+    memchip.l=AvailMem_(131074) ;#MEMF_CHIP|#MEMF_LARGEST
+    memfast.l=AvailMem_(131076) ;#MEMF_FAST|#MEMF_LARGEST
+    If mem>memchip
+      error$="MEM"
+    EndIf
+    chunkmem.l=sw*sh+20000      ;bytes of fast memory needed for the chunky "bitmap"
+    If chunkmem>memfast
+      error$="FAST"
+    EndIf
+  EndIf
+
+; ----------- READY! -----------------------------------------------------
+
+  If error$=""                  ;get ready to process picture
+    BitMap 1,sw,sh,sd           ;standard bitmap for the iff pic
+    InitChunky 2,sw,sh,2        ;fast mem chunky bitmap
+    LoadBitMap 1,picpath$,1
+    shapecolors.w=2^sd          ;convert depth to number of colours
+
+; ------- For the progress indicator --------------------------------------
+
+    Format""
+    i$="Remap "+Str$(sw)+" x "+Str$(sh)+"  "
+    i$=i$+Str$(shapecolors)+" colour picture      "
+
+
+;-------------Remap the picture's palette to WB palette--------------------
+
+    PaletteInfo 1
+
+    For i = 0 To shapecolors-1   ;remap the shape to wb screen
+      col(i)=FindColor(0,AGAPalRed(i),AGAPalGreen(i),AGAPalBlue(i),accuracy)
+    Next
+
+    a=PICreateRequest(i$,0,sw,1) ;open progress bar
+
+    For x=0 To sw-1              ;read each bitmap pixel
+      a=PIUpdateRequest(x)       ;and send the remapped colour to the chunky
+      For y=0 To sh-1
+        GPlot 2,x,y,col(Point(x,y))
+      Next y
+    Next x
+    Free BitMap 1                ;free the picture's bitmap
+    BitMap 1,sw,sh,wd            ;and open a new one in WorkBench Depth
+    ChunkyToBitMap 2,1           ;since this might be different than pic's depth
+    If a Then PIEndRequest
+
+
+
+
+;------------Open a window and put the picture on it-----------------------
+
+    winwid=sw
+    If winwid>maxw Then winwid=maxw
+    winhi=sh
+    If winhi>maxh Then winhi=maxh
+    winx=maxw/2-winwid/2
+    winy=maxh/2-winhi/2
+
+    Free Window 0
+    Window 0,winx,winy,winwid,winhi,$800|$1000,"",1,0
+    BitMaptoWindow 1,0,0,0,0,0,winwid,winhi
+
+;---------- Test Saving and Loading of Chunky vs iff ----------------------
+
+    answer=Request("","Test Save/Reload Chunky Pic?","Yes|No")
+    If answer
+      chunksav$=ASLFileRequest$("Save Chunky as:",svpath$,chfil$)
+      WriteChunky 2,chunksav$
+      iff$=chfil$+".iff"
+      iffsav$=ASLFileRequest$("Save Remapped iff as:",svpath$,iff$)
+      SaveBitmap 1,iffsav$,1
+      InnerCls 0
+      Request "","Saved","Reload"
+      ResetTimer
+      LoadBitMap 1,iffsav$
+      BitMaptoWindow 1,0
+      Request "Standard iff:",Str$(Ticks)+" ticks","OK"
+      InnerCls 0
+      ResetTimer
+      ReadChunky 2,chunksav$
+      ChunkyToBitMap 2,1
+      BitMaptoWindow 1,0
+      Request "Chunky:",Str$(Ticks)+" ticks","OK"
+    EndIf
+    Free BitMap1
+    Free Palette 1
+    Free Chunky 2
+
+;---------Non-supported file formats and memory errors wind up here ---------------------
+
+  Else                          ;We can't use the file - tell 'em why!
+      Rq$=""
+      If error$="MEM"
+        Format "#,##0,000"
+        Rq$="Not enough chip memory|Need:"+Str$(mem)+" bytes|Have:"+Str$(memchip)+" bytes"
+      EndIf
+      If error$="FAST"
+        Format "#,##0,000"
+        Rq$="Not enough fast memory|Need:"+Str$(chunkmem)+" bytes|Have:"+Str$(memfast)+" bytes"
+      EndIf
+      If error$="ERROR" Then Rq$="Unrecognized file type|"
+      If Rq$=""
+        Rq$="Can't process selected file|"
+        If error$="NF"
+          Rq$=Rq$+"File not found!"
+        Else
+          Rq$=Rq$+error$+" pictures not supported|"
+        EndIf
+      EndIf
+      If error$<>"NF" AND error$<>"MEM" Then Rq$=Rq$+"Pictures must be IFF - ILBM"
+      Request "Graphic load error",Rq$,"Cancel"
+  EndIf
+
+;------------Wait for some user action to continue ------------------------
+
+  If error$=""                  ;if a picture was shown wait
+    WaitEvent                   ;if not, just start over
+    Free Window 0
+  EndIf
+Forever
+
+
+

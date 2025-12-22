@@ -1,0 +1,245 @@
+~ Struct Indenter
+~ Version 1.0 by Roland Acton - August 1993
+~ Internet address: xracton@ccvax.fullerton.edu
+
+~ Version 1.1 by Roland Acton - January 1994
+~ Changes: The program now uses register variables, and makes proper
+~ procedure and library calls.
+
+~ This is an indenting program for the Struct language. It serves as
+~ a useful programming aid and also as an example of how to write a
+~ simple program in Struct.
+~ This program is public domain. You may use any part of it you wish
+~ in a program of your own, provided that you credit me and send me
+~ a copy of the program.
+
+define procedure Kahm
+define procedure word=ParseCommandLine
+set startup Kahm
+
+open library exec
+open library dos
+
+constant indentamount=2,maxkeywords=15
+
+global srcfilehandle:long,destfilehandle:long
+
+
+
+procedure Kahm
+local indent:word,bufferstart:long,bufferpos:word,buffercount:word
+local fileline:long,linepos:word,spacebuffer:long,z:byte
+local counter:long,indentskip:long,keywordcount:word
+local keywordpointer:long,foundkeyword:word,x:byte,linepointer:long
+local pclsuccess:word
+
+string (info1) "Indenter for the Struct language",10
+string (info2) "Version 1.1 by Roland Acton - January 1994",10,10
+print info1
+print info2
+proc call pclsuccess=ParseCommandLine
+if pclsuccess=1
+  libcall bufferstart=allocmem(256,0)
+  libcall fileline=allocmem(256,0)
+  libcall spacebuffer=allocmem(256,0)
+
+~ Strictly speaking, I should check to see if the memory allocation
+~ fails, but if the system is that low on memory it's going to fail
+~ for other reasons in short order.
+
+  for counter=spacebuffer;spacebuffer+252;4
+    longpoke counter,32*256+32*256+32*256+32
+  next
+  libcall buffercount=read(srcfilehandle,bufferstart,256)
+  bufferpos=0
+  indent=0
+
+~ The section of code below is an internal buffering system. It
+~ pulls in 256 bytes at a time from the source file and extracts
+~ lines of source code from them.
+
+  mainloop:
+  data register bufferpos,z,linepos,buffercount,fileline
+  address register bufferstart,fileline,indentskip
+  regload
+  linepos=0
+  repeat
+    bytepeek z=bufferstart+bufferpos
+    bytepoke fileline+linepos,z
+    bufferpos=bufferpos+1
+    linepos=linepos+1
+    if bufferpos=buffercount
+      libcall buffercount=read(srcfilehandle,bufferstart,256)
+      bufferpos=0
+    end if
+  until z=10 | buffercount=0 | linepos=256
+
+~ It's assumed that no line will be larger than 256 bytes. The extra
+~ condition above is just to stop the program from crashing if it's
+~ accidentally run on a binary file.
+
+  for indentskip=fileline;fileline+linepos-1
+    bytepeek z=indentskip
+    if z<>32
+      exit
+    end if
+  next
+  linepos=fileline+linepos-indentskip
+
+~ The section of code above is designed to skip any indentation that
+~ already exists.
+
+~ Now we have to determine which keyword, if any, the line begins
+~ with. We skip over spaces and convert alphabetic characters to
+~ uppercase.
+
+  bytedata (keywords) "IF",0,"FOR",0,"WHILE",0,"REPEAT",0,"LOOP",0
+  bytedata "ZEROLOOP",0,"ASM",0
+  bytedata "ELSE",0
+  bytedata "ENDIF",0,"NEXT",0,"WEND",0,"UNTIL",0,"ENDLOOP",0
+  bytedata "ZEND",0,"ENDASM",0
+
+  data register z,x,keywordcount,foundkeyword,indent
+  address register keywordpointer,linepointer,indentskip
+  regload
+  keywordcount=1
+  load address keywordpointer=keywords
+  repeat
+    linepointer=indentskip
+    foundkeyword=1
+    loop ;x<>0;
+      bytepeek z=linepointer
+      if z=32
+        linepointer=linepointer+1
+        bytepeek z=linepointer
+        back if
+      end if
+      if z=>97 & z=<122
+        z=z-32
+      end if
+      bytepeek x=keywordpointer
+      if z<>x & x<>0
+        foundkeyword=0
+      end if
+      linepointer=linepointer+1
+      keywordpointer=keywordpointer+1
+    end loop
+    if foundkeyword=1
+      exit
+    end if
+    keywordcount=keywordcount+1
+  until keywordcount>maxkeywords
+
+~ If the line started with a valid keyword, its number is in
+~ keywordcount.
+
+~ Check for one of the pre-output indent changers.
+
+  if keywordcount=>8 & keywordcount=<15
+    indent=indent-indentamount
+    if indent<0
+      indent=0
+    end if
+  end if
+
+~ Output the line.
+
+  bytepeek z=indentskip
+
+~ If this is a comment line, or is blank, we do not indent it at
+~ all.
+
+  if linepos>1 & z<>126
+    libcall write(destfilehandle,spacebuffer,indent)
+  end if
+  libcall write(destfilehandle,indentskip,linepos)
+
+~ Check for one of the post-output indent changers.
+
+  if keywordcount=<8
+    indent=indent+indentamount
+  end if
+
+~ If there's still something left in the input buffer, we go back to
+~ get the next line.
+
+  if buffercount>0
+    goto mainloop
+  end if
+  libcall freemem(bufferstart,256)
+  libcall freemem(fileline,256)
+  libcall freemem(spacebuffer,256)
+  libcall close(srcfilehandle)
+  libcall close(destfilehandle)
+end if
+end procedure
+
+
+
+procedure word=ParseCommandLine
+local step:word,z:byte,srcfilename:long,destfilename:long
+local addresskludge:long
+
+~ If the command line appears valid, it is altered (by changing the
+~ space and linefeed characters to nulls) so that it can be used to
+~ open the source and destination files.
+~ Note that this routine is deficient in that it cannot properly
+~ handle parameters enclosed in quotes.
+
+load address addresskludge=error1
+srcfilename=commandpointer
+commandlength=commandlength-1
+parsecommandline=0
+if commandlength>0
+  for step=0;commandlength-1
+    bytepeek z=commandpointer+step
+    if z=32
+      exit
+    end if
+  next
+  if step<commandlength
+    bytepoke commandpointer+step,0
+    step=step+1
+    destfilename=commandpointer+step
+    loop ;step<commandlength;step=step+1
+      bytepeek z=commandpointer+step
+      if z=32
+        exit
+      end if
+    end loop
+    if step=commandlength
+      bytepoke commandpointer+commandlength,0
+      parsecommandline=1
+    end if
+  end if
+end if
+string (error1) "Couldn't open file ",0,10
+if parsecommandline=1
+  libcall srcfilehandle=open(srcfilename,1005)
+  if srcfilehandle>0
+    libcall destfilehandle=open(destfilename,1006)
+    if destfilehandle>0
+      parsecommandline=1
+    else
+      libcall close(srcfilehandle)
+      print addresskludge
+      print destfilename
+      addresskludge=addresskludge+20
+      print addresskludge
+      parsecommandline=0
+    end if
+  else
+    print addresskludge
+    print srcfilename
+    addresskludge=addresskludge+20
+    print addresskludge
+    parsecommandline=0
+  end if
+else
+  string (error2) "Error in command line",10
+  string (error3) "Syntax: IndentStr <source-file> <destination-file>",10
+  print error2
+  print error3
+  parsecommandline=0
+end if
+end procedure

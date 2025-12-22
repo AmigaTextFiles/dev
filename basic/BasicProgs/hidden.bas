@@ -1,0 +1,36 @@
+   10    screen 1,4,0:dim xy%(1024):font 0
+   20    locate (0,10):shell "date"
+   30    inc1%=2:inc2%=2
+   40    p=340:q=85
+   50    xp=250:xr!=1.5*3.1415926536#
+   60    yp=45:yr=1:zp=64
+   70    xf!=xr!/xp:yf=yp/yr
+   80    for zi = -q to q-1 step inc1%
+   90    n% = 0:i% = 0
+   100   if zi<-zp or zi>zp then goto 340
+   110   zt = zi*xp/zp:zz=zi
+   120   xl = int(.5 + sqr(xp*xp - zt*zt))
+   130   for xi = -xl to xl step inc2%
+   140   xt! = sqr(xi*xi + zt*zt)*xf!:xx=xi
+   150   yy! = (sin(xt!) + .4 * sin(3*xt!))*yf
+   160   xy%(i%) = xx+zz+p:xy%(i%+1) = -yy+zz+q
+   170   if xy%(i%) < 0 then xy%(i%) = 0
+   180   if xy%(i%) > 640 then xy%(i%) = 640
+   190   if xy%(i%+1) < 0 then xy%(i%+1) = 0
+   200   if xy%(i%+1) > 200 then xy%(i%+1) = 200
+   210   i% = i% + 2:n% = n% + 1
+   220   next xi
+   230   xy%(i%) = xy%(i%-2):xy%(i%+1) = 200
+   240   xy%(i%+2) = xy%(0):xy%(i%+3) = 200
+   250   xy%(i%+4) = xy%(0):xy%(i%+5) = xy%(1)
+   260   n% = n% + 3
+   270   pena 2
+   280   mat draw n%, xy%()
+   290   pena 0
+   300   peno 2
+   310   paint (xy%(0) + 3, 185)
+   320   pena 1
+   330   mat draw n%, xy%()
+   340   next zi
+   350   locate(0,20):shell "date"
+   360   goto 360

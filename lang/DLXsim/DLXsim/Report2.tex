@@ -1,0 +1,736 @@
+\section{Interactive Sessions with \dlxsim}
+
+To illustrate some of the features of \dlxsim, this section describes
+two interactive sessions using examples taken from Chapter 6
+of {\it Computer Architecture, A Quantitative Approach} by Hennessy and
+Patterson.  The programs used are on page 315 and 317.  The ADDD
+instructions have been replaced with MULTD instructions, however, to
+show the effects of a slightly longer latency.  Also, TRAP instructions
+have been added to terminate execution of the programs when simulating.
+
+\subsection{Sample Datafile}
+
+The examples which follow operate on arrays of numbers.  A common datafile
+is used for input to the programs.  This datafile is named {\bf fdata.s}
+and is shown below:\\
+
+\begin{assembly}
+\instr{}{.data}{0}{}
+\instr{}{.global}{a}{}
+\instr{a:}{.double}{3.14159265358979}{}
+\instr{}{.global}{x}{}
+\instr{x:}{.double}{1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16}{}
+\instr{}{.double}{17,18,19,20,21,22,23,24,25,26,27}{}
+\instr{}{.global}{xtop}{}
+\instr{xtop:}{.double}{28}{}
+\end{assembly} \\
+
+The {\bf .data} directive specifies that the data should be loaded in
+at location 0.  The {\bf .global} directive add the specified labels
+to a global symbol table so that other assembly files can access them.
+The {\bf .double} directive stores double precision data to memory.
+
+\subsection{First Example}
+
+The first example uses the program at the bottom of page 315 (with the
+ADDD replaced by MULTD).  The program is shown below. \\
+
+\begin{assembly}
+\instr{}{ld}{f2,a}{}
+\instr{}{add}{r1,r0,xtop}{}
+\instr{loop:}{ld}{f0,0(r1)}{}
+\instr{}{}{}{; load stall occurs here}
+\instr{}{multd}{f4,f0,f2}{}
+\instr{}{}{}{; 4 FP stalls}
+\instr{}{sd}{0(r1),f4}{}
+\instr{}{sub}{r1,r1,\#8}{}
+\instr{}{bnez}{r1,loop}{}
+\instr{}{nop}{}{; branch delay slot}
+\instr{}{trap}{\#0}{; terminate simulation}
+\end{assembly} \\
+
+The simulator is invoked by typing {\bf dlxsim} at the system prompt. \\
+
+{\tt \% dlxsim} \\
+
+First the datafile is loaded, using the load command: \\
+
+\dlxcom{load fdata.s} \\
+
+Next, the program may be loaded.  The program above was created with an
+editor and saved in the file {\bf f1.s}.  It is loaded in the same way
+as the datafile. \\
+
+\dlxcom{load f1.s} \\
+
+To verify that the program has been loaded, the {\bf get} command can
+be used to examine memory.  The program is loaded at location 256 by
+default.  The second parameter to {\bf get} indicates how many words
+to dump.  The {\bf i} suffix tells {\bf get} to dump the contents in
+instruction format (i.e.  produce a disassembly). \\
+
+\dlxcom{get 256 9i}
+\begin{verbatim}
+start:	ld f2,a(r0)
+start+0x4:	addi r1,r0,0xe0
+loop:	ld f0,a(r1)
+loop+0x4:	multd f4,f0,f2
+loop+0x8:	sd a(r1),f4
+loop+0xc:	subi r1,r1,0x8
+loop+0x10:	bnez r1,loop
+loop+0x14:	nop
+loop+0x18:	trap 0x0
+\end{verbatim}
+
+To make sure that the statistics are all cleared (as they should be when
+\dlxsim\ is first invoked), use the {\bf stats} command with the relevant
+parameters: \\
+
+\dlxcom{stats stalls branch pending hw}
+\begin{verbatim}
+Memory size: 65536 bytes.
+
+Floating Point Hardware Configuration
+ 1 add/subtract units, latency =  2 cycles
+ 1 divide units,       latency = 19 cycles
+ 1 multiply units,     latency =  5 cycles
+Load Stalls = 0
+Floating Point Stalls = 0
+
+No branch instructions executed.
+
+Pending Floating Point Operations:
+none.
+\end{verbatim}
+
+The {\bf hw} specifier causes the memory size and floating point hardware
+information to be dumped.  The {\bf stalls} specifier causes the total
+load stalls and floating point stalls to be displayed.  The {\bf branch}
+specifier causes the branch information (taken vs. not taken) to be displayed;
+in this case no branches have been executed yet.  Finally, the {\bf pending}
+specifier causes the pending operations in the floating point units to
+be displayed (none in this case).
+Below, the first four instructions are executed using the {\bf step}
+command: \\
+
+\dlxcom{step 256}
+\begin{verbatim}
+stopped after single step, pc = start+0x4: addi r1,r0,0xe0
+\end{verbatim}
+
+\dlxcom{step}
+\begin{verbatim}
+stopped after single step, pc = loop: ld f0,a(r1)
+\end{verbatim}
+
+\dlxcom{step}
+\begin{verbatim}
+stopped after single step, pc = loop+0x4: multd f4,f0,f2
+\end{verbatim}
+
+\dlxcom{step}
+\begin{verbatim}
+stopped after single step, pc = loop+0x8: sd a(r1),f4
+\end{verbatim}
+
+The {\bf stats} command can produce some more interesting results 
+at this point.\\
+
+\dlxcom{stats stalls pending}
+\begin{verbatim}
+Load Stalls = 1
+Floating Point Stalls = 0
+
+Pending Floating Point Operations:
+multiplier   #1 :  will complete in  4 more cycle(s)  87.964594 ==> F4:F5
+\end{verbatim}
+
+A load stall occurred between the third and fourth instructions because of the
+F0 dependency.  The multiply instruction has issued, and is being
+processed in multiplier unit \#1.  It will complete and store the
+double precision value 87.96 into F4 and F5 in four more clock cycles.
+
+The double precision value in F4 can be displayed using the {\bf fget}
+command with a {\bf d} specifier (for double precision). \\
+
+\dlxcom{fget f4 d}
+\begin{verbatim}
+f4:	0.000000
+\end{verbatim}
+
+As expected, F4 hasn't received its value yet.  Executing one more instruction
+will change the statistics: \\
+
+\dlxcom{step}
+\begin{verbatim}
+stopped after single step, pc = loop+0xc: subi r1,r1,0x8
+\end{verbatim}
+
+\dlxcom{stats stalls pending}
+\begin{verbatim}
+Load Stalls = 1
+Floating Point Stalls = 4
+
+Pending Floating Point Operations:
+none.
+\end{verbatim}
+
+Since the SD instruction used the result from the multiply instruction,
+the multiply was completed before the SD was executed.  The four floating
+point stalls required for the multiply to complete were recorded as well.
+If F4 is examined now, its value after the writeback is displayed. \\
+
+\dlxcom{fget f4 d}
+\begin{verbatim}
+f4:	87.964594
+\end{verbatim}
+
+To execute the program to completion, the {\bf go} command can be used.
+When the TRAP instruction is detected, the simulation will stop. \\
+
+\dlxcom{go}
+\begin{verbatim}
+TRAP #0 received
+\end{verbatim}
+
+To view the cumulative stall and branch information, the {\bf stats} command
+can be used. \\
+
+\dlxcom{stats stalls branch}
+\begin{verbatim}
+Load Stalls = 28
+Floating Point Stalls = 112
+
+Branches:  total 28, taken 27 (96.43%), untaken 1 (3.57%)
+\end{verbatim}
+
+The loop executed 28 times.  There was a single load stall per iteration, 
+for a total of 28 load stalls.  There were 4 floating point stalls per
+iteration, for a total of 112 floating point stalls.  Finally, the
+conditional branch at the bottom of the loop was taken 27 times, and
+fell through on the final time.  All these statistics are reflected above.
+
+To verify the program operated properly, the memory locations containing
+the original data can be examined with the {\bf fget} command.  The original
+data was stored in the 28 double words beginning at location 8.\\
+
+\dlxcom{fget 8 28d}
+\begin{verbatim}
+x:	3.141593
+x+0x8:	6.283185
+x+0x10:	9.424778
+
+... etc. ...
+
+x+0xc8:	81.681409
+x+0xd0:	84.823002
+xtop:	87.964594
+\end{verbatim}
+
+As expected, the initial integer values have all been multiplied by $\pi$.
+
+\subsection{Second Example}
+
+The second example is from page 317 of the aforementioned text.  It
+demonstrates the effects of unrolling loops when multiple execution units
+are available.  The program, which is shown below, performs the same
+operations on the list of numbers as the previous example program. \\
+
+\begin{assembly}
+\instr{start:}{ld}{f2,a}{}
+\instr{}{add}{r1,r0,xtop}{}
+\instr{loop:}{ld}{f0,0(r1)}{}
+\instr{}{ld}{f6,-8(r1)}{}
+\instr{}{ld}{f10,-16(r1)}{}
+\instr{}{ld}{f14,-24(r1)}{}
+\instr{}{multd}{f4,f0,f2}{}
+\instr{}{multd}{f8,f6,f2}{}
+\instr{}{multd}{f12,f10,f2}{}
+\instr{}{multd}{f16,f14,f2}{}
+\instr{}{}{}{; FP stall here}
+\instr{}{sd}{0(r1),f4}{}
+\instr{}{sd}{-8(r1),f8}{}
+\instr{}{sd}{-16(r1),f12}{}
+\instr{}{sub}{r1,r1,\#32}{}
+\instr{}{bnez}{r1,loop}{}
+\instr{}{sd}{8(r1),f16}{; branch delay slot}
+\instr{}{trap}{\#0}{}
+\end{assembly} \\
+
+To take full advantage of this unwound loop, \dlxsim\ can be invoked with
+a command line argument specifying 4 floating point multiply units should
+be included in the hardware configuration.\\
+
+{\bf \%} {\tt dlxsim -mu4} \\
+
+\dlxcom{stats hw}
+\begin{verbatim}
+Memory size: 65536 bytes.
+
+Floating Point Hardware Configuration
+ 1 add/subtract units, latency =  2 cycles
+ 1 divide units,       latency = 19 cycles
+ 4 multiply units,     latency =  5 cycles
+\end{verbatim}
+
+After loading the data and program files, the {\bf step} instruction can
+be used to execute the first 10 instructions.  At this point, the last
+MULTD instruction has just issued.  The {\bf stats} command can display
+the stalls and pending operations. \\
+
+\dlxcom{stats stalls pending}
+\begin{verbatim}
+Load Stalls = 0
+Floating Point Stalls = 0
+
+Pending Floating Point Operations:
+multiplier   #0 :  will complete in  1 more cycle(s)  87.964594 ==> F4:F5
+multiplier   #1 :  will complete in  2 more cycle(s)  84.823002 ==> F8:F9
+multiplier   #2 :  will complete in  3 more cycle(s)  81.681409 ==> F12:F13
+multiplier   #3 :  will complete in  4 more cycle(s)  78.539816 ==> F16:F17
+\end{verbatim}
+
+It is intersting to see what happens after the next instruction is executed. \\
+
+\dlxcom{step}
+\begin{verbatim}
+stopped after single step, pc = loop+0x24: sd 0xfff8(r1),f8
+\end{verbatim}
+
+\dlxcom{stats stalls pending}
+\begin{verbatim}
+Load Stalls = 0
+Floating Point Stalls = 1
+
+Pending Floating Point Operations:
+multiplier   #2 :  will complete in  1 more cycle(s)  81.681409 ==> F12:F13
+multiplier   #3 :  will complete in  2 more cycle(s)  78.539816 ==> F16:F17
+\end{verbatim}
+
+Since the SD instruction was dependent on the first MULTD instruction, a
+floating point stall occurred so the MULTD could complete.  This added stall
+cycle also caused the second MULTD to also complete.  The MULTDs have
+``caught up'' with the SDs, and no more stalls will occur on this 
+iteration.  This is the reason loop unrolling works.  To run the program
+to completion, the {\bf go} command can be used. \\
+
+\dlxcom{go}
+\begin{verbatim}
+TRAP #0 received
+\end{verbatim}
+
+To dump all the statistics gathered, the {\bf stats} command is used without
+any parameters.
+
+\dlxcom{stats}
+\begin{verbatim}
+Memory size: 65536 bytes.
+
+Floating Point Hardware Configuration
+ 1 add/subtract units, latency =  2 cycles
+ 1 divide units,       latency = 19 cycles
+ 4 multiply units,     latency =  5 cycles
+Load Stalls = 0
+Floating Point Stalls = 7
+
+Branches:  total 7, taken 6 (85.71%), untaken 1 (14.29%)
+
+Pending Floating Point Operations:
+none.
+				INTEGER OPERATIONS
+				==================
+
+     ADD        0      ADDI        1      ADDU        0     ADDUI        0  
+     AND        0      ANDI        0      BEQZ        0      BFPF        0  
+    BFPT        0      BNEZ        7       DIV        0      DIVU        0  
+       J        0       JAL        0      JALR        0        JR        0  
+      LB        0       LBU        0        LD       29        LF        0  
+      LH        0       LHI        0       LHU        0        LW        0  
+    MOVD        0      MOVF        0   MOVFP2I        0   MOVI2FP        0  
+  MOVI2S        0    MOVS2I        0      MULT        0     MULTU        0  
+      OR        0       ORI        0       RFE        1        SB        0  
+      SD       28       SEQ        0      SEQI        0        SF        0  
+     SGE        0      SGEI        0       SGT        0      SGTI        0  
+      SH        0       SLE        0      SLEI        0       SLL        0  
+SLLI/NOP        0       SLT        0      SLTI        0       SNE        0  
+    SNEI        0       SRA        0      SRAI        0       SRL        0  
+    SRLI        0       SUB        0      SUBI        7      SUBU        0  
+   SUBUI        0        SW        0      TRAP        1       XOR        0  
+    XORI        0  
+Total integer operations = 74
+
+			FLOATING POINT OPERATIONS
+			=========================
+
+    ADDD        0      ADDF        0    CVTD2F        0    CVTD2I        0  
+  CVTF2D        0    CVTF2I        0    CVTI2D        0    CVTI2F        0  
+    DIVD        0      DIVF        0       EQD        0       EQF        0  
+     GED        0       GEF        0       GTD        0       GTF        0  
+     LED        0       LEF        0       LTD        0       LTF        0  
+   MULTD       28     MULTF        0       NED        0       NEF        0  
+    SUBD        0      SUBF        0  
+Total floating point operations = 28
+Total operations = 102
+Total cycles = 109
+\end{verbatim}
+
+The dynamic counts for all instructions are shown, as well as the
+statistics previously discussed.  The number of load stalls is seven
+in this case, compared to 28 in the first example.  This is the result
+of unrolling the loop four times and providing four multiply units in
+hardware.  An estimate of the clocks per instruction (CPI) can be
+obtained by dividing the total cycles (109) by the total operations
+(102).
+
+The two examples above give only a flavor for the types of operations which
+may be done in \dlxsim.  The possibilities are endless.
+
+\pagebreak
+
+\section{Internal Operation}
+
+Some information concerning how \dlxsim\ operates internally may be
+useful to some users, particularly those who wish to modify or enhance
+the simulator.  This section provides an overview of
+the simulator and a discussion of the underlying data structures used.
+{\it This information is not necessary to use \dlxsim.}
+All of the code discussed below is contained in the file \code{sim.c}.
+
+\subsection{Instruction Tables}
+
+\dlxsim\ contains four tables which contain information about the DLX
+instruction set.  The first is \code{opTable}.  This table contains 64
+entries corresponding to the 64 possible values of the opcode field.  Each
+entry consists of an instruction-format pair.  For example, the value of
+\code{opTable[5]} is \code{\{OP\_BNEZ, IFMT\}} indicating that opcode 5
+is a branch not equal to zero instruction, which uses the I-type format.
+Several entries in this table have \code{OP\_RES} as the instruction.  These
+entries are reserved for future extensions to the DLX instruction set.
+
+The zero opcode indicates a different table should be used to identify
+the instruction.  A second table called \code{specialTable} handles
+this case.  In this table are all the register-register operations.
+The format is not specified explicitly for these instructions (as it
+was in \code{opTable}) because they are all R-type format.  These
+instructions all contain a zero in the opcode field and a function
+encoding in the lower six bits of the instruction word.  There is also
+room in this table for expansion by using entries currently containing
+\code{OP\_RES}.
+
+An opcode of one indicates a floating point arithmetic operation.  A
+third table, \code{FParithTable} handles these instructions.  As with
+\code{specialTable}, all instructions in this table have R-type format.
+The exact operation is again specified by the lower six bits of the
+instruction word, which are used to index into this table.  Currently
+32 entries contain \code{OP\_RES} and are available for future expansion
+to the floating point instruction set.
+
+The final table is \code{operationNames}.  This table contains a list of all
+the integer instruction names followed by the floating point instruction names.
+Each group is arranged alphabetically.  These tables are used to print out
+the names of the instructions when a dynamic instruction count is requested.
+
+\subsection{Simulator Support Functions}
+
+This subsection describes the various routines which handle simulator
+commands and provide support for the main simulator code.  The function
+\code{Sim\_Create} initializes a DLX processor structure and is invoked when
+\dlxsim\ is first started.  The memory size of the machine along with
+the floating point hardware specification (i.e. unit quantities and
+latencies) are specified as parameters.
+
+Two functions, \code{statsReset} and \code{Sim\_DumpStats}, process the
+{\tt stats} command in \dlxsim.  The former resets all the statistics
+to zero, and the latter processes requests for various statistics.  The
+statistics currently taken during simulation are:  load stalls, floating
+point stalls, dynamic instruction counts, and conditional branch behavior.
+In addition, the floating point hardware and pending floating point operations
+can also be examined.  See the description of the {\tt stats} command
+for more information on how to request and reset the various statistics.
+
+The functions \code{Sim\_GoCmd} and \code{Sim\_StepCmd} process the simulator's
+{\tt go} and {\tt step} commands, respectively.  See the description of these
+commands for more information on using them.
+
+The functions \code{ReadMem} and \code{WriteMem} provide the interface
+between the simulator and the DLX memory structure.  They insure that the
+address accessed is valid, which means in must be within the memory's
+range and it must be on a word boundary.  Otherwise, appropriate error
+handling occurs.
+
+\subsection{Compilation of Instructions}
+
+To improve efficiency, \dlxsim\ ``compiles'' the instructions as it
+first encounters them.  To understand how this works, it is necessary
+to examine the structure of a single word of the DLX memory.  A single
+memory word contains several fields: \code{value}, \code{opCode},
+\code{rs1}, \code{rs2}, \code{rd}, and
+\code{extra}.  A DLX program to be simulated is written in DLX
+assembly language.  Such a program is automatically assembled into
+machine code as it is loaded.  The actual machine codes are stored in
+the \code{value} fields of the memory words.  The \code{value} field
+represents the number actually stored at a particular memory word.
+The \code{opCode} field of each memory word is initially set to the
+special value \code{OP\_NOT\_COMPILED}.
+
+When the simulator executes an instruction, it first examines the
+\code{opCode} field of the memory word pointed to by the program counter.
+If this field is a valid opcode (specified in the tables discussed
+above), the appropriate action for that instruction occurs.  If the
+\code{opCode} field contains the value \code{OP\_NOT\_COMPILED}, the
+function \code{Compile} is invoked.  This function looks at the actual
+word stored in the \code{value} field.  The bits corresponding to the
+opcode and function fields are examined to determine what the
+instruction is.  Depending on the instruction type, the two source
+register specifiers and destination register specifier may be
+extracted and stored in the fields \code{rs1}, \code{rs2}, and
+\code{rd}.  If a 16-bit immediate value is present (for I-type
+instructions) or a 26-bit offset is present (for J-type instructions),
+this value is extracted and stored in the \code{extra} field of the
+memory word.  The special code for the instruction is stored in the
+\code{opCode} field of the word, which previously contained the value
+\code{OP\_NOT\_COMPILED}.  These special codes are not the real DLX
+opcodes, but rather the pseudo-opcodes defined in the file
+\code{dlx.h}.
+
+When a compiled instruction is subsequently encountered, no shifting
+or masking operations are required to access the register specifiers or
+immediate values; the required information is already present in the
+appropriate fields of the memory words (\code{rs1}, \code{rs2},
+\code{rd}, and \code{extra}).  This allows the simulator to execute
+much faster.  The actual machine code for the instruction can still be
+examined through the \code{value} field, and this is the value printed
+when the word is examined with the {\tt get} command.
+
+\subsection{Main Simulation Loop}
+
+\code{Simulate} is the main function of the simulator.  The heart of this
+function is basically a very large 
+\code{switch} statement, based on the \code{opCode} field of the memory
+word pointed to by the program counter.  There is a case for each
+integer and floating point instruction.  \code{Simulate} loops through the
+basic fetch-decode-execute cycle until a stop command is received or some
+other exceptional condition occurs.
+
+\subsubsection{Load Stalls}
+
+DLX has a latency of one cycle on load instructions.  In other words,
+the result is not yet present in the destination register on the cycle
+immediately following the load instruction.  To address this problem,
+DLX has load interlocks which cause the pipeline to stall if an
+instruction immediately following a load instruction reads the value
+in the load's destination register.  \dlxsim\ records the occurance of
+these load stall cycles for statistical purposes.  Several variables
+are set during the processing of the following load instructions:
+\code{LB}, \code{LBU}, \code{LH}, \code{LHU} \code{LW}, \code{LF},
+and \code{LD}.  \code{LHI} is not included since the value to be
+loaded is contained in the instruction and there is no extra latency.
+For the other load instructions, the destination register (or
+registers in the case of load double) are stored in \code{loadReg1}
+and \code{loadReg2} (if this is a load double).  The corresponding
+values to be stored in these registers (on the next cycle) are stored
+in \code{loadValue1} and \code{loadValue2}.
+
+When an instruction that reads registers (such as an \code{ADD}
+instruction) is encountered during simulation, the contents of
+\code{loadReg1} and \code{loadReg2} are examined before any other
+action occurs.  If either of the registers specified by these
+variables were loaded in the previous instruction, a load stall is
+detected and tallied.  Different register fields must be checked for
+different instructions.  All the load stall detection logic is
+contained in the macros at the top of the \code{Simulate} function
+definition.
+
+Of interest is the fact that while load stalls would slow down the execution
+speed of a real DLX machine, they do not affect the performance of the
+simulator.  This is because load stall cycles are not actually simulated.
+Instead, it is simply noted that a load stall occurred at a particular point, and
+execution proceeds normally.
+
+\subsubsection{Dynamic Instruction Counts}
+
+Statistics on the number of each type of instruction executed are also 
+recorded during simulation.  This is a simple operation of incrementing the
+appropriate element of the array \code{operationCount}, which is indexed by
+the pseudo-opcodes discussed above.  The information in the array can be
+accessed by the {\tt stats} command.
+
+\subsubsection{Conditional Branch Behavior}
+
+\dlxsim\ also keeps statistics on the conditional branch behavior during
+program execution.  There are four instructions in this category: 
+\code{BEQZ}, \code{BNEZ}, \code{BFPT}, and \code{BFPF}.  The latter two
+instructions are branches based on the status of the floating point
+condition register.  Two fields of the DLX machine structure, \code{branchYes}
+and \code{branchNo} record how many conditional branches where taken and
+not taken, respectively.  These values are accessible via the {\tt stats}
+command.
+
+\subsection{Floating Point Execution Control}
+
+A large portion of the \dlxsim\ code is devoted to the floating point side
+of the machine.  The floating point scheme currently implemented requires
+instructions to issue in order, but they may complete out of order.  In addition
+to managing the allocation of the floating point units,
+\dlxsim\ must also handle all the hazard checking associated with out of order
+completion of instructions.  By requiring instructions to issue in order, the
+write-after-read (WAR) hazard is avoided.  The three hazards which may occur
+are read-after-write (RAW) hazards, write-after-write (WAW) hazards, and
+structural hazards.
+
+\subsubsection{Floating Point Data Structures}
+
+The variables and data structures which manage the floating point
+execution are all declared in the file \code{dlx.h} as part of the basic
+DLX structure.  The variables \code{num\_add\_units}, \code{num\_div\_units},
+and \code{num\_mul\_units} specify how many of each type of floating point
+execution unit are available on the machine.  
+The variables \code{fp\_add\_latency}, \code{fp\_div\_latency}, and 
+\code{fp\_mul\_latency} specify the corresponding latencies (in clock cycles)
+of each of the execution units.  All six of these variables have default
+values which may be overridden via command line parameters when
+\dlxsim\ is invoked.
+
+The variable \code{FPstatusReg} is the status register which is examined
+on a \code{BFPT} or \code{BFPF} instruction.  The various floating point
+set instructions (\code{EQF}, \code{NED}, etc.) write to this register.
+
+The array \code{fp\_add\_units} contains the status of all the floating point
+adders during execution.  If \code{fp\_add\_units[i]} is zero, adder i is
+available.  A non-zero value means that the unit is currently performing an
+operation -- the value specifies the clock cycle when the operation will 
+complete.  The array \code{fp\_div\_units} and \code{fp\_mul\_units} contain
+analogous information for the floating point dividers and multipliers.  All
+three structures can be accessed through the array \code{fp\_units} which is
+an array of pointers to the three execution unit status arrays.
+
+The array \code{waiting\_FPRs} contains 32 elements, corresponding to the
+32 floating point registers in DLX.  A zero in \code{waiting\_FPRs[i]} means
+floating point register Fi can be read from; it contains its most current
+value.  A non-zero value means register Fi is the destination register of a
+pending floating point operation (one which has issued but not yet completed).
+Attempting to read or write to such a register means a hazard condition exists.
+The non-zero value indicates the cycle at which the writeback to the register
+will occur.
+
+The variable \code{FPopsList} points to the chain of pending floating point
+operations.  Each item in this chain is of type \code{FPop}, a structure
+with the following fields:
+\begin{mylist}
+  \item [\code{type} \hfill] Indicates the type of operation.  Normally this is
+   implied by what type of floating point unit is executing the operation, 
+   however adders can perform both additions and subtractions.
+  \item [\code{unit} \hfill] The unit number of the execution unit which is
+   executing the operation.
+  \item [\code{dest} \hfill] The destination register for the operation.  For a
+   double precision operation, this is the lower-numbered destination register.
+  \item[\code{isDouble} \hfill] Indicates if the operation is single or double
+   precision.
+  \item [\code{result} \hfill] An array of two floats used to store the result of the
+   operation (only the first element is used for single precision operations).
+   The result is actually computed at the time of issue.
+  \item [\code{ready} \hfill] The cycle when the operation will complete and writeback
+   will occur.
+  \item[\code{nextPtr} \hfill] Points to the next \code{FPop} in the chain of
+   pending operations.
+\end{mylist}
+To maximize performance, the list of pending floating point operations is
+sorted based on when the operations will complete.  The operation which
+will complete soonest is at the head of the list.
+
+The variable \code{checkFP} is a copy of the \code{ready} field of the
+first floating point operation on the pending operation list.  If its
+value is zero, no floating point operations are pending.  Otherwise 
+\code{checkFP} indicates when the next (soonest) floating point operation will
+complete.  This provides for very quick checking in the fast-path of the
+simulator.  Only one value needs to be checked in a cycle when no
+writebacks should occur.
+
+Many of the previously
+discussed  structures refer to a clock cycle count when a particular
+operation will complete.  The current clock cycle is kept in the
+variable \code{cycleCount}.  This variable is incremented each time the
+simulator executes its main loop.  It is also incremented an
+extra time when a load stall is detected since the floating point units are
+still executing during a load stall.  When the cycle count reaches a large value
+specified by the constant \code{CYC\_CNT\_RESET}, \code{cycleCount} is ``reset''
+back to a small number (5), and all references to clock cycles in the
+floating point data structures are adjusted accordingly.  This operation is
+necessary to prevent \code{cycleCount} from overflowing, becoming negative, and
+thereby wreaking havoc on the sorted list of pending operations.  Making
+\code{cycleCount} an unsigned integer does not work, since there are still
+problems with sorting the pending operations when cycle counts ``wrap around''
+to zero.
+
+\subsubsection{Issuing Floating Point Operations}
+
+The function \code{FPissue} initiates a floating point operation.  It is called
+from eight of the switch cases in the main loop:  \code{ADDF}, \code{DIVF},
+\code{MULF}, \code{SUBF},  \code{ADDD}, \code{DIVD}, \code{MULD}, 
+and \code{SUBD}.  When a floating point instruction issues, three hazard
+conditions must be checked.  A structural hazard occurs if a floating point
+unit of the required type is not available.  A RAW hazard occurs if one of
+the source operands is the destination of a pending floating point operation.
+Finally, a WAW hazard occurs if the destination register is the destination
+register of a pending floating point operation.  All three conditions can
+be checked by examing the floating point data structures discussed above.  If
+any of these hazards are present (and there may be more than one), the
+current instruction is not issued.  Instead a non-zero value is returned
+which indicates the soonest cycle when one of the hazard conditions will
+be over.  This may be a cycle when one of the floating point units will 
+complete its current operation (eliminating a structural hazard), or
+when some register will be written back (eliminating a RAW or WAW hazard).
+When the caller receives a non-zero value from \code{FPissue}, the appropriate
+number of floating point stalls are simulated by adjusting the variables
+\code{cycleCount} and \code{FPstalls}.  The function \code{FPwriteBack}
+(see below) is called to perform any writebacks which may now occur.  Then
+\code{FPissue} is re-invoked.  If another hazard condition exists, the whole
+process may be repeated, but eventually all of the hazard conditions will
+terminate.
+
+If no hazards are present, the instruction is issued.  That is, an new \code{FPop}
+structure is placed in the appropriate spot in the pending operations list.
+The appropriate elements of \code{waiting\_FPRs} are also set to indicate
+that the destination registers are waiting for values to be written back.
+\code{FPissue} returns a zero value to indicate a successful issue, and the
+simulation continues.
+
+\subsubsection{Writing Back Floating Point Results}
+
+The function \code{FPwriteBack} is the second function involved in
+floating point execution.  It is called whenever \code{cycleCount} reaches
+\code{checkFP}, indicating that a result is ready to be written back on the
+current cycle.  \code{FPwriteBack} does exactly that.  It removes the
+first \code{FPop} from the list of pending operations, and stores the
+result (computed at time of issue) in the appropriate register(s).  It also
+zeroes the appropriate element(s) in \code{waiting\_FPRs}.  Since more than
+one operation may complete on the same cycle, \code{FPwriteBack} repeats
+this process until the value in the \code{ready} field of the operation
+at the head of the list exceeds the current value in \code{cycleCount}.
+
+\subsubsection{Handling RAW and WAW Hazards}
+
+The function \code{FPissue} (discussed above) handles the RAW and WAW 
+hazards when a new floating point operation is issued.  However, several other
+instructions can generate such hazards.  Any instruction which reads from or
+writes to a floating point register must check that the register is not the
+destination of a pending operation.  The following instructions fall into
+this class:
+\begin{mylist}
+  \item[Loads \hfill]  LF and LD.
+  \item[Stores \hfill] SF and SD.
+  \item[Moves \hfill] MOVFP2I, MOVI2FP, MOVF, MOVD.
+  \item[Converts \hfill] CVTD2FP, CVTD2I, CVTFP2D, CVTFP2I, CVTI2D, CVTI2FP.
+  \item[Sets \hfill] SEQF, SNEF, SLTF, SLEF, SGTF, SGEF, SEQD, SNED, SLTD, SLED, 
+   SGTD, SGED.
+\end{mylist}
+When any of these instruction are executed, a call to \code{FPwait} is made.
+This is the third and final function for handling floating point execution.
+It checks that all writebacks into the appropriate registers have occurred.
+The number of registers which need to be checked varies.  For a LF 
+instruction, only a single register needs to be checked, while four registers
+must be checked on a MOVD.  If any of the registers are the destinations
+of pending operations, \code{FPwait} will adjust \code{cycleCount} and
+\code{FPstalls} appropriately, and call \code{FPwriteBack} to write the
+results back to the registers.  When \code{FPwait} returns, all RAW and WAW
+hazard conditions will have passed.

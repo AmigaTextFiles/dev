@@ -1,0 +1,194 @@
+#include <stdio.h>
+#include "DebugPrint.h"
+
+#include <exec/exec.h>
+#include <proto/exec.h>
+#include <clib/alib_protos.h>
+
+#include <devices/serial.h>
+
+struct SerialIn {
+  struct MsgPort *msgport;
+  struct IOExtSer *serialio;
+  BOOL deviceopen;
+};
+
+struct SerialIn *si = NULL;
+
+#define serialbuffersize 4096 
+UBYTE serialbuffer[serialbuffersize];
+
+void CloseMidiIn(void);
+
+/*************************************************************************************/
+
+void PrintHex(UBYTE dec)
+{
+  static char hex[]="0123456789ABCDEF";
+  static count=0;
+
+  printf("%c%c ", hex[dec>>4], hex[dec&15]);
+  if(count++ == 19)
+  {
+    printf("\n");
+    count=0;
+  }
+}
+
+/*************************************************************************************/
+
+BOOL OpenMidiIn(void)
+{
+  if (si = (struct SerialIn *)AllocMem(sizeof(struct SerialIn), MEMF_PUBLIC|MEMF_CLEAR))
+  {
+    if (si->msgport = CreatePort(0,0))
+    {
+      if ( si->serialio = (struct IOExtSer *)CreateExtIO(si->msgport, sizeof(struct IOExtSer)) )
+      {
+        si->serialio->io_SerFlags = SERF_SHARED;
+
+        if ( si->deviceopen = !OpenDevice("serial.device", 0L, (struct IORequest *)si->serialio, 0L) )
+        {
+          si->serialio->io_Baud = 31250;
+          si->serialio->io_ReadLen = 8;
+          si->serialio->io_WriteLen = 8;
+          si->serialio->io_StopBits = 1;
+          si->serialio->io_RBufLen = 512;
+          si->serialio->io_SerFlags |= SERF_XDISABLED | SERF_RAD_BOOGIE;
+          si->serialio->io_SerFlags &= ~(SERF_EOFMODE | SERF_PARTY_ON);
+          si->serialio->IOSer.io_Command = SDCMD_SETPARAMS;
+          return (0==DoIO((struct IORequest *)si->serialio));
+        }
+      }
+    }
+  }
+
+  CloseMidiIn();
+  return FALSE;
+}
+
+/*************************************************************************************/
+
+void CloseMidiIn(void)
+{
+  if (si)
+  {
+    if (si->deviceopen) CloseDevice((struct IORequest *)si->serialio);
+    if (si->serialio) DeleteExtIO((struct IORequest *)si->serialio);
+    if (si->msgport) DeletePort(si->msgport);
+    FreeMem(si, sizeof(struct SerialIn));
+    si = NULL;
+  }
+}
+
+/*************************************************************************************/
+
+void ReceiveMidiData(ULONG *other_signals)
+{
+  struct IOExtSer *ioextser = si->serialio;
+  ULONG buffered;
+
+  while (1)
+  {
+    ioextser->IOSer.io_Command = SDCMD_QUERY;
+    DoIO((struct IORequest *)ioextser);
+
+    buffered = ioextser->IOSer.io_Actual;
+
+    if (buffered == 0)
+    {
+      ioextser->IOSer.io_Length = 1;
+      ioextser->IOSer.io_Data = (APTR)serialbuffer;
+      ioextser->IOSer.io_Command = CMD_READ;
+      SendIO((struct IORequest *)ioextser);
+
+      {
+        register ULONG serialmask = (1<<si->msgport->mp_SigBit);
+        register ULONG bits;
+
+        bits = Wait(*other_signals | serialmask);
+
+        if (bits & serialmask)
+        {
+          ULONG i;
+          for(i=0;i<ioextser->IOSer.io_Actual;i++)
+            PrintHex(serialbuffer[i]);
+
+          if (ioextser->IOSer.io_Error != 0)
+          {
+            char temp[80];
+            sprintf(temp, "[error=%d]!!", ioextser->IOSer.io_Error);
+            dprintf(temp);
+          }
+
+          WaitIO((struct IORequest *)ioextser);
+        }
+
+        if (bits & (~serialmask))
+        {
+          AbortIO((struct IORequest *)ioextser);
+          WaitIO((struct IORequest *)ioextser);
+          *other_signals = bits & (~serialmask);
+          return;
+        }
+      }
+    }
+    else // bytes in queue
+    {
+      ioextser->IOSer.io_Length = buffered>serialbuffersize?serialbuffersize:buffered;
+      ioextser->IOSer.io_Data = (APTR)serialbuffer;
+      ioextser->IOSer.io_Command = CMD_READ;
+      DoIO((struct IORequest *)ioextser);
+
+      if (ioextser->IOSer.io_Actual == 0)
+      {
+        char temp[80];
+        sprintf(temp, "Actual=%d, Buffered=%d!!", ioextser->IOSer.io_Actual, buffered);
+        dprintf(temp);
+        printf("*");
+      }
+
+      if (ioextser->IOSer.io_Error != 0)
+      {
+        char temp[80];
+        sprintf(temp, "[error=%d]!!", ioextser->IOSer.io_Error);
+        dprintf(temp);
+      }
+
+      {
+        ULONG i;
+
+        printf("[");
+
+        for(i=0;i<ioextser->IOSer.io_Actual;i++)
+          PrintHex(serialbuffer[i]);
+
+        printf("]");
+      }
+    }
+  }
+}
+
+
+int main(void)
+{
+  dprintf("Program started.");
+
+  if (OpenMidiIn())
+  {
+    while (1)
+    {
+      ULONG signals;
+      signals = SIGBREAKF_CTRL_C;
+
+      ReceiveMidiData(&signals);
+
+      if (signals & SIGBREAKF_CTRL_C)
+        break;
+    }
+    CloseMidiIn();
+  }
+
+  dprintf("Program ended.");
+  return 0;
+}

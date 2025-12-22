@@ -1,0 +1,135 @@
+<html><head>
+<title>Best of Blitz-List</title></head>
+<body bgcolor=#ffffff>
+<b>From</b> :  Peter Liebetrau (zippo@edina.xnc.com)<br>
+<b>Subject</b> :  How to use the timer.device<br>
+<pre>
+
+;
+; How to use the  timer.device
+;
+
+
+DEFTYPE.timerequest *timerrequest
+DEFTYPE.MsgPort     *timerport,*win0port
+DEFTYPE.Window      *win0
+DEFTYPE.l           timersignal,win0signal,signalset,signal,ev
+DEFTYPE.b           ende
+
+scr$  = "Timer-Demo-Screen"
+win0$ = "Timer-Demo-Window"
+
+
+; at first the timer.device routines
+
+;--------------------------------------------------------------------------
+Statement opentimer{}
+SHARED *timerrequest,*timerport,timersignal
+  ; To open a device we need a MsgPort
+  *timerport  = CreateMsgPort_()
+  ; With that MsgPort we create an IORequest
+  *timerrequest = CreateIORequest_(*timerport,SizeOf.timerequest)
+  ; Now we can open the device
+  OpenDevice_ Null("timer.device"),1,*timerrequest,0
+
+  ; To get messages from the device, we use its MsgPort`s Signalbit
+
+  If *timerport\mp_SigBit = 0 Then *timerport\mp_SigBit = AllocSignal_(-1)
+  timersignal = 1 LSL *timerport\mp_SigBit
+End Statement
+;--------------------------------------------------------------------------
+
+;--------------------------------------------------------------------------
+Statement closetimer{}
+SHARED *timerrequest,*timerport
+  If *timerport
+    FreeSignal_ *timerport\mp_SigBit
+    DeleteMsgPort_ *timerport
+  EndIf
+  If *timerrequest
+    AbortIO_ *timerrequest
+    CloseDevice_ *timerrequest
+    FreeMem_ *timerrequest,SizeOf.timerequest
+  EndIf
+End Statement ; close_timer{}
+;--------------------------------------------------------------------------
+
+;--------------------------------------------------------------------------
+Statement starttimer{}
+; First we have to initialize the TimerIO. Then we can wait for the signal !!!
+SHARED *timerrequest
+  *timerrequest\tr_time\tv_secs     = 1               ; We will wait 1 second
+  *timerrequest\tr_time\tv_micro    = 0               ; and no micro more
+  *timerrequest\tr_node\io_Command  = #TR_ADDREQUEST
+  SendIO_ *timerrequest                               ; Here we go ...
+End Statement ; starttimer{}
+
+Statement stoptimer{}
+; After getting the signal, we MUST stop the IORequest !!!!
+SHARED *timerrequest
+  If CheckIO_(*timerrequest) = 0 Then WaitIO_ (*timerrequest)
+End Statement ; stoptimer
+;--------------------------------------------------------------------------
+
+;--------------------------------------------------------------------------
+Statement timerint{}
+; When we get a timersignal, we call this interrupt routine
+SHARED scr$,win0$,*win0
+  ; We stop the IORequest
+  stoptimer{}
+  ; Then we can do everything we want to do
+  d$  = Date$(SystemDate)
+  s$  = win0$ + " Date "  + UStr$(Days) + "." + UStr$(Months) + "." + UStr$(Years)
+  Format "0#"
+  s$+"  Time "  + Str$(Hours) + ":" + Str$(Mins)  + ":" +Str$(Secs)
+  Format ""
+  WTitle s$,scr$
+  ; For the next event, we MUST start the IORequest again
+  starttimer{}     ; !!!! WICHTIG !!!!
+End Statement
+;--------------------------------------------------------------------------
+
+;------------------- Now the program --------------------------------------
+
+Screen 0,10,scr$
+Window 0,0,12,640,244,$143e,win0$,0,1
+
+; For the Wait_ we need the intuitionaddress of the windwo !
+*win0      = Peek.l(Addr Window(0))
+; Like for  the Timer, we need MsgPort and signalbit of the Window
+*win0port  = *win0\UserPort
+win0signal = 1 LSL *win0port\mp_SigBit   ; Das wars auch schon !
+
+; Then we create the timer, and start the IORequest
+opentimer{}
+starttimer{}
+
+; We "or" the signals of ALL MsgPorts we have
+
+signalset  = win0signal|timersignal
+
+Repeat
+; This loop is something like a normal WaitEvent-Loop
+  signal=Wait_(signalset)
+
+  ; Don`t use a Select/Case, because more than one signalbits can be set !
+
+  If (signal&win0signal)=win0signal   ; A windowevent
+    ev  = Event
+    Select ev
+    Case #IDCMP_CLOSEWINDOW
+      ende=True
+    End Select
+  EndIf
+
+  If (signal&timersignal)=timersignal ; A timerevent
+    GetMsg_ *timerport
+    timerint{}
+  EndIf
+Until ende=True
+
+; At the and, we have to close the timer.device
+
+stoptimer{}
+closetimer{}
+</pre></body></html>

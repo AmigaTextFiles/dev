@@ -1,0 +1,574 @@
+
+-------------------------------------------------------------------------------
+
+                                  PostSIM
+
+                      S.I.M. Postmortem Debug Server
+                               Version 0.85
+
+                  Copyright © 1992/1993 by Stefan Walter
+                            ALL RIGHTS RESERVED
+
+-------------------------------------------------------------------------------
+
+
+
+
+
+                               Documentation
+
+
+                         last edited on: 09.03.93
+
+
+
+
+
+
+
+===============================================================================
+1.      Introduction
+===============================================================================
+
+
+PostSIM  basically  is  a  sophisticated  crash handler.  It will catch all
+exceptions  which  do  not  occur  in  supervisor  mode  and  all  calls to
+exec.library's  Alert()  and  Debug().  Additionally to basic features like
+ending or suspending crashed tasks, PostSIM also allows symbolic postmortem
+debugging.
+
+PostSIM can be used for different objectives.  It can be used as preventive
+measurement against crashes and software failure requesters, giving you the
+chance  not  only  to  suspend  or end a crashed process but also to have a
+closer look at what went wrong.  If you are developing applications, having
+PostSIM  installed  in  the  background  can be very useful.  You can debug
+right  then  when  the program fails, which is a big help for searching the
+reason for those nasty hard_to_reproduce crashes.
+
+PostSIM  also  allows  you  to  partially get program to work that break on
+higher  versions  of  the  OS  or because of 680x0 processors, due to cache
+problems or the typical privileged 'MOVE SR,<ea>' instruction.
+
+Finally  PostSIM  allows  also  active  debugging.   If  you know that your
+program  has  a  bug,  you  can  insert  and  assemble  or  compile ILLEGAL
+instructions  or  calls  to  Debug() at strategic places in your program or
+where  you  assume  the  bug to be.  When you run the program, PostSIM gets
+invoked and you can monitor the program from then on.  Very useful to debug
+objects like file handlers etc.
+
+
+
+
+
+
+
+
+===============================================================================
+2.      Installation
+===============================================================================
+
+
+PostSIM  needs to be run *BEFORE* any crashes happen.  Therefore it should be
+installed  from the startup-sequence, but it can also be started later from
+the CLI/Shell.  Start from the Workbench is not allowed.
+
+For a proper installation of PostSIM do the following:
+
+
+
+      - Copy  the  file 'PostSIM' to a suitable location.  Possible choices
+        would  be  the 'C' directory or the directory where you have stored
+        the rest of your debugging toolkit.
+
+
+      - If  you haven't configured a copy of SIM yet, do this now and store
+        the copy in the 'C:' directory or somewhere else.
+
+
+      - Copy  the  symbol  definition  file  for your version of OS or your
+        custom  definition  file  to  the  'S:' directory as 'bug.libfile'.
+        PostSIM  and  SIMBug  share the same definition file.  PostSIM does
+        not  require  a  symbol definition file to work.  If you don't want
+        symbols for library calls, leave out this step.
+
+        The  information about how to edit or to create a custom definition
+        file can be found in a seperate documentation.
+
+
+      - If  you  want  installation  at  startup,  execute  PostSIM in your
+        startup-sequence.
+
+
+
+PostSIM accepts the following options when started:
+
+
+
+         -s (path)      (path)  specifies where PostSIM shall look for SIM.
+                        This  must  be stated if you do not have stored SIM
+                        in either the current or the 'C' directory.
+
+
+         -k (key)       (key)  specifies  the hotkey with which PostSIM can
+                        be   invoked.    (key)  is  a  hexadeciaml  number.
+                        default is:
+
+                           $00190019 (Ctrl-LShift-LAlt-p).
+
+                        A  description  of  how  the  number is built up is
+                        located at the end of the decomentation.
+
+
+         -w (win)       (win)  specifies  the  console window PostSIM shall
+                        open when invoked.  Default is:
+
+                           'CON:0/0/550/150/PostSIM v0.85'.
+
+                        If  the  default window is too small to contain the
+                        full  texts  with the system font you use, use this
+                        option to specify a larger window.
+
+
+         -l             Will  force PostSIM to load SIM immediately when it
+                        is installed.
+
+
+         -d             Will  force  PostSIM to patch the Debug() vector of
+                        exec.library directly to SIM's JSR entrance.
+
+                        This   option  will  automatically  load  SIM  when
+                        PostSIM is installed (see option -l).
+
+
+         -q             Supresses  the  title text when installing and only
+                        prints   the  installation  message.   Useful  when
+                        installing PostSIM in the startup-sequence.
+
+
+         -h             Disables   automatic   printing  of  all  available
+                        commands when PostSIM gets invoked.
+
+
+         ?              Prints a brief overview of the options and does not
+                        install PostSIM.
+
+
+
+A sample command line could look like this:
+
+
+
+         PostSIM -qlhd -sbin/sim -k$190030 -w"CON:0/0/640/200/PostSIM Window"
+
+
+
+When  PostSIM  fails  to install itself, it will return the following error
+messages:
+
+
+
+         - PostSIM successfully installed.
+
+                   PostSIM could be installed and is now working.
+
+
+
+         - Unable to open port.
+
+                   PostSIM could not open the port needed to handle
+                   crashes and was therefore not installed.
+
+
+
+         - Unable to load SIM.
+
+                   PostSIM could not load SIM at installation.
+
+
+
+Executing PostSIM again has the same effect as pressing the hotkey.
+
+While  PostSIM waits in the background, memory consumption limits itself to
+ca. 17  KBytes  plus the memory required for a process (ca. 5-13 KBytes)
+plus the memory for SIM and its display (ca. 68 Kbytes) if it is loaded at
+installation.
+
+
+
+
+
+
+
+
+===============================================================================
+3.      Invoking PostSIM
+===============================================================================
+
+
+PostSIM can get invoked for the following reasons:
+
+
+
+        - An exception happens.
+
+        - A task calls Alert().
+
+        - A task calls Debug().
+
+        - Debugging with SIM is suspended with the quit command of SIM.
+
+        - PostSIM's copy of SIM was called from another task and the
+          quit command of SIM is used.
+
+        - The hotkey to invoke PostSIM is pressed.
+
+        - PostSIM is executed again.
+
+
+
+In  any  of  these  cases,  PostSIM  will  suspend the task which called it
+(except for invokation due to the hotkey), open a console window and call
+WBToFront() and DisplayBeep().
+
+If  SIM  hasn't been loaded yet, it will attempt to do so.  If SIM can't be
+found  at  the  custom,  the current and the 'C' directory, a filerequester
+pops  up.   If  you  cancel it, SIM will not be loaded and debugging is not
+possible.
+
+PostSIM  then  loads  the  symbol  definition file if it could be found and
+generates a symbol list if no error in the definition file was found.
+
+Then the reason for the invokation is displayed.  If PostSIM was invoked by
+the  user and there are crashes stored in the storage list, their number is
+displayed  instead.   If  the  reason  was a crash, PostSIM also prints the
+tasks  address,  name  and  the  CLI  number  and the loaded command if the
+crashed task is a CLI process.  Last the results of a few sanity checks are
+printed.   The  sanity  checks  consist  of  a informing you if Forbid() or
+Disable()  was  broken,  if the stackpointer is not within the stack of the
+crashed  task/process  and  if its PC is not within the ROM or any hunks of
+the program loaded.
+
+Finally  PostSIM lists all available commands if this isn't suppressed with
+the 'h' option.  Then it waits for commands.
+
+
+
+If  more  then one task has crashed, they are queued up.  You can only deal
+with  one  task at a time.  If the queue isn't empty, the following message
+appears in the window title bar:
+
+
+        *** [n] crashes waiting in queue.
+
+
+If  a  task  crashes  while PostSIM's window is open, it is also put in the
+queue,  the  window  title  bar  is  updated  and  a  call  to WBToFront(),
+DisplayBeep() and ActivateWindow() is done.
+
+
+
+
+
+
+
+
+===============================================================================
+4.      Commands
+===============================================================================
+
+
+Interaction  with  PostSIM  is  done with one letter commands which in most
+cases  don't have further arguments.  Not all commands are allowed at every
+kind of invokation, i.e.  the 'D'/Debug command has no sence if PostSIM was
+invoked  by  hotkey.   The  available commands can be listed with the '?'
+command.
+
+
+The following commands exist:
+
+
+
+Q       Terminates PostSIM.  This is only allowed when no crash is pending,
+        the storage list is empty and debugging is not in progress.
+
+        If  while removing all patches a changed task traphandler is found,
+        information  about  the  task  is  given  and  the possibilities to
+        restore this one or all, not to restore it, not to restore any more
+        or  to  cancel.   If you have run any other debugger after PostSIM,
+        you shoud quit it before you end PostSIM.
+
+
+H       Holds  PostSIM.   If  no  crash is pending, this command closes the
+        window and puts PostSIM on stand-by.
+
+
+N       Creates  a  new  CLI/Shell.   This  command  requires the 'Run' and
+        'NewCLI' cli commands in the 'C' directory if they aren't resident.
+
+
+E       Enters  SIM  as  subroutine.   Basically of use if you lost control
+        while debugging or for short peeking of the system.  System symbols
+        are  available.   Do  not  change  the  stack pointers or the PC or
+        PostSIM will crash.
+
+
+I       If  a crash has happened, this command displays further information
+        about  register  contents  and  the  task/process  of  the  crashed
+        program.
+
+
+R       Regenerates the system symbols.  You can use this command to update
+        device,  library  base or task symbols after new libraries, devices
+        or tasks have been installed.
+
+
+U       Updates  the  traphandlers  of all tasks.  This command may be used
+        after   another   program  (i.e.   another  debugger)  changed  the
+        traphandler  of  a  task  and you want this traphandler pointing at
+        PostSIM again.
+
+        If  a changed task traphandler is found, information about the task
+        is  given  and  the possibilities to update this one or all, not to
+        update it, not to update any more or to cancel.
+
+
+S       Suspends  the  task that crashed by letting it wait forever.  There
+        is no way back to safely reactivate a tasks that has benn suspended
+        with this command.  Think carefully befure using it.
+
+
+X       Ends  the  crashed  program by either calling Exit() or by reseting
+        the stack and performing an additional RTS.
+
+
+O       Lets  the  old traphandler deal with the crash.  This allows you to
+        pass  control  to  another  debugging  tool that has been installed
+        before PostSIM or to see the standard software failure requester.
+
+
+Y       Loads symbols from an executable.  The symbols are relocated on the
+        segment list of the loaded command of the crashed process.
+
+        If  the  name of the executable isn't specified with the command, a
+        file requester pops up.
+
+        Problems  may  occur  with programs that detach from the CLI, where
+        the  segment  list of the program in memory does not match the hunk
+        structure of the executable.
+
+
+D       Start  debugging.   Passes control over the program that crashed to
+        SIM.   PostSIM  therefore  sets  the  task  traphandle of that task
+        directly  to  SIM.   You  can use the quit command of SIM to return
+        control   to   PostSIM  or  to  suspend  debugging  and  return  to
+        multitasking.
+
+        PostSIM removes its window and returns to stand-by.
+
+
+C       Terminates debugging and lets go the task that crashed.
+
+
+A       If  the  invokation reason was a call to Alert(), this command lets
+        the task complete the call.
+
+
+G       Terminates  debugging  and  resets  SIM.   This command needs to be
+        executed  if  you terminated debugging of the last crash and didn't
+        leave SIM with 'quit' then.
+
+
+P       Stores the crash in the storage list.
+
+
+W (n)   Gets the first or (n)th crash from the storage list.
+
+
+L       Lists all crashes in the storage list.
+
+
+T       Lists  all tasks and processes with their address, state, priority,
+        CLI  number,  name  plus name of the loaded command.  The output is
+        paged,  after  one  page has been printed and there is more to see,
+        you  can press either <CTRL-C> to abort or any other key to see the
+        next page.
+
+
+Z       Intercepts  any  task  specified by its task control block address.
+        The addresses can be found using the 'T' command.
+
+        If  the  task  to  be  intercepted is in the ready list, it will be
+        stoped before it will execute the next instruction.  If the task is
+        in  waitstate,  PostSIM will wait until the tasks becomes activated
+        somehow,  then  PostSIM  will  let  it  complete the call to Wait()
+        before it is stopped.
+
+        If a task could be intercepted, it will be dealt with like it would
+        have  crashed and activated PostSIM.  You can either debug the task
+        using the 'D' command or put it in the storage list to freeze it.
+
+
+?       Displays all available commands.
+
+
+
+
+
+
+
+
+===============================================================================
+5.      Debugging
+===============================================================================
+
+
+When  a  task crashes, it is put to waitstate by calling Wait(), regardless
+whether  it  has  called  Disable()  or  Forbid()  before or not.  This can
+remotely  lead  to futher crashes depending what the program was doing when
+it crashed, i.e.  if it was meddling with the task or memory lists.
+
+When  you  intend  to  debug  a  crashed task, you can do this with the 'D'
+command.   If  an  exception  caused  the  crash,  the  PC  points  to  the
+instruction  which  caused the exception.  If it was Alert(), The PC points
+to  the  real Alert() function, if you don't want to see the alert, perform
+an RTS, i.e.  with SIM's AMIGA-SHIFT-R shortcut.
+
+If  you need to suspend debugging for whatever reason, use the quit command
+of SIM.  You then return to PostSIM where you can use the 'D' command again
+to  continue  to  debug  or  the  'C'  command to continue execution of the
+program and to end the debugging of this task.
+
+When  you have finished debugging, don't leave SIM with 'Exit'.  Use 'Quit'
+instead.   You  return  to PostSIM.  There you finish debugging by entering
+the  'C'  command.   If  you  don't  do  this, you will need to use the 'G'
+command to grab SIM again when you need to do further debugging.
+
+
+
+
+
+
+
+
+===============================================================================
+6.      The Hotkey
+===============================================================================
+
+
+PostSIM's  default  hotkey to invoke PostSIM is CTRL-LALT-LSHIFT-P.  If you
+desire  to  have  another hotkey or if the default one interacts with other
+applications  you  have installed, you can specify your own when installing
+PostSIM using the 's' option.
+
+The  hotkey is defined as a number similar to a rawkey.  The hotkey's value
+is ORed together from the desired qualifiers and a key:
+
+        Qualifiers:
+
+                LEFT SHIFT:              $00000001
+                RIGHT SHIFT:             $00000002
+                CAPSLOCK:                $00000004
+                CONTROL:                 $00000008
+                LEFT ALT:                $00000010
+                RIGHT ALT:               $00000020
+                LEFT AMIGA:              $00000040
+                RIGHT AMIGA:             $00000080
+                MIDDLE BUTTON:           $00001000
+                RIGHT BUTTON:            $00002000
+                LEFT BUTTON:             $00004000
+
+
+
+        Keys (refering to American keyboard!):
+
+                A       $00200000                S       $00210000
+                B       $00350000                T       $00140000
+                C       $00330000                U       $00160000
+                D       $00220000                V       $00340000
+                E       $00120000                W       $00110000
+                F       $00230000                X       $00320000
+                G       $00240000                Y       $00150000
+                H       $00250000                Z       $00310000
+                I       $00170000                1       $00010000
+                J       $00260000                2       $00020000
+                K       $00270000                3       $00030000
+                L       $00280000                4       $00040000
+                M       $00370000                5       $00050000
+                N       $00360000                6       $00060000
+                O       $00180000                7       $00070000
+                P       $00190000                8       $00080000
+                Q       $00100000                9       $00090000
+                R       $00130000                0       $000a0000
+
+                -       $000b0000                '       $002a0000
+                =       $000c0000                $       $002b0000
+                \       $000d0000                <       $00300000
+                [       $001a0000                ,       $00380000
+                ]       $001b0000                .       $00390000
+                ;       $00290000                /       $003a0000
+
+                ESC     $00450000                TAB     $00420000
+                F1      $00500000                CR      $00440000
+                F2      $00510000                CTRL    $00630000
+                F3      $00520000                CAPS    $00620000
+                F4      $00530000                LSHIFT  $00600000
+                F5      $00540000                RSHIFT  $00610000
+                F6      $00550000                LALT    $00640000
+                F7      $00560000                RALT    $00650000
+                F8      $00570000                LAMIGA  $00660000
+                F9      $00580000                RAMIGA  $00670000
+                F10     $00590000                C-UP    $004c0000
+                |       $00000000                C-DOWN  $004d0000
+                BCKSPC  $00410000                C-LEFT  $004f0000
+                DEL     $00460000                C-RIGHT $004e0000
+                HELP    $005f0000
+
+
+
+        Keys of keypad:
+
+                1       $001d0000                0       $000f0000
+                2       $001e0000                .       $003c0000
+                3       $001f0000                [       $005a0000
+                4       $002d0000                ]       $005b0000
+                5       $002e0000                /       $005c0000
+                6       $002f0000                *       $005d0000
+                7       $003d0000                -       $004a0000
+                8       $003e0000                +       $005e0000
+                9       $003f0000                ENTER   $00000000
+
+
+
+An example: The default hotkey CTRL-LALT-LSHIFT-P:
+
+                LEFT SHIFT:     $00000001
+                CONTROL:        $00000008 OR
+                LEFT ALT:       $00000010 OR
+                P               $00190000 OR
+                ===========================
+                                $00190019
+
+
+
+
+
+
+
+
+===============================================================================
+7.      Final notes
+===============================================================================
+
+
+PostSIM  is  part  of  the  distribution  of SIM and may only be copied and
+distributed along with the entier distribution.
+
+If you find any bugs in PostSIM, the system symbol definition files or SIM,
+you  are  kindly  asked to report these to me in order to fix them.  Please
+look  at the end of the documentation of SIM for both my physical or e-mail
+address.
+
+
+
+Happy bug-hunting! :)
+

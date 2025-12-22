@@ -1,0 +1,3 @@
+
+Var AmigaGuideBase : Address;
+                                   

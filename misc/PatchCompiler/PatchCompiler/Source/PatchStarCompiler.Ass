@@ -1,0 +1,1160 @@
+	opt	l+
+
+	XREF	PATCH_MODULE_END,PATCH_MODULE_START
+	XREF.l	PATCH_MODULE_SIZE
+
+; V19
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                    PatchStartCompiler                          нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн й 1990 Roger Fischlin, Steigerwaldweg 6, 6450 Hanau 7, Germany нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+
+	incdir   	"ram:include/"
+
+        	include 	exec/memory.i
+	include	exec/exec_lib.i
+	include	exec/interrupts.i
+	include	libraries/dos_lib.i
+	include	libraries/dos.i
+	include	libraries/dosextens.i
+
+
+
+DOS	macro			; one library, one macro .....
+	move.l	a5,a6
+	jsr	_LVO\1(a6)
+	endm
+
+
+
+DOS_TEXT	macro
+	lea.l	.Text\@(pc),a0
+	moveq.l	#.TextEnd\@-.Text\@,d0
+	bsr	CLI_Text
+	bra.s	.Label\@
+.Text\@	dc.b	\1
+.TextEnd\@
+	even
+.Label\@	tst	d0
+	endm
+
+PSC_ERROR	macro
+	lea.l	.Text\@(pc),a0
+	moveq.l	#.TextEnd\@-.Text\@,d0
+	bsr	CLI_Text
+	bra.s	.Label\@
+.Text\@	dc.b	"    ERROR : "
+	dc.b	\1
+	dc.b	10
+.TextEnd\@
+	even
+.Label\@	tst	d0
+	endm
+
+	clr.b	-1(a0,d0)
+	move.l	a0,CommandString
+	lea	dosname(pc),a1		; open DOS
+	moveq.l	#33,d0
+	CALLEXEC 	OpenLibrary
+	move.l	d0,a5
+	tst.l	d0
+	beq	NoDOS
+	bsr	Main
+	move.l	a5,a1		; close DOS
+	CALLEXEC	CloseLibrary
+NoDOS	moveq.l	#0,d0
+	rts
+dosname	DOSNAME
+CommandString	dc.l	0
+Source_FH	dc.l	0
+Object_FH	dc.l	0
+Info_FH	dc.l	0
+LineCounter	dc.l	0
+BEGINCounter	dc.l	0
+LastIF	dc.b	0
+InfoName	dc.l	0
+SourceName	dc.l	0
+PatchName	dc.l	0
+	even
+
+
+
+Main	bsr	COMMAND		; check args 
+	tst.w	d0
+	bmi	INFO
+
+	DOS_TEXT	<10,$9b,"4m"," PatchStar - Compiler V1.00  й 1990 by Roger Fischlin ",$9b,"0m",10,10>
+	bne	.Error
+
+	move.l	PatchName(pc),d1		; open object file
+	move.l	#MODE_NEWFILE,d2
+	DOS	Open
+	move.l	d0,Object_FH
+	bne.s	.Label2
+	DOS_TEXT	<"couldn't open object file !",10>
+	bra	.Error
+
+.Label2	DOS_TEXT	<$9b,"1;32m"," 1.Writing patch module",10,$9b,"0;31m">
+	bsr	WRITE_MODULE
+	move.w	d0,d6
+	DOS_TEXT	<" done.",10,10>
+	tst.w	d6		; error ?
+	bne	DeleteObject
+
+
+	DOS_TEXT	<$9b,"1;32m"," 2.Writing info string",10,$9b,"0;31m">
+	bsr	WRITE_INFO
+	move.w	d0,d6
+	DOS_TEXT	<" done.",10,10>
+	tst.w	d6		; error ?
+	bne	DeleteObject
+
+
+	DOS_TEXT	<$9b,"1;32m"," 3.Compiling",10,$9b,"0;31m">
+	bsr	COMPILE_SOURCE
+	move.w	d0,d6
+	DOS_TEXT	<10," done.",10,10>
+	tst.w	d6		; error ?
+	bne.s	DeleteObject
+
+	DOS_TEXT	<$9b,"1;32m"," 4.Saving as executable",10,$9b,"0;31m">
+	bsr	EXECUTABLE
+	move.w	d0,d6
+	DOS_TEXT	<" done.",10,10>
+	tst.w	d6		; error ?
+	bne.s	DeleteObject
+
+
+
+	move.l	Object_FH(pc),d1	; close object file
+	DOS	Close
+.Error	rts
+
+
+
+DeleteObject	move.l	Object_FH(pc),d1	; close object file
+	DOS	Close
+	move.l	PatchName(pc),d1	; delete object
+	DOS	DeleteFile
+	DOS_TEXT	<10,10>
+	rts
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                   COMPILE SOURCE                     нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+COMPILE_SOURCE	move.l	SourceName(pc),d1	; open source file
+	move.l	#MODE_OLDFILE,d2
+	DOS	Open
+	move.l	d0,Source_FH
+	bne.s	.Label1
+	PSC_ERROR	<"couldn't open source file !",10>
+	bra	NoSource
+
+.Label1	clr.l	LineCounter
+	clr.b	LastIF
+NextLine	moveq.l	#0,d0		; check if CTRL-C 
+	moveq.l	#0,d1
+	CALLEXEC	SetSignal
+	btst	#12,d0
+	beq.s	.NoUserBreak
+	DOS_TEXT	<" User break .",10>	; write msg
+	bra	COMP_Error
+
+.NoUserBreak	addq.l	#1,LineCounter
+	bsr	WriteLine		; write current line number
+	bsr	ReadLine		; get next line
+	tst.b	Line		; end of file ?
+	beq	COMP_CloseSource
+	tst	d0
+	beq	.NoError		; error ?
+	bmi	.DosError
+	PSC_ERROR	<"Line too long !">
+	bra	COMP_Error
+.DosError	PSC_ERROR	<"DOS error !">
+	bra	COMP_Error
+
+.NoError	lea.l	Line(pc),a0
+	bsr	NextCommand		; skip spaces etc.
+	tst	d0
+	beq	NextLine		; no more commands...
+
+	move.b	(a0)+,d0		; a0 ^command
+	bsr	UpCase		; upcase
+	cmp.b	#"B",d0		; which command ?
+	beq	BEGIN
+	tst.b	LastIF		; if the last command is IF, the next one must be BEGIN !
+	beq.s	.NotIF
+	PSC_ERROR	<"IF without BEGIN !">	; write error msg
+	bra	DeleteObject
+
+.NotIF	cmp.b	#"E",d0
+	beq	END
+	cmp.b	#"Q",d0
+	beq	QUIT
+	cmp.b	#"T",d0
+	beq	TEXT
+	cmp.b	#"P",d0
+	beq	PATCH
+	cmp.b	#"C",d0
+	beq	CHECK
+	cmp.b	#"I",d0
+	beq	_IF
+	subq.l	#1,a0
+	bra	PATCH_2		; patch ? without "PATCH"
+
+SytaxError	PSC_ERROR	<"sytax error !">
+	bra	COMP_Error
+
+DOSError	PSC_ERROR	<"DOS error !">
+	bra.s	COMP_Error
+
+
+COMP_CloseSource
+	tst.l	BEGINCounter		; check if there are more BEGINs without ENDs
+	beq.s	.OK
+	PSC_ERROR	<"BEGIN without END !",10>
+	bra.s	COMP_Error
+
+.OK	move.l	Object_FH(pc),d1	; write END OF PATCH
+	move.l	#EOP,d2
+	moveq.l	#2,d3
+	DOS	Write
+	cmp.l	d0,d3
+	bne	DOSError
+	move.l	Source_FH(pc),d1
+	DOS	Close
+	moveq.l	#0,d0		; no error
+	rts
+COMP_Error	move.l	Source_FH(pc),d1
+	DOS	Close
+NoSource	moveq.l	#-1,d0		; error
+	rts
+
+EOP	dc.b	".",0
+	even
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                Write info string                     нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+INFO	lea.l	.String(pc),a0
+	move.l	#.StringEnd-.String,d0
+	bra	CLI_Text
+
+.String	dc.b	10,10," ",$9b,"4;31;42m"
+	dc.b	"                    PatchStar - Compiler V1.00                    "
+	dc.b	$9b,"0;31;40m",10,10
+	dc.b	"                     This program is ",$9b,"1m","FREEWARE",$9b,"0m"," !",10
+	dc.b	" й 1990"
+	dc.b	$9b,"0;33m"
+	dc.b	"  Roger Fischlin, Steigerwaldweg 6, D-6450 Hanau 7, Germany",10
+	dc.b	$9b,"0;31m",10
+	dc.b	"      Usage : PSCompiler <info file> <source file> <patch>",10,10
+.StringEnd	
+	even
+
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                Write Text to CLI                     нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+CLI_Text	movem.l	a0/d0,-(sp)
+	DOS	Output		; get handle to CLI window
+	move.l	d0,d1
+	move.l	(sp)+,d3
+	move.l	(sp)+,d2
+	DOS	Write
+	cmp.l	d0,d3		; write error
+	beq.s	.OK
+	moveq.l	#-1,d0
+	rts
+.OK	moveq.l	#0,d0
+	rts
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                       WriteLine                      нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+WriteLine	lea.l	.Number(pc),a0
+	move.l	LineCounter(pc),d0
+	bsr	.MakeASCII
+	move.l	a0,d0
+	lea.l	.LineText(pc),a0
+	sub.l	a0,d0
+	bra	CLI_Text
+
+
+.MakeASCII	moveq.l	#10-1,d2
+	moveq.l	#0,d3
+	lea.l	.Potenzen(pc),a1
+.Label1	move.b	#"0"-1,d1
+.Label2	addq	#1,d1
+	sub.l	(a1),d0
+	bcc.s	.Label2
+	add.l	(a1)+,d0
+	tst.b	d2
+	beq.s	.Label3
+	cmp.b	#"0",d1
+	beq.s	.Label4
+	moveq.l	#1,d3
+	bra.s	.Label3
+.Label4	tst.b	d3
+	beq.s	.Label5
+.Label3	move.b	d1,(a0)+
+.Label5	dbra	d2,.Label1
+	rts
+.Potenzen	dc.l	1000000000
+	dc.l	100000000
+	dc.l	10000000
+	dc.l	1000000
+	dc.l	100000
+	dc.l	10000
+	dc.l	1000
+	dc.l	100
+	dc.l	10
+	dc.l	1
+
+
+.LineText	dc.b	10,$9b,$41," Line : "
+.Number	ds.b	12
+
+
+; ннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                    GetLong                            нн
+; ннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн input   : a0    ^string                               нн
+; нн                                                       нн
+; нн result :  a0    ^end of number+1                      нн
+; нн           d0    number                                нн
+; нн           d1     0  OK                                нн
+; нн                  1  Overflow                          нн
+; нн                 -1  error                             нн
+; ннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+GetLong	movem.l	d3-d3/a1-a3,-(sp)
+	bsr.s	.Main
+	movem.l	(sp)+,d3-d3/a1-a3
+	rts
+
+.Main	moveq.l	#0,d0		
+	moveq.l	#0,d1
+	moveq.l	#0,d2
+.Label1	move.b	(a0)+,d3		
+	cmp.b	#" ",d3
+	beq.s	.Label1
+	cmp.b	#9,d3
+	beq.s	.Label1
+
+	cmp.b	#"$",d3		
+	beq	.Hex
+	cmp.b	#"%",d3		
+	beq	.Bin
+	cmp.b	#"@",d3		
+	beq	.Octal
+	cmp.b	#"-",d3		
+	beq.s	.Negativ
+	cmp.b	#"9",d3		
+	bhi	.Fehler
+	cmp.b	#"0"-1,d3
+	bhi	.Dezimal
+
+.Fehler	subq.l	#1,a0		
+	moveq.l	#-1,d1		
+	rts
+
+.Negativ	tst.b	d2		
+	bne.s	.Fehler
+	moveq.l	#1,d2		
+	bra	.Label1
+
+
+
+
+.Dezimal	subq.l	#1,a0		
+	move.l	a0,a1		
+.Label_D2	move.b	(a0)+,d3		
+	cmp.b	#"9",d3		
+	bhi.s	.Label_D3		
+	cmp.b	#"0"-1,d3
+	bhi.s	.Label_D2
+
+.Label_D3	lea.l	.Data10(pc),a2		
+	subq.l	#1,a0		
+	move.l	a0,a3		
+
+.Label_D5	move.l	(a2)+,d4		
+	beq.s	.Overflow		
+	moveq.l	#0,d3		
+	move.b	-(a3),d3		
+	sub.b	#"0"+1,d3		
+	bmi.s	.D_Zero		
+.Label_D4	add.l	d4,d0		
+	dbra	d3,.Label_D4
+.D_Zero	cmp.l	a3,a1		
+	bne.s	.Label_D5
+
+.Vorzeichen	tst.b	d2		
+	beq.s	.NotNegative
+	tst.l	d0		
+	bmi	.Overflow
+	neg.l	d0		
+.NotNegative	moveq.l	#0,d1		
+	rts
+
+.Data10	dc.l	1
+	dc.l	10
+	dc.l	100
+	dc.l	1000
+	dc.l	10000
+	dc.l	100000
+	dc.l	1000000
+	dc.l	10000000
+	dc.l	100000000
+	dc.l	1000000000
+	dc.l	0
+
+.Overflow	moveq.l	#1,d1		
+	rts
+		
+
+
+
+.Bin	move.b	(a0)+,d3		
+	cmp.b	#"0",d3
+	beq.s	.Label_B1
+	cmp.b	#"1",d3
+	bne	.Fehler
+	
+.Label_B1	lea.l	-1(a0),a1		
+.Label_B2	move.b	(a0)+,d3
+	cmp.b	#"1",d3		
+	beq.s	.Label_B2
+	cmp.b	#"0",d3
+	beq.s	.Label_B2
+	subq.l	#1,a0		
+	move.l	a0,a2		
+	moveq.l	#0,d1
+.Label_B3	move.b	-(a2),d3		
+	cmp.b	#"0",d3		
+	beq.s	.B_Zero
+	bset	d1,d0		
+.B_Zero	addq.l	#1,d1
+	cmp.b	#32,d1		
+	bhi.s	.Overflow		
+	cmp.l	a2,a1		
+	bne.s	.Label_B3
+	bra	.Vorzeichen
+
+
+
+
+
+.Octal	move.b	(a0)+,d3		
+	cmp.b	#"7",d3
+	bhi	.Fehler
+	cmp.b	#"0"-1,d3
+	bls	.Fehler
+
+	lea.l	-1(a0),a1		
+.Label_O2	move.b	(a0)+,d3		
+	cmp.b	#"7",d3		
+	bhi.s	.Label_O3		
+	cmp.b	#"0"-1,d3
+	bhi.s	.Label_O2
+
+.Label_O3	lea.l	.Data8(pc),a2		
+	subq.l	#1,a0		
+	move.l	a0,a3		
+
+.Label_O5	move.l	(a2)+,d4		
+	beq.s	.Overflow		
+	moveq.l	#0,d3		
+	move.b	-(a3),d3		
+	sub.b	#"0"+1,d3		
+	bmi.s	.O_Zero		
+.Label_O4	add.l	d4,d0		
+	dbra	d3,.Label_O4
+.O_Zero	cmp.l	a3,a1		
+	bne.s	.Label_O5
+
+	bra	.Vorzeichen
+
+.Data8	dc.l	@1
+	dc.l	@10
+	dc.l	@100
+	dc.l	@1000
+	dc.l	@10000
+	dc.l	@100000
+	dc.l	@1000000
+	dc.l	@10000000
+	dc.l	@100000000
+	dc.l	@1000000000
+	dc.l	@10000000000
+	dc.l	0
+
+
+.Hex	move.b	(a0)+,d3		
+	bsr.s	.Nibble
+	bmi	.Fehler		
+
+
+	lea.l	-1(a0),a1		
+.Label_H2	move.b	(a0)+,d3
+	bsr.s	.Nibble		
+	bpl.s	.Label_H2
+	subq.l	#1,a0		
+	move.l	a0,a2		
+	moveq.l	#0,d1
+.Label_H3	move.b	-(a2),d3		
+	bsr	.Nibble
+	lsl.l	d1,d4		
+	add.l	d4,d0		
+	addq.l	#4,d1
+	cmp.b	#32,d1		
+	bhi	.Overflow		
+	cmp.l	a2,a1		
+	bne.s	.Label_H3
+	bra	.Vorzeichen
+
+.Nibble	moveq.l	#0,d4
+	cmp.b	#"a"-1,d3		
+	bls.s	.N1		
+	cmp.b	#"f",d3
+	bhi.s	.N_Error
+	sub.b	#"a"-"A",d3
+.N1	sub.b	#"0",d3
+	cmp.b	#9,d3		
+	bls.s	.Ziffer
+	sub.b	#"@"-"9",d3		
+	cmp.b	#$f,d3
+	bhi.s	.N_Error
+.Ziffer	move.b	d3,d4
+	rts
+.N_Error	moveq.l	#-1,d4		
+	rts
+	
+
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                check whole command word              нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+CheckWhole	move.l	(sp)+,a3		; get return address
+.Label1	move.b	(a1)+,d1
+	beq.s	.Exit
+	move.b	(a0)+,d0		; next character
+	beq	SytaxError
+	bsr	UpCase
+	cmp.b	d1,d0		; compare characters
+	bne	SytaxError
+	bra.s	.Label1
+.Exit	jmp	(a3)		; return
+	
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                     UpCase d0                        нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+UpCase	cmp.b	#"a"-1,d0		; range "a"-"z"
+	bls.s	.Exit
+	cmp.b	#"z",d0
+	bhi.s	.Exit
+	sub.b	#"a"-"A",d0
+.Exit	rts
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн              Read line from Source                   нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+ReadLine	moveq.l	#(512/4)-1,d0		; clear buffer
+	lea.l	Line(pc),a0
+.Label1	clr.l	(a0)+
+	dbra	d0,.Label1
+
+
+	move.l	#Line,d2
+.Loop	move.l	Source_FH(pc),d1	; read one byte
+	moveq.l	#1,d3
+	DOS	Read
+	tst.l	d0
+	beq.s	.EndOfFile
+	cmp.l	d3,d0
+	bne.s	.ReadError
+	move.l	d2,a0
+	cmp.l	#Line,a0		; first byte ?
+	bne.s	.Label2
+	cmp.b	#" ",(a0)		; skip spaces & tabs in front of command
+	beq.s	.Loop
+	cmp.b	#9,(a0)
+	beq.s	.Loop
+.Label2	cmp.b	#10,(a0)		; end of line ?
+	beq.s	.Ok
+	addq.l	#1,d2
+	cmp.l	#Line+512,d2		; end of buffer ?
+	bne.s	.Loop
+	moveq.l	#1,d0		; line too long !!!
+	rts
+.EndOfFile	
+.Ok	moveq.l	#0,d0		; no error 
+	rts
+.ReadError	moveq.l	#-1,d0		; dos error
+	rts
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн    get pointer to next command (skip spaces ...)     нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+; return d0     0 empty line
+;               1 command line
+;        a0  :   ^command
+
+NextCommand	move.b	(a0)+,d0
+	beq.s	.EndOfLine
+	cmp.b	#10,d0		; LF ?
+	beq.s	.EndOfLine
+
+	cmp.b	#" ",d0		; space ?
+	beq.s	NextCommand
+	cmp.b	#9,d0		; tab ?
+	beq.s	NextCommand
+	cmp.b	#"*",d0		; rem line ?
+	beq.s	.EndOfLine
+	cmp.b	#";",d0		; rem line ?
+	beq.s	.EndOfLine
+	subq.l	#1,a0		; ^command
+	moveq.l	#1,d0
+	rts
+.EndOfLine	moveq.l	#0,d0
+	rts
+
+Line	ds.b	512
+
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                     BEGIN                            нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+BEGIN	clr.b	LastIF		; last command wasn't IF
+	lea.l	.BeginText(pc),a1	; check rest of command
+	bsr	CheckWhole
+	bsr	NextCommand		; no more chars in that line ?
+	tst	d0
+	bne	SytaxError		; this command needs no arguments !
+
+	addq.l	#1,BEGINCounter
+	move.l	Object_FH(pc),d1	; write to output
+	move.l	#.BeginCode,d2
+	moveq.l	#2,d3
+	DOS	Write
+	cmp.l	d0,d3		; error ?
+	beq	NextLine
+	bra	DOSError
+.BeginText	dc.b	"EGIN",0
+	even
+.BeginCode	dc.b	"B",0
+	even
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                       END                            нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+END	clr.b	LastIF		; last command wasn't IF
+	lea.l	.EndText(pc),a1	; check rest of command
+	bsr	CheckWhole
+	bsr	NextCommand		; no more chars in that line ?
+	tst	d0
+	bne	SytaxError		; this command needs no arguments !
+	subq.l	#1,BEGINCounter
+	bmi	.Error2
+	move.l	Object_FH(pc),d1	; write to output
+	move.l	#.EndCode,d2
+	moveq.l	#2,d3
+	DOS	Write
+	cmp.l	d0,d3		; error ?
+	beq	NextLine
+	bra	DOSError
+.Error2	PSC_ERROR	<"END without BEGIN !">
+	bra	DeleteObject
+.EndText	dc.b	"ND",0
+	even
+.EndCode	dc.b	"E",0
+	even
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                       QUIT                           нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+QUIT	clr.b	LastIF		; last command wasn't IF
+	lea.l	.QuitText(pc),a1	; check rest of command
+	bsr	CheckWhole
+	bsr	NextCommand		; no more chars in that line ?
+	tst	d0
+	bne	SytaxError		; this command needs no arguments !
+	move.l	Object_FH(pc),d1	; write to output
+	move.l	#.QuitCode,d2
+	moveq.l	#2,d3
+	DOS	Write
+	cmp.l	d0,d3		; error ?
+	beq	NextLine
+	bra	DOSError
+.QuitText	dc.b	"UIT",0
+	even
+.QuitCode	dc.b	"Q",0
+	even
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                       TEXT                           нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+TEXT	clr.b	LastIF		; last command wasn't IF
+	lea.l	.TextText(pc),a1	; check rest of command
+	bsr	CheckWhole
+	bsr	NextCommand		; get ^string
+	lea.l	.Buffer(pc),a1
+	tst	d0
+	beq.s	.Label3		; just LF	
+.Label1	move.b	(a0)+,d0
+	cmp.b	#"'",d0		; " or ' ?
+	beq.s	.Label2
+	cmp.b	#'"',d0
+	bne	SytaxError		; else sytax error 
+.Label2	move.b	(a0)+,d1		; copy string to buffer
+	beq.s	.Label3
+	cmp.b	#10,d1		; end of string : 0-byte, LF, "' ?
+	beq.s	.Label3
+	cmp.b	d0,d1	
+	beq.s	.Label3
+	move.b	d1,(a1)+
+	bra.s	.Label2
+.Label3	move.b	#10,(a1)+
+	lea.l	.Buffer(pc),a2
+	sub.l	a2,a1
+	move.l	a1,d3
+	move.b	d3,.Size		; write size
+	addq.l	#2+1,d3		; add Command and
+	bclr	#0,d3		; get word size
+
+	move.l	Object_FH(pc),d1	; write to output
+	move.l	#.TextCode,d2
+	move.l	a0,a2		; save a0
+	DOS	Write
+	cmp.l	d0,d3		; error ?
+	bne	DOSError
+	move.l	a2,a0
+	bsr	NextCommand
+	tst	d0
+	bne	SytaxError		; end of line ?
+	bra	NextLine		
+	
+.TextText	dc.b	"EXT",0
+	even
+.TextCode	dc.b	"T"
+.Size	dc.b	0
+.Buffer	ds.b	256
+	even
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                         IF                           нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+_IF	move.b	#1,LastIF		; last command was IF
+	lea.l	.IFText(pc),a1		; check rest of command
+	bsr	CheckWhole
+	bsr	NextCommand		; get argument
+	beq	.Error		; no argument ...	
+	move.b	(a0)+,d0
+	bsr	UpCase
+	cmp.b	#"T",d0
+	beq.s	.True
+	cmp.b	#"F",d0
+	bne.s	.Error
+	lea.l	.FalseText(pc),a1	; check rest of boolean expression
+	bsr	CheckWhole
+	move.b	#1,.Boolean		; boolean = FALSE
+.Write	move.l	Object_FH(pc),d1	; write to output
+	move.l	#.IFCode,d2
+	moveq.l	#2,d3
+	DOS	Write
+	cmp.l	d0,d3		; error ?
+	beq	NextLine
+	bra	DOSError
+.True	lea.l	.TrueText(pc),a1	; check rest of boolean expression
+	bsr	CheckWhole
+	clr.b	.Boolean		; boolean = TRUE
+	bra.s	.Write
+.Error	PSC_ERROR	<"IF without boolean expression (TRUE/FALSE) !">
+	bra	DeleteObject
+
+.IFText	dc.b	"F",0
+	even
+.FalseText	dc.b	"ALSE",0
+	even
+.TrueText	dc.b	"RUE",0
+	even
+.IFCode	dc.b	"I"
+.Boolean	dc.b	0
+	even
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                   CHECK / PATCH                      нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+CHECK	moveq	#"C",d0		; Check mode
+	lea.l	.CheckText(pc),a1	; check rest of command
+	bra.s	Patch_Check
+.CheckText	dc.b	"HECK",0
+	even
+PATCH_2	moveq.b	#"p",d0		; patch mode
+	bra.s	Patch_Check		; (patch command without "PATCH")
+
+
+PATCH	move.b	#"P",d0		; patch mode
+	lea.l	.PatchText(pc),a1	; check rest of command
+	bra.s	Patch_Check
+.PatchText	dc.b	"ATCH",0
+	even	
+
+; both command have nearly the same sytax !
+
+Patch_Check	cmp.b	#"p",d0
+	bne.s	.Label0
+	move.b	#"P",.Code
+	bra.s	.Label_1
+.Label0	move.b	d0,.Code
+
+.Label_1	bsr	CheckWhole
+	clr.b	LastIF		; last command wasn't IF
+	bsr	GetLong		; get file offset
+	tst.l	d1
+	bne	SytaxError		; wrong file offset !
+	move.l	d0,.Offset
+.Label1	move.b	(a0)+,d0
+	cmp.b	#" ",d0		; skip spaces, tabs ,"=" & ":"
+	beq.s	.Label1
+	cmp.b	#9,d0
+	beq.s	.Label1
+	cmp.b	#":",d0
+	beq.s	.Label1
+	cmp.b	#"=",d0
+	beq.s	.Label1
+
+	cmp.b	#"'",d0
+	beq	.String		; string !
+	cmp.b	#'"',d0
+	beq	.String		; string !
+
+	clr.b	.Size
+	subq.l	#1,a0
+	lea.l	.Args(pc),a1
+.Label10	bsr	NextCommand		; more chars in that line ?
+	tst	d0
+	beq	.Label2		; NO !
+	cmp.b	#"$",(a0)
+	bne.s	.Label11
+	addq.l	#1,a0		; skip "$"
+.Label11	bsr	GetHex		; read byte
+	tst.l	d0		; error ?
+	bmi	SytaxError
+	move.b	d0,(a1)+
+	addq.b	#1,.Size
+	cmp.b	#255,.Size		; at least 255 bytes
+	bne.s	.Label10
+	bra	.Label5
+
+.String	lea.l	.Args(pc),a1
+	moveq.l	#0,d2
+.Label3	move.b	(a0)+,d1		; next character
+	beq.s	.Label2		; end of file ?
+	cmp.b	#10,d1		; end of line ?
+	beq.s	.Label4
+	cmp.b	d0,d1		; end of string ?
+	beq.s	.Label4
+	move.b	d1,(a1)+		; write to buffer 
+	addq.l	#1,d2
+	cmp.w	#255,d2		; at least 255 bytes !
+	bls.s	.Label3
+.Label5	PSC_ERROR	<"Line too long !">
+	bra	DeleteObject
+
+
+.Label4	move.b	d2,.Size
+
+.Label2	tst.b	.Size
+	beq	SytaxError
+	bsr	NextCommand		; no more chars in that line ?
+	tst	d0
+	bne	SytaxError		; this command needs no arguments !
+	move.l	Object_FH(pc),d1	; write to output
+	move.l	#.Code,d2
+	move.b	.Size(pc),d3
+	addq.l	#2+4+1,d3
+	bclr	#0,d3		; even !
+	DOS	Write
+	cmp.l	d0,d3		; error ?
+	beq	NextLine
+	bra	DOSError
+	even
+.Code	dc.b	"C"
+.Size	dc.b	0
+.Offset	dc.l	0
+.Args	ds.b	256
+	even
+
+
+GetHex	move.b	(a0)+,d0
+	lea.l	.Hex(pc),a2		; ASCII -> Hex
+	moveq.l	#-1,d1		; get 1. nibble
+.W3	addq.l	#1,d1
+	cmp.w	#32,d1
+	bhi.s	.W6
+	cmp.b	(a2)+,d0
+	bne.s	.W3
+	and.w	#$f,d1
+	move.b	(a0)+,d0
+	lea.l	.Hex(pc),a2		; ASCII -> Hex
+	moveq.l	#-1,d2		; get 2. nibble
+.W4	addq.l	#1,d2
+	cmp.w	#32,d2
+	bhi.s	.W6
+	cmp.b	(a2)+,d0
+	bne.s	.W4
+	and.w	#$f,d2
+	lsl.b	#4,d1
+	or.b	d1,d2
+.W5	move.b	d2,d0
+	rts
+.W6	moveq.l	#-1,d0
+	rts
+.Hex	dc.b	"0123456789abcdef"
+	dc.b	"0123456789ABCDEF"
+
+
+
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                       COMMAND                            нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                    prepare  Args                         нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+
+COMMAND	move.l	CommandString(pc),a0
+	move.l	a0,a1
+	moveq.l	#0,d0
+	bsr.s	.Label1
+	cmp.b	#3,d0		; number of args ?
+	beq.s	.Label10
+	moveq.l	#-1,d0
+	rts
+.Label10	move.l	CommandString(pc),a0
+	move.l	a0,InfoName
+.Label11	tst.b	(a0)+
+	bne.s	.Label11
+	move.l	a0,SourceName
+.Label12	tst.b	(a0)+
+	bne.s	.Label12
+	move.l	a0,PatchName
+	moveq.l	#0,d0
+	rts	
+
+.Label1	bsr.s	.Next		; prepare command line
+	tst.b	d1
+	beq.s	.End
+	addq.l	#1,d0
+	cmp.b	#"'",d1
+	beq.s	.Quote	
+	cmp.b	#'"',d1
+	beq.s	.Quote	
+	subq.l	#1,a0
+
+.Label2	move.b	(a0)+,d1
+	beq.s	.LastArg
+	cmp.b	#" ",d1	
+	beq.s	.EndOfArg
+	cmp.b	#9,d1
+	beq.s	.EndOfArg
+	move.b	d1,(a1)+	
+	bra.s	.Label2
+
+.EndOfArg	clr.b	(a1)+	
+	bra.s	.Label1	
+
+.Quote	move.b	(a0)+,d2	
+	beq.s	.LastArg
+	cmp.b	d2,d1	
+	beq.s	.EndOfArg
+	move.b	d2,(a1)+	
+	bra.s	.Quote
+
+.LastArg	clr.b	(a1)+
+.End	rts
+
+.Next	move.b	(a0)+,d1
+	cmp.b	#" ",d1
+	beq.s	.Next
+	cmp.b	#9,d1
+	beq.s	.Next
+	rts
+
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                    Write Patch INFO string               нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+
+WRITE_INFO	move.l	InfoName(pc),d1	; open info file
+	move.l	#MODE_OLDFILE,d2
+	DOS	Open
+	move.l	d0,Info_FH
+	bne.s	.Label1
+	PSC_ERROR	<"couldn't open info file !",10>
+	bra	.NoInfo
+
+.Label1	moveq.l	#0,d4		; file size
+
+.Label2	moveq.l	#0,d0		; check if CTRL-C 
+	moveq.l	#0,d1
+	CALLEXEC	SetSignal
+	btst	#12,d0
+	beq.s	.NoUserBreak
+	DOS_TEXT	<" User break .",10>	; write msg
+	bra	.Error
+
+.NoUserBreak	move.l	Info_FH(pc),d1		; copy info string 
+	move.l	#.Buffer,d2
+	move.l	#256,d3
+	DOS	Read		; read part of info string
+	move.l	d0,d3
+	bmi.s	.DosError		; DOS error ?
+	beq.s	.End		; end of info string ?
+	add.l	d0,d4		; calculate file size
+	
+	move.l	#.Buffer,d2
+	move.l	Object_FH(pc),d1
+	DOS	Write		; copy to patch file		
+	cmp.l	d0,d3
+	beq	.Label2		; dos error ?
+
+.DosError	PSC_ERROR	<"DOS error !">
+.Error	move.l	Info_FH(pc),d1
+	DOS	Close
+.NoInfo	moveq.l	#-1,d0		; error
+	rts
+
+
+.End	moveq.l	#1,d3		; terminate info string with $00 byte and write word alligned
+	btst	#0,d4
+	bne.s	.Alligned		; alligned afteradding $00 byte ?
+	addq.l	#1,d3
+.Alligned	move.l	#.Buffer2,d2
+	move.l	Object_FH(pc),d1
+	DOS	Write
+	cmp.l	d0,d3
+	bne.s	.DosError
+
+.OK	move.l	Info_FH(pc),d1		; close file
+	DOS	Close
+	moveq.l	#0,d0		; no error
+	rts
+
+.Buffer	ds.b	256+2
+	even
+.Buffer2	dc.b	0,0
+
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                    Write Patch Module                    нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+
+WRITE_MODULE	move.l	#EXEC_HEADER,d2	; write Executable Header
+	move.l	#EXEC_HEADER_SIZE,d3
+	move.l	Object_FH(pc),d1
+	DOS	Write
+	cmp.l	d0,d3
+	bne.s	.DosError
+	move.l	#PATCH_MODULE_START,d2
+	move.l	#PATCH_MODULE_SIZE,d3
+	move.l	Object_FH(pc),d1
+	DOS	Write		; copy to patch module
+	cmp.l	d0,d3
+	beq	.Label2		; dos error ?
+.DosError	PSC_ERROR	<"DOS error !">
+	moveq.l	#-1,d0
+	rts
+.Label2	moveq.l	#0,d0		; check if CTRL-C 
+	moveq.l	#0,d1
+	CALLEXEC	SetSignal
+	btst	#12,d0
+	beq.s	.NoUserBreak
+	DOS_TEXT	<" User break .",10>	; write msg
+	moveq.l	#-1,d0
+	rts
+.NoUserBreak	moveq.l	#0,d0
+	rts
+
+
+EXEC_HEADER	dc.l	$3f3
+	dc.l	0
+	dc.l	1
+	dc.l	0
+	dc.l	0
+HUNK_SIZE1	dc.l	-1
+	dc.l	$3e9
+HUNK_SIZE2	dc.l	-1
+EXEC_HEADER_END
+EXEC_HEADER_SIZE  equ EXEC_HEADER_END-EXEC_HEADER
+
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                    saving as executable                  нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+EXECUTABLE	move.l	Object_FH(pc),d1
+	moveq.l	#0,d2
+	moveq.l	#OFFSET_CURRENT,d3
+	DOS	Seek		; get file pos
+	sub.l	#EXEC_HEADER_SIZE-4,d0
+	move.l	d0,d1
+	lsr.l	#2,d1
+	move.l	d1,HUNK_SIZE1
+	move.l	d1,HUNK_SIZE2
+	and.l	#%11,d0
+	moveq.l	#4,d1
+	sub.w	d0,d1
+	and.w	#%11,d1		; bytes to add to get longword alligned
+	move.l	#.Data+4,d2
+	moveq.l	#4,d3
+	add.l	d1,d3
+	sub.l	d1,d2
+	move.l	Object_FH(pc),d1
+	DOS	Write		; write pad bytes and $3f2
+	cmp.l	d0,d3
+	beq.s	.Label1
+.Error	PSC_ERROR	<"DOS error !">
+	moveq.l	#-1,d0
+	rts
+.Label1	moveq.l	#0,d0		; check if CTRL-C 
+	moveq.l	#0,d1
+	CALLEXEC	SetSignal
+	btst	#12,d0
+	beq.s	.NoUserBreak
+	DOS_TEXT	<" User break .",10>	; write msg
+	moveq.l	#-1,d0
+	rts
+.NoUserBreak	move.l	Object_FH(pc),d1	; write hunk size
+	moveq.l	#0,d2
+	moveq.l	#OFFSET_BEGINNING,d3
+	DOS	Seek		; get file pos
+	move.l	#EXEC_HEADER,d2	; write Executable Header (second time)
+	move.l	#EXEC_HEADER_SIZE,d3
+	move.l	Object_FH(pc),d1
+	DOS	Write
+	cmp.l	d0,d3
+	bne	.Error
+	moveq.l	#0,d0
+	rts
+	
+.Data	dc.l	0
+	dc.l	$3f2

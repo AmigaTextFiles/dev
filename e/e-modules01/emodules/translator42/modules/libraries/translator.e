@@ -1,0 +1,12 @@
+OPT MODULE
+OPT EXPORT
+OPT PREPROCESS
+
+#define TRANSLATORNAME 'translator.library'
+CONST   TRANSLATORVERSION = 42
+
+-> error return codes
+CONST TR_NOTUSED=-1,
+      TR_NOMEM=-2,
+      TR_MAKEBAD=-4
+

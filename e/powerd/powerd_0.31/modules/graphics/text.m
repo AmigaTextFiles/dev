@@ -1,0 +1,102 @@
+MODULE 'exec/ports','graphics/gfx','utility/tagitem'
+
+CONST	FS_NORMAL=0,
+		FSB_UNDERLINED=0,
+		FSF_UNDERLINED=1,
+		FSB_BOLD=1,
+		FSF_BOLD=2,
+		FSB_ITALIC=2,
+		FSF_ITALIC=4,
+		FSB_EXTENDED=3,
+		FSF_EXTENDED=8,
+		FSB_COLORFONT=6,
+		FSF_COLORFONT=$40,
+		FSB_TAGGED=7,
+		FSF_TAGGED=$80,
+		FPB_ROMFONT=0,
+		FPF_ROMFONT=1,
+		FPB_DISKFONT=1,
+		FPF_DISKFONT=2,
+		FPB_REVPATH=2,
+		FPF_REVPATH=4,
+		FPB_TALLDOT=3,
+		FPF_TALLDOT=8,
+		FPB_WIDEDOT=4,
+		FPF_WIDEDOT=16,
+		FPB_PROPORTIONAL=5,
+		FPF_PROPORTIONAL=$20,
+		FPB_DESIGNED=6,
+		FPF_DESIGNED=$40,
+		FPB_REMOVED=7,
+		FPF_REMOVED=$80
+
+OBJECT TextAttr
+	Name:PTR TO UBYTE,
+	YSize:UWORD,
+	Style:UBYTE,
+	Flags:UBYTE
+
+OBJECT TTextAttr OF TextAttr
+	Tags:PTR TO TagItem
+
+CONST	TA_DEVICEDPI=$80000001,
+		MAXFONTMATCHWEIGHT=$7FFF
+
+OBJECT TextFont
+	Message|MN:MN,
+	YSize:UWORD,
+	Style:UBYTE,
+	Flags:UBYTE,
+	XSize:UWORD,
+	Baseline:UWORD,
+	BoldSmear:UWORD,
+	Accessors:UWORD,
+	LoChar:UBYTE,
+	HiChar:UBYTE,
+	CharData:PTR TO UBYTE,
+	Modulo:UWORD,
+	CharLoc:APTR,
+	CharSpace:APTR,
+	CharKern:APTR
+
+CONST	TE0B_NOREMFONT=0,
+		TE0F_NOREMFONT=1
+
+OBJECT TextFontExtension
+	MatchWord:UWORD,
+	Flags0:UBYTE,
+	Flags1:UBYTE,
+	BackPtr:PTR TO TextFont,
+	OrigReplyPort:PTR TO MP,
+	Tags:PTR TO TagItem,
+	OFontPatchS:PTR TO UWORD,
+	OFontPatchK:PTR TO UWORD
+
+CONST	CT_COLORFONT=1,
+		CT_GREYFONT=2,
+		CT_ANTIALIAS=4,
+		CTB_MAPCOLOR=0,
+		CTF_MAPCOLOR=1,
+		CT_COLORMASK=$f
+
+OBJECT ColorFontColors
+	Reserved:UWORD,
+	Count:UWORD,
+	ColorTable:PTR TO UWORD
+
+OBJECT ColorTextFont
+	TextFont|TF:TextFont,
+	Flags:UWORD,
+	Depth:UBYTE,
+	FgColor:UBYTE,
+	Low:UBYTE,
+	High:UBYTE,
+	PlanePick:UBYTE,
+	PlaneOnOff:UBYTE,
+	ColorFontColors:PTR TO ColorFontColors,
+	CharData[8]:APTR
+
+OBJECT TextExtent
+	Width:UWORD,
+	Height:UWORD,
+	Extent:Rectangle

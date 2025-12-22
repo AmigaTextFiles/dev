@@ -1,0 +1,146 @@
+#!/usr/bin/perl
+#
+# email2smssend - send your emails to your GSM with smssend
+# Copyright (C) 2000 Jean-Baptiste Sarrodie (jaiguru@maldoror.freesurf.fr)
+#
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program; if not, write to the Free Software
+# Foundation, Inc., 59 Temple Place, Suite 330, Boston, MA  02111-1307  USA
+#
+
+use strict;
+
+# Configure the name and path of smssend
+my $sms_bin = "smssend";
+
+# Don't edit after here
+my $version = "0.4.1";
+my $header = 1;
+my $line;
+my ($from, $subject, $from_subject);
+my ($message, @tmp_messages, @messages);
+my ($limit_size, $limit_sms);
+my ($show_index, $reverse, $diff, $opt);
+my ($total_nb, $cpt, $prepend, $before, $after, @before__after);
+
+# Display usage help.  
+sub Usage {
+        print <<eof;
+Usage: email2smssend [options] -- [smssend options]
+  -ms, --msg-size       Maximum number of characters per message.
+  -mm, --max-msg        Maximum number of SMS by email (less than 9).
+  -i, --index           Prefix the sms with sequence number
+  -r, --reverse         Send SMS in reverse order (some providers need it)
+  -h, --help            Display this help message.
+  -V, --version         Display version number.
+  smssend options       See "smssend --help" for list of options.
+
+eof
+	exit;
+}
+
+# Assign some vars
+$show_index = 0;
+$reverse = 0;
+$diff = 1;
+
+# Check command line args
+Usage if (scalar(@ARGV) == 0);
+
+while ($opt = shift (@ARGV)) {
+	if ($opt eq "-h" or $opt eq "--help") {
+		Usage;
+	} elsif ($opt eq "-ms" or $opt eq "--msg-size") {
+		$limit_size = shift (@ARGV);
+		die "msg_size need to be an integer.\n" if (!($limit_size =~/^[0-9]+$/));
+	} elsif ($opt eq "-mm" or $opt eq "-max-msg") {
+		$limit_sms = shift (@ARGV);
+		die "max_msg need to be an integer.\n" if (!($limit_sms =~/^[0-9]+$/));
+		die "max_msg must be less than 9.\n" if ($limit_sms > 9);
+	} elsif ($opt eq "-i" or $opt eq "--index") {
+		$show_index = 1;
+	} elsif ($opt eq "-r" or $opt eq "--reverse") {
+		$reverse = 1;
+	} elsif ($opt eq "-V" or $opt eq "--version") {
+		print <<eof;
+email2smssend version $version
+
+Copyright (C) 2000 Jean-Baptiste Sarrodie.
+This is free software; see the source for copying conditions.  There is NO
+warranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE,
+to the extent permitted by law.
+eof
+		exit;
+	} elsif ($opt eq "--") {
+		last;
+	} else {
+		die "Unrecognize option: $opt\n";
+	}
+}
+
+# Check msg_size and msg_max
+die "msg_size needs to be defined.\n" if (! defined($limit_size));
+die "max_msg needs to be defined.\n" if (! defined($limit_sms));
+
+# Now, options in @ARGV are for smssend
+
+while (<STDIN>) {
+	chomp ($line = $_);
+
+	if ($header == 1) {
+        	if ($line =~ /^From:.*$/) {
+			$from = (split (/^From: /, $line))[1];
+		} elsif ($line =~ /^Subject:.*$/) {
+			$subject = (split (/^Subject: /, $line))[1];
+		} elsif ($line =~ /^$/) {
+			$header = 0;
+			$from_subject = "From: $from - Subject: $subject - ";
+		}
+	} else {
+		$message .= "$line ";
+	}
+}
+
+$limit_size -= 5 if ($show_index == 1);
+
+(@tmp_messages) = (split (/(.{$limit_size})/, $from_subject . $message));
+foreach (@tmp_messages) {
+	if (!($_ =~ /^ *$/) && ($limit_sms-- > 0)) {
+		push (@messages, $_);
+	}
+}
+
+# Search if a parameter is "--"
+@before__after = split (/\s--\s/, join (" ", @ARGV) . " ");
+$before = $before__after[0];
+$after = $before__after[1];
+$after = " -- " . $after if ($after ne "");
+
+# Initialize cpt
+$total_nb = scalar(@messages);
+$cpt = 1;
+
+if ($reverse == 1) {
+	@messages = reverse (@messages) if ($reverse == 1);
+	$cpt = $total_nb;
+   $diff = -1;
+}
+
+foreach (@messages) {
+	$prepend = $cpt . "/$total_nb: " if ($show_index == 1);
+   $cpt += $diff;
+	# for debug, uncomment the "print" and comment the "system"
+	# print $sms_bin . " " . $before . " \"" . $prepend . $_ . "\" " . $after . "\n";
+	system ($sms_bin . " " . $before . " \"" . $prepend . $_ . "\" " . $after);
+}
+

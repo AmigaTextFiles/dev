@@ -1,0 +1,201 @@
+include "inc/exec/types.inc";
+
+def DOSNAME = "dos.library";
+
+def DOSTRUE = (-1);
+def DOSFALSE = (0);
+
+def MODE_OLDFILE = 1005;
+def MODE_NEWFILE = 1006;
+def MODE_READWRITE = 1004;
+
+def OFFSET_BEGINNING = -1;
+def OFFSET_CURRENT = 0;
+def OFFSET_END = 1;
+def OFFSET_BEGINING = OFFSET_BEGINNING;
+
+def BITSPERBYTE = 8;
+def BYTESPERLONG = 4;
+def BITSPERLONG = 32;
+def MAXINT = $7fffffff;
+def MININT = $80000000;
+
+def SHARED_LOCK = -2;
+def ACCESS_READ = -2;
+def EXCLUSIVE_LOCK = -1;
+def ACCESS_WRITE = -1;
+
+struct DateStamp is
+  ds_Days:long;
+  ds_Minute:long;
+  ds_Tick:long;
+;
+
+def TICKS_PER_SECOND = 50;
+
+struct FileInfoBlock is
+  fib_DiskKey:long;
+  fib_DirEntryType:long;
+  fib_FileName[108]:byte;
+  fib_Protection:long;
+  fib_EntryType:long;
+  fib_Size:long;
+  fib_NumBlocks:long;
+  fib_Date:DateStamp;
+  fib_Comment[80]:byte;
+  fib_OwnerUID:uword;
+  fib_OwnerGID:uword;
+  fib_Reserved[32]:byte;
+;
+
+def FIBB_OTR_READ = 15;
+def FIBB_OTR_WRITE = 14;
+def FIBB_OTR_EXECUTE = 13;
+def FIBB_OTR_DELETE = 12;
+def FIBB_GRP_READ = 11;
+def FIBB_GRP_WRITE = 10;
+def FIBB_GRP_EXECUTE = 9;
+def FIBB_GRP_DELETE = 8;
+
+def FIBB_SCRIPT = 6;
+def FIBB_PURE = 5;
+def FIBB_ARCHIVE = 4;
+def FIBB_READ = 3;
+def FIBB_WRITE = 2;
+def FIBB_EXECUTE = 1;
+def FIBB_DELETE = 0;
+
+def FIBF_OTR_READ = (1<<FIBB_OTR_READ);
+def FIBF_OTR_WRITE = (1<<FIBB_OTR_WRITE);
+def FIBF_OTR_EXECUTE = (1<<FIBB_OTR_EXECUTE);
+def FIBF_OTR_DELETE = (1<<FIBB_OTR_DELETE);
+def FIBF_GRP_READ = (1<<FIBB_GRP_READ);
+def FIBF_GRP_WRITE = (1<<FIBB_GRP_WRITE);
+def FIBF_GRP_EXECUTE = (1<<FIBB_GRP_EXECUTE);
+def FIBF_GRP_DELETE = (1<<FIBB_GRP_DELETE);
+
+def FIBF_SCRIPT = (1<<FIBB_SCRIPT);
+def FIBF_PURE = (1<<FIBB_PURE);
+def FIBF_ARCHIVE = (1<<FIBB_ARCHIVE);
+def FIBF_READ = (1<<FIBB_READ);
+def FIBF_WRITE = (1<<FIBB_WRITE);
+def FIBF_EXECUTE = (1<<FIBB_EXECUTE);
+def FIBF_DELETE = (1<<FIBB_DELETE);
+
+def FAULT_MAX = 82;
+
+def BADDR(x) = ((x)<<2);
+def MKBADDR(x) = ((x)>>2);
+
+struct InfoData is
+  id_NumSoftErrors:long;
+  id_UnitNumber:long;
+  id_DiskState:long;
+  id_NumBlocks:long;
+  id_NumBlocksUsed:long;
+  id_BytesPerBlock:long;
+  id_DiskType:long;
+  id_VolumeNode:long;
+  id_InUse:long;
+;
+
+def ID_WRITE_PROTECTED = 80;
+def ID_VALIDATING = 81;
+def ID_VALIDATED = 82;
+
+def ID_NO_DISK_PRESENT = (-1);
+def ID_UNREADABLE_DISK = ($42414400);
+def ID_DOS_DISK = ($444f5300);
+def ID_FFS_DISK = ($444f5301);
+def ID_INTER_DOS_DISK = ($444f5302);
+def ID_INTER_FFS_DISK = ($444f5303);
+def ID_FASTDIR_DOS_DISK = ($444f5304);
+def ID_FASTDIR_FFS_DISK = ($444f5305);
+def ID_NOT_REALLY_DOS = ($4e444f53);
+def ID_KICKSTART_DISK = ($4b49434b);
+def ID_MSDOS_DISK = ($4d534400);
+
+def ERROR_NO_FREE_STORE = 103;
+def ERROR_TASK_TABLE_FULL = 105;
+def ERROR_BAD_TEMPLATE = 114;
+def ERROR_BAD_NUMBER = 115;
+def ERROR_REQUIRED_ARG_MISSING = 116;
+def ERROR_KEY_NEEDS_ARG = 117;
+def ERROR_TOO_MANY_ARGS = 118;
+def ERROR_UNMATCHED_QUOTES = 119;
+def ERROR_LINE_TOO_LONG = 120;
+def ERROR_FILE_NOT_OBJECT = 121;
+def ERROR_INVALID_RESIDENT_LIBRARY = 122;
+def ERROR_NO_DEFAULT_DIR = 201;
+def ERROR_OBJECT_IN_USE = 202;
+def ERROR_OBJECT_EXISTS = 203;
+def ERROR_DIR_NOT_FOUND = 204;
+def ERROR_OBJECT_NOT_FOUND = 205;
+def ERROR_BAD_STREAM_NAME = 206;
+def ERROR_OBJECT_TOO_LARGE = 207;
+def ERROR_ACTION_NOT_KNOWN = 209;
+def ERROR_INVALID_COMPONENT_NAME = 210;
+def ERROR_INVALID_LOCK = 211;
+def ERROR_OBJECT_WRONG_TYPE = 212;
+def ERROR_DISK_NOT_VALIDATED = 213;
+def ERROR_DISK_WRITE_PROTECTED = 214;
+def ERROR_RENAME_ACROSS_DEVICES = 215;
+def ERROR_DIRECTORY_NOT_EMPTY = 216;
+def ERROR_TOO_MANY_LEVELS = 217;
+def ERROR_DEVICE_NOT_MOUNTED = 218;
+def ERROR_SEEK_ERROR = 219;
+def ERROR_COMMENT_TOO_BIG = 220;
+def ERROR_DISK_FULL = 221;
+def ERROR_DELETE_PROTECTED = 222;
+def ERROR_WRITE_PROTECTED = 223;
+def ERROR_READ_PROTECTED = 224;
+def ERROR_NOT_A_DOS_DISK = 225;
+def ERROR_NO_DISK = 226;
+def ERROR_NO_MORE_ENTRIES = 232;
+def ERROR_IS_SOFT_LINK = 233;
+def ERROR_OBJECT_LINKED = 234;
+def ERROR_BAD_HUNK = 235;
+def ERROR_NOT_IMPLEMENTED = 236;
+def ERROR_RECORD_NOT_LOCKED = 240;
+def ERROR_LOCK_COLLISION = 241;
+def ERROR_LOCK_TIMEOUT = 242;
+def ERROR_UNLOCK_ERROR = 243;
+
+def RETURN_OK = 0;
+def RETURN_WARN = 5;
+def RETURN_ERROR = 10;
+def RETURN_FAIL = 20;
+
+def SIGBREAKB_CTRL_C = 12;
+def SIGBREAKB_CTRL_D = 13;
+def SIGBREAKB_CTRL_E = 14;
+def SIGBREAKB_CTRL_F = 15;
+
+def SIGBREAKF_CTRL_C = (1<<SIGBREAKB_CTRL_C);
+def SIGBREAKF_CTRL_D = (1<<SIGBREAKB_CTRL_D);
+def SIGBREAKF_CTRL_E = (1<<SIGBREAKB_CTRL_E);
+def SIGBREAKF_CTRL_F = (1<<SIGBREAKB_CTRL_F);
+
+def LOCK_DIFFERENT = -1;
+def LOCK_SAME = 0;
+def LOCK_SAME_VOLUME = 1;
+
+def CHANGE_LOCK = 0;
+def CHANGE_FH = 1;
+
+def LINK_HARD = 0;
+def LINK_SOFT = 1;
+
+def ITEM_EQUAL = -2;
+def ITEM_ERROR = -1;
+def ITEM_NOTHING = 0;
+def ITEM_UNQUOTED = 1;
+def ITEM_QUOTED = 2;
+
+def DOS_FILEHANDLE = 0;
+def DOS_EXALLCONTROL = 1;
+def DOS_FIB = 2;
+def DOS_STDPKT = 3;
+def DOS_CLI = 4;
+def DOS_RDARGS = 5;
+

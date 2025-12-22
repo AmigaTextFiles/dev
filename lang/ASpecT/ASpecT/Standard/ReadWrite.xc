@@ -1,0 +1,21 @@
+void
+DEFUN(xx__ReadWriteread_0,(ARG0,ARG1,RES1,RES2,RES3,IR),
+ TERM  ARG0 AND
+ TERM  ARG1 AND
+ TERM *RES1 AND
+ TERM *RES2 AND
+ TERM *RES3 AND
+ INSTREC IR)
+ { _RUNTIME_READ(_SReadWrite_term,ARG0,ARG1,RES1,RES2,RES3); }
+ 
+void
+DEFUN(xx__ReadWritewrite_0,(ARG0,ARG1,RES1,RES2,IR),
+      TERM  ARG0 AND
+      TERM  ARG1 AND
+      TERM *RES1 AND
+      TERM *RES2 AND
+      INSTREC IR)
+ { _RUNTIME_WRITE(_SReadWrite_term,ARG0,ARG1,RES1,RES2); }
+
+XINITIALIZE(ReadWrite_Xinitialize,__XINIT_ReadWrite)
+

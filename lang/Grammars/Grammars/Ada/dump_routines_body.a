@@ -1,0 +1,1278 @@
+with Ace_Universal_Types;
+use Ace_Universal_Types;
+
+with Literals;
+use Literals;
+
+with Symtbl_Entry_Get_Routines;
+use Symtbl_Entry_Get_Routines;
+
+with Symbol_Table_Routines;
+use Symbol_Table_Routines;
+
+with Node_Get_Routines;
+use Node_Get_Routines;
+
+with Misc_Support_Routines;
+use Misc_Support_Routines;
+
+with Error_Handler;
+use Error_Handler;
+
+with Sun_Windows;
+use Sun_Windows;
+
+package body Dump_Routines is
+
+
+   We_Are_Dumping        : Boolean     := False;
+
+   Dump_Statement_Number : Boolean     := False;
+
+   Dump_Text_Window      : Boolean     := False;
+
+   Quote_Infix           : Boolean     := True;
+
+   Line                  : String (1 .. 256);
+   Line_Length           : Ace_Natural := 1;
+
+   Indented              : Integer     := 0;
+
+
+   procedure Dump_To_Text_Windows (Switch : Boolean) is
+   begin
+      Dump_Text_Window := Switch;
+   end Dump_To_Text_Windows;
+
+   procedure Dump_Statement_Numbers (Switch : Boolean) is
+   begin
+      Dump_Statement_Number := Switch;
+   end Dump_Statement_Numbers;
+
+   function Is_Statement_Dump_On return Boolean is
+   begin
+      return We_Are_Dumping;
+   end Is_Statement_Dump_On;
+
+   procedure Dump (Switch : Boolean) is
+   begin
+      We_Are_Dumping := Switch;
+   end Dump;
+
+   procedure Indent is
+   begin
+      Indented := Indented + 3;
+   end Indent;
+
+   procedure Exdent is
+   begin
+      Indented := Indented - 3;
+   end Exdent;
+
+   procedure Print_Indent (File : File_Type) is
+   begin
+      for I in 1 .. Indented loop
+         if Dump_Text_Window then
+            Line_Length             := Line_Length + 1;
+            Line (1 .. Line_Length) := Line (1 .. Line_Length - 1) & " ";
+         else
+            Put (File, " ");
+         end if;
+      end loop;
+   end Print_Indent;
+
+   procedure Output (File : File_Type;
+                     Str  : String) is
+   begin
+      if Dump_Text_Window then
+         Line_Length             := Line_Length + Str'LENGTH;
+         Line (1 .. Line_Length) := Line (1 .. Line_Length - Str'LENGTH) & Str;
+      else
+         Put (File, Str);
+      end if;
+   end Output;
+
+   procedure Outputln (File : File_Type) is
+   begin
+      if Dump_Text_Window then
+         Display_Line (Line (2 .. Line_Length));
+         Line_Length := 1;
+      else
+         New_Line (File);
+      end if;
+   end Outputln;
+
+   procedure Outputln (File : File_Type;
+                       Str  : String) is
+   begin
+      if Dump_Text_Window then
+         Line_Length             := Line_Length + Str'LENGTH;
+         Line (1 .. Line_Length) := Line (1 .. Line_Length - Str'LENGTH) & Str;
+         Display_Line (Line (2 .. Line_Length));
+         Line_Length             := 1;
+      else
+         Put_Line (File, Str);
+      end if;
+   end Outputln;
+
+   function Is_Infix (Str : String) return Boolean is
+   begin
+      if Str'LENGTH > 3 then
+         return False;
+      elsif Str'LENGTH = 3 then
+         if Str = "mod" then
+            return True;
+         elsif Str = "rem" then
+            return True;
+         elsif Str = "and" then
+            return True;
+         elsif Str = "xor" then
+            return True;
+         elsif Str = "not" then
+            return True;
+         else
+            return False;
+         end if;
+      elsif Str'LENGTH = 2 then
+         if Str = "or" then
+            return True;
+         elsif Str = ">=" then
+            return True;
+         elsif Str = "<=" then
+            return True;
+         elsif Str = "/=" then
+            return True;
+         else
+            return False;
+         end if;
+      elsif Str'LENGTH = 1 then
+         case Str (Str'FIRST) is
+            when '+' |
+                 '-' |
+                 '*' |
+                 '/' |
+                 '&' |
+                 '|' |
+                 '=' |
+                 '<' |
+                 '>' =>
+               return True;
+            when others   =>
+               return False;
+         end case;
+      end if;
+   end Is_Infix;
+
+   procedure Dump_Type_Name (File : File_Type;
+                             Ref  : Ref_Symbol_Table_Entry) is
+   begin
+      case Ref.Entry_Kind is
+         when Object_Entry     =>
+            Output (File, Convert_To_String (Ref.Object_Type.Symbol_Name));
+         when Type_Entry  =>
+            Output (File, Convert_To_String (Ref.Symbol_Name));
+         when Formal_Param_Entry    =>
+            Output (File, Convert_To_String (Ref.Param_Type.Symbol_Name));
+         when others =>
+            null;
+      end case;
+   end Dump_Type_Name;
+
+   procedure Dump_Symbol_Name (File : File_Type;
+                               Ref  : Ref_Symbol_Table_Entry) is
+   begin
+      if Is_Infix (Convert_To_String (Ref.Symbol_Name)) and Quote_Infix then
+         Output (File, """");
+      end if;
+      Output (File, Convert_To_String (Ref.Symbol_Name));
+      if Is_Infix (Convert_To_String (Ref.Symbol_Name)) and Quote_Infix then
+         Output (File, """");
+      end if;
+   end Dump_Symbol_Name;
+
+   procedure Dump_Constraint_Info (File : File_Type;
+                                   Ref  : Ref_Symbol_Table_Entry) is
+   begin
+      Output (File, " range ");
+      Output (File, Ace_Integer'IMAGE (Get_Lower_Bound (Ref)));
+      Output (File, " .. ");
+      Output (File, Ace_Integer'IMAGE (Get_Upper_Bound (Ref)));
+   end Dump_Constraint_Info;
+
+   procedure Dump_Enumeration_List (File : File_Type;
+                                    Ref  : Ref_Symbol_Table_Entry) is
+      Iterator : Ref_Symbol_Table_Entry;
+
+   begin
+      Iterator := Get_First_Literal (Ref);
+      while (not Is_Empty (Iterator)) loop
+         Dump_Symbol_Name (File, Iterator);
+         Iterator := Get_Successor (Iterator);
+         if not Is_Empty (Iterator) then
+            Output (File, ", ");
+         end if;
+      end loop;
+   end Dump_Enumeration_List;
+
+   procedure Dump_Parameter_List (File : File_Type;
+                                  Ref  : Ref_Symbol_Table_Entry) is
+
+      Iterator  : Ref_Symbol_Table_Entry;
+      Iterator2 : Ref_Symbol_Table_Entry;
+
+      procedure Dump_Mode (File  : File_Type;
+                           Param : Ref_Symbol_Table_Entry) is
+      begin
+         if Is_Mode_Default_In (Param) then
+            null; -- nothing is output-ed here.
+         elsif Is_Mode_Explicit_In (Param) then
+            Output (File, "in ");
+         elsif Is_Mode_Out (Param) then
+            Output (File, "out ");
+         elsif Is_Mode_In_Out (Param) then
+            Output (File, "in out ");
+         end if;
+      end Dump_Mode;
+
+   begin
+      Iterator := Get_Head_Of_Parameters_List (Ref);
+      if Is_Empty (Iterator) then
+         return ;
+      else
+         Output (File, " (");
+         while (not Is_Empty (Iterator)) loop
+            Dump_Symbol_Name (File, Iterator);
+            -- Loop thru all parameters that are separated by a ","
+            loop
+               Iterator2 := Get_Next_Parameter (Iterator);
+               exit  when Is_Empty (Iterator2) or else
+                          not Is_Preceded_By_Comma (Iterator2);
+               Output (File, ", ");
+               Dump_Symbol_Name (File, Iterator2);
+               Iterator := Iterator2;
+            end loop;
+            Output (File, " : ");
+            Dump_Mode (File, Iterator);
+            Dump_Type_Name (File, Iterator);
+            if not Is_Empty (Iterator2) then
+               Output (File, "; ");
+            end if;
+            Iterator := Iterator2;
+         end loop;
+         Output (File, ")");
+      end if;
+   end Dump_Parameter_List;
+
+   procedure Dump_Symtbl (Ref            : Ref_Symbol_Table_Entry;
+                          File           : File_Type;
+                          Dumping_Bodies : Boolean := False) is
+   begin
+      if Is_Empty (Ref) then
+
+         Print_Indent (File);
+         Outputln (File, "null;");
+
+      else
+
+         case Get_Entry_Kind (Ref) is
+
+            when Object_Entry  =>
+               Dump_Symbol_Name (File, Ref);
+               Output (File, " : ");
+               Dump_Type_Name (File, Ref);
+               Outputln (File, ";");
+
+            when Type_Entry    | Derived_Type_Entry     =>
+               Output (File, "type ");
+               Dump_Symbol_Name (File, Ref);
+               Output (File, " is ");
+               if Get_Entry_Kind (Ref) = Type_Entry then
+                  if Is_Type_An_Enumeration_Type (Ref) then
+                     Output (File, "(");
+                     Dump_Enumeration_List (File, Ref);
+                     Outputln (File, ");");
+                  elsif Is_Type_An_Integer_Type (Ref) then
+                     Output (File, " range ");
+                     --dump_statement_statement_database
+                     --   (Get_Lower_Bound(Get_Symbol_Table_Entry(Ref));
+                     --dump_statement_statement_database
+                     --   (Get_Upper_Bound(Get_Symbol_Table_Entry(Ref));
+                     Output (File, Ace_Integer'IMAGE (Get_Lower_Bound (Ref)));
+                     Output (File, " .. ");
+                     Output (File, Ace_Integer'IMAGE (Get_Upper_Bound (Ref)));
+                     Outputln (File, ";");
+                  else
+                     Outputln (File, "<Unimplemented Type>;");
+                  end if;
+               elsif Get_Entry_Kind (Ref) = Derived_Type_Entry then
+                  Output (File, "new ");
+                  Dump_Symbol_Name (File, Get_Entry_Base_Type (Ref));
+                  if Has_Constraint (Ref) then
+                     Dump_Constraint_Info (File, Ref);
+                  end if;
+                  Outputln (File, ";");
+               end if;
+
+            when Subtype_Entry =>
+               Output (File, "subtype ");
+               Dump_Symbol_Name (File, Ref);
+               Output (File, " is ");
+               Dump_Symbol_Name (File, Get_Entry_Base_Type (Ref));
+               if Has_Constraint (Ref) then
+                  Dump_Constraint_Info (File, Ref);
+               end if;
+               Outputln (File, ";");
+
+            when Procedure_Entry    =>
+               Output (File, "procedure ");
+               Dump_Symbol_Name (File, Ref);
+               Dump_Parameter_List (File, Ref);
+               if Dumping_Bodies then
+                  if Is_Subprogram_Built_In (Ref) then
+                     Outputln (File, ";");
+                     Output (File, "pragma BUILTIN (");
+                     Dump_Symbol_Name (File, Ref);
+                     Output (File, ", ");
+                     Output
+                         (File,
+                          Ace_Integer'IMAGE (Get_Built_In_Instance_Number (Ref)
+                                             ));
+                     Outputln (File, ");");
+
+                  elsif not Is_Empty (Get_Head_Of_Statements_List (Ref)) then
+                     Outputln (File, " is");
+                     Indent;
+                     Dump_Statement_Database
+                         (Get_Head_Of_Declarations_List (Ref), File,
+                          Dumping_Bodies);
+                     Exdent;
+                     Outputln (File, "begin");
+                     Indent;
+                     Dump_Statement_Database
+                         (Get_Head_Of_Statements_List (Ref), File,
+                          Dumping_Bodies);
+                     Exdent;
+                     Output (File, "end ");
+                     Dump_Symbol_Name (File, Ref);
+                     Outputln (File, ";");
+
+                  else
+                     Outputln (File, ";");
+                  end if;
+
+               else -- spec only
+                  if Is_Subprogram_Built_In (Ref) then
+                     Outputln (File, ";");
+                     Output (File, "pragma BUILTIN (");
+                     Dump_Symbol_Name (File, Ref);
+                     Output (File, ", ");
+                     Output
+                         (File,
+                          Ace_Integer'IMAGE (Get_Built_In_Instance_Number (Ref)
+                                             ));
+                     Outputln (File, ");");
+                  else
+                     Outputln (File, ";");
+                  end if;
+
+               end if;
+
+
+            when Function_Entry     =>
+               Output (File, "function ");
+               Dump_Symbol_Name (File, Ref);
+               Dump_Parameter_List (File, Ref);
+               Output (File, " return ");
+               Dump_Symbol_Name (File, Get_Return_Type (Ref));
+               if Is_Subprogram_Built_In (Ref) then
+                  Outputln (File, ";");
+                  Output (File, "pragma BUILTIN (");
+                  Dump_Symbol_Name (File, Ref);
+                  Output (File, ", ");
+                  Output
+                      (File,
+                       Ace_Integer'IMAGE (Get_Built_In_Instance_Number (Ref)));
+                  Outputln (File, ");");
+               elsif Dumping_Bodies and
+                     not Is_Empty (Get_Head_Of_Statements_List (Ref)) then
+                  Outputln (File, " is");
+                  Indent;
+                  Dump_Statement_Database
+                      (Get_Head_Of_Declarations_List (Ref), File,
+                       Dumping_Bodies);
+                  Exdent;
+                  Outputln (File, "begin");
+                  Indent;
+                  Dump_Statement_Database (Get_Head_Of_Statements_List (Ref),
+                                           File, Dumping_Bodies);
+                  Exdent;
+                  Output (File, "end ");
+                  Dump_Symbol_Name (File, Ref);
+                  Outputln (File, ";");
+
+               else -- spec only
+                  Outputln (File, ";");
+               end if;
+
+            when Package_Entry =>
+               Output (File, "package ");
+               Dump_Symbol_Name (File, Ref);
+               Outputln (File, " is");
+               Indent;
+               Dump_Statement_Database (Get_Package_Spec_Decls (Ref), File,
+                                        False);
+               Exdent;
+               Output (File, "end ");
+               Dump_Symbol_Name (File, Ref);
+               Outputln (File, ";");
+
+               if Dumping_Bodies and Has_A_Body (Ref) then
+                  Print_Indent (File);
+                  Output (File, "package body ");
+                  Dump_Symbol_Name (File, Ref);
+                  Outputln (File, " is");
+                  Indent;
+                  Dump_Statement_Database (Get_Package_Body_Decls (Ref), File,
+                                           True);
+                  Exdent;
+                  if not Is_Empty (Get_Head_Of_Statements_List (Ref)) then
+                     Print_Indent (File);
+                     Outputln (File, "begin");
+                     Indent;
+                     Dump_Statement_Database
+                         (Get_Head_Of_Statements_List (Ref), File, True);
+                     Exdent;
+                  end if;
+                  Output (File, "end ");
+                  Dump_Symbol_Name (File, Ref);
+                  Outputln (File, ";");
+               end if;
+
+            when Enumeration_Literal_Entry    =>
+
+               Output (File, "-- Enumeration Literal : """);
+               Dump_Symbol_Name (File, Ref);
+               Output (File, """ of type ");
+               Dump_Symbol_Name (File, Get_Type (Ref));
+               Outputln (File);
+
+            when others   =>
+               --Show_Error(3009, Internal, "Dump_Symtbl");
+               null;
+
+         end case;
+      end if;
+   end Dump_Symtbl;
+
+
+   procedure Dump_For_Statement_Trace (Ref  : Ref_Statement_Database;
+                                       File : File_Type) is
+      Dumping_Bodies : Boolean := False;
+
+   begin
+      if Is_Empty (Ref) then
+         Print_Indent (File);
+         Outputln (File, "null;");
+
+      else
+
+         if Dump_Statement_Number then
+            Output (File, Ace_Integer'IMAGE (Get_Statement_Number (Ref)));
+            Output (File, "| ");
+         end if;
+
+         case Ref.Statement_Node.Statement_Kind is
+
+            when Object_Declaration =>
+               Dump_Statement_Database (Get_Name_List (Ref), File,
+                                        Dumping_Bodies);
+               Output (File, " : ");
+               Dump_Type_Name
+                   (File,
+                    Get_Symbol_Table_Entry
+                        (Get_Expression (Get_Name_List (Ref))));
+               if not Is_Empty (Get_Expression (Ref)) then
+                  Output (File, " := ");
+                  Dump_Statement_Database (Get_Expression (Ref), File,
+                                           Dumping_Bodies);
+               end if;
+               Outputln (File, ";");
+
+            when Type_Declaration   =>
+               Output (File, "type ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Output (File, " is ");
+               if Get_Entry_Kind (Get_Symbol_Table_Entry (Ref)) = Type_Entry
+                   then
+                  if Is_Type_An_Enumeration_Type (Get_Symbol_Table_Entry (Ref))
+                      then
+                     Output (File, "(");
+                     Dump_Enumeration_List (File, Get_Symbol_Table_Entry (Ref));
+                     Outputln (File, ");");
+                  elsif Is_Type_An_Integer_Type (Get_Symbol_Table_Entry (Ref))
+                         then
+                     Output (File, " range ");
+                     --dump_statement_statement_database
+                     --   (Get_Lower_Bound(Get_Symbol_Table_Entry(Ref));
+                     --dump_statement_statement_database
+                     --   (Get_Upper_Bound(Get_Symbol_Table_Entry(Ref));
+                     Output
+                         (File,
+                          Ace_Integer'IMAGE (
+                             Get_Lower_Bound (Get_Symbol_Table_Entry (Ref))));
+                     Output (File, " .. ");
+                     Outputln
+                         (File,
+                          Ace_Integer'IMAGE (
+                             Get_Upper_Bound (Get_Symbol_Table_Entry (Ref))));
+                     Outputln (File, ";");
+                  else
+                     Outputln (File, "<Unimplemented Type>;");
+                  end if;
+               elsif Get_Entry_Kind (Get_Symbol_Table_Entry (Ref)) =
+                     Derived_Type_Entry then
+                  Output (File, "new ");
+                  Dump_Symbol_Name
+                      (File, Get_Entry_Base_Type (Get_Symbol_Table_Entry (Ref))
+                       );
+                  if Has_Constraint (Get_Symbol_Table_Entry (Ref)) then
+                     Dump_Constraint_Info (File, Get_Symbol_Table_Entry (Ref));
+                  end if;
+                  Outputln (File, ";");
+               end if;
+
+            when Subtype_Declaration     =>
+               Output (File, "subtype ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Output (File, " is ");
+               Dump_Symbol_Name
+                   (File, Get_Entry_Base_Type (Get_Symbol_Table_Entry (Ref)));
+               if Has_Constraint (Get_Symbol_Table_Entry (Ref)) then
+                  Dump_Constraint_Info (File, Get_Symbol_Table_Entry (Ref));
+               end if;
+               Outputln (File, ";");
+
+            when Procedure_Declaration   =>
+               Output (File, "procedure ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Dump_Parameter_List (File, Get_Symbol_Table_Entry (Ref));
+               Outputln (File, ";");
+               if Is_Subprogram_Built_In (Get_Symbol_Table_Entry (Ref)) then
+                  Outputln (File, ";");
+                  Output (File, "pragma BUILTIN (");
+                  Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+                  Output (File, ", ");
+                  Output
+                      (File,
+                       Ace_Integer'IMAGE (
+                          Get_Built_In_Instance_Number
+                              (Get_Symbol_Table_Entry (Ref))));
+                  Outputln (File, ");");
+               end if;
+
+            when Function_Declaration    =>
+               Output (File, "function ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Dump_Parameter_List (File, Get_Symbol_Table_Entry (Ref));
+               Output (File, " return ");
+               Dump_Symbol_Name
+                   (File, Get_Return_Type (Get_Symbol_Table_Entry (Ref)));
+               Outputln (File, ";");
+               if Is_Subprogram_Built_In (Get_Symbol_Table_Entry (Ref)) then
+                  Outputln (File, ";");
+                  Output (File, "pragma BUILTIN (");
+                  Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+                  Output (File, ", ");
+                  Output
+                      (File,
+                       Ace_Integer'IMAGE (
+                          Get_Built_In_Instance_Number
+                              (Get_Symbol_Table_Entry (Ref))));
+                  Outputln (File, ");");
+               end if;
+
+            when Package_Declaration     =>
+               Output (File, "package ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Outputln (File, " is");
+
+            when Package_Body_Declaration     =>
+               Output (File, "package body ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Outputln (File, " is");
+
+            when Assign_Statement   =>
+               Print_Indent (File);
+               Dump_Statement_Database (Get_Lhs (Ref), File, Dumping_Bodies);
+               Output (File, " := ");
+               Dump_Statement_Database (Get_Rhs (Ref), File, Dumping_Bodies);
+               Outputln (File, ";");
+
+            when Loop_Statement     =>
+               if not Is_Empty (Get_Name (Ref)) then
+                  Print_Indent (File);
+                  Dump_Statement_Database
+                      (Get_Name (Ref), File, Dumping_Bodies);
+                  Outputln (File, " :");
+               end if;
+
+               if Is_Empty (Get_Loop_Scheme (Ref)) then
+                  if Is_Expression_Node (Ref) then
+                     Output (File, "while ");
+                     Dump_Statement_Database (Get_Loop_Scheme (Ref), File,
+                                              Dumping_Bodies);
+                     Output (File, " ");
+                  else
+                     Dump_Statement_Database (Get_Loop_Scheme (Ref), File,
+                                              Dumping_Bodies);
+                  end if;
+               end if;
+               Outputln (File, "loop");
+
+            when For_Statement =>
+               Output (File, "for ");
+               Dump_Statement_Database (Get_For_Variable (Ref), File,
+                                        Dumping_Bodies);
+               Output (File, " in ");
+               Dump_Statement_Database (Get_For_Range (Ref), File,
+                                        Dumping_Bodies);
+               Output (File, " ");
+
+            when If_Statement  =>
+               Output (File, "if ");
+               Dump_Statement_Database (Get_Condition (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, " then");
+
+            when Case_Statement     =>
+               Output (File, "case ");
+               Dump_Statement_Database (Get_Expression (Ref), File,
+                                        Dumping_Bodies);
+
+            when Case_Alternative_Part   =>
+               Output (File, "when ");
+               Dump_Statement_Database (Get_Alternative_Choice (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, " => ");
+
+            when Labeled_Statement  =>
+               Output (File, "<<");
+               Dump_Statement_Database (Get_Label_Entry (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, ">>");
+
+            when Goto_Statement     =>
+               Output (File, "goto ");
+               Dump_Statement_Database (Get_Goto_Label (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, ";");
+
+            when Exit_Statement     =>
+               Output (File, "exit ");
+               Dump_Statement_Database (Get_Name (Ref), File, Dumping_Bodies);
+               if not Is_Empty (Get_Condition (Ref)) then
+                  Output (File, " when ");
+                  Dump_Statement_Database (Get_Condition (Ref), File,
+                                           Dumping_Bodies);
+               end if;
+               Outputln (File, ";");
+
+            when Return_Statement   =>
+               Output (File, "return ");
+               if not Is_Empty (Get_Expression (Ref)) then
+                  Dump_Statement_Database (Get_Expression (Ref), File,
+                                           Dumping_Bodies);
+               end if;
+               Outputln (File, ";");
+
+            when Block_Statement    =>
+               null;
+
+            when With_Statement     =>
+               Output (File, "with ");
+               Dump_Statement_Database (Get_Name_List (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, ";");
+
+            when Use_Statement =>
+               Output (File, "use  ");
+               Dump_Statement_Database (Get_Name_List (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, ";");
+
+            when Procedure_Call     =>
+               Dump_Statement_Database (Get_Subprogram_Info (Ref), File,
+                                        Dumping_Bodies);
+               if not Is_Empty (Get_Parameter_List (Ref)) then
+                  Output (File, "(");
+                  Dump_Statement_Database (Get_Parameter_List (Ref), File,
+                                           Dumping_Bodies);
+                  Output (File, ")");
+               end if;
+               Outputln (File, ";");
+
+            when Pragma_Statement   =>
+               Output (File, "pragma ");
+               Dump_Statement_Database (Get_Name (Ref), File, Dumping_Bodies);
+               if not Is_Empty (Get_Argument_List (Ref)) then
+                  Output (File, "(");
+                  Dump_Statement_Database (Get_Argument_List (Ref), File,
+                                           Dumping_Bodies);
+                  Output (File, ")");
+               end if;
+               Outputln (File, ";");
+
+            when Null_Statement     =>
+               Outputln (File, "null;");
+
+            when Unknown  =>
+               null;
+         end case;
+      end if;
+   end Dump_For_Statement_Trace;
+
+   procedure Dump_Statement (Ref            : Ref_Statement_Database;
+                             File           : File_Type;
+                             Dumping_Bodies : Boolean) is
+   begin
+      if Ref = null then
+
+         Print_Indent (File);
+         Outputln (File, "null;");
+
+      else
+
+         if Dump_Statement_Number then
+
+            Output (File, Ace_Integer'IMAGE (Get_Statement_Number (Ref)));
+            Output (File, "| ");
+
+         end if;
+
+         case Ref.Statement_Node.Statement_Kind is
+
+            when Object_Declaration =>
+               Print_Indent (File);
+               Dump_Statement_Database (Get_Name_List (Ref), File,
+                                        Dumping_Bodies);
+               Output (File, " : ");
+               Dump_Type_Name
+                   (File,
+                    Get_Symbol_Table_Entry
+                        (Get_Expression (Get_Name_List (Ref))));
+               if not Is_Empty (Get_Expression (Ref)) then
+                  Output (File, " := ");
+                  Dump_Statement_Database (Get_Expression (Ref), File,
+                                           Dumping_Bodies);
+               end if;
+               Outputln (File, ";");
+
+            when Type_Declaration   =>
+               Print_Indent (File);
+               Output (File, "type ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Output (File, " is ");
+               if Get_Entry_Kind (Get_Symbol_Table_Entry (Ref)) = Type_Entry
+                   then
+                  if Is_Type_An_Enumeration_Type (Get_Symbol_Table_Entry (Ref))
+                      then
+                     Output (File, "(");
+                     Dump_Enumeration_List (File, Get_Symbol_Table_Entry (Ref));
+                     Outputln (File, ");");
+                  elsif Is_Type_An_Integer_Type (Get_Symbol_Table_Entry (Ref))
+                         then
+                     Output (File, " range ");
+                     --dump_statement_statement_database
+                     --   (Get_Lower_Bound(Get_Symbol_Table_Entry(Ref));
+                     --dump_statement_statement_database
+                     --   (Get_Upper_Bound(Get_Symbol_Table_Entry(Ref));
+                     Output
+                         (File,
+                          Ace_Integer'IMAGE (
+                             Get_Lower_Bound (Get_Symbol_Table_Entry (Ref))));
+                     Output (File, " .. ");
+                     Outputln
+                         (File,
+                          Ace_Integer'IMAGE (
+                             Get_Upper_Bound (Get_Symbol_Table_Entry (Ref))));
+                     Outputln (File, ";");
+                  else
+                     Outputln (File, "<Unimplemented Type>;");
+                  end if;
+               elsif Get_Entry_Kind (Get_Symbol_Table_Entry (Ref)) =
+                     Derived_Type_Entry then
+                  Output (File, "new ");
+                  Dump_Symbol_Name
+                      (File, Get_Entry_Base_Type (Get_Symbol_Table_Entry (Ref))
+                       );
+                  if Has_Constraint (Get_Symbol_Table_Entry (Ref)) then
+                     Dump_Constraint_Info (File, Get_Symbol_Table_Entry (Ref));
+                  end if;
+                  Outputln (File, ";");
+               end if;
+
+            when Subtype_Declaration     =>
+               Print_Indent (File);
+               Output (File, "subtype ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Output (File, " is ");
+               Dump_Symbol_Name
+                   (File, Get_Entry_Base_Type (Get_Symbol_Table_Entry (Ref)));
+               if Has_Constraint (Get_Symbol_Table_Entry (Ref)) then
+                  Dump_Constraint_Info (File, Get_Symbol_Table_Entry (Ref));
+               end if;
+               Outputln (File, ";");
+
+            when Procedure_Declaration   =>
+               Print_Indent (File);
+               Output (File, "procedure ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Dump_Parameter_List (File, Get_Symbol_Table_Entry (Ref));
+               if Dumping_Bodies and
+                  not Is_Empty
+                      (Get_Head_Of_Statements_List
+                           (Get_Symbol_Table_Entry (Ref))) then
+                  Outputln (File, " is");
+                  Indent;
+                  Dump_Statement_Database
+                      (Get_Head_Of_Declarations_List
+                           (Get_Symbol_Table_Entry (Ref)), File, Dumping_Bodies
+                       );
+                  Exdent;
+                  Print_Indent (File);
+                  Outputln (File, "begin");
+                  Indent;
+                  Dump_Statement_Database
+                      (Get_Head_Of_Statements_List
+                           (Get_Symbol_Table_Entry (Ref)), File, Dumping_Bodies
+                       );
+                  Exdent;
+                  Print_Indent (File);
+                  Output (File, "end ");
+                  Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+                  Outputln (File, ";");
+
+               else -- spec only
+                  Outputln (File, ";");
+               end if;
+
+            when Function_Declaration    =>
+               Print_Indent (File);
+               Output (File, "function ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Dump_Parameter_List (File, Get_Symbol_Table_Entry (Ref));
+               Output (File, " return ");
+               Dump_Symbol_Name
+                   (File, Get_Return_Type (Get_Symbol_Table_Entry (Ref)));
+               if Dumping_Bodies and
+                  not Is_Empty
+                      (Get_Head_Of_Statements_List
+                           (Get_Symbol_Table_Entry (Ref))) then
+                  Outputln (File, " is");
+                  Indent;
+                  Dump_Statement_Database
+                      (Get_Head_Of_Declarations_List
+                           (Get_Symbol_Table_Entry (Ref)), File, Dumping_Bodies
+                       );
+                  Exdent;
+                  Print_Indent (File);
+                  Outputln (File, "begin");
+                  Indent;
+                  Dump_Statement_Database
+                      (Get_Head_Of_Statements_List
+                           (Get_Symbol_Table_Entry (Ref)), File, Dumping_Bodies
+                       );
+                  Exdent;
+                  Print_Indent (File);
+                  Output (File, "end ");
+                  Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+                  Outputln (File, ";");
+
+               else -- spec only
+                  Outputln (File, ";");
+               end if;
+
+            when Package_Declaration     =>
+               Print_Indent (File);
+               Output (File, "package ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Outputln (File, " is");
+               Indent;
+               Dump_Statement_Database
+                   (Get_Package_Spec_Decls (Get_Symbol_Table_Entry (Ref)), File,
+                    False);
+               Exdent;
+               Print_Indent (File);
+               Output (File, "end ");
+               Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+               Outputln (File, ";");
+
+            when Package_Body_Declaration     =>
+               if Dumping_Bodies and Has_A_Body (Get_Symbol_Table_Entry (Ref))
+                   then
+                  Print_Indent (File);
+                  Output (File, "package body ");
+                  Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+                  Outputln (File, " is");
+                  Indent;
+                  Dump_Statement_Database
+                      (Get_Package_Body_Decls (Get_Symbol_Table_Entry (Ref)),
+                       File, True);
+                  Exdent;
+                  if not Is_Empty
+                         (Get_Head_Of_Statements_List
+                              (Get_Symbol_Table_Entry (Ref))) then
+                     Print_Indent (File);
+                     Outputln (File, "begin");
+                     Indent;
+                     Dump_Statement_Database
+                         (Get_Head_Of_Statements_List
+                              (Get_Symbol_Table_Entry (Ref)), File, True);
+                     Exdent;
+                  end if;
+                  Print_Indent (File);
+                  Output (File, "end ");
+                  Dump_Symbol_Name (File, Get_Symbol_Table_Entry (Ref));
+                  Outputln (File, ";");
+               end if;
+
+            when Assign_Statement   =>
+               Print_Indent (File);
+               Dump_Statement_Database (Get_Lhs (Ref), File, Dumping_Bodies);
+               Output (File, " := ");
+               Dump_Statement_Database (Get_Rhs (Ref), File, Dumping_Bodies);
+               Outputln (File, ";");
+
+            when Loop_Statement     =>
+               if not Is_Empty (Get_Name (Ref)) then
+                  Print_Indent (File);
+                  Dump_Statement_Database
+                      (Get_Name (Ref), File, Dumping_Bodies);
+                  Outputln (File, " :");
+               end if;
+               Print_Indent (File);
+               if Is_Empty (Get_Loop_Scheme (Ref)) then
+                  if Is_Expression_Node (Ref) then
+                     Output (File, "while ");
+                     Dump_Statement_Database (Get_Loop_Scheme (Ref), File,
+                                              Dumping_Bodies);
+                     Output (File, " ");
+                  else
+                     Dump_Statement_Database (Get_Loop_Scheme (Ref), File,
+                                              Dumping_Bodies);
+                  end if;
+               end if;
+               Outputln (File, "loop");
+               Indent;
+               Dump_Statement_Database
+                   (Get_Head_Of_Statements_List (Ref), File, Dumping_Bodies);
+               Exdent;
+               Print_Indent (File);
+               Output (File, "end loop ");
+               Dump_Statement_Database (Get_Name (Ref), File, Dumping_Bodies);
+               Outputln (File, ";");
+
+            when For_Statement =>
+               Output (File, "for ");
+               Dump_Statement_Database (Get_For_Variable (Ref), File,
+                                        Dumping_Bodies);
+               Output (File, " in ");
+               Dump_Statement_Database (Get_For_Range (Ref), File,
+                                        Dumping_Bodies);
+               Output (File, " ");
+
+            when If_Statement  =>
+               Print_Indent (File);
+               Output (File, "if ");
+               Dump_Statement_Database (Get_Condition (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, " then");
+               Indent;
+               if not Is_Empty (Get_Head_Of_True_Task_Statements_List (Ref))
+                   then
+                  Dump_Statement_Database
+                      (Get_Head_Of_True_Task_Statements_List (Ref), File,
+                       Dumping_Bodies);
+               else
+                  Print_Indent (File);
+                  Outputln (File, "null;");
+               end if;
+               Exdent;
+               if not Is_Empty (Get_Head_Of_False_Task_Statements_List (Ref))
+                   then
+                  Print_Indent (File);
+                  Outputln (File, "else");
+                  Indent;
+                  Dump_Statement_Database
+                      (Get_Head_Of_False_Task_Statements_List (Ref), File,
+                       Dumping_Bodies);
+                  Exdent;
+               end if;
+               Print_Indent (File);
+               Outputln (File, "end if;");
+
+            when Case_Statement     =>
+               Print_Indent (File);
+               Output (File, "case ");
+               Dump_Statement_Database (Get_Expression (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, " is");
+               Indent;
+               Dump_Statement_Database (Get_Alternatives_List (Ref), File,
+                                        Dumping_Bodies);
+               Exdent;
+               Print_Indent (File);
+               Outputln (File, "end case;");
+
+            when Case_Alternative_Part   =>
+               Print_Indent (File);
+               Output (File, "when ");
+               Dump_Statement_Database (Get_Alternative_Choice (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, " => ");
+               Indent;
+               Dump_Statement_Database
+                   (Get_Alternative_Statements (Ref), File, Dumping_Bodies);
+               Exdent;
+               if not Is_Empty (Get_Next_Alternative (Ref)) then
+                  Dump_Statement_Database (Get_Next_Alternative (Ref), File,
+                                           Dumping_Bodies);
+               end if;
+
+            when Labeled_Statement  =>
+               Print_Indent (File);
+               Output (File, "<<");
+               Dump_Statement_Database (Get_Label_Entry (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, ">>");
+
+            when Goto_Statement     =>
+               Print_Indent (File);
+               Output (File, "goto ");
+               Dump_Statement_Database (Get_Goto_Label (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, ";");
+
+            when Exit_Statement     =>
+               Print_Indent (File);
+               Output (File, "exit ");
+               Dump_Statement_Database (Get_Name (Ref), File, Dumping_Bodies);
+               if not Is_Empty (Get_Condition (Ref)) then
+                  Output (File, " when ");
+                  Dump_Statement_Database (Get_Condition (Ref), File,
+                                           Dumping_Bodies);
+               end if;
+               Outputln (File, ";");
+
+            when Return_Statement   =>
+               Print_Indent (File);
+               Output (File, "return ");
+               if not Is_Empty (Get_Expression (Ref)) then
+                  Dump_Statement_Database (Get_Expression (Ref), File,
+                                           Dumping_Bodies);
+               end if;
+               Outputln (File, ";");
+
+            when Block_Statement    =>
+               if not Is_Empty (Get_Block_Declarations (Ref)) then
+                  Print_Indent (File);
+                  Outputln (File, "declare");
+                  Indent;
+                  Dump_Statement_Database (Get_Block_Declarations (Ref), File,
+                                           Dumping_Bodies);
+                  Exdent;
+               end if;
+
+               Print_Indent (File);
+               Outputln (File, "begin");
+               Indent;
+               Dump_Statement_Database
+                   (Get_Head_Of_Statements_List (Ref), File, Dumping_Bodies);
+               Exdent;
+               Print_Indent (File);
+               Outputln (File, "end;");
+
+            when With_Statement     =>
+               Print_Indent (File);
+               Output (File, "with ");
+               Dump_Statement_Database (Get_Name_List (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, ";");
+
+            when Use_Statement =>
+               Print_Indent (File);
+               Output (File, "use  ");
+               Dump_Statement_Database (Get_Name_List (Ref), File,
+                                        Dumping_Bodies);
+               Outputln (File, ";");
+
+            when Procedure_Call     =>
+               Print_Indent (File);
+               Dump_Statement_Database (Get_Subprogram_Info (Ref), File,
+                                        Dumping_Bodies);
+               if not Is_Empty (Get_Parameter_List (Ref)) then
+                  Output (File, "(");
+                  Dump_Statement_Database (Get_Parameter_List (Ref), File,
+                                           Dumping_Bodies);
+                  Output (File, ")");
+               end if;
+               Outputln (File, ";");
+
+            when Pragma_Statement   =>
+               Print_Indent (File);
+               Output (File, "pragma ");
+               Dump_Statement_Database (Get_Name (Ref), File, Dumping_Bodies);
+               if not Is_Empty (Get_Argument_List (Ref)) then
+                  Output (File, "(");
+                  Dump_Statement_Database (Get_Argument_List (Ref), File,
+                                           Dumping_Bodies);
+                  Output (File, ")");
+               end if;
+               Outputln (File, ";");
+
+            when Null_Statement     =>
+               Print_Indent (File);
+               Outputln (File, "null;");
+
+            when Unknown  =>
+               null;
+         end case;
+
+         if not Is_Empty (Get_Next_Statement (Ref)) then
+            Dump_Statement_Database (Get_Next_Statement (Ref), File,
+                                     Dumping_Bodies);
+         end if;
+
+      end if;
+   end Dump_Statement;
+
+
+   procedure Dump_Expression (Ref            : Ref_Expression_Record;
+                              File           : File_Type;
+                              Dumping_Bodies : Boolean) is
+   begin
+      case Ref.Expression_Kind is
+
+         when Dot_Operator     =>
+            Dump_Statement_Database (Ref.Dot_Object, File, Dumping_Bodies);
+            Output (File, ".");
+            Dump_Statement_Database (Ref.Dot_Component, File, Dumping_Bodies);
+
+         when Left_Parenthesis_Operator  =>
+            if Is_Infix
+                   (Convert_To_String
+                        (Ref.Lp_Object.Expression_Node.Symbol_Name)) then
+               Output (File, "(");
+               Dump_Statement_Database
+                   (Ref.Lp_Items_List.Expression_Node.Item_Expression, File,
+                    Dumping_Bodies);
+               Quote_Infix := False;
+               Output (File, " ");
+               Dump_Statement_Database (Ref.Lp_Object, File, Dumping_Bodies);
+               Output (File, " ");
+               Quote_Infix := True;
+               Dump_Statement_Database
+                   (Ref.Lp_Items_List.Expression_Node.Next_List_Item, File,
+                    Dumping_Bodies);
+               Output (File, ")");
+            else
+               Dump_Statement_Database (Ref.Lp_Object, File, Dumping_Bodies);
+               if Ref.Lp_Object = null or else Ref.Lp_Items_List /= null then
+                  Output (File, "(");
+                  Dump_Statement_Database (Ref.Lp_Items_List, File,
+                                           Dumping_Bodies);
+                  Output (File, ")");
+               end if;
+            end if;
+
+         when List_Item   =>
+
+            Dump_Statement_Database (Ref.Item_Expression, File, Dumping_Bodies);
+
+            if Ref.Next_List_Item /= null then
+               Output (File, ", ");
+               Dump_Statement_Database (Ref.Next_List_Item, File,
+                                        Dumping_Bodies);
+            end if;
+
+         when Aggregate_Component   =>
+            Dump_Statement_Database
+                (Ref.Aggregate_Choice, File, Dumping_Bodies);
+            Output (File, " => ");
+            Dump_Statement_Database (Ref.Aggregate_Expression, File,
+                                     Dumping_Bodies);
+
+         when Range_Expression =>
+            if Ref.Range_Name /= null then
+               Dump_Statement_Database (Ref.Range_Name, File, Dumping_Bodies);
+               Output (File, " range ");
+            end if;
+            Dump_Statement_Database (Ref.Lower_Bound, File, Dumping_Bodies);
+            Output (File, "..");
+            Dump_Statement_Database (Ref.Upper_Bound, File, Dumping_Bodies);
+
+         when Attribute_Tick   =>
+            Dump_Statement_Database
+                (Ref.Attribute_Prefix, File, Dumping_Bodies);
+            Output (File, "'");
+            Dump_Statement_Database (Ref.Attribute, File, Dumping_Bodies);
+
+         when String_Node =>
+            Output (File, '"' & Convert_To_String (Ref.String_Symbol) & '"');
+
+         when Character_Node   =>
+            Put (''' & Ref.Character_Symbol & ''');
+
+         when Constant_Node    =>
+            Output (File, Convert_To_String (Ref.Constant_Symbol));
+
+         when Terminal_Node    =>
+            if Is_Infix (Convert_To_String (Ref.Symbol_Name)) and Quote_Infix
+                then
+               Output (File, """");
+               Output (File, Convert_To_String (Ref.Symbol_Name));
+               Output (File, """");
+            else
+               Output (File, Convert_To_String (Ref.Symbol_Name));
+            end if;
+
+         when Array_Reference                 |
+              Function_Call                   |
+              Type_Conversion                 |
+              Record_Reference                |
+              Dot_Notation_Variable_Reference |
+              Unknown     =>
+            null;
+
+      end case;
+   end Dump_Expression;
+
+   procedure Dump_Statement_Database (Ref            : Ref_Statement_Database;
+                                      File           : File_Type;
+                                      Dumping_Bodies : Boolean := False) is
+   begin
+      if Ref /= null then
+         case Ref.Node_Kind is
+            when Statement_Node_Type     =>
+               Dump_Statement (Ref, File, Dumping_Bodies);
+            when Expression_Node_Type    =>
+               Dump_Expression (Ref.Expression_Node, File, Dumping_Bodies);
+            when Unknown  =>
+               null;
+         end case;
+      end if;
+   end Dump_Statement_Database;
+
+   procedure Dump_Entire_Symtbl (Dump_Bodies : in Boolean := False) is
+      Current_Entry : Ref_Symbol_Table_Entry;
+   begin
+      Put_Line ("Entire Symbol Table Dump =>");
+      Current_Entry := Get_Top_Of_Symtbl;
+      while not Is_Empty (Current_Entry) loop
+         Dump_Symtbl (Current_Entry, Standard_Output, Dump_Bodies);
+         New_Line;
+         Current_Entry := Get_Next_Entry (Current_Entry);
+      end loop;
+   end Dump_Entire_Symtbl;
+
+end Dump_Routines;

@@ -1,0 +1,12 @@
+function AllocUnit ( unitNum : Integer) return Boolean;
+pragma IMPORT (C, AllocUnit, "AllocUnit");
+procedure FreeUnit ( unitNum : Integer);
+pragma IMPORT (C, FreeUnit, "FreeUnit");
+function GetUnit ( unitPointer : DiskResourceUnitPtr) return DiskResourceUnitPtr;
+pragma IMPORT (C, GetUnit, "GetUnit");
+function GetUnitID ( unitNum : Integer) return INTEGER ;
+pragma IMPORT (C, GetUnitID, "GetUnitID");
+procedure GiveUnit;
+pragma IMPORT (C, GiveUnit, "GiveUnit");
+function ReadUnitID ( unitNum : Integer) return INTEGER ;
+pragma IMPORT (C, ReadUnitID, "ReadUnitID");

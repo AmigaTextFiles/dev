@@ -1,0 +1,1098 @@
+DEFINITION FOR LIBRARY MODULE DataTypes ;
+
+FROM SYSTEM	IMPORT ADDRESS, STRING, LONGSET, SHORTSET, MAKEID ;
+FROM Dos	IMPORT FileLockPtr, FileHandlePtr, FileInfoBlockPtr ;
+FROM Utility	IMPORT TagItemPtr, TAG_USER, Tag ;
+FROM IFFParse	IMPORT IFFHandlePtr ;
+FROM Printer	IMPORT IOPrtCmdReq, IODRPReq ;
+FROM Graphics	IMPORT Point, ColorMapPtr, Rectangle, RastPortPtr, BitMapPtr ;
+FROM Exec	IMPORT LibraryPtr, Node, List, MinNode, SignalSemaphore,
+			IOStdReq ;
+FROM Intuition	IMPORT ScreenPtr, GadgetInfoPtr, RequesterPtr, WindowPtr ;
+FROM Classes	IMPORT ObjectPtr, Msg, gpLayoutPtr ;
+
+TYPE
+  DataTypeHeaderPtr	= POINTER TO DataTypeHeader ;
+  DTHookContextPtr 	= POINTER TO DTHookContext ;
+  ToolPtr		= POINTER TO Tool ;
+  DataTypePtr 		= POINTER TO DataType ;
+  ToolNodePtr 		= POINTER TO ToolNode ;
+  DTSpecialInfoPtr 	= POINTER TO DTSpecialInfo ;
+  DTMethodPtr 		= POINTER TO DTMethod ;
+  FrameInfoPtr 		= POINTER TO FrameInfo ;
+  dtGeneralPtr 		= POINTER TO dtGeneral ;
+  dtSelectPtr 		= POINTER TO dtSelect ;
+  dtFrameBoxPtr 	= POINTER TO dtFrameBox ;
+  dtGotoPtr 		= POINTER TO dtGoto ;
+  dtTriggerPtr 		= POINTER TO dtTrigger ;
+  printerIOPtr 		= POINTER TO printerIO ;
+  dtPrintPtr 		= POINTER TO dtPrint ;
+  dtDrawPtr 		= POINTER TO dtDraw ;
+  dtWritePtr 		= POINTER TO dtWrite ;
+  LinePtr		= POINTER TO Line ;
+  BitMapHeaderPtr 	= POINTER TO BitMapHeader ;
+  ColorRegisterPtr 	= POINTER TO ColorRegister ;
+  VoiceHeaderPtr 	= POINTER TO VoiceHeader ;
+  AnimHeaderPtr 	= POINTER TO AnimHeader ;
+  adtFramePtr 		= POINTER TO adtFrame ;
+  adtStartPtr 		= POINTER TO adtStart ;
+
+(*============================================================================*)
+
+CONST
+  ID_DTYP = MAKEID("DTYP") ;
+
+(*============================================================================*)
+
+CONST
+  ID_DTHD = MAKEID("DTHD") ;
+
+TYPE
+  DataTypeHeader = RECORD
+    dth_Name	 : STRING  ;	(* Descriptive name of the data type	   *)
+    dth_BaseName : STRING  ;	(* Base name of the data type		   *)
+    dth_Pattern	 : STRING  ;	(* Match pattern for file name.		   *)
+    dth_Mask	 : ADDRESS ;	(* Comparision mask			   *)
+    dth_GroupID	 : LONGINT ;	(* Group that the DataType is in	   *)
+    dth_ID	 : LONGINT ;	(* ID for DataType (same as IFF FORM type) *)
+    dth_MaskLen	 : INTEGER ;	(* Length of comparision mask		   *)
+    dth_Pad	 : INTEGER ;	(* Unused at present (must be 0)	   *)
+    dth_Flags	 : BITSET  ;	(* Flags				   *)
+    dth_Priority : CARDINAL;	(* Priority				   *)
+  END ;
+
+CONST
+  DTHSIZE = SIZE( DataTypeHeader ) ;
+
+(*============================================================================*)
+
+(* Basic type *)
+CONST
+  DTF_TYPE_MASK	= {0..3} ;
+  DTF_BINARY	= { } ;
+  DTF_ASCII	= {0} ;
+  DTF_IFF	= {1} ;
+  DTF_MISC	= {0,1} ;
+  DTF_CASE	= {4} ;(* Set if case is important *)
+
+  DTF_SYSTEM1	= BITSET( 1000H ) ;(* Reserved for system use *)
+
+(*==============================================================================
+ *
+ * GROUP ID and ID
+ *
+ * This is used for filtering out objects that you don't want.	For
+ * example, you could make a filter for the ASL file requester so
+ * that it only showed the files that were pictures, or even to
+ * narrow it down to only show files that were ILBM pictures.
+ *
+ * Note that the Group ID's are in lower case, and always the first
+ * four characters of the word.
+ *
+ * For ID's; If it is an IFF file, then the ID is the same as the
+ * FORM type.  If it isn't an IFF file, then the ID would be the
+ * first four characters of name for the file type.
+ *
+ *============================================================================*)
+
+CONST
+  GID_SYSTEM	= MAKEID("syst") ;(* System file, such as ; directory,	      *)
+  				  (* executable, library, device, font, etc.  *)
+
+  GID_TEXT	= MAKEID("text") ;(* Formatted or unformatted text	      *)
+
+  GID_DOCUMENT	= MAKEID("docu") ;(* Formatted text with graphics	      *)
+  				  (* or other DataTypes			      *)
+
+  GID_SOUND	= MAKEID("soun") ;(* Sound				      *)
+
+  GID_INSTRUMENT= MAKEID("inst") ;(* Musical instruments used for musical     *)
+  				  (* scores				      *)
+
+  GID_MUSIC	= MAKEID("musi") ;(* Musical score			      *)
+  GID_PICTURE	= MAKEID("pict") ;(* Still picture			      *)
+  GID_ANIMATION	= MAKEID("anim") ;(* Animated picture			      *)
+  GID_MOVIE	= MAKEID("movi") ;(* Animation with audio track 	      *)
+
+(*============================================================================*)
+
+(* A code chunk contains an embedded executable that can be loaded
+ * with InternalLoadSeg. *)
+  ID_CODE	= MAKEID("DTCD") ;
+
+(* DataTypes comparision hook context (Read-Only).  This is the
+ * argument that is passed to a custom comparision routine. *)
+TYPE
+  DTHookContext = RECORD
+    (* Libraries that are already opened for your use *)
+    dthc_SysBase	: LibraryPtr ;
+    dthc_DOSBase	: LibraryPtr ;
+    dthc_IFFParseBase	: LibraryPtr ;
+    dthc_UtilityBase	: LibraryPtr ;
+
+    (* File context *)
+    dthc_Lock		: FileLockPtr ;	     (* Lock on the file	      *)
+    dthc_FIB		: FileInfoBlockPtr ; (* Pointer to a FileInfoBlock    *)
+    dthc_FileHandle	: FileHandlePtr ;    (* Pointer to the file handle    *)
+    					     (* (may be NULL)		      *)
+    dthc_IFF		: IFFHandlePtr ;     (* Pointer to an IFFHandle       *)
+    					     (* (may be NULL)		      *)
+    dthc_Buffer		: STRING ;	     (* Buffer			      *)
+    dthc_BufferLength	: LONGINT ;	     (* Length of the buffer          *)
+  END ;
+
+(*============================================================================*)
+
+CONST
+  ID_TOOL = MAKEID("DTTL") ;
+
+TYPE
+  Tool = RECORD
+    tn_Which   : CARDINAL ; (* Which tool is this *)
+    tn_Flags   : BITSET   ; (* Flags		  *)
+    tn_Program : STRING   ; (* Application to use *)
+  END ;
+
+CONST
+  TSIZE = SIZE( Tool ) ;
+
+(* defines for tn_Which *)
+CONST
+  TW_INFO	= 1 ;
+  TW_BROWSE	= 2 ;
+  TW_EDIT	= 3 ;
+  TW_PRINT	= 4 ;
+  TW_MAIL	= 5 ;
+
+(* defines for tn_Flags *)
+
+  TF_LAUNCH_MASK = 0000FH ;
+  TF_SHELL	 = {0}    ;
+  TF_WORKBENCH	 = {1}    ;
+  TF_RX		 = {0,1}  ;
+
+(*============================================================================*)
+
+CONST
+  ID_TAGS = MAKEID("DTTG") ;
+
+(*============================================================================*)
+
+TYPE
+  DataType = RECORD
+    dtn_Node1		: Node ;	      (* Reserved for system use      *)
+    dtn_Node2		: Node ;	      (* Reserved for system use      *)
+    dtn_Header		: DataTypeHeaderPtr ; (* Pointer to the DataTypeHeader*)
+    dtn_ToolList	: List ;	      (* List of tool nodes           *)
+    dtn_FunctionName	: STRING ;	      (* Name of comparision routine  *)
+    dtn_AttrList	: TagItemPtr ; 	      (* Object creation tags         *)
+    dtn_Length		: LONGINT ;	      (* Length of the memory block   *)
+  END ;
+
+CONST
+  DTNSIZE = SIZE( DataType ) ;
+
+(*============================================================================*)
+
+TYPE
+  ToolNode = RECORD
+    tn_Node   : Node ;	  (* Embedded node		*)
+    tn_Tool   : Tool ;	  (* Embedded tool		*)
+    tn_Length : LONGINT ; (* Length of the memory block *)
+  END ;
+
+CONST
+   TNSIZE = SIZE( ToolNode ) ;
+
+(*============================================================================*)
+
+CONST
+  ID_NAME = MAKEID("NAME") ;
+
+(*============================================================================*)
+
+(* text ID's *)
+  DTERROR_UNKNOWN_DATATYPE		= 2000 ;
+  DTERROR_COULDNT_SAVE			= 2001 ;
+  DTERROR_COULDNT_OPEN			= 2002 ;
+  DTERROR_COULDNT_SEND_MESSAGE		= 2003 ;
+
+(* new for V40 *)
+  DTERROR_COULDNT_OPEN_CLIPBOARD	= 2004 ;
+  DTERROR_Reserved			= 2005 ;
+  DTERROR_UNKNOWN_COMPRESSION		= 2006 ;
+  DTERROR_NOT_ENOUGH_DATA		= 2007 ;
+  DTERROR_INVALID_DATA			= 2008 ;
+
+(* Offset for types *)
+  DTMSG_TYPE_OFFSET			= 2100 ;
+
+
+(*============================================================================*)
+
+CONST
+   DATATYPESCLASS = "datatypesclass" ;
+
+(*============================================================================*)
+
+CONST
+   DTA_Dummy = TAG_USER+01000H ;
+
+(* Generic attributes *)
+   DTA_TextAttr		= DTA_Dummy+10 ; (* (TextAttrPtr) Pointer to the      *)
+   					 (* default TextAttr to use for the   *)
+   					 (* text within the object.           *)
+
+   DTA_TopVert		= DTA_Dummy+11 ; (* (LONGINT) Current top vertcl unit *)
+
+   DTA_VisibleVert	= DTA_Dummy+12 ; (* (LONGINT) Number of visible       *)
+   					 (* vertical units		      *)
+
+   DTA_TotalVert	= DTA_Dummy+13 ; (* (LONGINT) Total number of vertical*)
+   					 (* units			      *)
+
+   DTA_VertUnit		= DTA_Dummy+14 ; (* (LONGINT) Number of pixels per    *)
+   				         (* vertical unit		      *)
+
+   DTA_TopHoriz		= DTA_Dummy+15 ; (* (LONGINT) Current top horizontal  *)
+   					 (* unit			      *)
+
+   DTA_VisibleHoriz	= DTA_Dummy+16 ; (* (LONGINT)  Number of visible      *)
+   					 (* horizontal units		      *)
+
+   DTA_TotalHoriz	= DTA_Dummy+17 ; (* (LONGINT) Total number of  	      *)
+   					 (* horizontal units		      *)
+
+   DTA_HorizUnit	= DTA_Dummy+18 ; (* (LONGINT) Number of pixels per    *)
+   					 (* horizontal unit		      *)
+
+   DTA_NodeName		= DTA_Dummy+19 ; (* (STRING) Name of the current      *)
+   					 (* element within the object.        *)
+
+   DTA_Title		= DTA_Dummy+20 ; (* (STRING) Title of the object.     *)
+
+   DTA_TriggerMethods	= DTA_Dummy+21 ; (* (DTMethodPtr) Pointer to a NULL   *)
+   					 (* terminated array of supported     *)
+   					 (* trigger methods.		      *)
+
+   DTA_Data		= DTA_Dummy+22 ; (* (ADDRESS) Object specific data.   *)
+
+   DTA_TextFont		= DTA_Dummy+23 ; (* (TextFontPtr) Default font to use *)
+   					 (* for text within the object.       *)
+
+   DTA_Methods		= DTA_Dummy+24 ; (* (ADDRESS) Pointer to a ~0         *)
+   					 (* terminated array of supported     *)
+   					 (* methods.			      *)
+
+   DTA_PrinterStatus	= DTA_Dummy+25 ; (* (LONGINT) Printer error message.  *)
+   					 (* Error numbers are defined in      *)
+   					 (* printer.h>			      *)
+
+   DTA_PrinterProc	= DTA_Dummy+26 ; (* PRIVATE ( ProcessPtr ) Pointer to *)
+   					 (* the print process.		      *)
+
+   DTA_LayoutProc	= DTA_Dummy+27 ; (* PRIVATE ( ProcessPtr ) Pointer to *)
+   					 (* the layout process.		      *)
+
+   DTA_Busy		= DTA_Dummy+28 ; (* Used to turn the applications'    *)
+   					 (* busy pointer off and on	      *)
+
+   DTA_Sync		= DTA_Dummy+29 ; (* Used to indicate that new	      *)
+   					 (* information has been loaded into  *)
+   					 (* an object. This is for models that*)
+   					 (* cache the DTA_TopVert like tags   *)
+
+   DTA_BaseName		= DTA_Dummy+30 ; (* The base name of the class	      *)
+
+   DTA_GroupID		= DTA_Dummy+31 ; (* Group that the object must belong *)
+
+   DTA_ErrorLevel	= DTA_Dummy+32 ; (* Error level			      *)
+
+   DTA_ErrorNumber	= DTA_Dummy+33 ; (* datatypes.library error number    *)
+
+   DTA_ErrorString	= DTA_Dummy+34 ; (* Argument for datatypes.lib error  *)
+
+   DTA_Conductor	= DTA_Dummy+35 ; (* New for V40. (STRING) specifies   *)
+   					 (* the name of the realtime.library  *)
+   					 (* conductor.	Defaults to "Main".   *)
+
+   DTA_ControlPanel	= DTA_Dummy+36 ; (* New for V40. (BOOL) Indicate      *)
+   					 (* whether a control panel should be *)
+   					 (* embedded within the object (in the*)
+   					 (* animation datatype, for example). *)
+   					 (* Defaults to TRUE.		      *)
+
+   DTA_Immediate	= DTA_Dummy+37 ; (* New for V40. (BOOL) Indicate      *)
+   					 (* whether the object should	      *)
+   					 (* immediately begin playing.        *)
+   					 (* Defaults to FALSE.		      *)
+
+   DTA_Repeat		= DTA_Dummy+38 ; (* New for V40. (BOOL) Indicate that *)
+   					 (* the object should repeat playing. *)
+   					 (* Defaults to FALSE.	              *)
+
+
+(* DTObject attributes *)
+   DTA_Name		= DTA_Dummy+100 ;
+   DTA_SourceType	= DTA_Dummy+101 ;
+   DTA_Handle		= DTA_Dummy+102 ;
+   DTA_DataType		= DTA_Dummy+103 ;
+   DTA_Domain		= DTA_Dummy+104 ;
+
+(* DON'T USE THE FOLLOWING FOUR TAGS.  USE THE CORRESPONDING TAGS IN INTUITION*)
+   DTA_Left		= DTA_Dummy+105 ;
+   DTA_Top		= DTA_Dummy+106 ;
+   DTA_Width		= DTA_Dummy+107 ;
+   DTA_Height		= DTA_Dummy+108 ;
+
+   DTA_ObjName		= DTA_Dummy+109 ;
+   DTA_ObjAuthor	= DTA_Dummy+110 ;
+   DTA_ObjAnnotation	= DTA_Dummy+111 ;
+   DTA_ObjCopyright	= DTA_Dummy+112 ;
+   DTA_ObjVersion	= DTA_Dummy+113 ;
+   DTA_ObjectID		= DTA_Dummy+114 ;
+   DTA_UserData		= DTA_Dummy+115 ;
+   DTA_FrameInfo	= DTA_Dummy+116 ;
+
+(* DON'T USE THE FOLLOWING FOUR TAGS.  USE THE CORRESPONDING TAGS IN INTUITION*)
+   DTA_RelRight		= DTA_Dummy+117 ;
+   DTA_RelBottom	= DTA_Dummy+118 ;
+   DTA_RelWidth		= DTA_Dummy+119 ;
+   DTA_RelHeight	= DTA_Dummy+120 ;
+
+   DTA_SelectDomain	= DTA_Dummy+121 ;
+   DTA_TotalPVert	= DTA_Dummy+122 ;
+   DTA_TotalPHoriz	= DTA_Dummy+123 ;
+   DTA_NominalVert	= DTA_Dummy+124 ;
+   DTA_NominalHoriz	= DTA_Dummy+125 ;
+
+(* Printing attributes *)
+   DTA_DestCols		= DTA_Dummy+400 ; (* (LONGINT) Destination X width   *)
+
+   DTA_DestRows		= DTA_Dummy+401 ; (* (LONGINT) Destination Y height  *)
+
+   DTA_Special		= DTA_Dummy+402 ; (* (CARDINAL) Option flags	     *)
+
+   DTA_RastPort		= DTA_Dummy+403 ; (* (RastPortPtr) RastPort to use   *)
+   					  (* when printing. (V40) 	     *)
+
+   DTA_ARexxPortName	= DTA_Dummy+404 ; (* (STRING) Pointer to base name   *)
+   					  (* for ARexx port (V40)	     *)
+
+
+(*============================================================================*)
+
+CONST
+  DTST_RAM	  = 1 ;
+  DTST_FILE	  = 2 ;
+  DTST_CLIPBOARD  = 3 ;
+  DTST_HOTLINK	  = 4 ;
+
+(*============================================================================*)
+
+(* Attached to the Gadget.SpecialInfo field of the gadget.  Don't access  *)
+(* directly,  use the Get/Set calls instead.				  *)
+
+TYPE
+  DTSpecialInfo = RECORD
+    si_Lock      : SignalSemaphore ; (* Locked while in DoAsyncLayout() *)
+    si_Flags     : LONGSET ;
+
+    si_TopVert   : LONGINT ;	(* Top row (in units)			*)
+    si_VisVert   : LONGINT ;	(* Number of visible rows (in units)	*)
+    si_TotVert   : LONGINT ;	(* Total number of rows (in units)	*)
+    si_OTopVert  : LONGINT ;	(* Previous top (in units)		*)
+    si_VertUnit  : LONGINT ;	(* Number of pixels in vertical unit	*)
+
+    si_TopHoriz  : LONGINT ;	(* Top column (in units)		*)
+    si_VisHoriz  : LONGINT ;	(* Number of visible columns (in units) *)
+    si_TotHoriz  : LONGINT ;	(* Total number of columns (in units)	*)
+    si_OTopHoriz : LONGINT ;	(* Previous top (in units)		*)
+    si_HorizUnit : LONGINT ;	(* Number of pixels in horizontal unit	*)
+  END ;
+
+
+CONST
+   DTSIF_LAYOUT		= {0} ; (* Object is in layout processing *)
+   DTSIF_NEWSIZE	= {1} ; (* Object needs to be layed out   *)
+   DTSIF_DRAGGING	= {2} ;
+   DTSIF_DRAGSELECT	= {3} ;
+   DTSIF_HIGHLIGHT	= {4} ;
+   DTSIF_PRINTING	= {5} ; (* Object is being printed	  *)
+   DTSIF_LAYOUTPROC	= {6} ; (* Object is in layout process    *)
+
+(*============================================================================*)
+
+TYPE
+  DTMethod = RECORD
+    dtm_Label   : STRING ;
+    dtm_Command : STRING ;
+    dtm_Method  : LONGINT ;
+  END ;
+
+(*============================================================================*)
+
+CONST
+  DTM_Dummy		= 0600H ;
+
+  DTM_FRAMEBOX		= 0601H ; (* Inquire what environment an object     *)
+  				  (* requires				    *)
+
+  DTM_PROCLAYOUT	= 0602H ; (* Same as GM_LAYOUT except guaranteed to *)
+  				  (* be on a process already		    *)
+
+  DTM_ASYNCLAYOUT	= 0603H ; (* Layout that is occurring on a process  *)
+
+  DTM_REMOVEDTOBJECT	= 0604H ; (* When a RemoveDTObject() is called      *)
+
+  DTM_SELECT		= 0605H ;
+  DTM_CLEARSELECTED	= 0606H ;
+
+  DTM_COPY		= 0607H ;
+  DTM_PRINT		= 0608H ;
+  DTM_ABORTPRINT	= 0609H ;
+
+  DTM_NEWMEMBER		= 0610H ;
+  DTM_DISPOSEMEMBER	= 0611H ;
+
+  DTM_GOTO		= 0630H ;
+  DTM_TRIGGER		= 0631H ;
+
+  DTM_OBTAINDRAWINFO	= 0640H ;
+  DTM_DRAW		= 0641H ;
+  DTM_RELEASEDRAWINFO	= 0642H ;
+
+  DTM_WRITE		= 0650H ;
+
+
+(* Used to ask the object about itself *)
+
+TYPE
+  FrameInfo = RECORD
+    fri_PropertyFlags	: LONGSET ; (* DisplayInfo (see Graphics.def) *)
+    fri_Resolution	: Point   ; (* DisplayInfo		      *)
+    fri_RedBits		: SHORTCARD ;
+    fri_GreenBits	: SHORTCARD ;
+    fri_BlueBits	: SHORTCARD ;
+    fri_Dimensions	: RECORD Width, Height, Depth : LONGINT END ;
+    fri_Screen		: ScreenPtr ;
+    fri_ColorMap	: ColorMapPtr ;
+    fri_Flags		: LONGSET ;
+  END ;
+
+CONST
+   FIF_SCALABLE	  = {0} ;
+   FIF_SCROLLABLE = {1} ;
+   FIF_REMAPPABLE = {2} ;
+
+(* DTM_REMOVEDTOBJECT, DTM_CLEARSELECTED, DTM_COPY, DTM_ABORTPRINT *)
+
+TYPE
+  dtGeneral = RECORD
+    MethodID  : LONGINT ;
+    dtg_GInfo : GadgetInfoPtr ;
+  END ;
+
+(* DTM_SELECT *)
+  dtSelect = RECORD
+    MethodID   : LONGINT ;
+    dts_GInfo  : GadgetInfoPtr ;
+    dts_Select : Rectangle ;
+  END ;
+
+(* DTM_FRAMEBOX *)
+  dtFrameBox = RECORD
+    MethodID		: LONGINT ;
+    dtf_Info		: GadgetInfoPtr ;
+    dtf_ContentsInfo	: FrameInfoPtr ;  (* Input  *)
+    dtf_FrameInfo	: FrameInfoPtr ;  (* Output *)
+    dtf_SizeFrameInfo	: LONGINT ;
+    dtf_FrameFlags	: LONGSET ;
+  END ;
+
+CONST
+  FRAMEF_SPECIFY = {0} ; (* Make do with the dimensions of FrameBox provided. *)
+
+(* DTM_GOTO *)
+TYPE
+  dtGoto = RECORD
+    MethodID	 : LONGINT ;
+    dtg_GInfo	 : GadgetInfoPtr ;
+    dtg_NodeName : STRING ;		(* Node to goto		 *)
+    dtg_AttrList : TagItemPtr ;		(* Additional attributes *)
+  END ;
+
+(* DTM_TRIGGER *)
+  dtTrigger = RECORD
+    MethodID	 : LONGINT ;
+    dtt_GInfo	 : GadgetInfoPtr ;
+    dtt_Function : LONGINT ;
+    dtt_Data	 : ADDRESS ;
+  END ;
+
+CONST
+  STM_PAUSE		=  1 ;
+  STM_PLAY		=  2 ;
+  STM_CONTENTS		=  3 ;
+  STM_INDEX		=  4 ;
+  STM_RETRACE		=  5 ;
+  STM_BROWSE_PREV	=  6 ;
+  STM_BROWSE_NEXT	=  7 ;
+
+  STM_NEXT_FIELD	=  8 ;
+  STM_PREV_FIELD	=  9 ;
+  STM_ACTIVATE_FIELD	= 10 ;
+
+  STM_COMMAND		= 11 ;
+
+(* New for V40 *)
+  STM_REWIND		= 12 ;
+  STM_FASTFORWARD	= 13 ;
+  STM_STOP		= 14 ;
+  STM_RESUME		= 15 ;
+  STM_LOCATE		= 16 ;
+
+(* Printer IO request *)
+TYPE
+  printerIO = RECORD
+    CASE :INTEGER OF
+    |1: ios   : IOStdReq ;
+    |2: iodrp : IODRPReq ;
+    |3: iopc  : IOPrtCmdReq ;
+    END ;
+  END ;
+
+(* DTM_PRINT *)
+
+  dtPrint = RECORD
+    MethodID	 : LONGINT ;
+    dtp_GInfo	 : GadgetInfoPtr ;	(* Gadget information		*)
+    dtp_PIO	 : printerIOPtr ;	(* Printer IO request		*)
+    dtp_AttrList : TagItemPtr ;		(* Additional attributes	*)
+  END ;
+
+(* DTM_DRAW *)
+
+  dtDraw = RECORD
+    MethodID	 : LONGINT ;
+    dtd_RPort	 : RastPortPtr ;
+    dtd_Left	 : LONGINT ;
+    dtd_Top	 : LONGINT ;
+    dtd_Width	 : LONGINT ;
+    dtd_Height	 : LONGINT ;
+    dtd_TopHoriz : LONGINT ;
+    dtd_TopVert  : LONGINT ;
+    dtd_AttrList : TagItemPtr ;		(* Additional attributes	*)
+  END ;
+
+(* DTM_WRITE *)
+
+  dtWrite = RECORD
+    MethodID	   : LONGINT ;
+    dtw_GInfo	   : GadgetInfoPtr ;	(* Gadget information		*)
+    dtw_FileHandle : FileHandlePtr ;	(* File handle to write to	*)
+    dtw_Mode	   : LONGINT ;
+    dtw_AttrList   : TagItemPtr ;	(* Additional attributes	*)
+  END ;
+
+CONST
+  DTWM_IFF = 0 ; (* Save data as IFF data	   *)
+  DTWM_RAW = 1 ; (* Save data as local data format *)
+
+(*============================================================================*)
+
+CONST
+  TEXTDTCLASS = "text.datatype" ;
+
+(*============================================================================*)
+
+(* Text attributes *)
+  TDTA_Buffer	  = DTA_Dummy + 300 ;
+  TDTA_BufferLen  = DTA_Dummy + 301 ;
+  TDTA_LineList	  = DTA_Dummy + 302 ;
+  TDTA_WordSelect = DTA_Dummy + 303 ;
+  TDTA_WordDelim  = DTA_Dummy + 304 ;
+  TDTA_WordWrap	  = DTA_Dummy + 305 ;
+(* Boolean. Should the text be word wrapped.  Defaults to false. *)
+
+(*============================================================================*)
+
+(* There is one Line structure for every line of text in our document.	*)
+TYPE
+  Line = RECORD
+    ln_Link	: MinNode ;	(* to link the lines together 		*)
+    ln_Text	: STRING ;	(* pointer to the text for this	line 	*)
+    ln_TextLen	: LONGINT ;	(* the character length of the text for *)
+    				(*  this line				*)
+    ln_XOffset	: CARDINAL ;	(* where in the	line the text starts 	*)
+    ln_YOffset	: CARDINAL ;	(* line the text is on 			*)
+    ln_Width	: CARDINAL ;	(* Width of line in pixels 		*)
+    ln_Height	: CARDINAL ;	(* Height of line in pixels 		*)
+    ln_Flags	: BITSET ;	(* info	on the line 			*)
+    ln_FgPen	: SHORTINT ;	(* foreground pen 			*)
+    ln_BgPen	: SHORTINT ;	(* background pen 			*)
+    ln_Style	: LONGINT ;	(* Font style 				*)
+    ln_Data	: ADDRESS ;	(* Link data...				*)
+  END ;
+
+(*============================================================================*)
+
+(* Line.ln_Flags *)
+
+CONST
+  LNF_LF	= {0} ; (* Line Feed					*)
+  LNF_LINK	= {1} ; (* Segment is a link				*)
+  LNF_OBJECT	= {2} ; (* ln_Data is a pointer to an DataTypes object	*)
+  LNF_SELECTED	= {3} ; (* Object is selected				*)
+
+(*============================================================================*)
+
+(* IFF types that may be text *)
+CONST
+  ID_FTXT = MAKEID("FTXT") ;
+  ID_CHRS = MAKEID("CHRS") ;
+
+
+(*============================================================================*)
+
+CONST
+   PICTUREDTCLASS = "picture.datatype" ;
+
+(*============================================================================*)
+
+(* Picture attributes *)
+CONST
+  PDTA_ModeID		= DTA_Dummy + 200 ; (* Mode ID of the picture *)
+
+  PDTA_BitMapHeader	= DTA_Dummy + 201 ;
+
+  PDTA_BitMap		= DTA_Dummy + 202 ; (* Pointer to a class-allocated   *)
+  					    (* bitmap, that will end	      *)
+					    (* up being freed by picture.class*)
+					    (* when DisposeDTObject()	      *)
+					    (* is called		      *)
+
+  PDTA_ColorRegisters	= DTA_Dummy + 203 ;
+  PDTA_CRegs		= DTA_Dummy + 204 ;
+  PDTA_GRegs		= DTA_Dummy + 205 ;
+  PDTA_ColorTable	= DTA_Dummy + 206 ;
+  PDTA_ColorTable2	= DTA_Dummy + 207 ;
+  PDTA_Allocated	= DTA_Dummy + 208 ;
+  PDTA_NumColors	= DTA_Dummy + 209 ;
+  PDTA_NumAlloc		= DTA_Dummy + 210 ;
+
+  PDTA_Remap		= DTA_Dummy + 211 ; (* Boolean : Remap picture	    *)
+  					    (* (defaults to TRUE)      	    *)
+
+  PDTA_Screen		= DTA_Dummy + 212 ; (* Screen to remap to	    *)
+
+  PDTA_FreeSourceBitMap	= DTA_Dummy + 213 ; (* Boolean : Free the source    *)
+  					    (* bitmap after remapping       *)
+
+  PDTA_Grab		= DTA_Dummy + 214 ; (* Pointer to a Point structure *)
+
+  PDTA_DestBitMap	= DTA_Dummy + 215 ; (* Pointer to the destination   *)
+  					    (* (remapped) bitmap	    *)
+
+  PDTA_ClassBitMap	= DTA_Dummy + 216 ; (* Pointer to class-allocated   *)
+  					    (* bitmap, that will end  up    *)
+  					    (* being freed by the class     *)
+  					    (* after DisposeDTObject() is   *)
+  					    (* called			    *)
+
+  PDTA_NumSparse	= DTA_Dummy + 217 ; (* (CARDINAL) Number of colors  *)
+  					    (* used for sparse remapping    *)
+
+  PDTA_SparseTable	= DTA_Dummy + 218 ; (* (STRING) Pointer to a table  *)
+  					    (* of pen numbers indicating    *)
+					    (* which colors should be used  *)
+					    (* when remapping the image.    *)
+					    (* This array must contain as   *)
+					    (* many entries as there are    *)
+					    (* colors specified with	    *)
+					    (* PDTA_NumSparse		    *)
+
+(*============================================================================*)
+
+CONST
+(* Masking techniques *)
+  mskNone		 = 0 ;
+  mskHasMask		 = 1 ;
+  mskHasTransparentColor = 2 ;
+  mskLasso		 = 3 ;
+  mskHasAlpha		 = 4 ;
+
+(* Compression techniques *)
+  cmpNone		 = 0 ;
+  cmpByteRun1		 = 1 ;
+  cmpByteRun2		 = 2 ;
+
+(* Bitmap header (BMHD) structure *)
+
+TYPE
+  BitMapHeader = RECORD
+    bmh_Width		: CARDINAL  ; (* Width in pixels	*)
+    bmh_Height		: CARDINAL  ; (* Height in pixels	*)
+    bmh_Left		: INTEGER   ; (* Left position		*)
+    bmh_Top		: INTEGER   ; (* Top position		*)
+    bmh_Depth		: SHORTCARD ; (* Number of planes	*)
+    bmh_Masking		: SHORTCARD ; (* Masking type		*)
+    bmh_Compression	: SHORTCARD ; (* Compression type	*)
+    bmh_Pad		: SHORTCARD ;
+    bmh_Transparent 	: CARDINAL  ; (* Transparent color	*)
+    bmh_XAspect		: SHORTCARD ;
+    bmh_YAspect		: SHORTCARD ;
+    bmh_PageWidth	: INTEGER   ;
+    bmh_PageHeight	: INTEGER   ;
+  END ;
+
+(*============================================================================*)
+
+(*  Color register structure *)
+TYPE
+  ColorRegister = RECORD
+    red, green, blue : SHORTCARD ;
+  END ;
+
+(*============================================================================*)
+
+(* IFF types that may be in pictures *)
+CONST
+  ID_ILBM = MAKEID("ILBM") ;
+  ID_BMHD = MAKEID("BMHD") ;
+  ID_BODY = MAKEID("BODY") ;
+  ID_CMAP = MAKEID("CMAP") ;
+  ID_CRNG = MAKEID("CRNG") ;
+  ID_GRAB = MAKEID("GRAB") ;
+  ID_SPRT = MAKEID("SPRT") ;
+  ID_DEST = MAKEID("DEST") ;
+  ID_CAMG = MAKEID("CAMG") ;
+
+(*============================================================================*)
+
+CONST
+  SOUNDDTCLASS = "sound.datatype" ;
+
+(*============================================================================*)
+
+(* Sound attributes	 *)
+CONST
+  SDTA_Dummy		= DTA_Dummy + 500 ;
+  SDTA_VoiceHeader	= SDTA_Dummy + 1 ;
+  SDTA_Sample		= SDTA_Dummy + 2 ; (* (ADDRESS) Sample data)	      *)
+
+  SDTA_SampleLength	= SDTA_Dummy + 3 ; (* (ULONG) Length of the sample    *)
+  					   (* data in bytes 		      *)
+
+  SDTA_Period		= SDTA_Dummy + 4 ; (* (CARDINAL) Period		      *)
+  SDTA_Volume		= SDTA_Dummy + 5 ; (* (CARDINAL)Volume.Range from 0-64*)
+  SDTA_Cycles		= SDTA_Dummy + 6 ;
+
+(* The following tags are new for V40 *)
+
+  SDTA_SignalTask = SDTA_Dummy + 7 ; (* (TaskPtr) Task to signal when sound is*)
+  				     (* complete or next buffer needed.       *)
+
+  SDTA_SignalBit  = SDTA_Dummy + 8 ; (* (SHORTINT) Signal bit to use on       *)
+  				     (* completion or -1 to disable 	      *)
+
+  SDTA_Continuous = SDTA_Dummy + 9 ; (* (LONGINT) Playing a continuous stream *)
+  				     (* of data.  Defaults to FALSE.	      *)
+
+(*============================================================================*)
+
+CONST
+  CMP_NONE     = 0 ;
+  CMP_FIBDELTA = 1 ;
+
+TYPE
+  VoiceHeader = RECORD
+    vh_OneShotHiSamples  : LONGINT   ;
+    vh_RepeatHiSamples   : LONGINT   ;
+    vh_SamplesPerHiCycle : LONGINT   ;
+    vh_SamplesPerSec     : CARDINAL  ;
+    vh_Octaves		 : SHORTCARD ;
+    vh_Compression	 : SHORTCARD ;
+    vh_Volume		 : LONGINT   ;
+  END ;
+
+(*============================================================================*)
+
+(* IFF types *)
+CONST
+  ID_8SVX	= MAKEID("8SVX") ;
+  ID_VHDR	= MAKEID("VHDR") ;
+
+(*============================================================================*)
+
+CONST
+  ANIMATIONDTCLASS = "animation.datatype" ;
+
+(*============================================================================*)
+
+(* Animation attributes *)
+CONST
+  ADTA_Dummy		= DTA_Dummy + 600 ;
+  ADTA_ModeID		= PDTA_ModeID ;
+  ADTA_KeyFrame		= PDTA_BitMap ; (* BitMapPtr Key frame  *)
+					(* (first frame) bitmap	*)
+
+  ADTA_ColorRegisters	= PDTA_ColorRegisters ;
+  ADTA_CRegs		= PDTA_CRegs ;
+  ADTA_GRegs		= PDTA_GRegs ;
+  ADTA_ColorTable	= PDTA_ColorTable ;
+  ADTA_ColorTable2	= PDTA_ColorTable2 ;
+  ADTA_Allocated	= PDTA_Allocated ;
+  ADTA_NumColors	= PDTA_NumColors ;
+  ADTA_NumAlloc		= PDTA_NumAlloc ;
+
+  ADTA_Remap		= PDTA_Remap ; (* (BOOL): Remap animation *)
+  				       (*  (defaults to TRUE)	  *)
+
+  ADTA_Screen		= PDTA_Screen ; (* (ScreenPtr) Screen to remap to    *)
+
+  ADTA_NumSparse	= PDTA_NumSparse ; (* (CARDINAL) Number of colors used*)
+  					   (* for sparse remapping	      *)
+
+ (* Pointer to a table of pen numbers indicating
+  * which colors should be used when remapping the image.
+  * This array must contain as many entries as there
+  * are colors specified with ADTA_NumSparse
+  *)
+
+  ADTA_SparseTable	= PDTA_SparseTable ;
+
+  ADTA_Width		= ADTA_Dummy + 1 ;
+  ADTA_Height		= ADTA_Dummy + 2 ;
+  ADTA_Depth		= ADTA_Dummy + 3 ;
+  ADTA_Frames		= ADTA_Dummy + 4 ; (* (LONGINT) Number of frames  *)
+  					   (* in the animation		  *)
+
+  ADTA_Frame		= ADTA_Dummy + 5 ; (* (LONGINT) Current frame	  *)
+  ADTA_FramesPerSecond	= ADTA_Dummy + 6 ; (* (LONGINT) Frames per second *)
+
+  ADTA_FrameIncrement	= ADTA_Dummy + 7 ; (* (LONG) Amount to change frame *)
+  					   (*  by when fast forwarding or   *)
+					   (* rewinding.  Defaults to 10.   *)
+					   (* Sound attributes		    *)
+
+  ADTA_Sample		= SDTA_Sample ;
+  ADTA_SampleLength	= SDTA_SampleLength ;
+  ADTA_Period		= SDTA_Period ;
+  ADTA_Volume		= SDTA_Volume ;
+  ADTA_Cycles		= SDTA_Cycles ;
+
+(*============================================================================*)
+
+CONST
+  ID_ANIM = MAKEID("ANIM") ;
+  ID_ANHD = MAKEID("ANHD") ;
+  ID_DLTA = MAKEID("DLTA") ;
+
+(*============================================================================*)
+
+(*  Required ANHD structure describes an ANIM frame *)
+TYPE
+  AnimHeader = RECORD
+    ah_Operation : SHORTCARD ;	(*  The compression method:
+				     0	set directly (normal ILBM BODY),
+				     1	XOR ILBM mode,
+				     2	Long Delta mode,
+				     3	Short Delta mode,
+				     4	Generalized short/long Delta mode,
+				     5	Byte Vertical Delta mode
+				     6	Stereo op 5 (third party)
+				    74	(ascii 'J') reserved for Eric Graham's
+					compression technique (details to be
+					released later).
+				*)
+
+    ah_Mask	: SHORTCARD ;	(* (XOR mode only - plane mask where each
+				   bit is set =1 if there is data and =0
+				   if not.)
+				*)
+
+    ah_Width	: CARDINAL ;	(* (XOR mode only - width and height of the *)
+    ah_Height	: CARDINAL ;	(* area represented by the BODY to eliminate *)
+				(* unnecessary un-changed data) *)
+
+
+    ah_Left	: INTEGER ;	(* (XOR mode only - position of rectangular *)
+    ah_Top	: INTEGER ;	(* area representd by the BODY) *)
+
+
+    ah_AbsTime	: LONGINT ;	(* Timing for a frame relative to the time
+				   the first frame was displayed, in
+				   jiffies (1/60 sec) *)
+
+    ah_RelTime  : LONGINT ;	(* Timing for frame relative to time
+				   previous frame was displayed - in
+				   jiffies (1/60 sec) *)
+
+    ah_Interleave : SHORTCARD ;	(* Indicates how may frames back this data is to
+				   modify.  0 defaults to indicate two frames
+				   back (for double buffering). n indicates n
+				   frames back.The main intent here is to allow
+				   values of 1 for special applications where
+				   frame data would modify the immediately
+				   previous frame.
+				*)
+
+    ah_Pad0	: SHORTCARD ;	(* Pad byte, not used at present. *)
+
+    ah_Flags	: LONGSET ;	(* 32 option bits used by options=4 and 5.
+				   At present only 6 are identified, but the
+				   rest are set =0 so they can be used to
+				   implement future ideas.  These are defined
+				   for option 4 only at this point.  It is
+				   recommended that all bits be set =0 for
+				   option 5 and that any bit settings
+				   used in the future (such as for XOR mode)
+				   be compatible with the option 4
+				   bit settings.   Player code should check
+				   undefined bits in options 4 and 5 to assure
+				   they are zero.
+
+				   The six bits for current use are:
+
+				    bit #  set = 0		set =1
+				    ===========================================
+				    0	   short data	      long data
+				    1	   set		      XOR
+				    2	   separate info      one info list
+					   for each plane     for all planes
+				    3	   not RLC	      RLC (run length
+				    			           coded)
+				    4	   horizontal	      vertical
+				    5	  short info offsets  long info offsets
+				*)
+
+     ah_Pad	: ARRAY [0..15] OF SHORTCARD ;
+    				(* This is a pad for future use for future    *)
+				(* compression modes.			      *)
+  END ;
+
+(*============================================================================*)
+
+CONST
+  ADTM_Dummy	    = 0700H ;
+  ADTM_LOADFRAME    = 0701H ; (* Used to load a frame of the animation   *)
+  ADTM_UNLOADFRAME  = 0702H ; (* Used to unload a frame of the animation *)
+  ADTM_START	    = 0703H ; (* Used to start the animation		 *)
+  ADTM_PAUSE	    = 0704H ; (* Used to pause the animation		 *)
+			      (* (don't reset the timer)		 *)
+
+  ADTM_STOP	    = 0705H ; (* Used to stop the animation		 *)
+  ADTM_LOCATE	    = 0706H ; (* Used to locate a frame in the animation *)
+  			      (* (as set by a slider...)		 *)
+
+(*============================================================================*)
+
+(* ADTM_LOADFRAME, ADTM_UNLOADFRAME *)
+TYPE
+  adtFrame = RECORD
+    MethodID	     : LONGINT ;
+    alf_TimeStamp    : LONGINT ;	(* Timestamp of frame to load   *)
+
+    (* The following fields are filled in by the ADTM_LOADFRAME method, *)
+    (* and are read-only for any other methods.				*)
+
+    alf_Frame	     : LONGINT ;	(* Frame number			*)
+    alf_Duration     : LONGINT ;	(* Duration of frame		*)
+
+    alf_BitMap	     : BitMapPtr ;	(* Loaded BitMap		*)
+    alf_CMap	     : ColorMapPtr ;	(* Colormap, if changed 	*)
+
+    alf_Sample	     : ADDRESS ;	(* Sound data			*)
+    alf_SampleLength : LONGINT ;
+    alf_Period	     : LONGINT ;
+
+    alf_UserData     : ADDRESS ; (* Used by load frame for extra data *)
+  END ;
+
+(* ADTM_START, ADTM_PAUSE, ADTM_STOP, ADTM_LOCATE *)
+
+  adtStart = RECORD
+    MethodID  : LONGINT ;
+    asa_Frame : LONGINT ; (* Frame # to start at *)
+  END ;
+
+(*============================================================================*)
+
+VAR
+  DataTypesBase : LibraryPtr ;
+
+PROCEDURE ObtainDataTypeA( type   : LONGINT ;
+			   handle : ADDRESS ;
+			   attrs  : TagItemPtr ) : DataTypePtr ;
+
+PROCEDURE ObtainDataType( type   : LONGINT ;
+			  handle : ADDRESS ;
+			  Tag1   : Tag ; .. ) : DataTypePtr ;
+
+PROCEDURE ReleaseDataType( dt : DataTypePtr ) ;
+
+PROCEDURE NewDTObjectA( name : STRING ; attrs : TagItemPtr ) : ObjectPtr ;
+PROCEDURE NewDTObject ( name : STRING ; Tag1 : Tag ; .. ) : ObjectPtr ;
+
+PROCEDURE DisposeDTObject( o : ObjectPtr ) ;
+
+PROCEDURE SetDTAttrsA( o     : ObjectPtr ;
+		       win   : WindowPtr ;
+		       req   : RequesterPtr ;
+		       attrs : TagItemPtr ) : LONGINT ;
+
+PROCEDURE SetDTAttrs( o    : ObjectPtr ;
+		      win  : WindowPtr ;
+		      req  : RequesterPtr ;
+		      Tag1 : Tag ; .. ) : LONGINT ;
+
+PROCEDURE GetDTAttrsA( o : ObjectPtr ; attrs : TagItemPtr ) : LONGINT ;
+PROCEDURE GetDTAttrs ( o : ObjectPtr ; Tag1 : Tag ; .. ) : LONGINT ;
+
+PROCEDURE AddDTObject( win : WindowPtr ;
+		       req : RequesterPtr ;
+		       o   : ObjectPtr ;
+		       pos : LONGINT ) : LONGINT ;
+
+PROCEDURE RefreshDTObjectA( o     : ObjectPtr ;
+			    win   : WindowPtr ;
+			    req   : RequesterPtr ;
+			    attrs : TagItemPtr ) ;
+
+PROCEDURE RefreshDTObject( o    : ObjectPtr ;
+			   win  : WindowPtr ;
+			   req  : RequesterPtr ;
+			   Tag1 : Tag ; .. ) ;
+
+PROCEDURE DoAsyncLayout( o : ObjectPtr ; gpl : gpLayoutPtr ) : LONGINT ;
+
+PROCEDURE DoDTMethodA(  o   : ObjectPtr ;
+		        win : WindowPtr ;
+			req : RequesterPtr ;
+			msg : Msg ) : LONGINT ;
+
+PROCEDURE DoDTMethod( o    : ObjectPtr ;
+		      win  : WindowPtr ;
+		      req  : RequesterPtr ;
+		      data : LONGINT ; .. ) : LONGINT ;
+
+PROCEDURE RemoveDTObject( win : WindowPtr ; o : ObjectPtr ) : LONGINT ;
+
+PROCEDURE GetDTMethods( object : ObjectPtr ) : ADDRESS ;
+
+PROCEDURE GetDTTriggerMethods( object : ObjectPtr ) : DTMethodPtr ;
+
+PROCEDURE PrintDTObjectA( o   : ObjectPtr ;
+			  w   : WindowPtr ;
+			  r   : RequesterPtr ;
+			  msg : dtPrintPtr ) : LONGINT ;
+
+PROCEDURE PrintDTObject( o    : ObjectPtr ;
+			 w    : WindowPtr ;
+			 r    : RequesterPtr ;
+			 data : LONGINT ; .. ) : LONGINT ;
+
+PROCEDURE GetDTString( id : LONGINT ) : STRING ;
+
+END DataTypes.

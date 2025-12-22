@@ -1,0 +1,1647 @@
+*************************************************
+*						*
+*		(C)opyright 1991-92		*
+*						*
+*		 by Tomi Blinnikka		*
+*						*
+*	Don't try to understand the code	*
+*						*
+* Version 0.01	30/12/1991			*
+*	 -0.99ö					*
+*						*
+* Version 1.00	01/01/1992			*
+*						*
+* BUGS:	Wrong year, debugging stuff left in	*
+*	in prog.				*
+*						*
+* Version 1.01	01/01/1992			*
+*						*
+* BUGS:	GetLength made an enforcer hit		*
+*	with illegal pointer. Fixed.		*
+*	Load bug (atleast partly) fixed.	*
+*						*
+* Version 1.02	13/01/1992			*
+*						*
+* BUGS:	Didn't work with all modems		*
+*						*
+* Version 1.03	15/03/1992			*
+*						*
+* BUGS:	All version up to here didn't get RING	*
+*	properly.				*
+*						*
+* Version 1.04	31/05/1992			*
+*						*
+* BUGS:	Version string not according to 	*
+*	style guide. Might have had debugging	*
+*	stuff left in again. Couldn't have a	*
+*	comment after name and options.		*
+*						*
+* Version 1.05	07/06/1992			*
+*						*
+* BUGS:						*
+*						*
+* Version 1.06	09/06/1992			*
+*						*
+* Added ",13," back. Added RingCounter.		*
+*						*
+* BUGS:	Serial unit was comming out incorrect	*
+*	if it was other than 0.			*
+*						*
+* Version 1.07	09/08/1992			*
+*						*
+* Version 1.08	30/12/1992			*
+*						*
+* Changed parser.				*
+*						*
+* Updated getting IOReq and message port to	*
+* KS 2.04 exec routines (from amiga.lib)	*
+*						*
+* BUGS:						*
+*						*
+* Version 1.09	31/12/1992 (rel. 1.1.93)	*
+*						*
+* Added init string.				*
+*						*
+* BUGS:						*
+*						*
+* Version 1.10	10/01/1993			*
+*						*
+* Cleaned _SysBase&_DOSBase out, fixed 		*
+* NoSerialText1.				*
+*						*
+* BUGS:	Had wrong lib calls in ClearMsgs	*
+*						*
+* Version 1.11	07/02/1993			*
+*						*
+* BUGS:						*
+*						*
+* Version 1.12	20/07/1993			*
+*						*
+* BUGS:						*
+*						*
+* Made a little bit safer to use.		*
+* Fixed some GadTools stuff.			*
+*						*
+*************************************************
+
+	INCLUDE	"JMPLibs.i"
+	INCLUDE	"exec/types.i"
+	INCLUDE	"exec/nodes.i"
+	INCLUDE	"exec/lists.i"
+	INCLUDE	"exec/ports.i"
+	INCLUDE	"exec/memory.i"
+	INCLUDE	"exec/devices.i"
+	INCLUDE	"exec/io.i"
+	INCLUDE	"exec/tasks.i"
+	INCLUDE	"libraries/dosextens.i"
+	INCLUDE	"libraries/dos.i"
+	INCLUDE	"devices/serial.i"
+	INCLUDE	"libraries/gadtools.i"
+	INCLUDE "workbench/startup.i"
+
+	INCLUDE	"XREF:2.0.xref"
+	INCLUDE	"XREF:intuition.xref"
+	INCLUDE	"XREF:exec.xref"
+	INCLUDE	"XREF:dos.xref"
+	INCLUDE	"XREF:icon.xref"
+
+RingTop:	EQU	2
+OptionTop:	EQU	56
+
+TRUE:		EQU	1
+
+PROGVERSION:	macro
+		dc.b	"1.12 (20.07.93)"
+		endm
+
+		section	RD,CODE
+
+		push	d2-d7/a2-a6
+
+		sub.l	a1,a1			;Find our task
+		lib	Exec,FindTask
+		move.l	d0,OurTask
+		move.l	d0,a4
+		move.l	pr_CLI(a4),d0
+		bne	OpenDos
+
+		lea.l	pr_MsgPort(a4),a0
+		lib	Exec,WaitPort
+		lea.l	pr_MsgPort(a4),a0
+		lib	Exec,GetMsg
+		move.l	d0,WBMsg
+
+OpenDos:	openlib	Dos,NoDos		;Keep at beginning
+		openlib	Utility,NoUtility
+
+		tst.l	WBMsg
+		beq	CLIStart
+
+		lea.l	NILName,a0
+		move.l	a0,d1
+		move.l	#MODE_NEWFILE,d2
+		lib	Dos,Open
+		move.l	d0,NILFile
+		beq	ShutDown
+		move.l	NILFile,_stdout
+		beq	NoNIL
+
+		openlib	Icon,NoIcon
+
+		move.l	WBMsg,a0
+		move.l	sm_ArgList(a0),a1
+		move.l	wa_Lock(a1),d1
+		lib	Dos,CurrentDir
+		move.l	d0,OldLock
+
+		move.l	WBMsg,a0
+		move.l	sm_ArgList(a0),a1
+		move.l	wa_Name(a1),a0
+		lib	Icon,GetDiskObject
+		move.l	d0,DiskObject
+		beq	MainStart
+
+		move.l	DiskObject,a4
+		move.l	$36(a4),a0		;do_ToolTypes
+		lea.l	DEVICEText1,a1
+		lib	Icon,FindToolType
+		tst.l	d0
+		beq	DoToolType1
+		move.l	d0,SerName
+
+DoToolType1:	move.l	$36(a4),a0		;do_ToolTypes
+		lea.l	UNITText1,a1
+		lib	Icon,FindToolType
+		tst.l	d0
+		beq	DoToolType2
+		move.l	d0,a0
+		bsr	ConvASCII
+		tst.l	d0
+		beq	DoToolType2
+		move.l	d0,SerUnit
+
+DoToolType2:	move.l	$36(a4),a0		;do_ToolTypes
+		lea.l	SPEEDText1,a1
+		lib	Icon,FindToolType
+		tst.l	d0
+		beq	DoToolType3
+		move.l	d0,a0
+		bsr	ConvASCII
+		tst.l	d0
+		beq	DoToolType3
+		move.l	d0,Speed
+
+DoToolType3:	move.l	$36(a4),a0		;do_ToolTypes
+		lea.l	ICONIFYText1,a1
+		lib	Icon,FindToolType
+		tst.l	d0
+		beq	DoToolType4
+		move.l	d0,a0
+		lea.l	YESText1,a1
+		lib	Icon,MatchToolValue
+		tst.l	d0
+		beq	DoToolType4
+		move.l	#1,Iconify
+
+DoToolType4:
+		bra	MainStart
+
+CLIStart:	lib	Dos,Output
+		move.l	d0,_stdout
+
+		lea.l	CLTemplate1,a0
+		move.l	a0,d1
+		lea.l	CLArray1,a0
+		move.l	a0,d2
+		clr.l	d3
+		lib	Dos,ReadArgs
+		move.l	d0,RDArgs1
+		beq	NoRDArgs
+
+		tst.l	UnitPointer
+		beq	DoParsing1
+		move.l	UnitPointer,a0
+		move.l	(a0),SerUnit
+DoParsing1:	tst.l	SpeedPointer
+		beq	DoParsing2
+		move.l	SpeedPointer,a0
+		move.l	(a0),Speed
+DoParsing2:
+
+MainStart:	openlib	Intuition,NoInt
+		openlib	GadTools,NoGadTools
+
+;Create reply port for serial.device (or modem0.device etc.)
+
+		lib	Exec,CreateMsgPort
+		move.l	d0,SRPort
+		beq	NoMsgPort
+
+;Create IOReq for serial.device (or for other device, but size is EXTSER)
+
+		move.l	#IOEXTSER_SIZE,d0
+		move.l	SRPort,a0
+		clr.b	LN_TYPE(a0)		;Make sure CheckIO doesn't hang
+		lib	Exec,CreateIORequest
+		move.l	d0,IORequest
+		beq	NoIOReq
+
+;open serial.device
+
+		move.l	SerName,a0
+		move.l	SerUnit,d0
+		move.l	IORequest,a1
+		move.b	#SERF_SHARED,IO_SERFLAGS(a1)
+		clr.l	d1				;no flags
+		lib	Exec,OpenDevice
+		tst.l	d0
+		bne	NoSerial
+		move.w	#$1,SerOpen		;just to tell if open
+
+		tst.l	Speed
+		beq	SkipSetParams
+		move.l	IORequest,a1
+		clr.l	IO_LENGTH(a1)
+		clr.l	IO_DATA(a1)
+		move.w	#SDCMD_SETPARAMS,IO_COMMAND(a1)
+		move.l	Speed,IO_BAUD(a1)
+		lib	Exec,DoIO
+		tst.l	d0
+		beq	SkipSetParams
+		bsr	NoSetSer
+
+SkipSetParams:
+
+		bsr	LockPubScr
+		tst.l	PubScreen
+		beq	NoPubScreen
+
+;Get visualinfo
+
+		move.l	PubScreen,a0
+		sub.l	a1,a1
+		lib	GadTools,GetVisualInfoA
+		move.l	d0,vi
+
+;Make gadget stuff
+
+		lea.l	glist,a0
+		lib	GadTools,CreateContext
+		move.l	d0,ContextGad
+		beq	NoContextGad
+
+		move.l	glist,a0
+		lea.l	NGOnOffGad1,a1
+		move.l	#CHECKBOX_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,OnOffGad1
+		move.l	d0,a0
+		or.w	#RELVERIFY,gg_Activation(a0)
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGSTFGad1,a1
+		move.l	#CHECKBOX_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,STFGad1
+		move.l	d0,a0
+		or.w	#RELVERIFY,gg_Activation(a0)
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGDBGad1,a1
+		move.l	#CHECKBOX_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,DBGad1
+		move.l	d0,a0
+		or.w	#RELVERIFY,gg_Activation(a0)
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGSaveGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,SaveGad1
+		or.w	#RELVERIFY,gg_Activation(a0)
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGQuitGad,a1
+		move.l	#BUTTON_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,a0
+		move.l	a0,QuitGad1
+		or.w	#GRELRIGHT,gg_Flags(a0)
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGCmdGad1,a1
+		move.l	#CHECKBOX_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	GadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,CmdGad1
+		move.l	d0,a0
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGStartGad1,a1
+		move.l	#STRING_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	StartGadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,StartStrGad1
+		move.l	d0,a0
+		move.l	$22(a0),a1
+		move.l	(a1),StartStrGadBuf1
+		or.w	#GADGIMMEDIATE!RELVERIFY,gg_Activation(a0)
+		add.w	d5,gg_TopEdge(a0)
+
+		lea.l	NGCmdStrGad1,a1
+		move.l	#STRING_KIND,d0
+		move.l	vi,gng_VisualInfo(a1)
+		lea.l	CmdStrGadTagList,a2
+		lib	GadTools,CreateGadgetA
+
+		move.l	d0,CmdStrGad1
+		move.l	d0,a0
+		move.l	$22(a0),a1
+		move.l	(a1),CmdStrGadBuf1
+		or.w	#GADGIMMEDIATE!RELVERIFY,gg_Activation(a0)
+		add.w	d5,gg_TopEdge(a0)
+
+		move.b	#1,GadMagic		;Make worked OK
+
+;New style menu stuff
+
+		lea.l	MNProjectMenu1,a0
+		lea.l	MenuTagList,a1
+		lib	GadTools,CreateMenusA
+		move.l	d0,mlist
+		beq	NoMenus
+
+		move.l	mlist,a0
+		move.l	vi,a1
+		lea.l	MenuTagList,a2
+		lib	GadTools,LayoutMenusA
+		move.b	#1,MenuMagic
+
+;Read preferences
+
+		bsr	Load
+
+;Set up first read request
+
+		bsr	ResetSer
+		bsr	Reader
+
+;Open the window
+
+		bsr	OpenWin1
+		tst.l	Window1
+		beq	NoWindow1
+
+;Unlock PubScreen
+
+		sub.l	a0,a0
+		move.l	PubScreen,a1
+		lib	Intuition,UnlockPubScreen
+		clr.l	PubScreen
+
+Window1IDCMP:	move.l	Window1,a0
+		bsr	CheckIDCMP
+		tst.l	d0
+		beq	Ring
+		cmp.l	#CLOSEWINDOW,d2
+		beq	ShutDown
+		cmp.l	#GADGETUP,d2
+		beq	DoGads
+		cmp.l	#MENUPICK,d2
+		beq	Win1Menus
+		cmp.l	#VANILLAKEY,d2
+		beq	VanillaKeys
+		bra	Window1IDCMP
+
+Win1Menus:	bsr	MenuNull
+		cmp.w	#$00,d6
+		beq	Win1Menus1
+		cmp.w	#$01,d6
+		beq	Win1Menus2
+		bra	Window1IDCMP
+Win1Menus1:	cmp.w	#$00,d5
+		beq	DoLoad
+		cmp.w	#$01,d5
+		beq	Save
+		cmp.w	#$02,d5
+		beq	About
+		cmp.w	#$04,d5
+		beq	ShutDown
+		bra	Window1IDCMP
+
+Win1Menus2:	cmp.w	#$00,d5
+		beq	DoResetCount
+		bra	Window1IDCMP
+
+DoResetCount:	clr.w	RingCount
+		bsr	RefreshCount
+		bra	Window1IDCMP
+
+DoLoad:		bsr	RemGads
+		bsr	Load
+		bsr	AddGads
+		move.l	#5,d1
+		lib	Dos,Delay
+		bra	ActivateGads2
+
+VanillaKeys:	cmp.w	#$1b,d3
+		beq	ShutDown
+		cmp.w	#'s',d3			;Lower case
+		beq	Save
+		cmp.w	#'q',d3
+		beq	ShutDown
+		cmp.w	#'c',d3
+		beq	ActivateGads1
+		cmp.w	#'i',d3
+		beq	ActivateGads2
+		cmp.w	#'S',d3			;Upper case
+		beq	Save
+		cmp.w	#'Q',d3
+		beq	ShutDown
+		cmp.w	#'C',d3
+		beq	ActivateGads1
+		cmp.w	#'I',d3
+		beq	ActivateGads2
+		bra	Window1IDCMP
+
+DoGads:		cmp.w	#1,$26(a5)
+		beq	ActivateGads2
+		cmp.w	#2,$26(a5)
+		beq	ActivateGads1
+		cmp.w	#10,$26(a5)
+		beq	Save
+		cmp.w	#20,$26(a5)
+		beq	ShutDown
+		bra	Window1IDCMP
+
+ActivateGads1:	move.l	CmdStrGad1,a0
+		move.l	Window1,a1
+		sub.l	a2,a2
+		lib	Intuition,ActivateGadget
+		bra	Window1IDCMP
+ActivateGads2:	move.l	StartStrGad1,a0
+		move.l	Window1,a1
+		sub.l	a2,a2
+		lib	Intuition,ActivateGadget
+		bra	Window1IDCMP
+
+ActGad:		move.l	StartStrGad1,a0
+		move.l	Window1,a1
+		sub.l	a2,a2
+		lib	Intuition,ActivateGadget
+		rts
+
+Load:		lea.l	PrefsName,a0
+		move.l	a0,d1
+		move.l	#MODE_OLDFILE,d2
+		lib	Dos,Open
+		move.l	d0,PrefsFile
+		beq	Load_ERR1
+
+		move.l	PrefsFile,d1
+		lea.l	Prefs,a0
+		move.l	a0,d2
+		move.l	#2,d3
+		lib	Dos,Read
+		cmp.l	#2,d0
+		bne	Load_ERR2
+
+		cmp.w	#'RD',Prefs
+		bne	Load_ERR3
+
+		move.l	PrefsFile,d1
+		add.l	#2,d2
+		move.l	#PrefsSize-2,d3
+		lib	Dos,Read
+		cmp.l	#PrefsSize-2,d0
+		bne	Load_ERR2
+
+Load_OUT0.1:	move.l	PrefsFile,d1
+		lib	Dos,Close
+		clr.l	PrefsFile
+
+Load_OUT:	bsr	SetModes
+		rts
+
+Load_ERR1:	lea.l	File_ERRTxt1,a1
+		bsr	DoAutoRequest
+		bra	Load_OUT
+
+Load_ERR2:	lea.l	File_ERRTxt2,a1
+		bsr	DoAutoRequest
+		bra	Load_OUT0.1
+
+Load_ERR3:	lea.l	File_ERRTxt3,a1
+		bsr	DoAutoRequest
+		bra	Load_OUT0.1
+
+Save:		bsr	CheckModes
+
+		lea.l	PrefsName,a0
+		move.l	a0,d1
+		move.l	#MODE_NEWFILE,d2
+		lib	Dos,Open
+		move.l	d0,PrefsFile
+		beq	Save_ERR1
+
+		move.w	#'RD',Prefs
+
+		move.l	PrefsFile,d1
+		lea.l	Prefs,a0
+		move.l	a0,d2
+		move.l	#PrefsSize,d3
+		lib	Dos,Write
+		cmp.l	#PrefsSize,d0
+		bne	Save_ERR2
+
+Save_OUT:	move.l	PrefsFile,d1
+		lib	Dos,Close
+		clr.l	PrefsFile
+Save_OUT1:	bra	ActivateGads2
+
+Save_ERR1:	lea.l	File_ERRTxt1,a1
+		bsr	DoAutoRequest
+		bra	Save_OUT1
+
+Save_ERR2:	lea.l	File_ERRTxt2,a1
+		bsr	DoAutoRequest
+		bra	Save_OUT
+
+About:		bsr	SleepPointer
+		bsr	MenusOff
+		bsr	RemGads
+
+		move.l	Window1,a0
+		lea.l	AboutTxt1,a1
+		move.l	#$00,a2		;positive text
+		lea.l	OKTxt,a3	;a bit the wrong way around but...
+		move.l	#$00,d0
+		move.l	#$00,d1
+		move.l	#320,d2
+		move.l	#$50,d3
+		lib	Intuition,AutoRequest
+		bsr	AddGads
+		bsr	MenusOn
+		bsr	NormalPointer
+		bra	Window1IDCMP
+
+Break:		lea.l	BreakText1,a0
+		bsr	Printer
+		move.l	#CLOSEWINDOW,d2		;fake closewindow...
+		move.l	#-1,d0
+		rts
+
+TestRing:	tst.w	BufCount
+		bne	TestRing2
+		cmp.b	#'R',Buffer1
+		bne	TestRing4
+TestRing2:	lea.l	Buffer2,a0
+		add.w	BufCount,a0
+		move.b	Buffer1,(a0)
+		add.w	#1,BufCount
+		cmp.w	#4,BufCount
+		bne	TestRing4
+		clr.w	BufCount
+		cmp.l	#'RING',Buffer2
+		bne	TestRing4
+TestRing3:	bsr	ClearSer
+		bsr	Reader
+		clr.l	d0			;indicate ring
+		rts
+TestRing4:	bsr	ClearSer		;Abort possible prev. read
+		bsr	Reader			;Set up new read
+		move.l	#-1,d0
+		rts
+
+TestSOL:	cmp.b	#13,(a0)
+		bne	TestSOL1
+		add.l	#1,a0
+TestSOL1:	cmp.b	#10,(a0)
+		bne	TestSOL2
+		add.l	#1,a0
+TestSOL2:	rts
+
+Ring:		add.w	#1,RingCount
+		bsr	CheckModes
+		tst.b	PrefsOnOff
+		beq	Window1IDCMP
+		bsr	STF
+		bsr	DB
+		bsr	Cmd
+		bsr	RefreshCount
+		bra	Window1IDCMP
+
+SetModes:	move.l	OnOffGad1,a0
+		and.w	#~SELECTED,gg_Flags(a0)
+		move.l	STFGad1,a0
+		and.w	#~SELECTED,gg_Flags(a0)
+		move.l	DBGad1,a0
+		and.w	#~SELECTED,gg_Flags(a0)
+		move.l	CmdGad1,a0
+		and.w	#~SELECTED,gg_Flags(a0)
+
+		move.l	OnOffGad1,a0
+		tst.b	PrefsOnOff
+		beq	SetModes1
+		or.w	#SELECTED,gg_Flags(a0)
+SetModes1:	move.l	STFGad1,a0
+		tst.b	PrefsSTF
+		beq	SetModes2
+		or.w	#SELECTED,gg_Flags(a0)
+SetModes2:	move.l	DBGad1,a0
+		tst.b	PrefsDB
+		beq	SetModes3
+		or.w	#SELECTED,gg_Flags(a0)
+SetModes3:	move.l	CmdGad1,a0
+		tst.b	PrefsCmd
+		beq	SetModes4
+		or.w	#SELECTED,gg_Flags(a0)
+SetModes4:	lea.l	CmdBuffer,a0
+		move.l	CmdStrGadBuf1,a1
+		move.l	#32,d0
+		lib	Exec,CopyMem
+
+		lea.l	StartBuffer,a0		;DEBUG!!!
+		move.l	StartStrGadBuf1,a1
+		move.l	#32,d0
+		lib	Exec,CopyMem
+
+		tst.l	Window1
+		beq	SetModes5
+		move.l	Window1,a0
+		move.w	Alt1XPos,d0
+		move.w	Alt1YPos,d1
+		move.w	wd_Width(a0),d2
+		move.w	wd_Height(a0),d3
+		lib	Intuition,ChangeWindowBox
+		rts
+SetModes5:	move.l	Alt1XPos,NewWindow1
+		rts
+
+CheckModes:	move.l	OnOffGad1,a0
+		move.w	gg_Flags(a0),d0
+		clr.b	PrefsOnOff
+		and.w	#SELECTED,d0
+		cmp.w	#SELECTED,d0
+		bne	CheckModes1
+		move.b	#$01,PrefsOnOff
+
+CheckModes1:	move.l	STFGad1,a0
+		move.w	gg_Flags(a0),d0
+		clr.b	PrefsSTF
+		and.w	#SELECTED,d0
+		cmp.w	#SELECTED,d0
+		bne	CheckModes2
+		move.b	#$01,PrefsSTF
+
+CheckModes2:	move.l	DBGad1,a0
+		move.w	gg_Flags(a0),d0
+		clr.b	PrefsDB
+		and.w	#SELECTED,d0
+		cmp.w	#SELECTED,d0
+		bne	CheckModes3
+		move.b	#$01,PrefsDB
+
+CheckModes3:	move.l	CmdGad1,a0
+		move.w	gg_Flags(a0),d0
+		clr.b	PrefsCmd
+		and.w	#SELECTED,d0
+		cmp.w	#SELECTED,d0
+		bne	CheckModes4
+		move.b	#$01,PrefsCmd
+CheckModes4:	move.l	CmdStrGadBuf1,a0
+		lea.l	CmdBuffer,a1
+		move.l	#32,d0
+		lib	Exec,CopyMem
+
+		move.l	StartStrGadBuf1,a0
+		lea.l	StartBuffer,a1
+		move.l	#32,d0
+		lib	Exec,CopyMem
+
+		move.l	Window1,a0
+		move.l	wd_LeftEdge(a0),Alt1XY
+		rts
+
+STF:		tst.b	PrefsSTF
+		beq	STF_OUT
+		move.l	Window1,a0
+		move.l	wd_Flags(a0),d0
+		and.l	#ZOOMED,d0
+		tst.l	Iconify
+		beq	STF1
+		cmp.l	#ZOOMED,d0
+		bne	STF2
+		bra	STF3
+STF1:		cmp.l	#ZOOMED,d0
+		bne	STF3
+STF2:		move.l	Window1,a0
+		lib	Intuition,ZipWindow
+STF3:		move.l	Window1,a0
+		move.l	$2e(a0),a0
+		lib	Intuition,ScreenToFront
+		move.l	Window1,a0
+		lib	Intuition,WindowToFront
+		move.l	Window1,a0
+		lib	Intuition,ActivateWindow
+STF_OUT:	rts
+
+DB:		tst.b	PrefsDB
+		beq	DB_OUT
+		sub.l	a0,a0
+		lib	Intuition,DisplayBeep
+DB_OUT:		rts
+
+Cmd:		tst.b	PrefsCmd
+		beq	Cmd_OUT
+		move.l	CmdStrGadBuf1,a0
+		tst.b	(a0)
+		beq	Cmd_OUT
+		move.l	a0,d1
+		clr.l	d2
+		clr.l	d3
+		lib	Dos,Execute
+Cmd_OUT:	rts
+
+RemGads:	move.l	Window1,a0
+		lea.l	glist,a1
+		sub.l	a2,a2
+		move.l	#-1,d0
+		lib	Intuition,RemoveGList
+		rts
+
+AddGads:	move.l	Window1,a0
+		lea.l	glist,a1
+		sub.l	a2,a2
+		move.l	#-1,d0
+		move.l	#-1,d1
+		lib	Intuition,AddGList
+
+		lea.l	glist,a0
+		move.l	Window1,a1
+		sub.l	a2,a2
+		move.l	#-1,d0
+		lib	Intuition,RefreshGList
+
+		move.l	Window1,a0
+		sub.l	a1,a1
+		lib	GadTools,GT_RefreshWindow
+		rts
+
+RefreshCount:	lea.l	fstrl,a0		;HEX->ASCII
+		lea.l	RingCount,a1		;Number2Print
+		lea.l	PutChProc,a2
+		lea.l	CountText2,a3		;Destination
+		lib	Exec,RawDoFmt
+
+		move.l	Window1,a0
+		lea.l	CountText1,a1
+		lea.l	RDName1,a2
+		lib	Intuition,SetWindowTitles
+		rts
+
+PutChProc:	tst.b	d0
+		beq	PutChProc_OUT
+		move.b	d0,(a3)+
+PutChProc_OUT:	rts
+
+ClearSer:	clr.w	Buffer1
+		move.l	IORequest,a1
+		lib	Exec,CheckIO
+		tst.l	d0
+		bne	ClearSer_OUT
+		move.l	IORequest,a1
+		lib	Exec,WaitIO
+		move.l	IORequest,a1
+		ABORTIO
+ClearSer_OUT:	rts
+
+Reader:		move.l	IORequest,a1
+		move.w	#CMD_READ,IO_COMMAND(a1)
+		move.l	#1,IO_LENGTH(a1)
+		lea.l	Buffer1,a0
+		move.l	a0,IO_DATA(a1)
+		lib	Exec,SendIO
+		rts
+
+ResetSer:	lea.l	StartBuffer,a1
+		bsr	GetLength
+		move.l	d0,d5
+		move.l	IORequest,a1
+		move.w	#CMD_WRITE,IO_COMMAND(a1)
+		move.l	d5,IO_LENGTH(a1)
+		lea.l	StartBuffer,a0
+		move.l	a0,IO_DATA(a1)
+		lib	Exec,DoIO
+
+		move.l	IORequest,a1
+		move.w	#CMD_WRITE,IO_COMMAND(a1)
+		move.l	#2,IO_LENGTH(a1)
+		lea.l	CRLFText1,a0
+		move.l	a0,IO_DATA(a1)
+		lib	Exec,DoIO
+		rts
+
+ShutDown:	tst.w	SerOpen
+		beq	ShutDown9000
+		bsr	ClearSer
+		move.l	IORequest,a1
+		lib	Exec,CloseDevice
+
+ShutDown9000:	move.l	IORequest,a0
+		lib	Exec,DeleteIORequest
+
+		move.l	SRPort,a0
+		lib	Exec,DeleteMsgPort
+
+ShutDown7000:	tst.l	PubScreen
+		beq	ShutDown6000
+		sub.l	a0,a0
+		move.l	PubScreen,a1
+		lib	Intuition,UnlockPubScreen
+
+ShutDown6000:	bsr	CloseWin1
+		bsr	Clean2.0Magic
+
+ShutDown5000:	move.l	PrefsFile,d1
+		beq	ShutDown4900
+		lib	Dos,Close
+
+ShutDown4900:	move.l	NILFile,d1
+		beq	ShutDown4000
+		lib	Dos,Close
+
+ShutDown4000:	move.l	RDArgs1,d1
+		beq	ShutDown3000
+		lib	Dos,FreeArgs
+
+ShutDown3000:	tst.l	DiskObject
+		beq	ShutDown2000
+		move.l	DiskObject,a0
+		lib	Icon,FreeDiskObject
+
+ShutDown2000:	move.l	OldLock,d1
+		beq	ShutDown1050
+		lib	Dos,CurrentDir
+
+ShutDown1050:	move.l	WBMsg,d2
+		beq	ShutDown1000
+		lib	Exec,Forbid
+		move.l	d2,a1
+		flib	Exec,ReplyMsg
+
+ShutDown1000:	closlib	Icon
+		closlib	Utility
+		closlib	Intuition
+		closlib	GadTools
+		closlib	Dos
+		pull	d2-d7/a2-a6
+		clr.l	d0
+		rts
+
+;CheckIDCMP gets messages from serial.device, keyboard (CTRL_C) and Intuition.
+;Give it the window structure in a0
+
+CheckIDCMP:	move.l	$56(a0),a2		;Get window's port
+		clr.l	d1			;Set signals for
+		clr.l	d0
+		move.b	$0f(a2),d1		;IntuiMessages,
+		bset.l	d1,d0
+		move.l	SRPort,a1		;serial.device
+		move.b	MP_SIGBIT(a1),d1
+		bset.l	d1,d0
+		bset.l	#SIGBREAKB_CTRL_C,d0	;and CTRL_C
+		lib	Exec,Wait
+
+		cmp.l	#SIGBREAKF_CTRL_C,d0	;If CTRL_C
+		beq	Break			;go break
+		move.b	$0f(a2),d1		;If not IDCMP
+		btst	d1,d0			;go test for ring
+		beq	TestRing
+
+C2GetMsg1:	move.l	a2,a0	
+		lib	GadTools,GT_GetIMsg
+		tst.l	d0
+		beq	C2GetMsg2
+	
+		move.l	d0,a1 
+		move.l	$14(a1),d2		;answers with Class in d2,
+		move.w	$18(a1),d3		;Code in d3 and
+		move.w	$1a(a1),a4		;Qualifier in a4
+		move.l	$1c(a1),a5		;IAddress in a5
+		lib	GadTools,GT_ReplyIMsg
+		bra	C2GetMsg1
+C2GetMsg2:	move.l	#-1,d0
+		rts
+
+;Newer MenuNull subroutine
+
+MenuNull:	move.w	d3,d0
+		and.w	#$1f,d0
+		move.w	d0,d6
+		move.w	d3,d0
+		lsr.w	#5,d0
+		move.w	d0,d1
+		and.w	#$3f,d0
+		move.w	d0,d5
+		lsr.w	#6,d1
+		move.w	d1,d4
+		rts
+
+SleepPointer:	move.l	Window1,a0
+		lea.l	ClockPointer1,a1
+		move.l	#16,d0
+		move.l	#16,d1			;WHAT-THE-HECK IS THIS FOR?
+		move.l	#-6,d2
+		move.l	#0,d3
+		lib	Intuition,SetPointer
+		rts
+
+NormalPointer:	move.l	Window1,a0
+		lib	Intuition,ClearPointer
+		rts
+
+MenusOn:	move.l	Window1,a0
+		move.l	mlist,a1
+		lib	Intuition,SetMenuStrip
+		rts
+
+MenusOff:	move.l	Window1,a0
+		lib	Intuition,ClearMenuStrip
+		rts
+
+;Lock PublicScreen
+
+LockPubScr:	sub.l	a0,a0
+		lib	Intuition,LockPubScreen
+		move.l	d0,PubScreen
+		beq	LockPubScr_OUT
+
+;Get some sizes
+
+		move.l	PubScreen,a0
+		move.b	sc_BarHeight(a0),d0
+		add.b	#1,d0
+		move.b	d0,BHeight+1
+		move.w	BHeight,d5
+		add.w	d5,SmallYSize
+		add.w	d5,WinYSize
+LockPubScr_OUT:	rts
+
+;Open Window
+
+OpenWin1:	tst.l	Iconify
+		beq	OpenWin1.01
+		lea.l	NewWindow1,a0
+		and.l	#~ACTIVATE,nw_Flags(a0)
+		move.l	NewWindow1,ZoomXY
+		move.l	NewWindow1+4,ZoomXY+4
+		move.l	Alt1XY,nw_LeftEdge(a0)
+		move.w	#160,nw_Width(a0)
+		move.w	BHeight,nw_Height(a0)
+OpenWin1.01:	lea.l	NewWindow1,a0
+		lea.l	Win1TagList,a1
+		lib	Intuition,OpenWindowTagList
+		move.l	d0,Window1
+		beq	OpenWin1_ERR1
+		bsr	AddGads
+		bsr	RefreshCount
+OpenWin1.1:	move.l	Window1,a0
+		move.l	mlist,a1
+		lib	Intuition,SetMenuStrip
+		bsr	ActGad
+		move.l	#-1,d0
+		rts
+OpenWin1_ERR1:	clr.l	d0
+		rts		
+
+CloseWin1:	tst.l	Window1
+		beq	CloseWin1_OUT
+		bsr	RemGads			;Not needed?
+CloseWin1.1:	move.l	Window1,a0
+		lib	Intuition,ClearMenuStrip
+		move.l	Window1,a3
+		bsr	ClearMSGs
+CloseWin1_OUT:	clr.l	Window1
+		rts
+
+;ClearMsgs subroutine
+;a3 = window structure (Don't even try to give it!)
+
+ClearMSGs:	lib	Exec,Forbid
+		move.l	Window1,a3
+		move.l	$56(a3),a2
+ClearMsg1:	move.l	a2,a0	
+		lib	GadTools,GT_GetIMsg
+		tst.l	d0
+		beq	ClearMsg2
+		move.l	d0,a1 
+		flib	GadTools,GT_ReplyIMsg
+		bra	ClearMsg1
+ClearMsg2:	move.l	a3,a0
+		lib	Intuition,CloseWindow
+		lib	Exec,Permit
+ClearMsg3:	rts
+
+;Get length of text in given address
+;
+;Input a1 = Address of null terminated text string
+;
+;Result d0 = Length
+
+GetLength:	clr.l	d0
+		cmp.l	#$00,a1		;fixes enforcer hit
+		beq	GetLength_OUT
+GetLength2:	add.l	#1,d0
+		tst.b	(a1)+
+		bne	GetLength2
+		sub.l	#1,d0		;don't include NULL
+GetLength_OUT:	rts
+
+ConvASCII:	clr.l	d0
+		clr.l	d1
+		cmp.b	#' ',(a0)
+		bne	ConvASCII2
+		add.l	#1,a0
+ConvASCII2:	move.b	(a0),d1
+		cmp.b	#'0',d1
+		bcs	ConvASCII_OUT
+		cmp.b	#'9',d1
+		bhi	ConvASCII_OUT
+		sub.b	#'0',d1
+		push	d1/a0
+;		mulu.w	#10,d0
+		move.l	#10,d1
+		lib	Utility,UMult32
+		pull	d1/a0
+		add.l	d1,d0
+		add.l	#1,a0
+		bra	ConvASCII2
+ConvASCII_OUT:	rts
+
+Clean2.0Magic:	tst.b	GadMagic
+		beq	Clean2.0M2
+		move.l	glist,a0
+		lib	GadTools,FreeGadgets
+
+Clean2.0M2:	tst.b	MenuMagic
+		beq	Clean2.0M3
+		move.l	mlist,a0
+		lib	GadTools,FreeMenus
+
+Clean2.0M3:	tst.l	vi
+		beq	Clean2.0_OUT
+		move.l	vi,a0
+		lib	GadTools,FreeVisualInfo
+
+Clean2.0_OUT:	rts
+
+;Error etc. messages
+
+NoDos:		pull	d2-d7/a2-a6
+		move.l	#RETURN_FAIL,d0
+		rts
+
+NoInt:		lea.l	NoIntText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoRDArgs:	lib	Dos,IoErr
+		move.l	d0,d1
+		clr.l	d2
+		lib	Dos,PrintFault
+		bra	ShutDown
+
+NoUtility:	add.l	#8,sp
+		lea.l	NoUtilityText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoGadTools:	lea.l	NoGTText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoNIL:		lea.l	NoNILText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoIcon:		lea.l	NoIconText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoMsgPort:	lea.l	NoMsgPortText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoIOReq:	lea.l	NoIOReqText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoSerial:	lea.l	NoSerialText1,a0
+		bsr	Printer
+		move.l	SerName,a0
+		bsr	Printer
+		lea.l	NoSerialText2,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoSetSer:	lea.l	NoSetSerText1,a0
+		bsr	Printer
+		rts
+
+NoPubScreen:	lea.l	NoPubScrText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoWindow1:	lea.l	NoWindowText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoContextGad:	lea.l	NoContextText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+NoMenus:	lea.l	NoMenusText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+Printer:	printa	a0,_stdout
+		rts
+
+DoAutoRequest:	move.l	#$00,a2		;positive text
+		lea.l	OKTxt(pc),a3	;a bit the wrong way around but...
+		move.l	#$00,d0
+		move.l	#$00,d1
+		move.l	#$00,d2
+		move.l	#$00,d3
+		sub.l	a0,a0
+		lib	Intuition,AutoRequest
+		rts
+
+;Structures
+
+;GadTools stuff
+
+vi:		dc.l	0		;Visual Info
+mlist:		dc.l	0
+ContextGad:	dc.l	0
+GadMagic:	dc.b	0
+MenuMagic:	dc.b	0
+
+;Gadgets
+
+OnOffGad1:	dc.l	0
+STFGad1:	dc.l	0
+DBGad1:		dc.l	0
+CmdGad1:	dc.l	0
+SaveGad1:	dc.l	0
+QuitGad1:	dc.l	0
+CmdStrGad1:	dc.l	0
+CmdStrGadBuf1:	dc.l	0		;Only a pointer!
+StartStrGad1:	dc.l	0
+StartStrGadBuf1: dc.l	0		;Only a pointer!
+
+;display stuff
+
+PubScreen:	dc.l	0
+Window1:	dc.l	0
+BHeight:	dc.w	0
+
+;lib stuff
+
+		libnames
+
+;Other stuff, part I
+
+OurTask:	dc.l	0
+RDArgs1:	dc.l	0
+SRPort:		dc.l	0
+IORequest:	dc.l	0
+PrefsFile:	dc.l	0
+NILFile:	dc.l	0
+_stdout:	dc.l	0
+WBMsg:		dc.l	0
+DiskObject:	dc.l	0
+OldLock:	dc.l	0
+BufCount:	dc.w	0
+RingCount:	dc.w	0
+
+;Options
+
+CLArray1:
+Iconify:	dc.l	0		;(1 = Yes, please)
+SerName:	dc.l	SerName2	;A pointer!
+UnitPointer:	dc.l	0
+SpeedPointer:	dc.l	0
+
+;Serial device stuff
+
+SerUnit:	dc.l	0
+Speed:		dc.l	0
+SerOpen:	dc.w	0
+
+;Strings, error
+
+BreakText1:	dc.b	"***Break: RingDetect",13,10,0
+NoIntText1:	dc.b	"ERROR: Couldn't open intuition.library",13,10,0
+NoUtilityText1:	dc.b	"ERROR: Couldn't open utility.library",13,10,0
+NoGTText1:	dc.b	"ERROR: Couldn't open gadtools.library!",13,10,0
+NoNILText1:	dc.b	"ERROR: Couldn't open device NIL:!",13,10,0
+NoIconText1:	dc.b	"ERROR: Couldn't open icon.library!",13,10,0
+NoMsgPortText1:	dc.b	"ERROR: Couldn't get message port!",13,10,0
+NoIOReqText1:	dc.b	"ERROR: Couldn't get SerialIOReq!",13,10,0
+NoSetSerText1:	dc.b	"ERROR: Couldn't set parameters for device!",13,10,0
+NoSerialText1:	dc.b	"ERROR: Couldn't open ",0
+SerName2:	dc.b	"serial.device",0
+NoSerialText2:	dc.b	13,10,0
+NoPubScrText1:	dc.b	"ERROR: Couldn't lock PublicScreen",13,10,0
+NoContextText1:	dc.b	"ERROR: Couldn't create context gadget",13,10,0
+NoMenusText1:	dc.b	"ERROR: Couldn't allocate menus structure",13,10,0
+NoWindowText1:	dc.b	"ERROR: Couldn't open Window",13,10,0
+File_ERRText1:	dc.b	"Couldn't open file!",0
+File_ERRText2:	dc.b	"File error!",0
+File_ERRText3:	dc.b	"Incorrect file type!",0
+
+;Strings, names
+
+CLTemplate1:	dc.b	"I=ICONIFY/S,DEV=DEVICE/K,UNIT/N/K,SPEED/N/K",0
+RDVersion:	dc.b	"$VER: RingDetect "
+		PROGVERSION
+		dc.b	" (c) Copyright Tomi Blinnikka 1993",0
+SRPortName:	dc.b	"RingDetect_port",0
+OKText1:	dc.b	"OK",0
+PrefsName:	dc.b	"ENVARC:RingDetect.PREFS",0
+NILName:	dc.b	"NIL:",0
+DEVICEText1:	dc.b	"DEVICE",0
+UNITText1:	dc.b	"UNIT",0
+SPEEDText1:	dc.b	"SPEED",0
+ICONIFYText1:	dc.b	"ICONIFY",0
+YESText1:	dc.b	"YES",0
+AboutText1:	dc.b	"Name   : RingDetect",0
+AboutText2:	dc.b	"Version: "
+		PROGVERSION
+		dc.b	0
+AboutText3:	dc.b	"Author : Tomi Blinnikka",0
+AboutText4:	dc.b	"   (c) Copyright 1993",0
+RDName1:	dc.b	"RingDetect",0
+CountText1:	dc.b	"RD: "
+CountText2:	dc.b	"    0 ",0
+fstrl:		dc.b	"%5.d",0
+CRLFText1:	dc.b	13,10,0
+		ds.l	0
+
+;New screen & new window structures
+
+NewWindow1:	dc.w	200,31			;X,Y POS
+		dc.w	310			;WIDTH
+WinYSize:	dc.w	72			;HEIGHT
+		dc.b	0,1			;PENS
+		dc.l	CLOSEWINDOW!VANILLAKEY!MENUPICK!GADGETUP	;IDCMP FLAGS
+		dc.l	NOCAREREFRESH!WINDOWDRAG!WINDOWDEPTH!WINDOWCLOSE!ACTIVATE	;FLAGS
+		dc.l	0,0			;GADGETS, CHECKMARK
+		dc.l	CountText1		;TITLE
+		dc.l	0			;SCREEN ADDRESS
+		dc.l	0			;BITMAP			
+		dc.w	0,0,0,0			;MIN/MAX SIZE
+		dc.w	PUBLICSCREEN		;TYPE
+
+Win1TagList:	dc.l	WA_AutoAdjust,TRUE
+		dc.l	WA_Zoom,ZoomXY
+		dc.l	TAG_DONE,0
+
+ZoomXY:
+SmallXPos:	dc.w	10
+SmallYPos:	dc.w	21
+SmallXSize:	dc.w	160
+SmallYSize:	dc.w	0
+
+;Fonts
+
+Topaz:		dc.l	TopazName
+		dc.w	8
+		dc.b	0
+		dc.b	0
+TopazName:	dc.b	"topaz.font",0
+		ds.l	0
+
+
+;ITextStructures
+
+OKTxt:		dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	6,3			;LEFT+TOPEDGE
+		dc.l	0			;FONT
+		dc.l	OKText1			;TEXT
+		dc.l	0			;NEXTTEXT
+
+File_ERRTxt1:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	10,10			;LEFT+TOPEDGE
+		dc.l	0			;FONT
+		dc.l	File_ERRText1		;TEXT
+		dc.l	0			;NEXTTEXT
+
+File_ERRTxt2:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	10,10			;LEFT+TOPEDGE
+		dc.l	0			;FONT
+		dc.l	File_ERRText2		;TEXT
+		dc.l	0			;NEXTTEXT
+
+File_ERRTxt3:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	10,10			;LEFT+TOPEDGE
+		dc.l	0			;FONT
+		dc.l	File_ERRText3		;TEXT
+		dc.l	0			;NEXTTEXT
+
+AboutTxt1:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	0,0			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	AboutText1		;TEXT
+		dc.l	AboutTxt2		;NEXTTEXT
+
+AboutTxt2:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	0,10			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	AboutText2		;TEXT
+		dc.l	AboutTxt3		;NEXTTEXT
+
+AboutTxt3:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	0,20			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	AboutText3		;TEXT
+		dc.l	AboutTxt4		;NEXTTEXT
+
+AboutTxt4:	dc.b	1,2			;PENS
+		dc.w	0			;MODE
+		dc.w	0,30			;LEFT+TOPEDGE
+		dc.l	Topaz			;FONT
+		dc.l	AboutText4		;TEXT
+		dc.l	0 ;AboutTxt5		;NEXTTEXT
+
+;Gadgets
+
+OnOffGadText1:	dc.b	"On/Off",0
+STFGadText1:	dc.b	"ScreenToFront",0
+DBGadText1:	dc.b	"DisplayBeep",0
+SaveGadText1:	dc.b	"_Save",0
+QuitGadText1:	dc.b	"_Quit",0
+CmdGadText2:	dc.b	"Command",0
+CmdGadText1:	dc.b	"_Command",0
+StartGadText1:	dc.b	"_Init string",0
+		ds.l	0
+
+glist:		dcb.b	gg_SIZEOF,0
+
+NGOnOffGad1:	dc.w	10		;gng_LeftEdge
+		dc.w	RingTop		;gng_TopEdge
+		dc.w	0		;gng_Width
+		dc.w	12		;gng_Height
+		dc.l	OnOffGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	0		;gng_GadgetID
+		dc.l	PLACETEXT_RIGHT	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGSTFGad1:	dc.w	10		;gng_LeftEdge
+		dc.w	RingTop+13	;gng_TopEdge
+		dc.w	0		;gng_Width
+		dc.w	12		;gng_Height
+		dc.l	STFGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	0		;gng_GadgetID
+		dc.l	PLACETEXT_RIGHT	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGDBGad1:	dc.w	10		;gng_LeftEdge
+		dc.w	RingTop+26	;gng_TopEdge
+		dc.w	0		;gng_Width
+		dc.w	12		;gng_Height
+		dc.l	DBGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	0		;gng_GadgetID
+		dc.l	PLACETEXT_RIGHT	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGCmdGad1:	dc.w	10		;gng_LeftEdge
+		dc.w	RingTop+39	;gng_TopEdge
+		dc.w	0		;gng_Width
+		dc.w	12		;gng_Height
+		dc.l	CmdGadText2	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	0		;gng_GadgetID
+		dc.l	PLACETEXT_RIGHT	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGSaveGad:	dc.w	10		;gng_LeftEdge
+		dc.w	OptionTop	;gng_TopEdge
+		dc.w	60		;gng_Width
+		dc.w	12		;gng_Height
+		dc.l	SaveGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	10		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGQuitGad:	dc.w	-70		;gng_LeftEdge
+		dc.w	OptionTop	;gng_TopEdge
+		dc.w	60		;gng_Width
+		dc.w	12		;gng_Height
+		dc.l	QuitGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	20		;gng_GadgetID
+		dc.l	PLACETEXT_IN	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGCmdStrGad1:	dc.w	160		;gng_LeftEdge
+		dc.w	RingTop+27	;gng_TopEdge
+		dc.w	128		;gng_Width
+		dc.w	12		;gng_Height
+		dc.l	CmdGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	1		;gng_GadgetID
+		dc.l	PLACETEXT_BELOW	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+NGStartGad1:	dc.w	174		;gng_LeftEdge
+		dc.w	RingTop		;gng_TopEdge
+		dc.w	100		;gng_Width
+		dc.w	12		;gng_Height
+		dc.l	StartGadText1	;gng_GadgetText
+		dc.l	Topaz		;gng_TextAttr
+		dc.w	2		;gng_GadgetID
+		dc.l	PLACETEXT_BELOW	;gng_Flags
+		dc.l	0		;gng_VisualInfo
+		dc.l	0		;gng_UserData
+
+;Gadget TagLists
+
+StartGadTagList: dc.l	GTST_String,StartBuffer
+		dc.l	GT_Underscore,'_'
+		dc.l	GTST_MaxChars,20
+		dc.l	TAG_DONE,0
+
+CmdStrGadTagList: dc.l	GTST_String,CmdBuffer
+		dc.l	GT_Underscore,'_'
+		dc.l	GTST_MaxChars,32
+		dc.l	TAG_DONE,0
+
+GadTagList:	dc.l	GT_Underscore,'_'
+		dc.l	TAG_DONE,0
+;Menus
+
+Menu1Name:	dc.b	"Project",0
+LoadMenuText1:	dc.b	"Load",0
+LoadCommKey:	dc.b	"L",0
+SaveMenuText1:	dc.b	"Save",0
+SaveCommKey:	dc.b	"S",0
+AboutMenuText1:	dc.b	"About...",0
+AboutCommKey:	dc.b	"?",0
+QuitMenuText1:	dc.b	"Quit",0
+QuitCommKey:	dc.b	"Q",0
+Menu2Name:	dc.b	"Counter",0
+ResetMenuText1:	dc.b	"Reset",0
+ResetCommKey:	dc.b	"R",0
+		ds.l	0
+
+MNProjectMenu1:	dc.b	NM_TITLE		;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	Menu1Name		;gnm_Label
+		dc.l	0			;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+MNLoad1:	dc.b	NM_ITEM			;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	LoadMenuText1		;gnm_Label
+		dc.l	LoadCommKey		;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+MNSave1:	dc.b	NM_ITEM			;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	SaveMenuText1		;gnm_Label
+		dc.l	SaveCommKey		;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+MNAbout1:	dc.b	NM_ITEM			;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	AboutMenuText1		;gnm_Label
+		dc.l	AboutCommKey		;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+MNP1SepMenu1:	dc.b	NM_ITEM			;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	NM_BARLABEL		;gnm_Label
+		dc.l	0			;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+MNQuit1:	dc.b	NM_ITEM			;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	QuitMenuText1		;gnm_Label
+		dc.l	QuitCommKey		;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+MNCounterMenu1:	dc.b	NM_TITLE		;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	Menu2Name		;gnm_Label
+		dc.l	0			;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+MNReset1:	dc.b	NM_ITEM			;gnm_Type
+		dc.b	0			;gnm_Pad
+		dc.l	ResetMenuText1		;gnm_Label
+		dc.l	ResetCommKey		;gnm_CommKey
+		dc.w	0			;gnm_Flags
+		dc.l	0			;gnm_MutualExclude
+		dc.l	0			;gnm_UserData
+
+		dc.w	0			;NM_END?
+
+;Menu TagList(s)
+
+MenuTagList:	dc.l	GTMN_Menu,MNProjectMenu1
+		dc.l	TAG_DONE,0
+
+;Buffers
+
+Buffer1:	dcb.b	2,0
+Buffer2:	dcb.b	4,0
+
+PREFS_START:
+
+Prefs:		dc.b	"RD"
+PrefsOnOff:	dc.b	1
+PrefsSTF:	dc.b	1
+PrefsDB:	dc.b	1
+PrefsCmd:	dc.b	0
+
+Alt1XY:
+Alt1XPos:	dc.w	200
+Alt1YPos:	dc.w	31
+
+CmdBuffer:	dcb.b	34,0
+StartBuffer:	dc.b	"ATZ"
+		dcb.b	22-3,0
+
+PREFS_END:	dc.l	0,0
+
+PrefsSize:	EQU	(PREFS_END-PREFS_START)
+
+		Section	RD,DATA,CHIP
+
+		ds.w	0
+
+ClockPointer1:	dc.w	$0000,$0000
+		dc.w	$0400,$07C0,$0000,$07C0,$0100,$0380,$0000,$07E0
+		dc.w	$07C0,$1FF8,$1FF0,$3FEC,$3FF8,$7FDE,$3FF8,$7FBE
+		dc.w	$7FFC,$FF7F,$7EFC,$FFFF,$7FFC,$FFFF,$3FF8,$7FFE
+		dc.w	$3FF8,$7FFE,$1FF0,$3FFC,$07C0,$1FF8,$0000,$07E0
+		dc.w	$0000,$0000
+
+		end
+

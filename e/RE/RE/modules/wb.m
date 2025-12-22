@@ -1,0 +1,26 @@
+MODULE 'utility/tagitem'
+
+LIBRARY WorkbenchBase
+	AddAppWindowA(d0,d1,a0,a1,a2:PTR TO TagItem)(d0)=-48,
+	AddAppWindow(d0,d1,a0,a1,a2:LIST OF TagItem)(d0)=-48,
+	RemoveAppWindow(a0)(d0)=-54,
+	AddAppIconA(d0,d1,a0,a1,a2,a3,a4:PTR TO TagItem)(d0)=-60,
+	AddAppIcon(d0,d1,a0,a1,a2,a3,a4:LIST OF TagItem)(d0)=-60,
+	RemoveAppIcon(a0)(d0)=-66,
+	AddAppMenuItemA(d0,d1,a0,a1,a2:PTR TO TagItem)(d0)=-72,
+	AddAppMenuItem(d0,d1,a0,a1,a2:LIST OF TagItem)(d0)=-72,
+	RemoveAppMenuItem(a0)(d0)=-78,
+	WBInfo(a0,a1,a2)(d0)=-90,
+	OpenWorkbenchObjectA(a0,a1:PTR TO TagItem)(d0)=-96,
+	OpenWorkbenchObject(a0,a1:LIST OF TagItem)(d0)=-96,
+	CloseWorkbenchObjectA(a0,a1:PTR TO TagItem)(d0)=-102,
+	CloseWorkbenchObject(a0,a1:LIST OF TagItem)(d0)=-102,
+	WorkbenchControlA(a0,a1:PTR TO TagItem)(d0)=-108,
+	WorkbenchControl(a0,a1:LIST OF TagItem)(d0)=-108,
+	AddAppWindowDropZoneA(a0,d0,d1,a1:PTR TO TagItem)(d0)=-114,
+	AddAppWindowDropZone(a0,d0,d1,a1:LIST OF TagItem)(d0)=-114,
+	RemoveAppWindowDropZone(a0,a1)(d0)=-120,
+	ChangeWorkbenchSelectionA(a0,a1,a2:PTR TO TagItem)(d0)=-126,
+	ChangeWorkbenchSelection(a0,a1,a2:LIST OF TagItem)(d0)=-126,
+	MakeWorkbenchObjectVisibleA(a0,a1:PTR TO TagItem)(d0)=-132,
+	MakeWorkbenchObjectVisible(a0,a1:LIST OF TagItem)(d0)=-132

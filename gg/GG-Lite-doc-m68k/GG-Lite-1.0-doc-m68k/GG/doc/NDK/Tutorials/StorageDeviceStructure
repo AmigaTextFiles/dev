@@ -1,0 +1,1036 @@
+
+            An Explanation of AmigaDOS Storage Device Structure
+
+  In order for you to use a disk editor to its full disk-saving/disk-altering
+potential, you must first understand the structure of an AmigaDOS device.
+References will be made to a P.D. disk editor called 'Sectorama', though the
+basic information and principals presented in this doc will be applicable to
+all disk editors.  Note that to avoid confusion and to provide immediately
+applicable info, the block formats presented in this doc are specifically for
+512 byte blocks.  For larger blocks, the size of the Hash Table will vary and
+all info after the hash table will be displaced ahead of the hash table so
+the secondary-type word is at the end of the block.  All devices I know of to
+this point use a 512 byte block.
+
+  This document is basically written in two parts.  The first part is an
+explanation of what each word in each type of block, how various types
+of blocks are structured, and how all these blocks relate to one another on
+an AmigaDOS storage device.  The second part is an explanation of how to do
+things with a disk editor such as sectorama.
+
+I) BLOCK BASICS
+   ============
+
+  Generally, each block on an AmigaDOS device contains a checksum, a header
+key whose value is the disk address of the block, and a block type which tells
+you what type of block this is so you know what format that particular block
+uses.  Note that when I use the term, 'block', I am referring to a 512 byte
+chunk of storage space on an AmigaDOS device.  For example, on a floppy or
+hard drive, a block refers to a 512 byte sector.  In VDO: and RAM:, a block
+refers to 512 contiguous bytes somewhere in memory.  Also note that the size
+of each datum in a block is a 32 bit word.  For all blocks, the first
+six words are as follows:
+
+     +--------------------+
+   0 |    Block Type      |
+     +--------------------+
+   1 |    Header Key      |
+     +--------------------+
+   2 |  Number or count   |
+     +--------------------+
+   3 | Table or Data size |
+     +--------------------+
+   4 | First or next data |
+     +--------------------+
+   5 |     Checksum       |
+     +--------------------+
+     :                    :
+
+Block Type  - This identifies the general size and structure of this block.
+              It currently has one of three values:
+
+              T.SHORT = 00000002  This indicates the block is at the head of
+                                  a list (i.e. a HEADER BLOCK).
+
+              T.LIST  = 00000010  This indicates the block is a LIST BLOCK.
+                                  A list block is a member of a linked list
+                                  list blocks and contains a table of pointers
+                                  to data blocks.
+
+              T.DATA  = 00000008  This indicates the block is a DATA BLOCK.
+                                  A data block is simply a block that contains
+                                  data and will be described later in this
+                                  doc.
+
+Header Key  - This 32-bit word is the device's address for this block.  It
+              is a pointer to this block.
+
+Number or Count - If this not a data block, this is a total count of data
+                  blocks (and, hence, the highest sequence number of any
+                  data block) pointed-to by this block.
+
+                - If this block is a data block, this number is the sequence
+                  number of this data block.  That is, it tells us this data
+                  block is the n'th member of a list of data blocks.
+
+Table or Data Size - This is a count of how many 32-bit words there are in
+                     the table or data starting at word # 6 in this block.
+
+First or Next Data - This is a pointer to the data block following this block.
+                     If this block is a header or a list block, then this
+                     pointer will point to the first data block in a list
+                     of data blocks.
+
+Checksum - When this number and the values of all other words in this block
+           are added up, the sum must be zero.  This is how bad blocks are
+           detected by AmigaDOS.
+
+For all types of blocks excepting data blocks, the last four words have the
+following format:
+
+     :                :
+     +----------------+
+  7C |   Hashchain    |
+     +----------------+
+  7D |    Parent      |
+     +----------------+
+  7E |   Extension    |
+     +----------------+
+  7F | Secondary Type |
+     +----------------+
+
+Hashchain - points to the next entry on this hash chain.
+
+Parent - pointer to the parent directory.  The parent directory is the
+         directory block which either points to this block or points to a
+         linked list (i.e. hash chain) of which this block is a member.
+
+Extension - pointer to the next extension block which essentially extends the
+            table which starts at word # 6 of this block.
+
+Secondary Type - This exactly identifies what kind of block this is.  This
+                 tells us exactly what function and structure this block has.
+                 The possible codes in this word are:
+
+                 ST.ROOT    = 00000001  This identifies the ROOT BLOCK, which
+                                        is the device's 'root directory'.
+                                        This block ultimately points to all
+                                        the files and directories on the
+                                        storage device.
+
+                 ST.USERDIR = 00000002  This identifies a USER DIRECTORY BLOCK
+                                        which points to all the files and
+                                        directories which have been defined
+                                        for this directory.
+
+                 ST.FILE    = FFFFFFFD  This identifies either a FILE HEADER
+                                        BLOCK, if the block type at word # 1
+                                        is T.SHORT, or a FILE LIST BLOCK if
+                                        the block type is T.LIST.
+                                        A FILE HEADER BLOCK points to all the
+                                        data blocks that make up the file.  If
+                                        there are too many data blocks to be
+                                        pointed to by this block, a list of
+                                        FILE LIST BLOCKS is pointed-to by the
+                                        extension pointer at word # 7E.  A
+                                        FILE LIST BLOCK simply extends the
+                                        table and points to the next FILE LIST
+                                        BLOCK if more data block pointers are
+                                        required.
+
+Note that the above-mentioned word definitions are not applicable to some
+block types and functions.  Where their function is non-applicable, their
+value is usually set at zero.
+
+II) THE ROOT BLOCK
+    ==============
+
+  The block that ultimately points to everything on the disk is called the
+'Root Block'.  This block usually resides in the exact center of a storage
+device to minimize the distance a read/write head of a floppy or hard disk
+must move when travelling from an outer cylinder to the Root Block.  The
+format of the Root Block is as follows:
+
+        symbolic    usual
+         value      value
+     +----------------------+
+   0 |  T.SHORT  = 00000002 |  Indicates this is a 512 byte header block
+     +----------------------+
+   1 |        0  = 00000000 |  Header Key (Always zero in a root block)
+     +----------------------+
+   2 |        0  = 00000000 |  Highest sequence number in chain (0 for root)
+     +----------------------+
+   3 |  HT SIZE  = 00000048 |  Hashtable size (=blocksize-56 = 512/4-56 words)
+     +----------------------+
+   4 |        0  = 00000000 |
+     +----------------------+
+   5 | CHECKSUM  =    ?     |  Checksum for this block
+ ----+----------------------+
+{  6 |                      |
+{    |      Hash Table      |
+{ to :                      :
+{    :                      :
+{ 4D |                      |
+ ----+----------------------+
+  4E |   BMFLAG  = FFFFFFFF |  True (all F's) if device or disk bitmap valid
+ ----+----------------------+
+{ 4F |                      |
+{    |     Bitmap Pages     |
+{ to :                      :
+{    :                      :
+{ 68 |                      |
+ ----+----------------------+
+  69 |     DAYS  =    ?     |  Volume last altered date and time.
+     +----------------------+  Date is in packed format.
+  6A |     MINS  =    ?     |  Time is rated in minutes and ticks.
+     +----------------------+  One tick is 1/60th of a second.
+  6B |    TICKS  =    ?     |
+ ----+----------------------+
+{ 6C |                      |  Volume name as a BCPL string of 30 characters
+{    |      Disk Name       |  or less, though the amount of space to store
+{ to :                      :  this string always remains the same size.
+{    :                      :
+{ 78 |                      |
+ ----+----------------------+
+  79 |CREATEDAYS =    ?     |  Date and time when this volume was created.
+     +----------------------+  Format here, as well as all date/time data
+  7A |CREATEMINS =    ?     |  presented in other types of blocks are in the
+     +----------------------+  format shown for the above volume last altered
+  7B |CREATETICKS=    ?     |  date and time.
+     +----------------------+
+  7C |        0  = 00000000 |  Next entry on this hash chain (0 for root)
+     +----------------------+
+  7D |        0  = 00000000 |  Parent directory (always 0 for root)
+     +----------------------+
+  7E |        0  = 00000000 |  Extension  (always 0 for root)
+     +----------------------+
+  7F |  ST.ROOT  = 00000001 |  Secondary type indicates this is a Root Block
+     +----------------------+
+
+-> What the heck is a HASH TABLE?
+
+  A HASH TABLE is a table of pointers to files and to lists of files.  To
+locate a particular file in the table, the name of the file is used to
+calculate where in the table it is to be located.  This location may not be
+unique to the name of this file.  In this case, the pointer will point to a
+linked list of file headers which must be traversed until the file header for
+the file we're searching for is found.  This linked list is referred to as a
+HASH CHAIN.
+
+  The actual searching-out of files will be discussed in more practical terms
+in the practical portion of this document.
+
+-> What things are pointed-to by pointers in a HASH TABLE?
+
+  Each non-zero pointers in the hash table points to either a FILE HEADER
+BLOCK or a USER DIRECTORY BLOCK which, in turn, may have a hash chain pointer
+which will point to the next file header block or user directory block in
+the hash chain.
+
+-> What are bitmap pages?
+
+  The words in the list of bitmap pages point to 512 byte blocks which
+simply map-out which blocks on the device are used, and which are free for
+usage.  I don't yet understand how the bitmaps are set-up or maintained,
+but as soon as I find out, I'll slip the info into this document.
+
+-> What is a BCPL string?
+
+  This is a string of bytes where the first byte indicates the number of
+characters in the string (say, 'n' characters), the next 'n' characters
+contain the ASCII values for the string, and the rest of the string is
+ignored.  For example, on my Workbench disk, a hex dump of the string looks
+like this:
+
+09576F72 6B62656E 63686F72 6B62656E .Workbenchorkben
+63680000 00000000 00000000 00000000 ch..............
+00000000 00000000                   ........
+
+Where the 09 at the beginning specifies that only the next nine characters
+are valid characters of the string and the rest are ignored.
+
+Note that for the root block, zeros are always in the Header Key, Sequence
+Number, Hash cain, Parent, and Extension fields.  This is because a ROOT BLOCK
+is always at a specific spot on the device (for a disk, it is exactly
+cenetered between the outer- and inner-most cylinders), it never require hash
+table extensions, it is not pointed-to by a hash table and is not part of a
+hash list, and it does not have a parent directory.
+
+III) USER DIRECTORY BLOCKS
+     =====================
+
+  A user directory block is created when a new directory is made in a storage
+device.  It contains its own name and protection status, its parent directory,
+as well as a hash table pointing to files and user directories that have been
+placed into this directory.  The hash table functions exactly the same way as
+that in the ROOT BLOCK.  The format of a USER DIRECTORY BLOCK is as follows:
+
+        symbolic    usual
+         value      value
+     +----------------------+
+   0 |  T.SHORT  = 00000002 |  Indicates this is a 512 byte header block
+     +----------------------+
+   1 |  OWN KEY  =    ?     |  Header Key (pointer to this very block)
+     +----------------------+
+   2 |        0  = 00000000 |  Highest sequence number in chain (always zero)
+     +----------------------+
+   3 |        0  = 00000000 |
+     +----------------------+
+   4 |        0  = 00000000 |
+     +----------------------+
+   5 | CHECKSUM  =    ?     |  Checksum for this block
+ ----+----------------------+
+{  6 |                      |
+{    |      Hash Table      |
+{ to :                      :
+{    :                      :
+{ 4D |                      |
+ ----+----------------------+
+  4E |    SPARE  = 00000000 |
+  4F |    SPARE  = 00000000 |
+     +----------------------+
+  50 |  PROTECT  =    ?     |  Protection bits (Read/Write/Execute/Delete)
+     +----------------------+
+  51 |        0  = 00000000 |  Unused (always zero)
+ ----+----------------------+
+{ 52 |                      |
+{    |       COMMENT        |  Stored as a BCPL string
+{ to :                      :  (up to 90 characters)
+{    :                      :
+{ 68 |                      |
+ ----+----------------------+
+  69 |     DAYS  =    ?     |  Directory creation date and time.
+     +----------------------+
+  6A |     MINS  =    ?     |
+     +----------------------+
+  6B |    TICKS  =    ?     |
+ ----+----------------------+
+{ 6C |                      |
+{    |    Directory Name    |  Directory name as a BCPL
+{ to :                      :  (up to 30 characters)
+{    :                      :
+{ 7B |                      |
+ ----+----------------------+
+  7C |HASHCHAIN  =    ?     |  Next entry with same hash value
+     +----------------------+
+  7D |   PARENT  =    ?     |  Back pointer to parent directory
+     +----------------------+
+  7E |        0  = 00000000 |  Extension  (always 0 for root)
+     +----------------------+
+  7F |  ST.ROOT  = 00000002 |  Secondary type indicates this is a Root Block
+     +----------------------+
+
+IV) FILE HEADER BLOCK
+    =================
+
+  This block is the first block of any given file.  It contains file
+information such as the name, size, protection status, creation date, and a
+pointer to the parent directory block of the file.  It also contains a table
+of pointers to all the data blocks that make up the file.  If there are more
+data blocks than there are pointers in the table of data block pointers (at
+words # 6 to 4D), an extension pointer is provided to a FILE LIST BLOCK which
+contains a similar table of data block pointers.  If the file list block
+still doesn't provide enough pointers, it will provide yet another extension
+pointer to another FILE LIST BLOCK.  This list of FILE LIST BLOCKS extends
+until enough pointers are provided to point to all the data blocks of the
+file.
+
+        symbolic    usual
+         value      value
+     +----------------------+
+   0 |  T.SHORT  = 00000002 |  Indicates this is a 512 byte header block
+     +----------------------+
+   1 |  OWN KEY  =    ?     |  Header Key (pointer to this very block)
+     +----------------------+
+   2 |HIGHEST SEQ=    ?     |  Number of data blocks pointed-to by this block
+     +----------------------+
+   3 |DATA SIZE  =    ?     |
+     +----------------------+
+   4 |FIRST DATA =    ?     |  Pointer to the first data block of the file
+     +----------------------+
+   5 | CHECKSUM  =    ?     |  Checksum for this block
+ ----+----------------------+
+{  6 |          :           |
+{    :          :           :  List of pointers to data blocks
+{ to :          :           :  (i.e. Data block keys)
+{    |     DATA BLOCK 3     |
+{    |     DATA BLOCK 2     |
+{ 4D |     DATA BLOCK 1     |
+ ----+----------------------+
+  4E |    SPARE  = 00000000 |
+  4F |    SPARE  = 00000000 |
+     +----------------------+
+  50 |  PROTECT  =    ?     |  Protection bits (Read/Write/Execute/Delete)
+     +----------------------+
+  51 | BYTESIZE  =    ?     |  Total size of file in bytes
+ ----+----------------------+
+{ 52 |                      |
+{    |       COMMENT        |  Stored as a BCPL string
+{ to :                      :  (up to 90 characters)
+{    :                      :
+{ 68 |                      |
+ ----+----------------------+
+  69 |     DAYS  =    ?     |  File creation date and time.
+     +----------------------+
+  6A |     MINS  =    ?     |
+     +----------------------+
+  6B |    TICKS  =    ?     |
+ ----+----------------------+
+{ 6C |                      |
+{    |      File Name       |  File  name as a BCPL string
+{ to :                      :  (up to 30 characters)
+{    :                      :
+{ 7B |                      |
+ ----+----------------------+
+  7C |HASHCHAIN  =    ?     |  Next entry with same hash value
+     +----------------------+
+  7D |   PARENT  =    ?     |  Back pointer to parent directory
+     +----------------------+
+  7E |EXTENSION  =    ?     |  Pointer to a FILE LIST BLOCK (if required)
+     +----------------------+
+  7F |  ST.ROOT  = FFFFFFFD |  Secondary type indicates this is a Root Block
+     +----------------------+
+
+V) FILE LIST BLOCK
+   ===============
+
+  This type of block is used to extend the table of data block keys
+(pointers) of a FILE HEADER BLOCK when the table in the FILE HEADER BLOCK
+hasn't enough pointers to point to all the file's data blocks.  If a FILE
+LIST BLOCK doesn't have enough pointers to point to the rest of the file's
+data blocks, the EXTENSION pointer of the block will point to yet another
+FILE LIST BLOCK.  The extension list continues until enough pointers are
+provided for all the data blocks in the file.
+
+        symbolic    usual
+         value      value
+     +----------------------+
+   0 |  T.LIST   = 00000010 |  Indicates this is a file list block
+     +----------------------+
+   1 |  OWN KEY  =    ?     |  Header Key (pointer to this very block)
+     +----------------------+
+   2 |BLOCK COUNT=    ?     |  Number of data blocks pointed-to by this block
+     +----------------------+
+   3 |DATA SIZE  = 00000000 |
+     +----------------------+
+   4 |FIRST DATA =    ?     |  Pointer to the first data block of the file
+     +----------------------+
+   5 | CHECKSUM  =    ?     |  Checksum for this block
+ ----+----------------------+
+{  6 |          :           |
+{    :          :           :  Extended list of pointers to data blocks
+{ to :          :           :  (i.e. Data block keys)
+{    |     DATA BLOCK 3     |
+{    |     DATA BLOCK 2     |
+{ 4D |     DATA BLOCK 1     |
+ ----+----------------------+
+{ 4E |                      |
+{    |        unused        |  unused (all zeros)
+{ to :                      :
+{    :                      :
+{ 7B |                      |
+ ----+----------------------+
+  7C |        0  = 00000000 |  Next in hash list (always zero for list block)
+     +----------------------+
+  7D |   PARENT  =    ?     |  Points to the file header block of this file
+     +----------------------+
+  7E |EXTENSION  =    ?     |  Points to the next FILE LIST BLOCK (if required)
+     +----------------------+
+  7F |  ST.ROOT  = FFFFFFFD |  Secondary type indicates this is a Root Block
+     +----------------------+
+
+VI)  DATA BLOCK
+     ==========
+
+  A data block contains data from a file and is pointed-to by preceding
+data blocks and by a pointer in a table in either a FILE HEADER BLOCK or a
+FILE LIST BLOCK.  Thus, the data block can be accessed directly from a header
+or list block of a file, or sequentially by following the linked list of data
+blocks.  Each data block also points to the FILE HEADER BLOCK which describes
+the file which contains this data block.  A sequence number is also present
+in a data block, and indicates that this data block is the n'th data block
+in the list of the file's data blocks.
+
+        symbolic    usual
+         value      value
+     +----------------------+
+   0 |  T.DATA   = 00000008 |  Indicates this is a data block
+     +----------------------+
+   1 |  HEADER   =    ?     |  Header key pointing to the file header block.
+     +----------------------+
+   2 |  SEQ NUM  =    ?     |  Sequence number
+     +----------------------+
+   3 | DATA SIZE = 00000000 |  Number of words of data in this block
+     +----------------------+
+   4 | NEXT DATA =    ?     |  Pointer to the next data block
+     +----------------------+
+   5 | CHECKSUM  =    ?     |  Checksum for this block
+ ----+----------------------+
+{  6 |                      |
+{    |         DATA         |
+{ to :                      :
+{    :                      :
+{ 7F |                      |
+     +----------------------+
+
+VII)  HOW DO THE BLOCKS FIT TOGETHER?
+      ===============================
+
+  The ROOT BLOCK is located at a fixed location, exactly between the highest
+and lowest addresses available on a storage device.  The ROOT BLOCK contains
+a table of pointers (the hash table) to linked lists (hash chains) of USER
+DIRECTORY BLOCKS and FILE HEADER BLOCKS which describe user directories and
+files accessible from the root directory.
+
+  A USER DIRECTORY BLOCK contains the name and protection status of a user
+directory, as well as a hash table containing pointers to hash chains of
+USER DIRECTORY BLOCKS and FILE HEADER BLOCKS which describe user directories
+and files accessible from that user directory.  Since the USER DIRECTORY
+itself is a member of a hash chain, it also contains pointers to its parent
+directory block and to the next USER DIRECTORY BLOCK or FILE HEADER BLOCK in
+the header chain.
+
+  A FILE HEADER BLOCK contains information describing the file it represents,
+as well as a table of pointers to DATA BLOCKS that make up the file.  If
+there aren't enough pointers in this table to point to all the file's DATA
+BLOCKS, an EXTENSION pointer points to a list of FILE LIST BLOCKS which
+extend the table.  Since the FILE HEADER BLOCK is a member of a hash chain,
+it contains pointers to its parent directory and to the next USER DIRECTORY
+BLOCK or FILE HEADER BLOCK in the header chain.
+
+  A FILE LIST BLOCK contains a table of pointers to DATA BLOCKS and extends
+the table of the FILE HEADER BLOCK or FILE LIST BLOCK which points to this
+FILE LIST BLOCK.  If there aren't enough pointers in this table to point to
+the remainder of the file's DATA BLOCKS, an EXTENSION pointer in the FILE
+LIST BLOCK points to the next FILE LIST BLOCK to extend its data block table.
+
+  A DATA BLOCK's main content is data.  It is part of a linked list of DATA
+BLOCKS and includes a pointer to the next DATA BLOCK in the list.  It also
+includes a sequence number indicating that this DATA BLOCK is the n'th DATA
+BLOCK in the list.  Each DATA BLOCK is pointed-to both by the preceding DATA
+BLOCK in the list, and by a pointer in a data block table in either a FILE
+HEADER BLOCK or a FILE LIST BLOCK.  Each DATA BLOCK also contains a pointer
+to the FILE HEADER BLOCK which describes the file which the DATA BLOCK is a
+member of.
+
+  Confused?  Don't worry, practical stuff is coming up next...
+
+ Appendixes
+--------------
+
+                                APPENDIX A
+                              DOS STRUCTURES
+
+(Thanks to Martin Mares for most of these structures)
+
+Here  are  dos  structures  for  the  Old  File  System (OFS), offsets are in
+longs:
+
+ROOT BLOCK:
+
+This block is in the middle of the medium. It's the root directory.
+
+0 T.SHORT (=2)
+1 0
+2 0
+3 HASH TABLE SIZE
+4 0
+5 CHECKSUM
+6 HASH TABLE
+...
+SIZE-50 BITMAP FLAG (TRUE=BITMAP IS VALID)
+SIZE-49 BITMAPBLOCKS
+...
+SIZE-24 BITMAP EXTENSION BLOCK
+SIZE-23 DAYS LAST ACCESS
+SIZE-22 MINS LAST ACCESS
+SIZE-21 TICKS LAST ACCESS
+SIZE-20 DISK NAME
+...
+SIZE-7 CREATE DAYS
+SIZE-6 CREATE MINS
+SIZE-5 CREATE TICKS
+SIZE-4 0
+SIZE-3 0
+SIZE-2 FIRST DIRECTORY CACHE BLOCK
+SIZE-1 ST.ROOT (=1)
+
+USER DIR:
+
+0 T.SHORT (=2)
+1 POINTER TO SELF
+2 0
+3 0
+4 0
+5 CHECKSUM
+6 HASH TABLE
+...
+SIZE-50 NOT USED
+SIZE-48 PROTECTION BITS
+SIZE-47 0
+SIZE-46 COMMENT
+...
+SIZE-23 DAYS LAST ACCES
+SIZE-22 MINS LAST ACCES
+SIZE-21 TICKS LAST ACCES
+SIZE-20 DIRECTORY NAME
+...
+SIZE-11 PREVIOUS BLOCK IN LINK-LIST - This value is always NULL.
+SIZE-10 NEXT BLOCK IN LINK-LIST
+SIZE-4 HASH CHAIN (NEXT ENTRY WITH SAME HASH VALUE)
+SIZE-3 PARENT DIRECTORY
+SIZE-2 FIRST DIRECTORY CACHE BLOCK
+SIZE-1 ST.USERDIR (=2)
+
+FILE HEADER:
+
+0 T.SHORT (=2)
+1 POINTER TO SELF
+2 # OF DATA BLOCKS IN THIS PART
+3 0
+4 1.ST DATA BLOCK
+5 CHECKSUM
+6 ...
+
+DATABLOCKS-
+SIZE-52 2nd DATA BLOCK
+SIZE-51 1ST DATA BLOCK
+SIZE-50 NOT USED
+SIZE-48 PROTECTION BITS
+SIZE-47 BYTE SIZE
+SIZE-46 COMMENT
+...
+SIZE-23 DAYS LAST ACCES
+SIZE-22 MINS LAST ACCES
+SIZE-21 TICKS LAST ACCES
+SIZE-20 FILE NAME
+...
+SIZE-11 PREVIOUS BLOCK IN LINK-LIST - This value is always NULL.
+SIZE-10 NEXT BLOCK IN LINK-LIST
+SIZE-4 NEXT ENTRY WITH SAME HASH VALUE
+SIZE-3 PARENT DIRECTORY
+SIZE-2 POINTER TO EXTENSION OR NULL
+SIZE-1 ST.FILE (=-3)
+
+
+EXTENSION OF FILE HEADER:
+
+0 T.LIST (=16)
+1 POINTER TO SELF
+2 # OF DATA BLOCKS IN THIS PART
+3 0
+4 0
+5 CHECKSUM
+6 ...
+
+DATABLOCKS-
+SIZE-52 2nd DATA BLOCK
+SIZE-51 1ST DATA BLOCK
+SIZE-50 NOT USED
+SIZE-4 0
+SIZE-3 FILE HEADER
+SIZE-2 POINTER TO EXTENSION OR NULL
+SIZE-1 ST.FILE (=-3)
+
+DATA BLOCK:
+
+0 T.DATA (8)
+1 POINTER TO FILE HEADER
+2 NUMBER IN FILE (1ST,2ND,20TH DATA BLOCK)
+3 DATA SIZE
+4 NEXT DATA BLOCK OR NULL
+5 CHECKSUM
+6 DATA
+...
+
+BITMAP EXTENSION BLOCK:
+
+   If  there's  more than 25 bitmap sectors, pointers to next bitmap blocks are
+stored  in this block.  All longs (except the last one) are used as pointers to
+the  bitmap blocks.  Last long points to the next BITMAP EXTENSION BLOCK (if it
+exists).
+
+   0 BITMAP BLOCK POINTERS
+   ...
+   SIZE-1 NEXT BITMAP EXTENSION BLOCK
+ 
+BITMAP:
+
+   Bitmap is stored in longs.  The bootblocks are not stored in the bitmap.  If
+there  are  two bootblocks, the first bit (Bit #0) of the first long of data is
+for  sector #2.  The second bit (bit #1) of the third long is for sector #67...
+If  the bit is clear, sector is allocated.  In dos edit mode, DED converts this
+user  unfriendly  defined  rule  so  sectors are displayed consecutively on the
+screen.
+
+0 CHECKSUM
+1 DATA
+...
+
+For  Fast  File  System  (FFS) it's the same, but data block contain only data
+(512 bytes).
+
+DIRECTORY CACHE BLOCK:
+0 (21)
+1 SELFPOINTER
+2 POINTER TO DIRECTORY
+3 NUMBER ITEMS STORED IN THIS BLOCK
+4 NEXT DIRECTORY CACHE BLOCK
+5 CHECKSUM
+6 - FIRST RECORD
+
+  RECORD STRUCTURE: ( !!! OFFSETS ARE IN BYTES !!! )
+
+0 POINTER TO FILEHEADER OR USERDIR OF THIS RECORD
+4 SIZE OF FILE
+8 PROTECTION BITS
+12 0
+16 DAYS LAST ACCES
+18 MINS LAST ACCES
+20 TICKS LAST ACCES
+22 RECORD TYPE ($FD=FILE, $FC=LINKED FILE, $02=DIR, $04=LINKED DIR)
+23 NAME (BSTR)
+   COMMENT (BSTR)
+   THERE MAY BE NULL BYTE (FOR WORD-ALIGNMENT)
+
+LINKED FILE:
+0 T.SHORT (=2)
+1 SELFPOINTER
+2 0
+3 0
+4 0
+5 CHECKSUM
+SIZE-23 DAYS LAST ACCESS
+SIZE-22 MINS LAST ACCESS
+SIZE-21 TICKS LAST ACCESS
+SIZE-20 FILE NAME
+...
+SIZE-11 PREVIOUS BLOCK IN LINK-LIST
+SIZE-10 NEXT BLOCK IN LINK-LIST
+SIZE-4 NEXT ENTRY WITH SAME HASH VALUE
+SIZE-3 PARENT DIRECTORY
+SIZE-1 ST.LINKED FILE (=-4)
+
+LINKED DIRECTORY:
+0 T.SHORT (=2)
+1 POINTER TO SELF
+2 0
+3 0
+4 0
+5 CHECKSUM
+...
+SIZE-23 DAYS LAST ACCESS
+SIZE-22 MINS LAST ACCESS
+SIZE-21 TICKS LAST ACCESS
+SIZE-20 DIRECTORY NAME
+...
+SIZE-11 PREVIOUS BLOCK IN LINK-LIST
+SIZE-10 NEXT BLOCK IN LINK-LIST
+SIZE-4 NEXT ENTRY WITH SAME HASH VALUE
+SIZE-3 PARENT DIRECTORY
+SIZE-1 ST.LINKED USERDIR (=4)
+
+The  following  structures  and  texts were taken from the devices/hardblocks.i
+include file.
+
+   Next  types  are  blocks  of data that exist on a hard disk to describe that
+disk.  They are not generically accessable to the user as they do not appear on
+any  DOS  drive.   The blocks are tagged with a unique identifier, checksummed,
+and linked together.  The root of these blocks is the RigidDiskBlock.
+
+   The   RigidDiskBlock   must   exist   on   the   disk   within   the   first
+RDB_LOCATION_LIMIT  blocks.   This  inhibits the use of the zero cylinder in an
+AmigaDOS   partition:    although   it   is  strictly  possible  to  store  the
+RigidDiskBlock  data  in  the  reserved  area  of a partition, this practice is
+discouraged  since  the  reserved  blocks  of  a  partition  are overwritten by
+"Format", "Install", "DiskCopy", etc.  The recommended disk layout, then, is to
+use  the  first  cylinder(s)  to  store  all  the drive data specified by these
+blocks:  i.e.  partition descriptions, file system load images, drive bad block
+maps, spare blocks, etc.
+
+   NOTE:   Optional  block addresses below contain $FFFFFFFF to indicate a NULL
+address.
+
+Rigid disk block:
+
+0  ID - text "RDSK"
+1  Size of this checksummed structure (in longs)
+2  Block checksum
+3  SCSI Target ID of host
+4  Size of disk blocks (in bytes)
+5  Flags  -  Bit  0  =  no  disks exist to be configured after this one on this
+                        controller
+             Bit  1  =  no LUNs exist to be configured greater than this one at
+                        this SCSI Target ID
+             Bit 2 = no Target IDs exist to be configured greater than this one
+                     on this SCSI bus
+             Bit 3 = don't bother trying to perform reselection when talking to
+                     this drive
+             Bit 4 = Disk identification valid
+             Bit 5 = Controller identification valid
+             Bit 6 = Drive supports scsi synchronous mode - CAN BE DANGEROUS TO
+                     USE IF IT DOESN'T! (added 20-Jul-89)
+
+6  Optional bad block list
+7  Optional first partition block (PART)
+8  Optional fule system header block (FSHD)
+9  Optional  drive-specific  init  code  *DriveInit(lun,rdb,ior):   "C"  stk  &
+   d0/a0/a1)
+10 Six longs sets to -1
+15 Number of drive cylinders
+17 Sectors per track
+18 Number of drive heads
+19 Interleave
+20 Landing zone cylinder (would be negative number)
+21 Three unused longs
+24 Starting cylinder: write precompensation
+25 Starting cylinder: reduced write current
+26 Drive step rate
+27 Five unused longs
+32 Low block of range reserved for hardblocks
+33 High block of range for these hardblocks
+34 Low cylinder of partitionable disk area
+35 High cylinder of partitionable data area
+36 Number of blocks available per cylinder
+37 Seconds needed for autopark - zero for no auto park
+38 Highest block used by RDSK (Not including replacement bad blocks)
+39 One unused long
+40 Two longs for disk vendor
+42 Four longs for disk product
+45 One long for disk revision
+47 Two longs for controller vendor
+49 Four longs for controller product
+53 One long for controller revision
+54 Ten unused longs
+
+Bad block(s) block:
+
+0 ID - text "BADB"
+1 Size of this checksummed structure (in longs)
+2 Block checksum
+3 SCSI Target ID of host
+4 Block number of the next Bad block(s) block (link)
+5 One unused long
+6 There are block pairs - First long  - pointer to bad block to replace to 
+                          Second long - pointer to good block which replaces it
+
+Partition block:
+
+0  ID - text "PART"
+1  Size of this checksummed structure (in longs)
+2  Block checksum
+3  SCSI Target ID of host
+4  Block number of the next Partition block (or -1)
+5  Flags - Bit 0 = This partition is bootable
+           Bit 1 = Do not automount this partition (e.g.  manually mounted, but
+                   space reserved here)
+6  Two reserved longs
+8  Preferred flags for OpenDevice
+9  Eight longs for BSRT device name (e.g. DH0)
+17 Fiveteen unused longs
+
+   The   following   structure   (dos   environment)   was   taken   from   the
+dos/filehandler.i include file (but Partition block structure continuing!).
+
+32 Size of table (in long without this, usually 16)
+33 Size of block in longs
+34 Sector org (??? - doc says that it's unused, set to 0)
+35 Surfaces = number of heads
+36 Sectors per block (not used, set to 1)
+37 Number of blocks per track
+38 Number  of  blocks  reserved  by  DOS  at  the start of the  partition (e.g.
+   bootblock)
+39 Number of blocks reserved by DOS at the end of the partition (mostly zero)
+40 Interleave
+41 Starting cylinder of the partition
+42 Last cylinder of the partition
+43 Initial number of DOS buffers
+44 Type of memory to allocate for buffers
+45 Max number of bytes to transfer at a time
+46 Address mask to block out certain memory (usually $FFFFFE)
+47 Boot priority
+48 Dos  type  ASCII  (HEX) string  showing filesystem type (like in bootblock):
+   0x444F5300 is old filesystem
+   0x444F5301 is fast file system
+49 Fiveteen reserved longs
+
+File system header:
+
+0  ID text "FSHD"
+1  Size of this checksummed structure (in longs)
+2  Block checksum
+3  SCSI Target ID of host
+4  Size of disk blocks (in bytes)
+5  Flags - No flags defined (???)
+6  Two reserved longs
+8  Dos  type  ASCII  (HEX) string  showing filesystem type (like in bootblock):
+   0x444F5300 is old filesystem
+   0x444F5301 is fast file system
+9  Two words specifying release version of this code
+10 Patching flags for next nine (or in future more) entries specifies, which of
+   these have to be patched to the device structure.  Bit 0 = patch Device node
+   type,  bit  7  =  patch  Segment list ..., $180 to patch Segment list Global
+   vector.
+
+   The  following  (device node) structure was taken from the dos/filehandler.i
+include file (but File system header block structure continuing!).
+
+11 Type - always 0 for dos "devices"
+12 CPTR  to  task.   If this  is null when the node is accesses, a task will be
+   started up
+13 BPTR to lock - not used for devices - leave null
+14 BSTR Handler - filename to loadseg (if seglist is null)
+15 Stacksize to use when starting task
+16 Task priority when starting task
+17 BPTR to startup msg: FileSysStartupMsg for disks
+18 Pointer to first Load file system segment (LSEG) block.
+19 BPTR to global vector - BCPL global  vector to use when starting a task.  -1
+means that the Segment list (see long 19) is not for a bcpl program, so the dos
+won't  try and construct one.  0 tell the dos that you obey BCPL linkage rules,
+and that it should construct a global vector for you.
+20 Twenty three reserved longs
+43 Twenty one reserved longs
+
+Load file system segment (these block contains filesystem):
+
+0 ID - text "LSEG"
+1 Size of this checksummed structure (in longs)
+2 Block checksum
+3 SCSI Target ID of host
+4 Block number of the next Load file system segment block (link)
+5 There is 123 longs of data
+...
+
+                                APPENDIX B
+                           THE HASHING FUNCTION
+
+   Hashing  is  a very good way to speed up the disk access.  In AmigaDos, it's
+used  in  directories  (including ROOT).  One block contains 72 hashchains.  If
+some  items  have  the same hash value, the long in the directory points to the
+first  block,  the  entry  'next entry with same hash value' of the first block
+points to the second block...
+
+   HASH_VALUE  is number of long, where the number of block is stored in, name
+is the name of object and name[n] is the n-th character of the string.
+
+HASH_VALUE=f(STRLEN[name]) MOD 72 + 6
+
+      f(0)=STRLEN(name)
+      f(n)=13*f(n-1)+TOUPPER(name[n])
+
+   Here is source of hashing function.
+INPUT:  A0 = String to hash value compute to
+OUTPUT: D0 = Hash value
+
+hash_fn	move.l	a0,-(a7)
+	moveq	#-1,d1
+1$	add.l	#1,d1
+	tst.b	(a0)+
+	bne	1$
+	move.l	(a7)+,a0
+3$	move.b	(a0)+,d0
+	beq	2$
+	mulu	#13,d1
+	bsr	to_upper
+	and.w	#$00FF,d0
+	add.w	d0,d1
+	and.w	#$7FF,d1
+	bra	3$
+
+2$	move.l	d1,d0
+	rts
+
+#define	REV		0L
+#define BLOCKSIZE	TD_SECTOR
+#define NUMBLOCKS	(NUMCYLS * NUMHEADS * NUMSECS)
+#define ROOTBLOCK	(NUMBLOCKS / 2)
+#define BITMAPINDEX	79
+#define NUMLONGS	(NUMBLOCKS / 32)
+
+#ifndef DEVICES_TRACKDISK_H
+#define DEVICES_TRACKDISK_H
+
+/*
+**
+**	$VER: trackdisk.h 33.13 (28.11.90)
+**	Includes Release 39.108
+**
+**	trackdisk device structure and value definitions
+**
+**	(C) Copyright 1985-1992 Commodore-Amiga, Inc.
+**	    All Rights Reserved
+**
+*/
+
+#ifndef EXEC_IO_H
+#include "exec/io.h"
+#endif
+
+#ifndef EXEC_DEVICES_H
+#include "exec/devices.h"
+#endif
+
+/*
+ *--------------------------------------------------------------------
+ *
+ * Physical drive constants
+ *
+ *--------------------------------------------------------------------
+ */
+
+/* OBSOLETE -- use the TD_GETNUMTRACKS command! */
+/*#define	NUMCYLS	80*/		/*  normal # of cylinders */
+/*#define	MAXCYLS	(NUMCYLS+20)*/	/* max # cyls to look for during cal */
+/*#define	NUMHEADS 2*/
+/*#define	NUMTRACKS (NUMCYLS*NUMHEADS)*/
+
+#define	NUMSECS	11
+#define NUMUNITS 4
+
+/*
+ *--------------------------------------------------------------------
+ *
+ * Useful constants
+ *
+ *--------------------------------------------------------------------
+ */
+
+/*-- sizes before mfm encoding */
+#define	TD_SECTOR 512
+#define	TD_SECSHIFT 9		/* log TD_SECTOR */
+
+*------------------------------------ V39 Extension & MultiUser support
+
+UID & GID are combined into one long and stored in USER DIR BLOCK and FILE
+HEADER BLOCK at the same position: $4f (longs). All protection bits are
+stored at $50 in a special order, explained below.
+
+nybble 0 at $50 - USER protection bits
+stored as RWED : 0 means that flag is SET and 1 that is CLEARED !
+
+nybble 1 at $50
+stored as HSPA : 0 means that flag is CLEARED and 1 that is SET !
+
+nybble 3 and 2 at $50 - OTHER and GROUP protection bits
+stored as RWEDRWED : 0 means that flag is CLEARED and 1 that is SET !
+
+nybble 7 at $50
+stored as U--- : 0 means that flag is CLEARED and 1 that is SET !
+
+I think that when FS assumes that UID, GID and OTHER and GROUP protection bits
+are all 0's, then there is no MultiUser support and treates file or dir like
+normal [O,F]FS.
+
+*------------------------------------------------------------------------
+
+						Zgromadzil i zebral do kupy
+                                               
+                                                      Smash/GDC
+
+                                         Email: smash@atomix.imio.pw.edu.pl
+
+           A powycinaî róûne niepotrzebne rzeczy i dodaî trochë
+
+                                                      Chyras/Negative IQ
+
+                                         Email: chyras@tempus.ii.uni.wroc.pl

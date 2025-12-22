@@ -1,0 +1,215 @@
+;; -*-Lisp-*-
+;;
+;; FEMTO an extended Atto Emacs with a tiny lisp extension language
+;; hughbarney AT googlemail.com
+;;
+;; The editor provides only basic buffer movement and edit functions
+;; everything else is done by extending the user interface using the
+;; lisp extension language. Functions can be bound to keys using set-key.
+;; For example: (set-key "c-k" "(kill-to-eol)")
+;; 
+;; place femto.rc in your home direcory and it is run when femto starts up.
+;;
+
+;; max value
+(defun max(a b)
+  (if (> a b) a b))
+
+;; min value
+(defun min(a b)
+  (if (< a b) a b))
+
+;; concatenate a list of strings
+(defmacro concat args
+  (cond
+    ((null args) "")
+    ((null (cdr args)) (car args))
+    (t (list (quote string.append) (car args) (cons (quote concat) (cdr args)))) ))
+
+;; return filename relative to the homedir
+(defun home(fn)
+  (concat (os.getenv "HOME") "/" fn))
+
+;; the user should modify this value to where they wish to store scripts and extensions
+(setq script_dir (home "src/femto/examples/"))
+
+(setq config_file "femto.rc")
+
+(defun edit-config()
+  (find-file (home config_file)))
+
+(defun load-script(fn)
+  (load (concat script_dir fn)))
+
+(defun repeat (n func)  
+  (cond ((> n 0) (func) (repeat (- n 1) func))))
+
+;; trim all spaces from front of a string
+(defun string.trim.front(s)
+  (cond
+    ((not (eq (string.ref s 0) " ")) s)
+    ((< (string.length s) 2) "")
+    (t (string.trim.front (string.substring s 1 (- (string.length s) 1)))) ))
+
+;; trim all spaces from back of a string
+(defun string.trim.back(s)
+  (cond
+    ((not (eq (string.ref s (- (string.length s) 1)) " ")) s)
+    ((< (string.length s) 2) "")
+    (t (string.trim.back (string.substring s 0 (- (string.length s) 2)))) ))
+
+;; trim spaces off front and back of a string
+(defun string.trim(s)
+  (string.trim.back (string.trim.front s)))
+
+
+;; delete next word
+(defun delete-next-word()
+  (backward-word)
+  (forward-word)
+  (set-mark)
+  (forward-word)
+  (kill-region))
+
+;; previous word
+(defun delete-previous-word()
+  (forward-word)
+  (backward-word)
+  (forward-char)
+  (set-mark)
+  (backward-word)
+  (backward-word)
+  (forward-char)
+  (kill-region))
+
+;; kill to end of line, uses if and progn
+(defun kill-to-eol()
+  (cond
+    ((eq (get-point) (get-point-max)) nil)
+    ((eq "\n" (get-char)) (delete))
+    (t (set-mark) (end-of-line) (if (eq (get-point) (get-mark)) (delete) (kill-region)))))
+
+;; shrink string by dropping off last char
+(defun shrink(s)
+  (cond
+    ((< (string.length s) 2) "")
+    (t (string.substring s 0 (- (string.length s) 2)))  ))
+
+;; some keystroke checks that we will use later
+(defun is_ctl_g(k)
+  (eq k (ascii 7)))
+
+(defun is_escape(k)
+  (eq k (ascii 27)))
+
+(defun is_backspace(k)
+  (or (eq k (ascii 8)) (eq k (ascii 127))))
+
+(defun is_ctl_s(k)
+  (eq k (ascii 19)))
+
+(defun is_control_char(k)
+  (and (>= (ascii->number k) 0) (<= (ascii->number k) 31)))
+
+
+;; prompt for a keystroke then show its name
+(defun describe-key()
+  (show-prompt "Describe Key: " "")
+  (setq key (get-key))
+  (cond
+    ((not (eq key "")) (message key))
+    (t (message (concat (get-key-name) " runs command " (get-key-funcname))))))
+
+;;
+;; GNU Emacs style lisp interaction.
+;; Place cursor behind an s-expression, type C-] and the
+;; block will be evaluated.
+;;
+
+;; find the end of the s-expression and set cursor on next cell
+(defun find_end_p()
+  (setq k (get-char))
+  (cond 
+    ((eq 0 (get-point)) -1)
+    ((eq ")" k) (forward-char) (get-point))
+    ((or (eq "" k) (eq " " k) (eq "\t" k) (eq "\n" k)) (backward-char) (find_end_p))
+    (t -1) ))
+
+;; find the start of the s-expression
+;; assumes start is always in first character of line
+;; this means comments and strings dont need to be handled
+(defun find_start_p()
+  (beginning-of-line)
+  (setq kyy (get-char))
+  (cond 
+    ((and (eq 0 (get-point)) (not (eq kyy "("))) -1) 
+    ((eq kyy "(") (get-point))
+    (t (previous-line) (find_start_p)) ))
+
+;;
+;; find the start and end of the s-expression
+;; set the mark and the start and point at the end
+;; call eval-block
+(defun find_and_eval_sexp()
+  (setq o_point (get-point))
+  (setq lb_count 0)
+  (setq rb_count 0)
+  (setq start_p -1)
+  (setq end_p (find_end_p))
+  (if (> end_p -1) (setq start_p (find_start_p)))
+  (if (and (> start_p -1) (> end_p -1))
+  (progn
+    (set-point start_p)
+    (set-mark)
+    (set-point end_p)
+    (eval-block))
+  (progn
+    (set-point o_point)
+    (if (eq -1 start_p) (message "could not find start of s-expression"))
+    (if (eq -1 end_p) (message "could not find end of s-expression"))) ))
+
+
+;;
+;; start up message
+;;
+
+(defun show-startup-message()
+  (if (eq "*scratch*" (get-buffer-name))
+  (progn
+    (insert-string "\n\n\n\n\n\n\n\n\n\n\n\n")
+    (insert-string "   / _| ___ _ __ ___ | |_ ___     \n")
+    (insert-string "  | |_ / _ \ '_ ` _ \| __/ _ \    \n")
+    (insert-string "  |  _|  __/ | | | | | || (_) |   \n")
+    (insert-string "  |_|  \___|_| |_| |_|\__\___/'    \n\n")
+    (insert-string "  Tiny Emacs clone with Tiny-Lisp extension language\n  ")
+    (insert-string (get-version-string))
+    (insert-string "\n\n\n\n\n\n\n"))))
+
+;;
+;;  Load extensions
+;;
+
+(load-script "oxo.lsp")
+(load-script "bufmenu.lsp")
+(load-script "dired.lsp")
+(load-script "grep.lsp")
+(load-script "defmacro.lsp")
+(load-script "git.lsp")
+
+;;
+;;  Key Bindings 
+;;
+
+(set-key "esc-right" "delete-next-word")
+(set-key "esc-left" "delete-previous-word")
+(set-key "c-k" "kill-to-eol")
+(set-key "c-x ?" "describe-key")
+(set-key "c-]" "find_and_eval_sexp")
+(set-key "c-x c-o" "oxo")
+(set-key "c-x c-b" "buffer-menu")
+(set-key "c-x c-d" "dired")
+(set-key "c-x c" "edit-config")
+(set-key "c-x g" "grep-command")
+
+(show-startup-message)
+

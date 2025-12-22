@@ -1,0 +1,769 @@
+;Dstar..adapted from TI86
+;Goodness knows what its gonna look like!
+;31/7/98
+;Starting to make it compilable...
+;Works - just 30 mins later! But needs front end etc!
+
+
+        MODULE  dstar
+
+        INCLUDE "#stdio.def"
+        INCLUDE "#map.def"
+        INCLUDE "#memory.def"
+        INCLUDE "#error.def"
+        INCLUDE "#screen.def"
+
+
+
+        defc    k_exit   = 'T'
+        defc    k_up     = 'Q'
+        defc    k_down   = 'A'
+        defc    k_left   = 'O'
+        defc    k_right  = 'P'
+        defc    k_second = ' '
+        defc    k_clear  = 13
+
+        defc    tiscr    =      35000 ;(1024 bytes)
+
+
+
+
+         org    32768
+
+.oz_gamein
+          ld   hl,0
+          add  hl,sp
+          ld   sp,($1FFE)
+          push hl
+          call oz_init
+          ld   a,sc_dis
+          call_oz(os_esc)
+          call start
+          ld   a,sc_ena
+          call_oz(os_esc)
+          ld   a,'5'
+          ld   bc,mp_del
+          call_oz(os_map)          ;remove our map
+          ld   hl,baswindres       ;clear BASIC window
+          call_oz(gn_sop)
+          pop  hl
+          ld   sp,hl
+          ret
+
+
+.Start
+         xor     a
+         ld     (BallOrBox),a
+         call   SetUpLevel              ;uncompresses and draws current level
+.keyloop
+         ld     a,(BallOrBox)
+         or     a
+         jr     z,IsBall                ;if 'BallOrBox' is 0, we are moving the ball
+         ld     hl,BoxOffset            ;otherwise we are moving the box
+         jr     OnWithKeyloop
+.IsBall
+         ld     hl,BallOffset
+.OnWithKeyloop
+         push   hl                      ;does GET_KEY destroy hl? I just wanted to be safe :)
+;         call   GET_KEY                 ;CHANGE
+        ld      bc,5
+        call_oz(os_tin)
+         pop    hl
+         cp     K_EXIT
+         ret    z                       ;Exit if the Exit key has been pressed
+         cp     K_UP
+         jr     z,up
+         cp     K_DOWN
+         jr     z,down
+         cp     K_LEFT
+         jp     z,left
+         cp     K_RIGHT
+         jp     z,right
+         cp     K_SECOND
+         jp     z,switch
+         cp     K_CLEAR
+         call   z,SetUpLevel
+         ld     hl,Board
+         ld     b,144                   ;there are 144 pieces in the playing field (9*16)
+.CheckWinLoop
+         ld     a,(hl)
+         cp     2
+         inc    hl
+         jr     z,keyloop  ;if any one of them is 2 (clear), keep playing
+         djnz   CheckWinLoop
+
+         ld     hl,(Level)
+         ld     bc,38
+         add    hl,bc
+         ld     (Level),hl              ;otherwise go up a level
+         call   SetUpLevel
+         jr     keyloop
+
+.up
+         call   StandardStart           ;the start of every move, gets offset to piece being moved
+         ld     a,(ix-16)               ;load a with the piece above it
+         call   StandardMiddle          ;check to make sure it is a valid move
+         ld     a,(ix+0)
+         ld     (ix+0),0
+         ld     (ix-16),a               ;actually move the piece
+         ld     a,(hl)
+         sub    16
+         ld     (hl),a                  ;update the offset we are workig with
+         call   DrawBoard
+         jr     up                      ;keep moving up until we hit something
+
+.down
+         call   StandardStart
+         ld     a,(ix+16)
+         call   StandardMiddle
+         ld     a,(ix+0)
+         ld     (ix+0),0
+         ld     (ix+16),a
+         ld     a,(hl)
+         add    a,16
+         ld     (hl),a
+         call   DrawBoard
+         jr     down
+.left
+         call   StandardStart
+         ld     a,(ix-1)
+         call   StandardMiddle
+         ld     a,(ix+0)
+         ld     (ix+0),0
+         ld     (ix-1),a
+         ld     a,(hl)
+         dec    a
+         ld     (hl),a
+         call   DrawBoard
+         jr     left
+
+.right
+         call   StandardStart
+         ld     a,(ix+1)
+         call   StandardMiddle
+         ld     a,(ix+0)
+         ld     (ix+0),0
+         ld     (ix+1),a
+         ld     a,(hl)
+         inc    a
+         ld     (hl),a
+         call   DrawBoard
+         jr     right
+
+;Surely this could be ld a,(hl) xor 1 ld (hl),a
+.switch
+         ld     hl,BallOrBox
+         bit    0,(hl)
+         jr     z,SwitchToBox
+         res    0,(hl)                  ;we are now moving the ball
+         jp     keyloop
+.SwitchToBox
+         set    0,(hl)                  ;switch to box move mode
+         jp     keyloop
+
+.StandardStart
+         ld     d,0
+         ld     a,(hl)
+         ld     e,a
+         ld     ix,Board
+         add    ix,de                   ;get offset to piece being moved into ix
+         ld     a,(BallOrBox)
+         ld     b,a                     ;put BallOrBox into b so it can be tested
+         ret
+
+.StandardMiddle
+         bit    0,b
+         jr     z,goonstd
+         cp     2
+         jr     z,keyloop1
+.goonstd
+         cp     2                       ;if it is 2, we can run over it
+         ret    z
+         or     a                       ;if the piece isn't 0, we can't go there, so we go back to checking for keys
+         jr     nz,keyloop1
+         ret                            ;otherwise, keep moving the piece
+.keyloop1
+         inc    sp                      ;clean up the stack
+         inc    sp
+         jp     keyloop
+
+.SetUpLevel
+         ld     hl,(Level)
+         ld     de,Levels
+         add    hl,de                   ;get address of level data
+         ld     de,BallOffset
+         ld     bc,2
+         ldir                           ;the first 2 bytes are BallOffset and BoxOffset, respectively
+         ld     de,Board                ;this is where the uncompressed level goes
+         ld     b,9                     ;the board is 9 high
+.y_loop
+         push   bc
+         ld     b,4                     ;and each compressed line is 4 bytes wide (each byte hold 4 elemenets, 4*4=16)
+.x_loop
+         push   bc
+         ld     a,(hl)
+         srl    a       ;rlca*2
+         srl    a
+         srl    a
+         srl    a
+         srl    a
+         srl    a                       ;shift 6 times to get the first piece
+         and    @11                     ;we only need the rightmost 2 bits
+         ld     (de),a                  ;put it in the temp area
+         inc    de                      ;and increment de (address of current place in temp area)
+         ld     a,(hl)
+         srl    a
+         srl    a
+         srl    a
+         srl    a                       ;we only need to shift 4 times for the second piece
+         and    @11
+         ld     (de),a
+         inc    de
+         ld     a,(hl)
+         srl    a
+         srl    a                       ;2 for the third piece...
+         and    @11
+         ld     (de),a
+         inc    de
+         ld     a,(hl)
+         and    @11                     ;and none for the fourth one
+         ld     (de),a
+         inc    de
+         inc    hl
+         pop    bc
+         djnz   x_loop
+         pop    bc
+         djnz   y_loop
+         ld     hl,Board
+         ld     a,(BallOffset)
+         ld     d,0
+         ld     e,a
+         add    hl,de
+         ld     (hl),3                  ;put ball where it belongs
+         ld     hl,Board
+         ld     a,(BoxOffset)
+         ld     d,0
+         ld     e,a
+         add    hl,de
+         ld     (hl),4                  ;put box where it belongs
+
+.DrawBoard
+         push   hl
+;
+         ld     hl,Board
+         xor    a
+         ld     (temp_y),a
+         ld     b,9
+.yloop1
+         push   bc
+         xor    a
+         ld     (temp_x),a
+         ld     b,16
+.xloop1
+         push   bc
+         ld     a,(temp_x)
+         ld     b,a
+         ld     a,(temp_y)
+         ld     c,a
+         ld     a,(hl)
+         push   hl
+         ld     d,a
+         add    a,a                     ;*2
+         ld     e,a
+         add    a,a                     ;*4
+         add    a,e                     ;*6
+         add    a,d                     ;*7
+         ld     hl,Sprites
+         ld     d,0
+         ld     e,a
+         add    hl,de                   ;get offset to sprite
+         call   PutAligned              ;draw it
+         pop    hl
+         inc    hl
+         ld     a,(temp_x)
+         inc    a
+         ld     (temp_x),a
+         pop    bc
+         djnz   xloop1
+         ld     a,(temp_y)
+         inc    a
+         ld     (temp_y),a
+         pop    bc
+         djnz   yloop1
+;Damn it, have to invent a new copy routine...
+;OZ page in
+          ld   c,3
+          call_oz(os_mgb)
+          push bc        ;store old binding
+.ozbank   ld   bc,3
+          call_oz(os_mpb)     ;bind in the screen
+          call  ozscrcpy
+;OZ page out..
+;Then call os_tin..
+        pop     bc
+        ld   c,3
+        call_oz(os_mpb)     ;restore old bindings..
+        ld      bc,0
+        call_oz(os_tin)
+         pop    hl
+         ret
+
+.ozscrcpy
+.ozaddr ld      de,0
+        ld      hl,tiscr
+        ld      c,8
+.ozscrcpy1
+        push    hl
+        ld      b,16
+.ozscrcpy3
+        push    bc
+        push    hl
+        ld      bc,16
+        ld      a,8
+.ozscrcpy2
+        ex      af,af'
+        ld      a,(hl)
+        ld      (de),a
+        inc     de
+        add     hl,bc
+        ex      af,af'
+        dec     a
+        jr      nz,ozscrcpy2
+        pop     hl
+        inc     hl
+        pop     bc
+        djnz    ozscrcpy3
+        pop     hl
+        push    bc
+        ld      bc,16*8
+        add     hl,bc
+;        ex      de,hl
+;        add     hl,bc
+;        ex      de,hl
+        pop     bc
+        dec     c
+        jr      nz,ozscrcpy1
+        ret
+        
+.PutAligned                     ;b=x/8  c=y/7  hl->sprite
+         push   hl                      ;sprite address
+         push   bc
+         ld     h,0
+         ld     l,c
+         add    hl,hl                   ;*2
+         add    hl,hl                   ;*4
+         add    hl,hl                   ;*8
+         add    hl,hl                   ;*16
+         push   hl              
+         pop    bc                      ;bc=*16
+         add    hl,hl                   ;*32
+         push   hl
+         pop    de                      ;de=*32
+         add    hl,hl                   ;*64
+         add    hl,bc
+         add    hl,de                   ;*112
+         ld     de,tiscr        
+         add    hl,de
+         pop    bc
+         ld     d,0
+         ld     e,b
+         add    hl,de
+         pop    de                      ;de has sprite, hl has pos in video mem
+         ld     b,7
+.row_loop2
+         push   bc
+         ld     a,(de)
+         ld     (hl),a
+         inc    de
+         ld     bc,16
+         add    hl,bc                   ;go to next line in video memory
+         pop    bc
+         djnz   row_loop2
+         ret
+
+
+.temp_x         defb    0
+.temp_y         defb    0
+.balloffset     defb    0
+.boxoffset      defb    0
+.ballorbox      defb    0
+.board          defs    144
+
+
+.Level
+         defw 0
+
+.Sprites                        ;1=edge, 2=clear ball 3=moveable ball 4=moveable block
+ defb    @00000000
+ defb    @00000000
+ defb    @00000000
+ defb    @00000000
+ defb    @00000000
+ defb    @00000000
+ defb    @00000000
+
+ defb    @01111110
+ defb    @10101001
+ defb    @11000111
+ defb    @10110001
+ defb    @11001011
+ defb    @10100101
+ defb    @01111110
+
+ defb    @00000000
+ defb    @00011000
+ defb    @00100100
+ defb    @00100100
+ defb    @00011000
+ defb    @00000000
+ defb    @00000000
+
+ defb    @00000000
+ defb    @00011000
+ defb    @00110100
+ defb    @00111100
+ defb    @00011000
+ defb    @00000000
+ defb    @00000000
+
+ defb    @00000000
+ defb    @00111100
+ defb    @00111100
+ defb    @00111100
+ defb    @00111100
+ defb    @00000000
+ defb    @00000000
+
+.Levels
+ defb    17,30                           ;ball offset, box offset
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01000101,@00000000,@00000000,@10010001
+ defb    @01000000,@00000000,@00000010,@00010101
+ defb    @01000000,@00000000,@01011000,@00000001
+ defb    @01000000,@01010010,@00000000,@00000101
+ defb    @01010010,@00001000,@00000000,@10000001
+ defb    @01001000,@00000000,@00100101,@00100001
+ defb    @01000000,@00000101,@10000000,@00001001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level2
+ defb    30,86
+ defb    @00010000,@01000100,@01000000,@01000101
+ defb    @01000000,@10000000,@00000000,@00000001
+ defb    @00000001,@10000001,@10000000,@10000000
+ defb    @01000100,@10000000,@00001000,@00010001
+ defb    @00000000,@00000100,@00001000,@00000100
+ defb    @01000000,@00010001,@00001000,@00000001
+ defb    @00000001,@00000100,@01000000,@01101001
+ defb    @01000000,@00000000,@00000000,@00000100
+ defb    @00010000,@01000000,@00000000,@00010000
+.level3
+ defb    30,46
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01000000,@00000000,@00000000,@10010001
+ defb    @01000000,@01010000,@00000000,@01010001
+ defb    @01000000,@01100000,@00000010,@00000001
+ defb    @01001000,@00000000,@10010100,@00001001
+ defb    @01000110,@00001000,@00100100,@00100101
+ defb    @01000101,@10000110,@00001000,@10010101
+ defb    @01100000,@00000101,@10000000,@00000001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level4
+ defb    125,30
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01000000,@00000000,@00000000,@00010001
+ defb    @01000000,@00000100,@00000000,@00000001
+ defb    @01011001,@10001001,@10011001,@10011001
+ defb    @01000100,@01100010,@01000100,@01000101
+ defb    @01011001,@10011000,@10011001,@10011001
+ defb    @01000000,@00000100,@00000000,@00000001
+ defb    @01000000,@01000000,@00000000,@01000001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level5
+ defb    17,110
+ defb    @00010101,@01010101,@01010101,@01010100
+ defb    @01000000,@01000000,@01000001,@00000001
+ defb    @01000001,@10000100,@10000010,@00010001
+ defb    @01010000,@00000000,@01000001,@00000001
+ defb    @01100001,@10010000,@00000000,@00000101
+ defb    @01010000,@00000001,@00100001,@00000001
+ defb    @01100100,@00010001,@00010000,@00010001
+ defb    @01000000,@01000000,@00100100,@00011001
+ defb    @00010101,@01010101,@01010101,@01010100
+.level6
+ defb    65,113
+ defb    @00000000,@01010101,@01010101,@01010101
+ defb    @00000001,@00000010,@00000001,@10001001
+ defb    @00000100,@00000010,@00000000,@01000101
+ defb    @00010000,@00000010,@00000000,@00000001
+ defb    @01000000,@00000010,@00000000,@00000001
+ defb    @01010000,@00000010,@00000100,@00000101
+ defb    @01000000,@00000010,@00000000,@01000001
+ defb    @01000001,@00000010,@00000101,@10000001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level7
+ defb    115,122
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01000000,@00000000,@00000000,@00000001
+ defb    @00010100,@01010100,@00011000,@01011001
+ defb    @00011000,@00011000,@01000100,@01000100
+ defb    @00000100,@00010000,@01010100,@01010000
+ defb    @00010100,@00010000,@01100100,@01100100
+ defb    @01000000,@00000000,@00000000,@00000001
+ defb    @01000000,@01100000,@00000000,@00011001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level8
+ defb    108,98
+ defb    @01010101,@01010101,@01010101,@01010100
+ defb    @01000010,@01010000,@00000000,@00000101
+ defb    @01000001,@10000001,@01001000,@00000001
+ defb    @01000010,@01010001,@00011000,@00000001
+ defb    @01010000,@00000001,@01000001,@10010001
+ defb    @01010001,@00000000,@00000010,@01100001
+ defb    @01100010,@01000000,@10000001,@00010001
+ defb    @01010000,@00000000,@00000000,@00000001
+ defb    @00010101,@01010101,@01010101,@01010101
+.level9
+ defb    30,72
+ defb    @00000100,@01010101,@01010101,@01010100
+ defb    @00011001,@10000000,@00000001,@00000001
+ defb    @01100010,@01000000,@00100000,@00000100
+ defb    @00010001,@00001001,@01000010,@01000001
+ defb    @01000001,@10000110,@00100000,@00001001
+ defb    @01000000,@00001001,@01000000,@00000100
+ defb    @01100110,@00000000,@00000000,@00010000
+ defb    @01000000,@00000000,@00000000,@01000000
+ defb    @01010101,@01010101,@01010101,@00000000
+.level10
+ defb    93,36
+ defb    @00000000,@01010101,@01010101,@01010100
+ defb    @01010101,@00100000,@00000000,@00000001
+ defb    @01000000,@00000101,@01100010,@01001001
+ defb    @01001000,@00000110,@00011000,@00000100
+ defb    @01000000,@00000100,@00100000,@01001001
+ defb    @01100110,@00000100,@10010000,@01000100
+ defb    @00011000,@00000101,@01000001,@01010000
+ defb    @01000000,@00000000,@00000100,@01000100
+ defb    @00010101,@01010101,@01010000,@01000001
+.level11
+ defb    30,108
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01000000,@00000001,@00000000,@00000001
+ defb    @01000001,@10100000,@00000010,@10000101
+ defb    @01010000,@00100000,@00010100,@00001001
+ defb    @01100000,@00000110,@01101000,@00010101
+ defb    @01010001,@01000000,@00010100,@00000001
+ defb    @01100000,@10010010,@00000000,@00001001
+ defb    @01011001,@01010000,@00000100,@00000101
+ defb    @00010100,@01010101,@01010101,@01010100
+.level12
+ defb    17,92
+ defb    @01010000,@00000001,@01000001,@01010100
+ defb    @01000101,@01010110,@00010101,@00100101
+ defb    @01000000,@00101000,@00000000,@10000001
+ defb    @01000101,@00000101,@10000001,@10010001
+ defb    @01000100,@10000101,@01100001,@01000001
+ defb    @01000101,@00000101,@00000001,@00010001
+ defb    @01000000,@00001000,@00000000,@00000001
+ defb    @01000000,@00000000,@00100000,@00000001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level13
+ defb    18,113
+ defb    @00010101,@01010101,@01010101,@01010100
+ defb    @01000001,@00000000,@00000000,@10000101
+ defb    @01000100,@00000110,@00000010,@01010001
+ defb    @01000000,@00000000,@10000000,@00010001
+ defb    @01001000,@00000000,@00000000,@00011001
+ defb    @01000100,@00000000,@00100000,@00000001
+ defb    @01010000,@00000000,@10001000,@00011001
+ defb    @01000000,@01000000,@00100001,@00010001
+ defb    @00010101,@01010101,@01010101,@01010100
+.level14
+ defb    36,50
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01100110,@00000000,@00000000,@10011001
+ defb    @01001001,@00000000,@00000001,@01000001
+ defb    @01000000,@00000000,@00000010,@00000001
+ defb    @01000000,@00000000,@00100100,@00000001
+ defb    @01000000,@00000010,@00000000,@00000001
+ defb    @01001001,@00000000,@00000000,@01000001
+ defb    @01100110,@00000000,@00000000,@10011001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level15
+ defb    51,76
+ defb    @00010101,@01010100,@01010101,@01010100
+ defb    @01000000,@00001001,@00000000,@00100001
+ defb    @01000100,@10000100,@00010000,@00100001
+ defb    @01000000,@01000000,@01101000,@01100001
+ defb    @00010001,@00000001,@00100000,@00010001
+ defb    @01100000,@00000000,@00010000,@01100001
+ defb    @00010000,@00000000,@10000000,@00000100
+ defb    @01100000,@00000000,@00000000,@00001001
+ defb    @00010101,@01010101,@01010101,@01010100
+.level16
+ defb    35,19
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01010000,@01100010,@00000000,@00001001
+ defb    @01100000,@10011000,@00000000,@00000101
+ defb    @01010001,@01010000,@00001000,@00000101
+ defb    @01010000,@00000010,@01100100,@00000001
+ defb    @01101000,@00000000,@00001001,@10000001
+ defb    @01010010,@00000000,@01010101,@10000001
+ defb    @01011001,@00000100,@00000000,@00000001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level17
+ defb    29,124
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01001001,@00000000,@00000000,@01000001
+ defb    @01000100,@00100110,@10011000,@00010001
+ defb    @01000000,@00011001,@01100100,@10000001
+ defb    @01001001,@00000000,@00000010,@01000001
+ defb    @01000010,@01100000,@00001001,@00000001
+ defb    @01000100,@00010001,@01100100,@00010001
+ defb    @01000000,@00100001,@10000000,@00000001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level18
+ defb    115,26
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01001000,@00000010,@00000001,@00000001
+ defb    @01000001,@10011000,@00000110,@00000001
+ defb    @01000000,@01100100,@00000001,@10000001
+ defb    @01000000,@10000001,@00000010,@01100001
+ defb    @01000110,@01000000,@01001001,@00000001
+ defb    @01001001,@10000100,@10000100,@00000001
+ defb    @01100100,@00000100,@00000000,@01000001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level19
+ defb    126,110
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01100000,@00010100,@00000000,@01011001
+ defb    @01000100,@00010000,@00000000,@01100001
+ defb    @01001001,@00000010,@01010000,@10000001
+ defb    @01000100,@00000001,@10000000,@00000001
+ defb    @01000000,@00010000,@00100100,@00000001
+ defb    @01000101,@00100100,@01011000,@00010001
+ defb    @01001001,@00011000,@00000000,@01010001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level20
+ defb    77,66
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01000000,@10011000,@00000000,@00000001
+ defb    @01011000,@00100100,@01011000,@00000101
+ defb    @01000100,@01001000,@00000100,@00010001
+ defb    @01000000,@01000001,@01000001,@00001001
+ defb    @01000100,@00010000,@00100001,@00010001
+ defb    @01010000,@00100101,@00011000,@00100101
+ defb    @01000000,@00000000,@00100110,@00000001
+ defb    @01010101,@01010101,@01010101,@01010101
+.level21
+ defb    103,105
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01000101,@01000000,@00001000,@00000101
+ defb    @01000000,@01000000,@00000000,@01000101
+ defb    @01000000,@01011000,@00000000,@00100001
+ defb    @01000010,@00000000,@10000000,@10000101
+ defb    @01000000,@00010000,@00000101,@01100001
+ defb    @01000010,@00100000,@00000010,@00101001
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @00000000,@00000000,@00000000,@00000000
+.level22
+ defb    103,105
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01100100,@00011001,@00011000,@00010001
+ defb    @01000000,@00010000,@00000000,@00000001
+ defb    @01100000,@00010000,@01100000,@10000001
+ defb    @01010001,@10000000,@00000010,@00010101
+ defb    @01001000,@01000000,@01010110,@00000001
+ defb    @01000000,@00000100,@01000000,@10000001
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @00000000,@00000000,@00000000,@00000000
+.level23
+ defb    103,105
+ defb    @00010101,@01010101,@01010101,@01010100
+ defb    @01000100,@00011001,@00011000,@00010001
+ defb    @01000000,@00100000,@01000000,@00000001
+ defb    @01010000,@00010000,@00100001,@10000001
+ defb    @01000001,@10000001,@00001010,@00100001
+ defb    @01011000,@01000000,@01010010,@00000001
+ defb    @01000000,@00000100,@01000000,@10000001
+ defb    @00010101,@01010101,@01010101,@01010100
+ defb    @00000000,@00000000,@00000000,@00000000
+.level24
+ defb    103,105
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01000000,@00000100,@00000000,@00000101
+ defb    @01000101,@10001000,@00000001,@01100101
+ defb    @01000110,@00000000,@00100100,@00010101
+ defb    @01001010,@00001001,@00010100,@00000001
+ defb    @01000110,@00100001,@00000000,@01010001
+ defb    @01000101,@00000000,@01000101,@01101001
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @00000000,@00000000,@00000000,@00000000
+.level25
+ defb    103,105
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @01000000,@00000000,@00000000,@00010001
+ defb    @01001000,@01011000,@00001000,@00000001
+ defb    @01000000,@01100000,@10000001,@01000001
+ defb    @01001000,@00000001,@01000001,@10000001
+ defb    @01000110,@00000010,@01000000,@00100001
+ defb    @01000101,@10000100,@00000000,@00000001
+ defb    @01010101,@01010101,@01010101,@01010101
+ defb    @00000000,@00000000,@00000000,@00000000
+
+;Oz stuff here...
+
+.oz_init
+
+;Do OZ stuff now..
+          ld   hl,baswindres
+          call_oz(gn_sop)
+          ld   hl,windini
+          call_oz(gn_sop)
+          ld   a,'5'       ;window number - ignored!
+          ld   bc,mp_gra
+          ld   hl,128
+          call_oz(os_map)          ; create map width of 256 pixels
+          ld   b,0
+          ld   hl,0                ; dummy address
+          ld   a,sc_hr0
+          call_oz(os_sci)          ; get base address of map area (hires0)
+          push bc
+          push hl
+          call_oz(os_sci)          ; (and re-write original address)
+          pop  hl
+          pop  bc
+          ld   a,b
+          ld   (ozbank+2),a
+          ld   a,h
+          and  63                  ;mask to bank
+          or   192                 ;mask to segment 3 (49152)
+          ld   h,a
+          ld   (ozaddr+1),hl
+          ret
+
+
+
+.baswindres
+          defm ""&1&"2H1"&$0C&$0
+          
+.windini
+          defb   1,'7','#','3',32+7,32+1,32+34,32+7,131     ;dialogue box
+          defb   1,'2','C','3',1,'4','+','T','U','R',1,'2','J','C'
+          defb   1,'3','@',32,32  ;reset to (0,0)
+          defm   "DStar z88"
+          defb   1,'3','@',32,32 ,1,'2','A',32+34  ;keep settings for 10
+          defb   1,'7','#','3',32+8,32+3,32+32,32+5,128     ;dialogue box
+          defb   1,'2','C','3'
+          defb   1,'3','@',32,32,1,'2','+','B'
+          defb   0
+          defm "Converted by D Morris 31/7/98"
+          defm "djm@jb.man.ac.uk"
+.windclr
+          ld   hl,windclrt
+          call_oz(gn_sop)
+          ret
+
+
+.windclrt
+          defm ""&1&"2C3"&1&"2+B"&0
+

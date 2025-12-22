@@ -1,0 +1,228 @@
+DEFINITION MODULE IFFM2;
+
+
+(*
+  ===========================================================================
+  ||                                                                       ||
+  ||   IFFM2 - Amiga (r) version                                           ||
+  ||                                                                       ||
+  ||   Original Developers:  November 15, 1988, Greg Epley                 ||
+  ||                                                                       ||
+  ||    Module Version:  *   1.0.0, May 29, 1989, Greg Epley               ||
+  ||                         First implementation; compiled with M2AMIGA   ||
+  ||                         Rel. 3.1                                      ||
+  ||                                                                       ||
+  ||                                                                       ||
+  ||              Copyright (c) 1988, 1989  Second Sight (tm)              ||
+  ||                                                                       ||
+  ||    Amiga is a registered trademark of Commodore-Amiga, Inc.  Second   ||
+  ||    Sight is a trademark of Second Sight, Lexington, North Carolina.   ||
+  ||                                                                       ||
+  ===========================================================================
+*)
+
+(*
+=================================  IMPORTS  =================================
+*)
+FROM DOS	IMPORT FileHandlePtr;
+FROM Exec	IMPORT UByte;
+FROM Graphics	IMPORT BitMapPtr,
+                       ViewModes, ViewModeSet;
+
+
+(* NOTE: Heap routines are used to dynamically allocate memory space by
+ * some of the IFFM2 routines.  Even if the client program should lose
+ * control this memory will be returned to the system unless a fatal
+ * M2Amiga crash occurs (in which case it doesn't matter anyway, since
+ * you have to re-boot).  Also, in case you don't know this, the user of
+ * these routines is "the Client". *)
+
+
+TYPE
+  (* IFF id's are stored as LONGINT types for efficient copy and compare. *)
+  ID = LONGINT;
+
+CONST
+  (* These are shifting constants used to define the LONGINT IFF id's. *)
+  H = 1000000H;  M = 10000H;  L = 100H;  V = 10H;
+
+  (* These LONGINT IFF id's are currently recognized by the IFF routines in
+   * this module. *)
+  IDFORM = ID("F")*H + ID("O")*M + ID("R")*L + ID("M");
+  IDILBM = ID("I")*H + ID("L")*M + ID("B")*L + ID("M");
+  IDBMHD = ID("B")*H + ID("M")*M + ID("H")*L + ID("D");
+  IDCMAP = ID("C")*H + ID("M")*M + ID("A")*L + ID("P");
+  IDBODY = ID("B")*H + ID("O")*M + ID("D")*L + ID("Y");
+  IDCAMG = ID("C")*H + ID("A")*M + ID("M")*L + ID("G");
+  IDEOFX = ID("E")*H + ID("O")*M + ID("F")*L + ID("X");
+
+CONST
+  (* The maximum number of color registers allowed on the Amiga. *)
+  MaxColorRegister = 64;
+  
+TYPE
+  (*---- BitMapHeader -----------------------------------------------------*)
+  (* The BitMapHeader structure is specifically an IFF ILBM structure. *)
+
+  (* Type of masking for the data. *)
+  Masking = (mskNone, mskHasMask, mskHasTransparentColor, mskLasso);
+
+  (* Type of compression for the data. *)
+  Compression = (cmpNone, cmpByteRun1);
+
+  (* The BitMapHeader structure stores assorted information from an IFF ILBM
+   * BMHD (BitMapHeaDer) chunk. *)
+  BitMapHeader = RECORD
+    w, h : CARDINAL;
+    x, y : INTEGER;
+    nPlanes : UByte;
+    masking : Masking;
+    compression : Compression;
+    pad1 : UByte;
+    transparentColor : CARDINAL;
+    xAspect, yAspect : UByte;
+    pageWidth, pageHeight : INTEGER;
+  END;
+  BitMapHeaderPtr = POINTER TO BitMapHeader;
+
+
+  (* The IFFFileFrame structure stores assorted information related to each
+   * IFF file using the IFFM2 routines.  Every item in this structure may
+   * not be used for every type of IFF file so pointer types are used for
+   * most of the items to cut down on wasted space.  The frame space is
+   * allocated during OpenIFF() and freed by CloseIFF(). *)  
+  
+  IFFFileFrame = RECORD
+    filehandle : FileHandlePtr;
+    bmhd : BitMapHeaderPtr;
+    cmap : ARRAY [0..MaxColorRegister-1] OF INTEGER;
+    nColors : INTEGER;
+    bitmap : BitMapPtr;
+    camg : ViewModeSet;
+  END;
+  IFFFileFramePtr = POINTER TO IFFFileFrame;
+
+
+(*---- OpenIFF ------------------------------------------------------------*)
+(*
+ * Open an IFF file for reading or writing and return an IFFFileFramePtr if
+ * successful or NIL if not.
+ *
+ * The mode indicates whether to read [DOS oldFile] or write [DOS newFile].
+ * This also pre-initializes all the other frame items; it does not allocate
+ * any memory spaces for them but just sets such pointers to NIL.
+ *)
+PROCEDURE OpenIFF (name : ARRAY OF CHAR; mode : LONGINT) : IFFFileFramePtr;
+
+
+(*---- CloseIFF -----------------------------------------------------------*)
+(*
+ * Close an IFF file previously opened with OpenIFF().  This also deallocates
+ * any memory spaces which were dynamically allocated by IFFM2 calls.
+ *)
+PROCEDURE CloseIFF (VAR frame : IFFFileFramePtr);
+
+
+(*---- PrintIFFError ------------------------------------------------------*)
+(*
+ * Print a text error message to the M2Amiga standard output stream used by
+ * Terminal.  Safe to call even if there is no error.
+ *)
+PROCEDURE PrintIFFError ();
+
+
+(*---- GetType ------------------------------------------------------------*)
+(*
+ * Read the IFF file type chunk (e.g., ILBM, SMUS, 8SVX, ANIM, etc.) and
+ * return to the client as an ID.  This will not return any types not
+ * currently supported.
+ *)
+PROCEDURE GetType (frame : IFFFileFramePtr) : ID;
+
+
+(*---- GetChunkHdr --------------------------------------------------------*)
+(*
+ * Read an IFF file data chunk (e.g., BMHD, CMAP, BODY) and return its size
+ * and ID to the client.
+ *)
+PROCEDURE GetChunkHdr (VAR frame : IFFFileFramePtr; VAR size : LONGINT) : ID;
+
+
+(*---- GetPad -------------------------------------------------------------*)
+(*
+ * Read an IFF file pad byte.  Returns TRUE to client if successful, FALSE
+ * if not.
+ *)
+PROCEDURE GetPad (frame : IFFFileFramePtr) : BOOLEAN;
+
+
+(*---- GetUnknown ---------------------------------------------------------*)
+(*
+ * Read an unrecognized IFF file data chunk and return TRUE if successful or
+ * FALSE if not.
+ *)
+PROCEDURE GetUnknown (frame : IFFFileFramePtr; size : LONGINT) : BOOLEAN;
+
+
+(*==== ILBM Standard Reader Routines ======================================*)
+(*
+ * For standard ILBM files the following allocations and items are filled for
+ * you by calling the indicated routines:
+ *
+ *	filehandle	- filled by OpenIFF() if successful
+ *	bmhd		- structure space allocated and filled by GetBMHD(),
+ *                        also assumes display viewmodes (camg) if CAMG chunk
+ *                        not found yet [reads]; freed during CloseIFF()
+ *	cmap		- ARRAY of INTEGER RGB color values (about 120 bytes
+ *                        of static storage by GetCMAP() [reads]
+ *      nColors         - INTEGER 15-bits of static storage by GetCMAP()
+ *			  [reads]
+ *	camg		- ViewModeSet space elements are set during
+ *			  GetCAMG() [reads]
+ *
+ * Client must allocate and fill the following items [as needed]:
+ *
+ *	bitmap		- pointer to a BitMap structure BEFORE calling
+ *			  GetBODY() [reads] *)
+
+(*---- GetBMHD ------------------------------------------------------------*)
+(*
+ * Read an IFF ILBM BMHD (BitMapHeaDer) chunk; dynamically allocates the
+ * bmhd data space and fills it; also guesses at the display viewmodes if
+ * the CAMG chunk hasn't been found yet.  Returns TRUE to client if
+ * successful or FALSE if not.
+ *)
+PROCEDURE GetBMHD (VAR frame : IFFFileFramePtr; size : LONGINT) : BOOLEAN;
+
+
+(*---- GetCMAP ------------------------------------------------------------*)
+(*
+ * Read an IFF ILBM CMAP (ColorMAP) chunk; also sets a count of the number
+ * of colors in the color map chunk; refer to the frame's cmap entry for
+ * the format of the final contents after reading.  Returns TRUE to client if
+ * successful or FALSE if not.
+ *)
+PROCEDURE GetCMAP (VAR frame : IFFFileFramePtr; size : LONGINT) : BOOLEAN;
+
+
+(*---- GetBODY ------------------------------------------------------------*)
+(*
+ * Read an IFF ILBM BODY (bitplane data) chunk; this handles bitplane data
+ * with compression and/or masking applied; client should point the frame's
+ * bitmap item to a valid BitMap data space before calling this.  Returns
+ * TRUE to client if successful or FALSE if not.
+ *)
+PROCEDURE GetBODY (VAR frame : IFFFileFramePtr; size : LONGINT) : BOOLEAN;
+
+
+(*---- GetCAMG ------------------------------------------------------------*)
+(*
+ * Read an IFF ILBM CAMG (Commodore-AMiGa viewmodes) chunk; this translates
+ * the LONGINT numeric for the viewmodes and sets the proper elements in the
+ * frame's camg data space.  Returns TRUE to client if successful or FALSE
+ * if not.
+ *)
+PROCEDURE GetCAMG (VAR frame : IFFFileFramePtr; size : LONGINT) : BOOLEAN;
+
+
+END IFFM2.

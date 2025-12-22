@@ -1,0 +1,71 @@
+/*****************************************************************************/
+/*                                                                           */
+/*				   global.c				     */
+/*                                                                           */
+/*		  Global variables for the da65 disassembler		     */
+/*                                                                           */
+/*                                                                           */
+/*                                                                           */
+/* (C) 2000      Ullrich von Bassewitz                                       */
+/*               Wacholderweg 14                                             */
+/*               D-70597 Stuttgart                                           */
+/* EMail:        uz@musoftware.de                                            */
+/*                                                                           */
+/*                                                                           */
+/* This software is provided 'as-is', without any expressed or implied       */
+/* warranty.  In no event will the authors be held liable for any damages    */
+/* arising from the use of this software.                                    */
+/*                                                                           */
+/* Permission is granted to anyone to use this software for any purpose,     */
+/* including commercial applications, and to alter it and redistribute it    */
+/* freely, subject to the following restrictions:                            */
+/*                                                                           */
+/* 1. The origin of this software must not be misrepresented; you must not   */
+/*    claim that you wrote the original software. If you use this software   */
+/*    in a product, an acknowledgment in the product documentation would be  */
+/*    appreciated but is not required.                                       */
+/* 2. Altered source versions must be plainly marked as such, and must not   */
+/*    be misrepresented as being the original software.                      */
+/* 3. This notice may not be removed or altered from any source              */
+/*    distribution.                                                          */
+/*                                                                           */
+/*****************************************************************************/
+
+
+
+#include "global.h"
+
+
+
+/*****************************************************************************/
+/*     	      	    		     Data				     */
+/*****************************************************************************/
+
+
+
+/* File names */
+const char* InFile     	      = 0;      /* Name of input file */
+const char* OutFile    	      = 0;      /* Name of output file */
+
+/* Default extensions */
+const char OutExt[]	      = ".dis";	/* Output file extension */
+const char CfgExt[]    	      = ".cfg";	/* Config file extension */
+
+/* Flags and other command line stuff */
+unsigned char FormFeeds	      = 0;	/* Add form feeds to the output? */
+unsigned char PassCount	      = 2;	/* How many passed do we do? */
+unsigned long StartAddr	      = 0xC000;	/* Start/load address of the program */
+
+/* Stuff needed by many routines */
+unsigned char Pass	      = 0;	/* Disassembler pass */
+
+/* Page formatting */
+unsigned PageLength    	      = 0;	/* Length of a listing page */
+unsigned MIndent	      = 9;	/* Mnemonic indent */
+unsigned AIndent	      = 17;	/* Argument indent */
+unsigned CIndent	      = 49;	/* Comment indent */
+unsigned TIndent	      = 81;	/* Text bytes indent */
+unsigned BytesPerLine	      = 8;	/* Max. number of data bytes per line */
+
+
+

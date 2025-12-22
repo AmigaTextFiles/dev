@@ -1,0 +1,32 @@
+CONST DEVICES_SCSIDISK_I=1,
+    HD_WIDESCSI=8,
+    HD_SCSICMD=28
+
+OBJECT SCSICmd
+  Data:PTR TO UWORD,
+  Length:ULONG,
+  Actual:ULONG,
+  Command:PTR TO UBYTE,
+  CmdLength:UWORD,
+  CmdActual:UWORD,
+  Flags:UBYTE,
+  Status:UBYTE,
+  SenseData:PTR TO UBYTE,
+  SenseLength:UWORD,
+  SenseActual:UWORD
+
+CONST SCSIF_WRITE=0,
+    SCSIF_READ=1,
+    SCSIB_READ_WRITE=0,
+    SCSIF_NOSENSE=0,
+    SCSIF_AUTOSENSE=2,
+    SCSIF_OLDAUTOSENSE=6,
+    SCSIB_AUTOSENSE=1,
+    SCSIB_OLDAUTOSENSE=2,
+    HFERR__SelfUnit=$28,
+    HFERR__DMA=$29,
+    HFERR__Phase=$2A,
+    HFERR__Parity=$2B,
+    HFERR__SelTimeout=$2C,
+    HFERR__BadStatus=$2D,
+    HFERR_NoBoard=$32

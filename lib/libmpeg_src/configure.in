@@ -1,0 +1,210 @@
+dnl Process this file with autoconf to produce a configure script.
+AC_INIT(wrapper.c)
+AC_CONFIG_HEADER(config.h)
+
+# Set the default compiler options and defines (these may be 
+# overridden by OS-specific code below)
+OPT=""
+DEFS=""
+
+# Get the OS, and check for a system-specific Makefile fragment to include
+AC_CANONICAL_HOST
+Makefile_OS="/dev/null"
+case "$host_os" in
+  irix*) if test -z "$CC"; then CC=cc; fi ;
+         extras="easympeg" ;
+         Makefile_OS="Makefile.irix" ;;
+  hpux*) if test -z "$CC"; then 
+           AC_CHECK_PROGS(CC, cc, none)
+           if test "$CC" = "cc"; then
+             OPT="-Aa "
+           else
+             CC=""
+           fi
+         fi
+         AC_DEFINE(_HPUX_SOURCE,1)
+esac
+AC_SUBST_FILE(Makefile_OS)
+
+dnl # Look for any OS-specific chunks of Makefile (these get appended
+dnl # to the end of Makefile).  Currently there is only Makefile.irix,
+dnl # to build easympeg.
+
+dnl AC_MSG_CHECKING(system-specific Makefile fragment)
+dnl if test -f Makefile.$host_os; then 
+dnl   Makefile_OS=Makefile.$host_os
+dnl   AC_MSG_RESULT($Makefile_OS)
+dnl else
+dnl   Makefile_OS="/dev/null"
+dnl   AC_MSG_RESULT(none)
+dnl fi
+dnl AC_SUBST_FILE(Makefile_OS)
+
+
+# Look for the C compiler (default gcc, except on SGI's and HP's), and make
+# sure it supports prototypes, void, and enums properly (can't trust
+# __STDC__).
+
+CFLAGS=$OPT
+AC_PROG_CC
+cc_flagged=`echo "$CC $CFLAGS $CPPFLAGS" |sed 's/ +/ /;s/ *$//'`
+AC_MSG_CHECKING(that \"$cc_flagged\" is fairly ANSI-compliant)
+AC_CACHE_VAL(mpeg_cv_cc_ansi, [
+AC_TRY_COMPILE(, [
+typedef enum { RED, GREEN, BLUE, YELLOW, BLACK } colour;
+void *foo (colour C);
+colour a = GREEN;
+
+foo (a);
+], mpeg_cv_cc_ansi=yes, mpeg_cv_cc_ansi=no)])
+CC_ANSI=$mpeg_cv_cc_ansi
+AC_MSG_RESULT($CC_ANSI)
+
+if test $CC_ANSI = no; then
+  AC_MSG_CHECKING(for alternative C compiler)
+  AC_CHECK_PROGS(ALTCC, acc, none)
+  if test $ALTCC = none; then
+    AC_MSG_ERROR(An ANSI-compliant C compiler is required to build the MPEG Library)
+  else
+    CC=$ALTCC
+  fi
+fi
+
+# Check for ancient gcc that doesn't set an error code (but still aborts)
+# when we run it with a bad optimization level -- this is a problem with 
+# gcc 1.36 on the NeXT.
+
+if test "$GCC" = "yes"; then
+  AC_MSG_CHECKING(how gcc handles bad optimization settings)
+  AC_CACHE_VAL(mpeg_cv_broken_gcc, [
+  touch conftest.c
+  $CC -O9 -c conftest.c 2> conftest.err
+  if test $? -eq 0 -a -s conftest.err; then
+    mpeg_cv_broken_gcc="broken"
+    opt_level="-O"
+  else
+    mpeg_cv_broken_gcc="fine"
+  fi
+  rm -rf conftest.*])
+
+  AC_MSG_RESULT($mpeg_cv_broken_gcc)
+  if test "$mpeg_cv_broken_gcc" = "broken"; then
+    opt_level="-O"
+  fi
+fi
+  
+# See how high an optimization level (up to -O6) the compiler will 
+# let us go.  This is skipped if $opt_level is already set (eg.
+# by the NeXT-detector code above) because the NeXT cc dies, but 
+# doesn't return an error code if run with an illegal -O option!
+
+if test -z "$opt_level" ; then
+  AC_MSG_CHECKING(highest available optimization level)
+  opt_level=""
+  AC_CACHE_VAL(mpeg_cv_opt_level, [
+  for opt in "-O" "-O2" "-O3" "-O4" "-O5" "-O6"; do
+    CFLAGS="$OPT$opt"
+    AC_TRY_COMPILE(,,mpeg_cv_opt_level=$opt,)
+  done
+  ])
+  opt_level=$mpeg_cv_opt_level
+  if [ test -z $opt_level ]; then
+    AC_MSG_ERROR(your compiler is broken, I give up)
+  fi
+
+  AC_MSG_RESULT($opt_level)
+fi
+OPT="$OPT$opt_level"
+AC_SUBST(OPT)
+AC_SUBST(DEFS)
+CFLAGS="$OPT $DEFS"      # this is the final, real assigment to CFLAGS!
+
+AC_PROG_RANLIB
+AC_CHECK_PROG(AR, ar, ar)
+
+# Check for "--disable-dither" and "--disable-jpeg" options: these 
+# options control which files will actually be compiled and included
+# in the library, so it has to be done at the `configure' step.
+# Also, enable/disable dither controls the ENABLE_DITHER #define.
+
+AC_ARG_ENABLE(dither,[
+  --enable-dither         include code for all dithering modes (default)
+  --disable-dither        only include code for full-colour conversion
+                          (useful when linking with ImageMagick)],
+dither=$enable_dither, dither=yes)
+if test $dither = yes; then
+  libsrc='$(DECODER_SRC) $(DITHER_SRC)'
+  libobj='$(DECODER_SRC:.c=.o) $(DITHER_SRC:.c=.o)'
+  AC_DEFINE(ENABLE_DITHER, 1)
+  AC_MSG_RESULT(including dithering code)
+else
+  libsrc='$(DECODER_SRC)'
+  libobj='$(DECODER_SRC:.c=.o)'
+  AC_DEFINE(ENABLE_DITHER, 0)
+  AC_MSG_RESULT(omitting dithering code)
+fi
+AC_SUBST(libsrc)
+AC_SUBST(libobj)
+
+AC_ARG_ENABLE(jpeg,[
+  --enable-jpeg           include DCT code from Indep. JPEG Group (default)
+  --disable-jpeg          don't include the DCT code (use this when linking
+                          with HDF and/or JPEG libraries)],
+jpeg=$enable_jpeg, jpeg=yes)
+if test $jpeg = yes; then
+  
+  jrevdct="jrevdct.c "
+  extras="$extras mpegtest"
+  Makefile_extras="Makefile.extras"
+  AC_MSG_RESULT(including JPEG DCT code)
+else
+  jrevdct=""
+  extras=""
+  Makefile_extras=""
+  AC_MSG_RESULT(omitting JPEG DCT code)
+fi
+AC_SUBST(jrevdct)
+AC_SUBST(extras)
+AC_SUBST_FILE(Makefile_extras)
+
+# Checks for header files.
+AC_HEADER_STDC
+AC_CHECK_HEADERS(sys/time.h unistd.h)
+
+dnl Checks for typedefs, structures, and compiler characteristics.
+AC_HEADER_TIME
+
+dnl Checks for library functions.
+AC_FUNC_VPRINTF
+AC_CHECK_FUNCS(strtod strtol lrand48)
+AC_CHECK_FUNC(getrusage,AC_DEFINE(HAVE_GETRUSAGE,1),AC_DEFINE(HAVE_GETRUSAGE,0))
+
+# Try to find out where CLK_TCK is defined if we don't have getrusage.
+# Need to do this because IRIX puts it in <time.h> and <limit.h>, AIX
+# puts it in <time.h>, SunOS doesn't have it, and I dunno about anyone
+# else.  Note: nothing is currently done with the $clk_tck_where
+# value; right now I only worry about the case where CLK_TCK isn't
+# found at all.
+
+if test "$ac_cv_func_getrusage" = "no"; then
+  AC_MSG_CHECKING(for where to find CLK_TCK symbol)
+  clk_tck_where=""
+  for hdr in "<time.h>" "<limits.h>" ; do
+    if test -z "$clk_tck_where"; then
+      AC_EGREP_CPP(yes,
+[#include $hdr
+ #ifdef CLK_TCK
+  yes
+ #endif
+], clk_tck_where=$hdr)
+    fi
+  done
+  if test -z "$clk_tck_where"; then
+    AC_MSG_WARN([CLK_TCK not found, assuming 60 ticks/sec])
+    AC_DEFINE(CLK_TCK,60)
+  else
+    AC_MSG_RESULT($clk_tck_where)
+  fi
+fi
+
+AC_OUTPUT(Makefile extras/Makefile)

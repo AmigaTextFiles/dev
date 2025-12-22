@@ -1,0 +1,10 @@
+OPT NATIVE
+{#include <stddef.h>}
+
+->TYPE PTRDIFF_T IS NATIVE {ptrdiff_t} PTR
+
+TYPE SIZE_T IS NATIVE {size_t} BIGVALUE
+
+->TYPE MAX_ALIGN_T IS NATIVE {max_align_t} BIGVALUE
+
+->TYPE NULLPTR_T IS NATIVE {nullptr_t} PTR

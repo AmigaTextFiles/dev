@@ -1,0 +1,5 @@
+IMPLEMENTATION MODULE Objects;
+
+BEGIN
+END Objects.
+

@@ -1,0 +1,21 @@
+def MODE_640 = $8000;
+def PLNCNTMSK = $7;
+def PLNCNTSHFT = 12;
+def PF2PRI = $40;
+def COLORON = $0200;
+def DBLPF = $400;
+def HOLDNMODIFY = $800;
+def INTERLACE = 4;
+
+def PFA_FINE_SCROLL = $f;
+def PFB_FINE_SCROLL_SHIFT = 4;
+def PF_FINE_SCROLL_MASK = $f;
+
+def DIW_HORIZ_POS = $7f;
+def DIW_VRTCL_POS = $1ff;
+def DIW_VRTCL_POS_SHIFT = 7;
+
+def DFTCH_MASK = $ff;
+
+def VPOSRLOF = $8000;
+

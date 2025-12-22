@@ -1,0 +1,193 @@
+/*
+
+               Compile a CED file using PCQ Pascal
+
+This is an ARexx script that uses PCQ Pascal version 1.2 to run
+through the entire compile/assemble/link/execute cycle for the
+file in the current view of CygnusEd Professional.  You can
+install this script as one of the DOS/Arexx commands, then be able
+to run the compiler et al with one key.  The actual steps this
+script takes are:
+
+        1. Save the program if any changes have been made.
+        2. Run the compiler on it
+        3. Run the peephole optimizer if the user wants to.
+        4. Run the assembler on it
+        5. If there were no problems, and the user wants to,
+           link the program.
+              5a. If there were no problems in the link step, and
+                  again if the user wants to, run the program.
+
+All intermediate files are created in T:.  The output, which will
+either be an executable program, an object file, or nothing, will
+be in the same directory as the source file.
+
+You will need to supply the correct pathnames for Pascal, Peep,
+A68k, Blink and PCQ.lib in the body of this script.  If the
+commands are on the command path, they won't have to be changed,
+but you still should supply a complete pathname for PCQ.lib so
+you can compile programs residing in any directory.
+
+If a program compiles correctly, it _should_ run through the other
+programs without a problem.  Based on that assumption, I don't
+spend much effort checking for errors in the optimize, assemble or
+link steps.
+
+I heartily recommend that if you plan to use this script, you
+modify it to meet your needs exactly.  It will be time well spent.
+
+*/
+
+
+options results
+
+/* Since I run this from inside CED, this isn't really necessary */
+
+address 'rexx_ced'
+
+/* Get the current file name, without the path information */
+
+status 21
+filename = result
+
+if (filename = "") | (pos('.p',filename) = 0) then do
+    'okay1 Expecting a ".p" file'
+    exit
+end
+
+/* Get # changes to current view, save if > 0 */
+
+status 18
+if result > 0 then 'save'
+
+filename = delstr(filename,lastpos('.p',filename),2)
+
+/* We create a little batch file to actually run the compiler  */
+
+if ~open(batchfile, 't:CompilePCQ.batch', 'W') then do
+    'okay1 Could not create command file'
+    exit
+end
+
+/* In case the program includes any files using relative file  */
+/* specifications, we need to set the current directory to the */
+/* same as the source code.                                    */
+
+status 20
+writeln(batchfile, 'cd' result)
+
+/* Get filename with complete path */
+
+status 19
+inputfile = result
+
+outputfile = 't:' || filename || '.asm'
+
+/* Make sure to use the appropriate path name for the compiler */
+
+writeln(batchfile, 'Pascal >T:CompilePCQ.out -q' inputfile outputfile)
+close(batchfile)
+
+
+/* Run the script, then lose it */
+
+address command 'execute t:CompilePCQ.batch'
+address command 'delete >nil: t:CompilePCQ.batch'
+
+/* Report any errors from PCQ */
+
+if open(logfile, 't:CompilePCQ.out', 'R') then do
+    do until eof(logfile)
+        ErrorString = readln(logfile)
+
+        /* This first test is just a reminder, in case you want to */
+        /* process all errors.  "Abort" would never come first.    */
+
+        if ErrorString = "Compilation Aborted" then do
+            address command 'delete >nil:' outputfile
+            'okay1 Compilation Aborted'
+            exit
+        end
+
+        if ErrorString ~= "" then do
+            parse var errorstring '"' errorfilename '" At' LineNo,
+                                       ',' ColumnNo ':' ErrorText
+            if errorfilename = inputfile then do
+                'jumpto' LineNo 1
+                do for ColumnNo /* this properly handles tabs */
+                    'right'
+                end
+                'okay1 Error:' || ErrorText
+            end; else 'okay1 Error in' errorfilename || '0A'X || ErrorText
+            close(logfile)
+            address command 'delete >nil: t:CompilePCQ.out'
+            exit
+        end
+    end
+    close(logfile)
+    address command 'delete >nil: t:CompilePCQ.out'
+end; else exit
+
+inputfile = outputfile
+
+'okay2 Compiled correctly' || '0A'X || '    Run Peep?'
+if result then do
+    outputfile = 't:' || filename || '.s'
+
+    /* Be sure to use the appropriate path for Peep */
+
+    address command 'Peep >nil:' inputfile outputfile
+
+    address command 'delete >nil:' inputfile
+
+    inputfile = outputfile
+end
+
+outputfile = 't:' || filename || '.o'
+
+/* Be sure to use the appropriate path for A68k */
+
+address command 'A68k -q' inputfile outputfile
+
+address command 'delete >nil:' inputfile
+
+inputfile = outputfile
+
+/* Get the file name, complete with path info */
+
+status 19
+outputfile = delstr(result,lastpos('.p',result),2)
+
+if exists(inputfile) then do
+    'okay2 Assembled Correctly' || '0A'X || '     Run Blink?'
+    if result then do
+
+        /* Be sure to supply the correct paths */
+        /* for Blink and PCQ.lib               */
+
+        address command 'Blink >T:CompilePCQ.out',
+                 inputfile 'to' outputfile 'library PCQ.lib'
+        if open(logfile, 'T:CompilePCQ.out', 'R') then do
+            do until eof(logfile)
+                ErrorString = readln(logfile)
+                if upper(left(ErrorString,5)) = "ERROR" then do
+                    'okay1 Error linking' outputfile || '0A'X ||,
+                           ErrorString
+                    address command 'delete >nil: t:CompilePCQ.out'
+                    exit
+                end
+            end
+            address command 'delete >nil: t:CompilePCQ.out'
+            'okay2 Linked without errors.  Execute?'
+            if result then do
+                'getstring "' || outputfile '" "Enter Command String"'
+                if result ~= "" then do
+                    address command result
+                end
+            end
+        end; else 'okay1 Error executing linker'
+    end; else address command 'copy' inputfile outputfile || '.o'
+
+    address command 'delete >nil:' inputfile
+end; else 'okay1 Error assembling'
+

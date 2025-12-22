@@ -1,0 +1,405 @@
+<HTML>
+<HEAD>
+<title>Notes on MUI Application Class</title>
+<!-- Changed by: Steven Vermeulen, 23-Jul-1996 -->
+<link rev=made href=mailto:svermeulen@ragnarok.mtroyal.ab.ca>
+</HEAD>
+<BODY>
+<pre>
+From: Jason S Birch <jasonb@cs.uwa.edu.au>
+Message-Id: <199603281700.BAA07585@decadence>
+Subject: Re: PushMethod acceleration ? :)
+To: mui@sunsite.Informatik.RWTH-Aachen.DE
+Date: Fri, 29 Mar 1996 01:00:50 +0800 (WST)
+In-Reply-To: <2583.6661T720T2927@zool.unizh.ch> from "Michael Neuweiler" at Mar 28, 96 12:05:57 pm
+X-Mailer: ELM [version 2.4 PL25]
+Mime-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Resent-Message-Id: <"RdPoN2.0.Qp2._OiMn"@sunsite>
+Resent-From: mui@sunsite.Informatik.RWTH-Aachen.DE
+Reply-To: mui@sunsite.Informatik.RWTH-Aachen.DE
+X-Mailing-List: <mui@sunsite.informatik.rwth-aachen.de> archive/latest/825
+X-Loop: mui@sunsite.informatik.rwth-aachen.de
+Precedence: list
+Resent-Sender: mui-request@sunsite.Informatik.RWTH-Aachen.DE
+X-Lines: 128
+Status: RO
+Content-Type: text/plain; charset="US-ASCII"
+Content-Length: 5758
+
+> If I initiate multiple PushMethod's in a short time (so there's not enough
+> time for MUI to process them) only the first two or three Methods are handled
+> correctly. The rest is simply dropped. To avoid this problem is use two
+
+Yes, this has come up before. MUI uses a small internal array to store
+PushMethods in. A list would be much nicer, Stefan. ;-)
+
+> 2) define a global flag (let's call it "lock_AddEntry"
+>    before I do a PushMethod in the subtask I make lock_AddEntry = TRUE;
+>    The method itself has to make lock_AddEntry = FALSE when it's finished
+>    After the PushMethod in the subtask I do a loop like this:
+>    while(lock_AddEntry)
+>      Delay(5);
+
+This is analagous to how my system works, although I'm using
+semaphores.
+
+Basically I have a rendering task that does a heap of computation and
+renders into an offscreen rastport. When it's finished a frame, it
+sets a flag (Drawn) to FALSE, releases a semaphore, and does a PushMethod.
+
+The main program, waiting patiently in its event loop, at some point
+will be awakened by the PushMethod, which triggers the custom class to
+do a MUI_Redraw() internally, which in turn obtains the semaphore,
+copies the offscreen bitmap to the window, sets Drawn to TRUE, and
+releases the semaphore. Then it goes back to sleep.
+
+The rendering subtask, in the meantime, has done an ObtainSemaphore.
+When it gets it, it checks to see if Drawn is TRUE. If so, it can
+continue because it means the main task successfully copied the bitmap.
+Otherwise it releases it, does a little Delay, and tries again, to try
+and give the main task time to snatch the semaphore and do its work.
+
+So, the semaphore is, in effect, protecting the offscreen rastport
+(and the Drawn flag) - neither task can access or change it without
+obtaining the semaphore first, and the flag is used to tell the draw
+task whether the main task has had a chance to do it's job or not.
+Most of the time (ie. almost always) the main task does, in fact,
+manage to grab the semaphore immediately so the draw task doesn't
+manage to steal it back again too quickly. (If I had any other work
+that could be done, I would do it after giving up the semaphore to
+give the main task even more time.) If the main task finishes quickly,
+then when the draw task tries to obtain the semaphore it succeeds
+immediately, so there's no penalty.
+
+In your case, I'd do something like:
+
+struct SignalSemaphore lock_AddEntry_Sem;
+...
+InitSemaphore(&lock_AddEntry_Sem);
+...
+while(something){
+...
+   ObtainSemaphore(lock_AddEntry_Sem);     // Grab the semaphore
+   while (lock_AddEntry){                  // Main task completed its job?
+      ReleaseSemaphore(lock_AddEntry_Sem); // No, release semaphore
+      Delay(1);                            // Wait a bit
+      ObtainSemaphore(lock_AddEntry_Sem);  // Try again
+   }
+...
+   lock_AddEntry = TRUE;                   // Set flag
+   ReleaseSemaphore(lock_AddEntry_Sem);    // Give CPU back to main task
+...
+}
+
+You can play with the Delay() value a bit if you like. The big
+advantage of this technique over yours is that you may never actually
+need to Delay() - if the other task has obtained the semaphore quickly
+enough, your ObtainSemaphore() will block and return immediately the
+other task releases the semaphore, lock_AddEntry will be FALSE, and
+you won't be waiting more than absolutely necessary. The only reason
+for the delay is if the other task hasn't grabbed the semaphore soon
+enough, not to block you until the other task has finished. The
+ObtainSemaphore() takes care of that.
+
+(A while ago I played around with trying to use two semaphores to
+indicate when the job was done so the Delay() wasn't needed, but you
+have to be careful about deadlocks.)
+
+> I know I should use MsgPorts instead the loop but I suppose it would make
+> things even slower.
+
+Yes, MsgPorts are slower. Semaphores are *very* cheap to use under
+AmigaOS.
+
+> The problem is that even if the MUI-loop of the main task
+> is idle it takes a long time until the method of the class is initiated.
+> So filling up a filelist this way takes a long time (in my opinion).
+
+If the main task is waiting on a signal (as it will be if it's not
+busy) and your task is running at a lower priority, then the
+ReleaseSemaphore() will actually cause a task switch and give the CPU to
+the main task right away, enabling it to easily grab the semaphore.
+
+> Does anybody know a better solution - hopefully a faster one - than mine ?
+
+Hopefully my suggestion will do what you want.
+
+> Is there a way to enlarge PushMethod's "stack" ?
+
+Yes - badger Stefan. ;-) He has said in the past that PushMethod
+shouldn't be too heavily overloaded, however, for inter-process
+communication - he recommends using private messageports for more intensive
+stuff. In my case I just use it as a signalling mechanism to wake up
+the main task and get it to send a MUI_Redraw to the custom class, and
+I only ever send one at once (although there are 30-60 of them per
+second). Never had any problems with it in those circumstances.
+
+> Is there no support from MUI for the subtask to check if the PushMethods have
+> been completed ?
+
+No. You get a TRUE if the PushMethod was successfully pushed, but in
+general you wouldn't want to be hanging around waiting for a
+(potentially very long) chain of events resulting from your PushMethod
+to be completed.
+
+> Michael
+>                                     dolphin@zool.unizh.ch (Michael Neuweiler)
+
+Hope this helps. Cheers,
+Jason.
+
+
+From: "Stefan Stuntz" <stuntz@informatik.tu-muenchen.de>
+Date:   Fri, 22 Mar 1996 14:16:34 +0100
+X-Mailer: IntuiNews 1.3b Beta 7 (2.2.96)
+Subject: Re: Checked menu items and related windows (The palette problem)
+Message-Id: <81320564@magic.informatik.tu-muenchen.de>
+Organization: Home of MUI
+Resent-Message-Id: <"qfjr42.0.-w6.6ZgKn"@sunsite>
+Resent-From: mui@sunsite.Informatik.RWTH-Aachen.DE
+Reply-To: mui@sunsite.Informatik.RWTH-Aachen.DE
+X-Mailing-List: <mui@sunsite.informatik.rwth-aachen.de> archive/latest/734
+X-Loop: mui@sunsite.informatik.rwth-aachen.de
+Precedence: list
+Resent-Sender: mui-request@sunsite.Informatik.RWTH-Aachen.DE
+Content-Type: text
+Content-Length: 409
+X-Lines: 13
+Status: RO
+
+John HLB Tyler wrote in article <21199653.Amiga@155.212.1.2>:
+
+> Imagine if you will a menu of checkmarked items that when
+> checked open certain windows. When unchecked they close the
+> respective window and DISPOSE the window object. Let's call
+> these window objects "palettes" although they are not palette
+> class objects.
+
+This sounds like a case for MUIM_Application_PushMethod.
+
+--
+Greetings, Stefan
+</pre>
+
+
+<pre>
+From: "Stefan Stuntz" <stuntz@informatik.tu-muenchen.de>
+Date:   Sun, 07 Apr 1996 13:20:32 +0100
+X-Mailer: IntuiNews 1.3b Beta 7 (2.2.96)
+Subject: Re: MUI-REXX
+Message-Id: <81320958@magic.informatik.tu-muenchen.de>
+Organization: Home of MUI
+Resent-Message-Id: <"6-Xw9.0.uS4.mKwPn"@sunsite>
+Resent-From: mui@sunsite.Informatik.RWTH-Aachen.DE
+Reply-To: mui@sunsite.Informatik.RWTH-Aachen.DE
+X-Mailing-List: <mui@sunsite.informatik.rwth-aachen.de> archive/latest/958
+X-Loop: mui@sunsite.informatik.rwth-aachen.de
+Precedence: list
+Resent-Sender: mui-request@sunsite.Informatik.RWTH-Aachen.DE
+Content-Type: text
+Content-Length: 188
+X-Lines: 10
+Status: RO
+
+Marcin Orlowski wrote in article <yam6669.60014.137192968@193.59.3.15>:
+
+>   Is there any legal way to override default ARexx command with my own
+>   routines.
+
+No.
+
+--
+Greetings, Stefan
+
+Subject: RE: MUI-Application
+Message-Id: <960517054738_101526.3324_IHK47-1@CompuServe.COM>
+Resent-Message-Id: <"ztdIc2.0.jM6.NF1dn"@sunsite>
+Resent-From: mui@sunsite.Informatik.RWTH-Aachen.DE
+Reply-To: mui@sunsite.Informatik.RWTH-Aachen.DE
+X-Mailing-List: <mui@sunsite.informatik.rwth-aachen.de> archive/latest/1331
+X-Loop: mui@sunsite.informatik.rwth-aachen.de
+Precedence: list
+Resent-Sender: mui-request@sunsite.Informatik.RWTH-Aachen.DE
+Content-Type: text
+Content-Length: 1255
+X-Lines: 44
+Status: RO
+
+> 
+> [ Citation of --- ]
+> >
+> > Dnia 15-Maj-96   , "Olaf Peters" napisa=EE:
+> >
+> > > > who can help me with the new MUI-about window? I don`t know how t=
+> o call.
+> > >
+> > > Quite simple:
+> > >
+> > >	DoMethod(app, MUIM_ApplicationAboutMUI) ;
+> > >
+> > > (Hope this is correct C - online translation from M2 :-)
+> >
+> >    DoMethod(app, MUIM_ApplicationAboutMUI, NULL);
+> >
+> >  would be better as DoMethod requires 3 args so most of compilers wil=
+> l report error.
+> 
+> Hmp, since when?
+> 
+> Perhaps I do have corrupt system prototypes, but I remember reading
+> something like
+>    ULONG DoMethod(Object *, ULONG ID, ...);
+> 
+> And btw, DoMethod(list, MUIM_List_Clear) works just fine and compiles
+> without error on three different compilers (with prototype checking).
+
+DoMethod(app, MUIM_Application_AboutMUI, window); requires 3 args => the
+third arg is a window object to which the aboutwindow will be centered, or
+NULL! This is explained in Autodoc of Application Object.
+
+IMHO MUIM_Application_AboutMUI makes only a sense in a Notification like
+this:
+
+	    DoMethod(My_menu-obj, MUIM_Notify, MUIA_Pressed, FALSE,
+		     app, 2, MUIM_Application_AboutMUI, window);
+
+or in a private custom class.
+
+
+Willi Burkhardt 		101526.3324@compuserve.com
+
+
+Subject: Re: About MUI
+To: mui@sunsite.Informatik.RWTH-Aachen.DE
+In-Reply-To: <xqN4mMD362aUz1@lcs.ndh.com>
+Resent-Message-Id: <"jwB_Q3.0.t-2.8FXgn"@sunsite>
+Resent-From: mui@sunsite.Informatik.RWTH-Aachen.DE
+X-Mailing-List: <mui@sunsite.informatik.rwth-aachen.de> archive/latest/1414
+X-Loop: mui@sunsite.informatik.rwth-aachen.de
+Precedence: list
+Resent-Sender: mui-request@sunsite.Informatik.RWTH-Aachen.DE
+X-Lines: 48
+Status: RO
+Content-Type: text/plain; charset="ISO-8859-1"
+Content-Length: 1199
+
+Hi, T.Schuerger@lcs.ndh.com!
+
+You wrote with the subject "About MUI":
+
+> Is there a way to show information about MUI by calling a method or
+> something? Some programs have an "About" and an "About MUI" menu item. I'd
+> like to include "About MUI" as well in my application.
+
+Try something like this:
+
+------- snip! -------
+LONG AboutMUI_H(struct Hook *hook, struct Object *Obj, ULONG *FirstParm)
+{
+#ifndef MUIABOUTWORKS
+  DisplayBeep(NULL);
+  MUI_Request(ObjApp->App, ObjApp->Window, 0,
+    APPNAME": MUI information", "*_Ok",
+    "\033cThis function could not be implemented\n" \
+    "because of corrupt developer files.\n" \
+    "\n" \
+    "This is a MUI application.\n" \
+    "MUI is copyrighted by Stefan Stuntz."
+    );
+#else
+  if(!hook->h_Data)
+  {
+    hook->h_Data = AboutmuiObject,
+        MUIA_Window_RefWindow, ObjApp->Window,
+        MUIA_Aboutmui_Application, ObjApp->App,
+    End;
+  }
+  if(hook->h_Data)
+    set(hook->h_Data, MUIA_Window_Open, TRUE);
+  else
+    Disperr(MSG_ERR_NOABOUTMUI);
+#endif
+  return(0);
+}
+------- snap! -------
+
+hook->h_Data stores a pointer to the AboutMUI object, in case of
+somebody trying to call the hook twice.
+
+Ciao,
+      /Johnny/
+
+From: "Stefan Stuntz" <stuntz@informatik.tu-muenchen.de>
+Date: Thu, 11 Jul 1996 15:37:01 +0100
+X-Mailer: IntuiNews 1.4 (28.6.96)
+Subject: Re: Suggestion for next release
+Message-Id: <81323329@magic.informatik.tu-muenchen.de>
+Organization: Home of MUI
+Resent-Message-ID: <"oa8hE1.0.eJ5.RHGvn"@susi>
+Resent-From: mui@sunsite.Informatik.RWTH-Aachen.de
+Reply-To: mui@sunsite.Informatik.RWTH-Aachen.de
+X-Mailing-List: <mui@sunsite.informatik.rwth-aachen.de> archive/latest/1806
+X-Loop: mui@sunsite.informatik.rwth-aachen.de
+Precedence: list
+Resent-Sender: mui-request@sunsite.Informatik.RWTH-Aachen.de
+Content-Type: text
+Content-Length: 391
+X-Lines: 13
+Status: RO
+
+
+> I need to add AREXX commands dynamically because I have tool plug-ins f=
+> or
+> my modeler and the program don't know anything at creation time about
+> the plug-in arexx commands.
+
+MUIs ARexx interface still sucks a little and is probably not suited for
+big and complicated projects. In your case, you should better disables
+MUIs ARexx handling and do it yourself.
+
+--
+Greetings, Stefan
+
+From: jasonb@cs.uwa.edu.au
+Message-Id: <199607131537.XAA26110@decadence>
+Subject: Re: ARexx deferred message handling
+To: mui@Susi.Informatik.RWTH-Aachen.de
+Date: Sat, 13 Jul 1996 23:37:35 +0800 (WST)
+In-Reply-To: <9607120712.AA00802@panam.wimsey.com> from "Chris Sterne" at Jul 11, 96 11:12:03 pm
+X-Mailer: ELM [version 2.4 PL25]
+MIME-Version: 1.0
+Content-Transfer-Encoding: 7bit
+Resent-Message-ID: <"7OSWf.0.Gs1.JCyvn"@susi>
+Resent-From: mui@sunsite.Informatik.RWTH-Aachen.de
+Reply-To: mui@sunsite.Informatik.RWTH-Aachen.de
+X-Mailing-List: <mui@sunsite.informatik.rwth-aachen.de> archive/latest/1892
+X-Loop: mui@sunsite.informatik.rwth-aachen.de
+Precedence: list
+Resent-Sender: mui-request@sunsite.Informatik.RWTH-Aachen.de
+X-Lines: 23
+Status: RO
+Content-Type: text/plain; charset="US-ASCII"
+Content-Length: 690
+
+> This is easy to do when one has direct access to the ARexx message port
+> and its messages, but MUI appears to prevents such free access and
+> control.
+
+If you set MUIA_Application_UseRexx to FALSE, you should be able to
+set up your own ARexx message port and do anything you want with it.
+ 
+> Any suggestions would be most welcome.
+
+Hope this helps.
+ 
+> Thank you,
+> Chris Sterne.
+
+Cheers,
+Jason.
+
+-- 
+Jason S Birch                        ,-_|\ email: jasonb@cs.uwa.edu.au
+
+</pre>

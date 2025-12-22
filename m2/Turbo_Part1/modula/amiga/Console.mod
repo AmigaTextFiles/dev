@@ -1,0 +1,3 @@
+IMPLEMENTATION MODULE Console ;
+END Console.
+

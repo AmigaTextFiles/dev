@@ -1,0 +1,157 @@
+/* Patches AMOSPro to load it's envoironment from 
+   T:AMOSPro_Interpreter_Config, then if that fails,
+   S:AMOSPro_Interpreter_Config
+*/
+
+/* V1.1 changes 
+
+ * Filename may be on command line 
+
+ * Exception Handlers now used for errors
+
+*/
+
+
+/* V1.2 changes
+
+ * Now recognises & patches AMOS Pro V2.00 & V1.12
+
+ * Rejects other versions
+
+ * Re-written error messages
+
+*/
+
+/* V1.3 Changes
+
+ * Addresses patched in AMOSPro V.2 were wrong.
+
+ * Memory allocation bug fixed.
+
+*/
+
+
+MODULE 'ReqTools','libraries/reqtools','utility/tagitem','Dos/Dos'
+
+ENUM	ER_OPEN=20,ER_READ,ER_WRITE,FR_LIB,FR_ALLOC,ER_VERSION
+
+CONST	RW_ERR=-1
+
+RAISE ER_OPEN IF Open()=NIL
+RAISE ER_READ IF Read()=RW_ERR
+RAISE ER_WRITE IF Write()=RW_ERR
+RAISE ER_OPEN IF FileLength()=RW_ERR
+
+DEF quitstring[5]:STRING
+
+PROC main() HANDLE
+
+  DEF file=0
+  DEF poss,post
+  DEF filename[256]:STRING
+
+  quitstring := 'Quit'
+  getTheArg(filename)
+
+  IF FileLength(filename)=22624
+    /* AMOSPro V2.0 */
+      poss := $518E
+      post := $51AB
+  ELSE
+    IF FileLength(filename)=115972
+      /* AMOSPro V1.12 */
+      poss := $fd0
+      post := $fed
+    ELSE
+      Raise(ER_VERSION)
+    ENDIF
+  ENDIF
+
+  file := Open(filename,MODE_OLDFILE)
+  
+  Seek(file,post,-1)
+  Write(file,'T:',1)
+  Seek(file,poss,-1)
+  Write(file,'S:',1)
+
+  Close(file)
+  WriteF('Patching completed OK')
+
+EXCEPT
+
+SELECT exception
+
+  CASE ER_OPEN;      request('Error: Could Not Open AMOSPro File',quitstring,NIL)
+  CASE ER_READ;      request('Error: Could Not Read from AMOSPro File',quitstring,NIL)
+  CASE ER_WRITE;     request('Error: Could Not Write to AMOSPro File',quitstring,NIL)
+  CASE ER_VERSION;   request('Error: Not V1.12 or V2.00 of AMOSPro',quitstring,NIL)
+  DEFAULT;	     request('Error: An I/O Error has occured',quitstring,NIL)
+
+ENDSELECT
+
+
+
+ENDPROC
+
+
+
+PROC filereq(dirbuf) HANDLE
+
+  RAISE FR_LIB IF OpenLibrary()=NIL
+  RAISE FR_ALLOC IF RtAllocRequestA()=NIL
+
+  CONST FILEREQ=0,REQINFO=1
+
+  DEF filebuf[120]:STRING
+  DEF req:PTR TO rtfilerequester
+  DEF tempstr[1]:STRING
+
+  reqtoolsbase:=OpenLibrary('reqtools.library',37)
+  req:=RtAllocRequestA(FILEREQ,0)
+  filebuf := 'AMOSPro'
+  RtChangeReqAttrA(req,[RTFI_DIR,'AMOSPro_System:',TAG_DONE])
+  IF RtFileRequestA(req,filebuf,'Select your AMOSPro file',0)=FALSE THEN CleanUp(5)
+
+  StrCopy(dirbuf,req.dir,ALL)
+  RtFreeRequest(req)
+
+  RightStr(tempstr,dirbuf,1)
+  IF StrCmp(tempstr,':',1)=FALSE THEN StrAdd(dirbuf,'/',ALL)
+  StrAdd(dirbuf,filebuf,ALL)
+
+  CloseLibrary(reqtoolsbase)
+
+EXCEPT
+
+SELECT exception
+  CASE FR_LIB;     request('Error: Could Not Open Reqtools Library',quitstring,NIL)
+  CASE FR_ALLOC;   request('Error: Could Not Open File Requester',quitstring,NIL)	
+  DEFAULT;	   Raise(exception)
+ENDSELECT
+  
+
+ENDPROC 
+
+
+
+
+
+PROC getTheArg(filename)
+
+IF arg [] > 0
+  IF (arg[0] = '"') AND (arg[StrLen(arg)-1] = '"')
+    
+    MidStr(filename,arg,1,StrLen(arg)-2)
+  ELSE
+    StrCopy(filename,arg,ALL)
+  ENDIF
+ELSE
+  filereq(filename)
+ENDIF
+
+IF filename[0]=0 THEN CleanUp(20)
+	
+ENDPROC
+
+PROC request(body,gadgets,args)
+ENDPROC EasyRequestArgs(0,[20,0,'Patch AMOSPro V1.3',body,gadgets],0,args)

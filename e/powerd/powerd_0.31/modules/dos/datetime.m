@@ -1,0 +1,21 @@
+MODULE  'dos/dos'
+
+OBJECT DateTime
+  Stamp:DateStamp,
+  Format:UBYTE,
+  Flags:UBYTE,
+  StrDay:PTR TO UBYTE,
+  StrDate:PTR TO UBYTE,
+  StrTime:PTR TO UBYTE
+
+CONST LEN_DATSTRING=16,
+    DTB_SUBST=0,
+    DTF_SUBST=1,
+    DTB_FUTURE=1,
+    DTF_FUTURE=2,
+    FORMAT_DOS=0,
+    FORMAT_INT=1,
+    FORMAT_USA=2,
+    FORMAT_CDN=3,
+    FORMAT_MAX=3,
+    FORMAT_DEF=4

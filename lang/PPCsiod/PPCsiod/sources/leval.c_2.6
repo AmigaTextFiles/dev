@@ -1,0 +1,366 @@
+/* Scheme In One Define.
+ 
+The garbage collector, the name and other parts of this program are
+
+ *                     COPYRIGHT (c) 1989 BY                              *
+ *      PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+
+Conversion  to  full scheme standard, characters, vectors, ports, complex &
+rational numbers, and other major enhancments by
+
+ *      Scaglione Ermanno, v. Pirinoli 16 IMPERIA P.M. 18100 ITALY        * 
+
+Permission  to use, copy, modify, distribute and sell this software and its
+documentation  for  any purpose and without fee is hereby granted, provided
+that  the  above  copyright  notice appear in all copies and that both that
+copyright   notice   and   this  permission  notice  appear  in  supporting
+documentation,  and that the name of Paradigm Associates Inc not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.
+
+PARADIGM  DISCLAIMS  ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL  IMPLIED  WARRANTIES  OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+PARADIGM  BE  LIABLE  FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <math.h>
+
+#include "siod.h"
+
+
+LISP lleval(LISP x,LISP env)
+{if(EQ(env,sym_user_environment)) env = NIL;
+ else if(NENVP(env)) env = sym_initial_environment;
+ return(leval(x,env));}
+
+LISP leval(LISP x,LISP env)
+{LISP tmp,arg1,arg2,arg3;
+ loop:
+ switch TYPE(x)
+   {case tc_symbol:
+      tmp = envlookup(x,env);
+      if NULLP(tmp)
+        {if(EQ(VCELL(x),unbound_marker)) 
+           {cur_exp = x;
+            cur_env = env;
+            err("variable not bound in current environment",x,ERR_GEN);}
+         tmp = VCELL(x);}
+      else
+         tmp = cdr(tmp);
+      if(NTYPEP(tmp,tc_macro))
+        return(tmp);
+      x = apply_proc(VCELL(tmp),cons(x,NIL),env);
+      goto loop;
+    case tc_cons:
+      tmp = CAR(x);
+      switch TYPE(tmp)
+	{case tc_symbol:
+	   tmp = envlookup(tmp,env);
+	   if NULLP(tmp)
+             {if(EQ(VCELL(CAR(x)),unbound_marker)) 
+                {cur_exp = x;
+                 cur_env = env;
+                 err("symbol not bound in current environment",CAR(x),ERR_GEN);}
+              tmp = VCELL(CAR(x));
+              break;}
+	   tmp = cdr(tmp);
+	   break;
+	 case tc_cons:
+	   tmp = leval(tmp,env);
+	   break;}
+      switch TYPE(tmp)
+	{case tc_macro:
+           x = apply_proc(VCELL(tmp),cons(x,NIL),env);
+           goto loop;
+         case tc_subr_0:
+           cur_exp = x;
+           cur_env = env;
+           if(NNULLP(CDR(x))) 
+              err("procedure needs 0 parameters",x,ERR_GEN);
+	   return(SUBRF(tmp)());
+	 case tc_subr_1:
+           arg1 = CDR(x);
+           if(CONSP(arg1))
+             {if(NNULLP(CDR(arg1))) 
+                {cur_exp = x;
+                 cur_env = env;
+                 err("procedure needs 1 parameters",x,ERR_GEN);}
+              arg1=leval(CAR(arg1),env);}
+           cur_exp = x;
+           cur_env = env;
+	   return(SUBR1F(tmp)(arg1));
+	 case tc_subr_2:
+           arg1 = CDR(x);
+           if(CONSP(arg1))
+             {arg2 = CDR(arg1);
+              if(CONSP(arg2))
+                {if(NNULLP(CDR(arg2))) 
+                   {cur_exp = x;
+                    cur_env = env;
+                    err("procedure needs 2 parameters",x,ERR_GEN);}
+                 arg2=leval(CAR(arg2),env);}
+              arg1=leval(CAR(arg1),env);}
+           cur_exp = x;
+           cur_env = env;
+	   return(SUBR2F(tmp)(arg1,arg2));
+	 case tc_subr_3:
+           arg1 = CDR(x);
+           if(CONSP(arg1))
+             {arg2 = CDR(arg1);
+              if(CONSP(arg2))
+                {arg3 = CDR(arg2);
+                 if(CONSP(arg3))
+                   {if(NNULLP(CDR(arg3))) 
+                      {cur_exp = x;
+                       cur_env = env;
+                       err("procedure needs 3 parameters",x,ERR_GEN);}
+                    arg3=leval(CAR(arg3),env);}
+                 arg2=leval(CAR(arg2),env);}
+              arg1=leval(CAR(arg1),env);}
+           cur_exp = x;
+           cur_env = env;
+	   return(SUBR3F(tmp)(arg1,arg2,arg3));
+	 case tc_lsubr:
+           cur_exp = x;
+           cur_env = env;
+           arg1 = NULLP(CDR(x)) ? NIL : leval_args(CDR(x),env);
+           cur_exp = x;
+           cur_env = env;
+	   return(SUBR1F(tmp)(arg1));
+	 case tc_fsubr:
+           cur_exp = x;
+           cur_env = env;
+	   return(SUBR2F(tmp)(CDR(x),env));
+	 case tc_msubr:
+           cur_exp = x;
+           cur_env = env;
+	   if NULLP(MSUBRF(tmp)(&x,&env)) return(x);
+	   goto loop;
+	 case tc_closure:
+           cur_exp = x;
+           cur_env = env;
+	   env = envcons(leval_args_env(CDR(x),car(CODE(tmp)),env),
+			 DEFENV(tmp));
+           x = cdr(CODE(tmp));
+	   goto loop;
+	 case tc_fluidclosure:
+	  {LISP fenv;
+           env = DEFENV(tmp);
+           fenv = sym_fluid_environment;
+           sym_fluid_environment = envcons(NIL,sym_fluid_environment);
+           cur_exp = x;
+           cur_env = env;
+           fluid_extend_env(leval_args_env(CDR(x),
+                            car(CODE(tmp)),env));
+           x = leval(cdr(CODE(tmp)),env);
+           sym_fluid_environment = fenv;
+	   goto loop;
+	 case tc_rec:
+           cur_exp = x;
+           cur_env = env;
+	   env = envcons(leval_args_env(cons(tmp,CDR(x)),car(CODE(tmp)),env),
+			 DEFENV(tmp));
+	   x = cdr(CODE(tmp));
+	   goto loop;}
+	 default:
+           cur_exp = x;
+           cur_env = env;
+	   err("attempt to call a non procedural object",tmp,ERR_GEN);}
+    default:
+      return(x);}}
+
+LISP procp(LISP x)
+{
+switch TYPE(x)
+ {case tc_subr_0:
+  case tc_subr_1:
+  case tc_subr_2:
+  case tc_subr_3:
+  case tc_lsubr:
+  case tc_fsubr:
+  case tc_msubr:
+  case tc_closure:
+  case tc_fluidclosure:
+  case tc_rec:
+  return(truth);
+  default:
+  return(NIL);}}
+
+LISP procedurep(LISP x)
+{
+switch TYPE(x)
+ {case tc_subr_0:
+  case tc_subr_1:
+  case tc_subr_2:
+  case tc_subr_3:
+  case tc_lsubr:
+  case tc_fsubr:
+  case tc_msubr:
+  return(truth);
+  default:
+  return(NIL);}}
+
+LISP closurep(LISP x)
+{
+switch TYPE(x)
+ {case tc_closure:
+  case tc_fluidclosure:
+  case tc_rec:
+  return(truth);
+  default:
+  return(NIL);}}
+
+LISP leval_applyif(LISP args,LISP env)
+{LISP tmp,proc;
+ tmp = leval(car(args),env);
+ proc = leval(car(cdr(args)),env);
+ if(!procp(proc))
+   err("apply-if",proc,ERR_SECOND | ERR_NPRO);
+ if NNULLP(tmp)
+    return(apply_proc(proc,cons(tmp,NIL),env)); 
+ else 
+    return(car(cdr(cdr(args))));}
+
+LISP leval_apply(LISP form,LISP env)
+{LISP proc,args;
+proc = leval(car(form),env);
+args = leval(car(cdr(form)),env);
+if(!procp(proc))
+  err("apply",proc,ERR_FIRST | ERR_NPRO);
+if (NNULLP(args) && NCONSP(args))
+  err("apply",args,ERR_SECOND | ERR_NPAI);
+return(apply_proc(proc,args,env));}
+
+LISP apply_proc(LISP proc,LISP args,LISP env)
+{LISP arg1,arg2,arg3;
+switch TYPE(proc)
+ {case tc_subr_0:
+    cur_exp = args;
+    cur_env = env;
+    if(NNULLP(args)) 
+       err("procedure needs 0 parameters",args,ERR_GEN);
+    return(SUBRF(proc)());
+  case tc_subr_1:
+    cur_exp = args;
+    cur_env = env;
+    if(NNULLP(cdr(args))) 
+        err("procedure needs 1 parameters",args,ERR_GEN);
+    arg1 = car(args);
+    return(SUBR1F(proc)(arg1));
+  case tc_subr_2:
+    cur_exp = args;
+    cur_env = env;
+    arg1 = car(args);
+    arg2 = cdr(args);
+    if(NNULLP(cdr(arg2))) 
+        err("procedure needs 2 parameters",args,ERR_GEN);
+    arg2 = car(args);
+    return(SUBR2F(proc)(arg1,arg2));
+  case tc_subr_3:
+    cur_exp = args;
+    cur_env = env;
+    arg1 = car(args);
+    arg2 = cdr(args);
+    arg3 = cdr(arg2);
+    if(NNULLP(cdr(arg3))) 
+        err("procedure needs 3 parameters",args,ERR_GEN);
+    arg2 = car(arg2);
+    arg3 = car(arg3);
+    return(SUBR3F(proc)(arg1,arg2,arg3));
+  case tc_lsubr:
+    cur_exp = args;
+    cur_env = env;
+    return(SUBR1F(proc)(args));
+  case tc_fsubr:
+  case tc_msubr:
+    cur_exp = args;
+    cur_env = env;
+    err("special forms cannot be applyed",proc,ERR_GEN);
+  case tc_closure:
+    cur_exp = args;
+    cur_env = env;
+    env = envcons(assoc_args_env(args,car(CODE(proc)),env),
+  	  DEFENV(proc));
+    args = cdr(CODE(proc));
+    return(leval(args,env));
+  case tc_fluidclosure:
+   {LISP fenv;
+    cur_exp = args;
+    cur_env = env;
+    env = DEFENV(proc);
+    fenv = sym_fluid_environment;
+    sym_fluid_environment = envcons(NIL,sym_fluid_environment);
+    fluid_extend_env(assoc_args_env(cdr(args),
+                              car(CODE(proc)),env));
+    args = leval(cdr(CODE(proc)),env);
+    sym_fluid_environment = fenv;
+    return(args);}
+  case tc_rec:
+    cur_exp = args;
+    cur_env = env;
+    env = envcons(assoc_args_env(cons(proc,args),car(CODE(proc)),env),
+  	  DEFENV(proc));
+    args = cdr(CODE(proc));
+    return(leval(args,env));
+  default:
+    cur_exp = args;
+    cur_env = env;
+    err("attempt to call a non procedural object",proc,ERR_GEN);}}
+
+LISP leval_args(LISP l,LISP env)
+{LISP result,v1,v2,tmp;
+ if NULLP(l) return(NIL);
+ result = cons(leval(car(l),env),NIL);
+ for(v1=result,v2=cdr(l);
+     CONSP(v2);
+     v1 = tmp, v2 = CDR(v2))
+  {tmp = cons(leval(CAR(v2),env),NIL);
+   CDR(v1) = tmp;}
+ if NNULLP(v2) err("bad syntax argument list",l,ERR_GEN);
+ return(result);}
+
+LISP leval_args_env(LISP actuals,LISP formals,LISP env)
+{LISP fl,al,result;
+ result = NIL;
+ for(fl = formals,al = actuals; 
+     CONSP(fl)&&CONSP(al); 
+     fl = CDR(fl),al = CDR(al))
+    result = cons(cons(CAR(fl),
+                       leval(CAR(al),env)),
+                  result);
+ if NULLP(fl)
+    {if NNULLP(al)
+       err("wrong number of arguments",actuals,ERR_GEN);}
+ else if CONSP(fl)
+    err("wrong number of arguments",actuals,ERR_GEN);
+ else 
+   result = cons(cons(fl,leval_args(al,env)),result);
+ return(result);}
+
+LISP assoc_args_env(LISP actuals,LISP formals,LISP env)
+{LISP fl,al,result;
+ result = NIL;
+ for(fl = formals,al = actuals; 
+     CONSP(fl)&&CONSP(al); 
+     fl = CDR(fl),al = CDR(al))
+    result = cons(cons(CAR(fl),
+                       CAR(al)),
+                  result);
+ if NULLP(fl)
+    {if NNULLP(al)
+       err("wrong number of arguments",actuals,ERR_GEN);}
+ else if CONSP(fl)
+    err("wrong number of arguments",actuals,ERR_GEN);
+ else 
+   result = cons(cons(fl,al),result);
+ return(result);}
+

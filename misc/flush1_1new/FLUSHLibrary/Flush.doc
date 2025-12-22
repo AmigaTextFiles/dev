@@ -1,0 +1,257 @@
+
+
+TABLE OF CONTENTS
+
+flush.library/README
+flush.library/FlushDo()
+flush.library/FlushEnableAnnounce()
+flush.library/FlushDisableAnnounce()
+
+
+flush.library/README                             flush.library/README
+
+   FLUSH LIBRARY
+	This library has been designed to allow easy notification if
+	memory is getting low. Programs which desire this information
+	have to ask for it at initialization, and to "unsubscribe" at
+	cleanup. A safe way to do this is to subscribe AFTER having
+	allocated everything, and unsubscribe BEFORE freeing the memory.
+
+   NOTES
+	- The library must remain open until you have no subscribe pending.
+	- Note that you may subscribe more than once.
+	- You may also subscribe/unsubscribe for other tasks.
+	- Note that the open count will be always zero. This is a side effect
+	and has no influence on the library or system itself.
+
+   VERSION
+	1.1
+
+   NEW FOR THIS RELEASE
+	MODE_MSG has been implemented. See FlushEnableAnnounce().
+	C-Support (C definitions by Michel Schinz)
+
+   AUTHORS
+	Marc Schaefer (general design and implementation)
+	Michel Schinz (C include files and definitions.)
+	For more information see COPYRIGHT, README, HISTORY, and BUG files.
+
+   SEE ALSO
+	exec.library/OpenLibrary()
+	exec.library/CloseLibrary()
+	flush.library/FlushEnableAnnounce()
+
+   BUGS
+	None known.
+
+   TODO
+	No more ideas.
+
+
+flush.library/FlushDo()                           flush.library/FlushDo()
+
+   NAME
+	FlushDo -- Announce flush event to all tasks / handler that asked
+                   for it with FlushEnableAnnounce()
+
+   SYNOPSIS
+	FlushDo()
+
+	void FlushDo();
+
+   FUNCTION
+	Announce a flush event to all tasks and handlers who have asked
+	for it via FlushEnableAnnounce(), and have not "unsubscribed"
+	with FlushDisableAnnounce().
+
+   INPUTS
+	None
+
+   RETURNS
+	None
+
+   NOTES
+	- This call is not safe from interrupts, since it is not possible
+	to free memory (= access memory lists) during interrupts. See
+	Exec AllocMem() and FreeMem().
+	- This call is safe within a Forbid(), or AllocMem().
+	- We don't scratch _any_ register. No return code. As a normal
+	library we need our basepointer in A6.
+	- We will panic if any node is an illegal state, using Exec/Alert().
+
+   SEE ALSO
+	exec.library/Alert()
+	exec.library/AllocMem()
+	exec.library/FreeMem()
+	exec.library/Forbid()
+	exec.library/Permit()
+	flush.library/FlushEnableAnnounce()
+	flush.library/FlushDisableAnnounce()
+
+   BUGS
+	None known.
+
+   TODO
+	No more ideas.
+
+
+flush.library/FlushEnableAnnounce()                           flush.library/FlushEnableAnnounce()
+
+   NAME
+	FlushEnableAnnounce -- Inform library that we want Flush information.
+
+   SYNOPSIS
+	flushid = FlushEnableAnnounce(mode, handler, data, pri)
+	D0                            D0    A0       D1    D2-0:8
+
+	ULONG FlushEnableAnnounce(ULONG, APTR, ULONG, LONG);
+
+   FUNCTION
+	Subscribe for flush event announce. The following modes apply:
+
+	MODE_SIGNALME		The task specified in handler will receive
+				the signal bit number data (low 8 bits only).
+
+	MODE_HANDLER		FlushDo will directly jump to the specified
+				address handler with the following registers set:
+
+				A6 ^ ExecBase
+				D0 = the value submitted as 'data'.
+
+				You may not scratch any registers EXCEPT
+				A0/A1/D0/D1 (normal convention) and A6 (special
+				convention). Note that the stack given to you
+				will be a the stack of the process that caused
+				the low memory AllocMem() flush.
+				You may not do anything that could cause you
+				to Wait() or take long to complete. And don't
+				allocate memory !! You are probably called from
+				inside the memory allocator !
+
+	MODE_MSG		We will reply to the message specified in handler and
+				immediately do a FlushDisableAnnounce() for you, since
+				we don't own your message any more. You should always
+				do as follows to unsubscribe.
+					a) Check that you did not already receive the message if you
+					have an internal boolean variable.
+					b) Forbid()
+					c) Check that you didn't receive the message with GetMessage().
+					d) FlushDisableAnnounce(flushid) if message not received.
+					e) Permit()
+					f) General cleanup.
+				The only advantage of this method is that we free our internal
+				structure synchronously. However in most cases you better should
+				use MODE_HANDLER or MODE_SIGNALME.
+				Note that the message structure should be properly initalized (ReplyPort set)
+				
+	Note that MODE_SIGNALME does not authorize direct freeing, because
+	of multitasking rules, but allow you to Wait() or call any function
+	your task may normally call. The call to AllocMem() that caused the
+	Flush _will_ infact fail. It's the simplest, but also the less useful
+	method since memory isn't de-allocated synchronously.
+
+	MODE_HANDLER will be preferred mode for programs that really want the
+	low-memory situation to be quickly resolved. If there is sufficient
+	memory freed by MODE_HANDLER's routines, the AllocMem() call that
+	caused the flush will succeed. It's the better method for resource-freeing,
+	but a dangerous one since you are called from the Memory Allocator.
+
+	MODE_MSG will be preferred method for programs that have no more signal to
+	be allocated and would perfer using a special message port shared between more
+	events. However you should better consider the complexity of the task before
+	choosing this method. Note that you may also use special features of the
+	messages ports such as software interrupts.
+
+   INPUTS
+	mode - either MODE_SIGNALME, MODE_HANDLER or MODE_MSG.
+	handler - either a pointer to a task control block, or to a handler.
+	data - either the signal bit number or a data passed as a parameter.
+	pri - the priority of your node (-128 ... +127), zero for normal.
+
+   RETURNS
+	flushid - 0 if memory problem (don't call FlushDisableAnnounce() then).
+	You have to save this somewhere for giving it back as an argument
+	to FlushDisableAnnounce().
+
+   NOTES
+	- This call should be done during (after) initialization. At the
+	time you call this routine, your handler may be called, or your
+	task being signaled.
+	- We don't allow message-based information, because allocating a
+	message during a flush is not possible, however replying to a message
+	previously received would be possible.
+	- Not safe from interrupts. We only Forbid() to get access to our
+	internal list. We also allocate memory, which is not allowed from
+	interrupts (see exec.library/AllocMem())
+	- We don't scratch _any_ register, except D0 for return code. As a normal
+	library we need our basepointer in A6.
+	- We will panic if the mode is illegal, using Exec/Alert().
+
+   SEE ALSO
+	exec.library/Alert()
+	exec.library/AllocMem()
+	exec.library/FreeMem()
+	exec.library/Forbid()
+	exec.library/Permit()
+	exec.library/Wait()
+	flush.library/FlushEnableAnnounce()
+	flush.library/FlushDisableAnnounce()
+	flush.library/FlushDo()
+
+   BUGS
+	None known.
+
+   TODO
+	No more ideas.
+
+
+flush.library/FlushDisableAnnounce()                           flush.library/FlushDisableAnnounce()
+
+   NAME
+	FlushDisableAnnounce -- Inform library that we don't want Flush information any more.
+
+   SYNOPSIS
+	FlushDisableAnnounce(flushid)
+	                     D0
+
+	void FlushDisableAnnounce(ULONG);
+
+   FUNCTION
+	Unsubscribe for flush event announce. This routine is normally called
+	if you succeeded with FlushEnableAnnounce() and you are just before
+	clean up. It is important NOT to let the flush notification enabled
+	if you quit or clean up. This may result in memory trashing or free
+	twice bugs. Note that if MODE_MSG was the choosen mode, we WON'T
+	reply to the message. Infact the message field will be ignored.
+
+   INPUTS
+	flushid - what was returned from FlushEnableAnnounce().
+
+   RETURNS
+	None.
+
+   NOTES
+	- Not safe from interrupts. We only Forbid() to get access to our
+	internal list. We free memory.
+	- We don't scratch _any_ register, except D0 (information invalid).
+	As a normal library we need our basepointer in A6.
+	- We will panic if the node contains illegal information or is nil,
+	using Exec/Alert().
+
+   SEE ALSO
+	exec.library/Alert()
+	exec.library/AllocMem()
+	exec.library/FreeMem()
+	exec.library/Forbid()
+	exec.library/Permit()
+	flush.library/FlushEnableAnnounce()
+	flush.library/FlushDisableAnnounce()
+	flush.library/FlushDo()
+
+   BUGS
+	None known.
+
+   TODO
+	No more ideas.
+
+

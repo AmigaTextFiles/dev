@@ -1,0 +1,18 @@
+LIBRARY LowLevelBase
+	ReadJoyPort(d0)(d0)=-30,
+	GetLanguageSelection()(d0)=-36,
+	GetKey()(d0)=-48,
+	QueryKeys(a0,d1)(d0)=-54,
+	AddKBInt(a0,a1)(d0)=-60,
+	RemKBInt(a1)(d0)=-66,
+	SystemControlA(a1:PTR TO TagItem)(d0)=-72,
+	SystemControl(a1:LIST OF TagItem)(d0)=-72,
+	AddTimerInt(a0,a1)(d0)=-78,
+	RemTimerInt(a1)(d0)=-84,
+	StopTimerInt(a1)(d0)=-90,
+	StartTimerInt(a1,d0,d1)(d0)=-96,
+	ElapsedTime(a0)(d0)=-102,
+	AddVBlankInt(a0,a1)(d0)=-108,
+	RemVBlankInt(a1)(d0)=-114,
+	SetJoyPortAttrsA(d0,a1:PTR TO TagItem)(d0)=-132,
+	SetJoyPortAttrs(d0,a1:LIST OF TagItem)(d0)=-132

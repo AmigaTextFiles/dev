@@ -1,0 +1,1779 @@
+*****************************************************************************
+*									    *
+*	PROGRAM: StripHunk						    *
+*	VERSION: 1.3							    *
+*   SOURCE CODE: 28 (7.11.2000)						    *
+*	   DATE: 23.09.1997 - 05.10.1999				    *
+*      LANGUAGE: Assembler (DevPac V3.14)				    *
+*	 SYSTEM: A1200	KS 40.68 WB 40.42 2MB chip 8MB fast 68030/50mhz	    *
+*									    *
+*	 AUTHOR: Joerg Riemer 14167 Berlin/SchottmuellerStr.107/Germany	    *
+*	  EMAIL: joerg_riemer@freenet.de / mission@cs.tu-berlin.de	    *
+*									    *
+*      FUNCTION: changes hunk_reloc32 <-> hunk_drel32			    *
+*		 removes debug_hunks like $3E8,$3F0,$3F1		    *
+*		 sorts reloc_entrys from low to high and reverse	    *
+*									    *
+*****************************************************************************
+
+BSS_Section	set	0
+
+*****************************************************************************
+
+		OUTPUT	RAM:StripHunk
+
+*****************************************************************************
+
+ASLFR_DoMultiSelect	equ	$8008002D
+ASLFR_DoPatterns	equ	$8008002E
+ASLFR_DoSaveMode	equ	$8008002C
+ASLFR_DrawersOnly	equ	$8008002F
+ASLFR_InitialFile	equ	$80080008
+ASLFR_TitleText		equ	$80080001
+
+fr_Drawer		equ	$008
+fr_File			equ	$004
+fr_ArgList		equ	$024
+fr_NumArgs		equ	$020
+
+_LVOAllocAslRequest	equ	-048
+_LVOFreeAslRequest	equ	-054
+_LVOAslRequest		equ	-060
+
+*****************************************************************************
+
+HUNK_HEADER		equ	1011
+
+MODE_OLDFILE	     	equ	1005
+MODE_NEWFILE	     	equ	1006
+
+ACCESS_READ		equ	-002
+
+fib_Protection		equ	$074
+fib_Size		equ	$07C
+fib_Comment		equ	$090
+fib_SIZEOF		equ	$104
+
+FIBB_ARCHIVE		equ	$004
+
+_LVOOpen              	equ	-030
+_LVOClose              	equ	-036
+_LVORead               	equ	-042
+_LVOWrite              	equ	-048
+_LVOOutput             	equ	-060
+_LVODeleteFile         	equ	-072
+_LVORename            	equ	-078
+_LVOLock              	equ	-084
+_LVOUnLock             	equ	-090
+_LVOCurrentDir         	equ	-126
+_LVOIoErr              	equ	-132
+_LVOSetComment         	equ	-180
+_LVOSetProtection     	equ	-186
+_LVOFlush              	equ	-360
+_LVOExamineFH          	equ	-390
+_LVOSetIoErr           	equ	-462
+_LVOPrintFault         	equ	-474
+_LVOCheckSignal        	equ	-792
+_LVOReadArgs           	equ	-798
+_LVOFreeArgs           	equ	-858
+_LVOFilePart           	equ	-870
+_LVOPutStr             	equ	-948
+_LVOVPrintf            	equ	-954
+
+*****************************************************************************
+
+_LVOAllocMem          	equ	-198
+_LVOFreeMem            	equ	-210
+_LVOCloseLibrary       	equ	-414
+_LVOOpenLibrary        	equ	-552
+_LVOCacheClearU        	equ	-636
+
+*****************************************************************************
+
+DataBase1	rs.b	0
+
+DOSBase		rs.l	1
+ASLBase		rs.l	1
+
+*****************************************************************************
+
+ArgArray	rs.b	0
+
+LFile		rs.l	1
+SFile		rs.l	1
+Replace		rs.l	1
+DRel32		rs.l	1
+Split		rs.l	1
+Reloc32		rs.l	1
+Sort		rs.l	1
+Reverse		rs.l	1			;sort reverse (7.11.00)
+Symbol		rs.l	1
+Debug		rs.l	1
+Name		rs.l	1
+Zeros		rs.l	1
+AslReq		rs.l	1
+Quiet		rs.l	1
+
+RArgPtr		rs.l	1
+
+*****************************************************************************
+
+FileCnt		rs.l	1			;counter (files to operate)
+
+*****************************************************************************
+
+ASLFlag	 	rs.l	1			;flag (using ASL)
+
+LREQBase 	rs.l	1
+SREQBase 	rs.l	1
+
+*****************************************************************************
+
+RCode		rs.l	1			;buffer for returncode
+IOErr		rs.l	1			;buffer for io_error
+
+*****************************************************************************
+
+DataBase2	rs.b	0			;cleared for every file
+
+LName		rs.b	32			;buffer filename (load)
+SName		rs.b	32			;buffer filename (save)
+BName		rs.b	32			;buffer backupname
+
+LPath		rs.l	1			;strptr path (load)
+LPLock		rs.l	1			;lock currentdir (load)
+OldLDir		rs.l	1			;lock prev. dir
+FHandleL	rs.l	1			;filehandle (old file)
+
+SPath		rs.l	1			;strptr path (save)
+SPLock		rs.l	1			;lock currentdir (save)
+OldSDir		rs.l	1			;lock prev. dir
+FHandleS	rs.l	1			;filehandle (new file)
+
+OvlHunk		rs.l	1			;pointer overlay_hunk
+
+RdSize		rs.l	1			;reduced size (over all)
+
+NFSize		rs.l	1			;new filesize
+Memory		rs.l	1			;mem-ptr (current file)
+
+EFlag1		rs.b	1			;overlay found
+EFlag2		rs.b	1			;(name/symbol/debug) removed
+EFlag3		rs.b	1			;reloc changed (strip/revert)
+EFlag4		rs.b	1			;save error
+
+EFlag5		rs.b	1			;empty hunk found
+EFlag6		rs.b	1			;dummy for longword align
+EFlag7		rs.b	1			;dummy for longword align
+EFlag8		rs.b	1			;dummy for longword align
+
+ProgID		rs.l	2			;buffer for hunk_header_id
+
+Buffer		rs.l	1
+
+***********************************************  file info block ************
+
+FIBlock		rs.b	fib_SIZEOF		;buffer for fileinfoblock
+
+BSS_Size1	rs.b	0			;bss_size over all
+
+BSS_Size2	set	BSS_Size1-DataBase2	;required for inner circle
+
+*****************************************************************************
+
+		if	BSS_Section
+
+ProgStart	movea.l	ProgStart-4(pc),A5	;get bss_section
+		addq.l	#1,A5			;skip pointer (next segment)
+		adda.l	A5,A5			;convert bpcl_pointer
+		adda.l	A5,A5			;to real_address
+
+		elseif
+
+ProgStart	lea	DataBase(pc),A5		;get database
+
+		endc
+
+*****************************************************************************
+
+		movea.l	4.w,A6			;set EXEC to call a function
+
+		moveq	#20,D0			;get failat level
+		move.l	D0,RCode(A5)		;preset returncode (no dos)
+
+		moveq	#37,D0			;set required version
+		lea	DOSName(pc),A1		;get libraryname
+		jsr	_LVOOpenLibrary(A6)	;use EXEC to (openlibrary)
+		move.l	D0,DOSBase(A5)		;save returned pointer
+
+		beq.b	CloseLibs		;branch on fail
+
+		moveq	#0,D0			;set required version
+		lea	ASLName(pc),A1		;get libraryname
+		jsr	_LVOOpenLibrary(A6)	;use EXEC to (openlibrary)
+		move.l	D0,ASLBase(A5)		;save returned pointer
+
+*****************************************************************************
+
+		bsr.b	Main0
+
+*****************************************************************************
+
+CloseLibs	movea.l	4.w,A6			;set EXEC to call a function
+
+		move.l	ASLBase(A5),D1		;get base_ptr
+		beq.b	CloseDOS		;branch when not open
+		movea.l	D1,A1			;set base_ptr
+		jsr	_LVOCloseLibrary(A6)	;use EXEC to (closelibrary)
+
+CloseDOS	move.l	DOSBase(A5),D1		;get base_ptr
+		beq.b	QuitClose		;branch when not open
+		movea.l	D1,A1			;set base_ptr
+		jsr	_LVOCloseLibrary(A6)	;use EXEC to (closelibrary)
+
+QuitClose	move.l	RCode(A5),D0		;set returncode
+		rts				;back to shell
+
+*****************************************************************************
+
+DOSName		dc.b	"dos.library",0
+ASLName		dc.b	"asl.library",0
+
+*****************************************************************************
+
+version dc.b "$VER: striphunk 1.3 28 (7.11.00) by joerg riemer sep'97",0,0
+
+*****************************************************************************
+
+Main0		bsr	ReadArgs		;read arguments by dos
+		bsr	CheckArgs		;check for wrong arguments
+		bsr	OpenREQs		;open filerequester
+
+Main1		moveq	#0,D0			;get failat level
+		move.l	D0,RCode(A5)		;set returncode
+
+Main2		movea.l	DOSBase(A5),A6		;set DOS to call a function
+
+		bsr	ChkBreak		;check for break by (ctrl_c)
+		bsr	PrepLSrc		;prepare fname/fdir. (src.)
+		bsr	PrintT00		;print "processing FILE:"
+		bsr	LoadFile		;load file
+		bsr	PrepFile		;parse file, strip hunks
+		bsr	ChkBreak		;check for break by (ctrl_c)
+		bsr	PrepSDst		;prepare fname/fdir. (dst.)
+		bsr	PrintTBS		;print "bytes saved"
+		bsr	PrintT02		;print "writing"
+		bsr	SaveFile		;save file to disk
+		bsr	PrintT04		;print "done."
+
+Main3		bsr.b	FreeMem			;free file_mem
+		bsr.b	ResetData		;clear used datas
+
+		moveq	#1,D0			;decrement
+		sub.l	D0,FileCnt(A5)		;file counter
+		bpl.b	Main2			;loop until -1
+
+Main4		bsr.b	CloseREQ		;free both asl requester
+		bsr.b	FreeArgs		;unset readargs
+		bsr.b	SetIOErr		;try to set last io_error
+		rts				;go back to shell
+
+***********************************************  clear database *************
+
+ResetData	lea	DataBase2(A5),A0	;get base of datas
+		move.w	#BSS_Size2-1,D0		;set size to clear
+		moveq	#0,D1			;prepare clear register
+ClearMemory	move.b	D1,(A0)+		;clear datas
+		dbra	D0,ClearMemory		;until overflow
+		rts				;go back
+
+***********************************************  free file memory ***********
+
+FreeMem		move.l	Memory(A5),D1		;get file memory
+		beq.b	QuitFreeM		;branch if not set
+		movea.l	D1,A1			;set memory base
+		lea	FIBlock(A5),A0		;get fileinfoblock
+		move.l	fib_Size(A0),D0		;set filesize
+		add.l	D0,D0			;add working area
+		movea.l	4.w,A6			;set EXEC to call a function
+		jsr	_LVOFreeMem(A6)		;use EXEC to (freemem)
+QuitFreeM	rts				;go back
+
+*****************************************************************************
+
+CloseREQ	movea.l	ASLBase(A5),A6		;set ASL to call a function
+
+		move.l	LREQBase(A5),D0		;test requester base
+		beq.b	CloseFREQ		;branch if not open
+		movea.l	D0,A0			;set requester base
+		jsr	_LVOFreeAslRequest(A6)	;use ASL to (freeaslrequest)
+
+CloseFREQ	move.l	SREQBase(A5),D0		;test requester base
+		beq.b	QuitCREQ		;branch if not open
+		movea.l	D0,A0			;set requester base
+		jsr	_LVOFreeAslRequest(A6)	;use ASL to (freeaslrequest)
+
+QuitCREQ	rts				;go back
+
+***********************************************  free arguments *************
+
+FreeArgs	lea	ArgArray(A5),A1		;get argarray
+		move.l	RArgPtr(A5),D1		;set readarg pointer
+		movea.l	DOSBase(A5),A6		;set DOS to call a function
+		jsr	_LVOFreeArgs(A6)	;use DOS to (freeargs)
+		rts				;go back
+
+***********************************************  set last io_error **********
+
+SetIOErr	move.l	IOErr(A5),D1		;set last io_error
+		beq.b	QuitIOErr		;branch if there is nothing
+		movea.l	DOSBase(A5),A6		;set DOS to call a function
+		jsr	_LVOSetIoErr(A6)	;use DOS to (setioerr)
+QuitIOErr	rts				;go back
+
+***********************************************  strip/revert hunks/relocs **
+
+PrepFile	movea.l	Memory(A5),A0		;get base of current file
+		movea.l	A0,A1			;prepare end of file
+		lea	FIBlock(A5),A2		;get fileinfoblock
+		adda.l	fib_Size(A2),A1		;add filesize
+
+Loop		cmpa.l	A0,A1			;check for eof
+		bne.b	ParseHunk		;branch if so
+
+		move.l	A1,D0			;set end of file
+		sub.l	Memory(A5),D0		;calculate new filesize
+		move.l	D0,NFSize(A5)		;and save
+
+		move.b	EFlag2(A5),D0		;removed some hunks ?
+		or.b	EFlag3(A5),D0		;stripped some relocs ?
+		bne.b	QuitParse		;branch if so
+
+		bsr	PrintT06		;print "untouched"
+
+		addq.l	#4,SP			;skip some sub-routines
+		pea	Main3(pc)		;do the next file
+
+QuitParse	rts				;go back
+
+************************************************
+
+ParseHunk	move.l	(A0),D0			;get hunk_id from file
+		moveq	#23,D1			;set loop counter
+		lea	HunkTable(pc),A2	;set id_table
+SearchID	move.w	D1,D2			;prepare offset
+		add.w	D2,D2			;want it in words
+		cmp.w	(A2,D2.W),D0		;found hunk_id ?
+		dbeq	D1,SearchID		;dbranch if not
+
+		bne	PrintError1		;branch when nothing found
+
+		move.w	JmpTable(pc,D2),D2	;calculate jump_address
+		jmp	JmpTable(pc,D2)		;parse current hunk
+
+*** available hunks *********************************************************
+*									    *
+*   00)*hunk_unit	  -( 999/$3E7) 01)+hunk_name	     #(1000/$3E8)   *
+*   02)+hunk_code	  #(1001/$3E9) 03)+hunk_data	     #(1002/$3EA)   *
+*   04)+hunk_bss	  #(1003/$3EB) 05)+hunk_reloc	     #(1004/$3EC)   *
+*   06)*hunk_reloc16	  -(1005/$3ED) 07)*hunk_reloc8	     -(1006/$3EE)   *
+*   08)*hunk_ext	  -(1007/$3EF) 09)+hunk_symbol	     #(1008/$3F0)   *
+*   10)+hunk_debug	  #(1009/$3F1) 11)+hunk_end	     #(1010($3F2)   *
+*   12)+hunk_header	  #(1011/$3F3) 13)*		      (1012/$3F4)   *
+*   14)+hunk_overlay	  #(1013/$3F5) 15)+hunk_break	     #(1014/$3F6)   *
+*   16)+hunk_drel32	  #(1015/$3F7) 17)*hunk_drel16	     ?(1016/$3F8)   *
+*   18)*hunk_drel8	  ?(1017/$3F9) 19)*hunk_lib	     ?(1018/$3FA)   *
+*   20)*hunk_index	  ?(1019/$3FB) 21)+hunk_reloc32short #(1020/$3FC)   *
+*   22)*hunk_relreloc32	  ?(1021/$3FD) 23)*hunk_absreloc16   ?(1022/$3FE)   *
+*									    *
+*****************************************************************************
+
+HunkTable	dc.w	$3E7,$3E8,$3E9,$3EA,$3EB,$3EC,$3ED,$3EE
+		dc.w	$3EF,$3F0,$3F1,$3F2,$3F3,$3F4,$3F5,$3F6
+		dc.w	$3F7,$3F8,$3F9,$3FA,$3FB,$3FC,$3FD,$3FE
+
+JmpTable	dc.w	PrintError1-JmpTable,ParseHunk01-JmpTable
+		dc.w	ParseHunk02-JmpTable,ParseHunk03-JmpTable
+		dc.w	ParseHunk04-JmpTable,ParseHunk05-JmpTable
+		dc.w	PrintError1-JmpTable,PrintError1-JmpTable
+		dc.w	PrintError1-JmpTable,ParseHunk09-JmpTable
+		dc.w	ParseHunk10-JmpTable,ParseHunk11-JmpTable
+		dc.w	ParseHunk12-JmpTable,PrintError1-JmpTable
+		dc.w	ParseHunk14-JmpTable,ParseHunk15-JmpTable
+		dc.w	ParseHunk16-JmpTable,PrintError1-JmpTable
+		dc.w	PrintError1-JmpTable,PrintError1-JmpTable
+		dc.w	PrintError1-JmpTable,ParseHunk21-JmpTable
+		dc.w	PrintError1-JmpTable,PrintError1-JmpTable
+
+* hunk_name #(1000/$3E8) ****************************************************
+
+ParseHunk01	tst.b	Name(A5)		;delete hunk_name ?
+		beq.b	ParseHunk02		;branch if not
+
+************************
+
+DeleteHunk	st	EFlag2(A5)		;set flag (hunk removed)
+
+		movea.l	A0,A2			;prepare work_register
+		addq.l	#4,A2			;skip hunk_id
+		move.l	(A2),D0			;set hunk_length
+		lsl.l	#2,D0			;want it in bytes
+		lea	4(A2,D0.l),A2		;get hunk_end
+
+************************
+
+ShrinkFile	st	EFlag3(A5)		;set flag (file changed)
+
+		move.l	A0,D0			;calculate size
+		sub.l	A2,D0			;to shrink
+		add.l	D0,RdSize(A5)		;add (reduced)size [over all]
+
+.Shrink		move.l	(A2),(A2,D0.l)		;shrink file
+		addq.l	#4,A2			;long by long
+		cmpa.l	A2,A1			;until eof
+		bne.b	.Shrink
+
+		adda.l	D0,A1			;file is now bit smaller
+		bra	Loop			;go back (parse next hunk)
+
+* hunk_debug #(1009/$3F1) *********************
+
+ParseHunk10	tst.b	Debug(A5)		;want to remove hunk_debug ?
+		bne.b	DeleteHunk		;branch if so
+
+* hunk_data #(1002/$3EA) **********************
+
+ParseHunk03					;same like hunk_code
+
+* hunk_code #(1001/$3E9) **********************
+
+ParseHunk02	addq.l	#4,A0			;skip hunk_id
+
+		movea.l	A0,A2			;hunk_length, required later
+
+		move.l	(A0),D0			;get longs to skip
+		sne	EFlag5(A5)		;set flag if hunk empty
+		lsl.l	#2,D0			;want it in bytes
+		lea	4(A0,D0.l),A0		;jump to hunk_end
+
+		tst.b	EFlag5(A5)		;check for empty hunk
+		beq	Loop			;branch if so
+
+		tst.b	Zeros(A5)		;remove zeros ?
+		beq	Loop			;branch if not
+
+		movea.l	A0,A3			;prepare work_register
+.ChkZeros	tst.l	-(A0)			;calc length
+		beq.b	.ChkZeros		;of zeros (backward)
+		addq.l	#4,A0			;reset address
+		cmpa.l	A0,A3			;found some zeros ?
+		beq	Loop			;branch if not
+
+		st	EFlag2(A5)		;set flag, backup only
+
+		move.l	A3,D0			;recalculate
+		sub.l	A0,D0			;hunk_length
+		lsr.l	#2,D0			;requires longs
+		sub.l	D0,(A2)			;reset hunk_length
+
+		movea.l	A3,A2			;prepare work_register
+		bra.b	ShrinkFile		;and shrink file
+
+* hunk_symbol #(1008/$3F0) ********************
+
+ParseHunk09	movea.l	A0,A2			;save hunkbase
+
+		addq.l	#4,A0			;skip hunk_id
+		move.l	(A0)+,D0		;get longs to skip
+		beq.b	.RemoveSymbol		;branch if end_mark
+
+.SkipSymbol	lsl.l	#2,D0			;want it in bytes
+		lea	4(A0,D0.l),A0		;skip symbol
+		move.l	(A0)+,D0		;get longs to skip
+		bne.b	.SkipSymbol		;do the next
+
+.RemoveSymbol	tst.b	Symbol(A5)		;want to remove hunk_symbol ?
+		beq	Loop			;no,go back (parse next hunk)
+
+		st	EFlag2(A5)		;set flag,symbol_hunk removed
+
+		exg.l	A0,A2			;prepare work_register
+		bra	ShrinkFile		;remove symbol hunk
+
+* hunk_bss #(1003/$3EB) ***********************
+
+ParseHunk04	addq.l	#4,A0			;skip hunk_id
+
+* hunk_break #(1014/$3F6) *********************
+
+ParseHunk15					;same like hunk_end
+
+* hunk_end #(1010/$3F2) ***********************
+
+ParseHunk11	addq.l	#4,A0			;skip hunk_id / bss_size
+		bra	Loop			;go back (parse next hunk)
+
+* hunk_overlay #(1013/$3F5) *******************
+
+ParseHunk14	tst.b	EFlag1(A5)		;only one overlay, please
+		bne	PrintError1		;branch if not
+		st	EFlag1(A5)		;set flag, overlay found
+
+		movem.l	A0-1,-(SP)		;save registers
+		bsr	PrintT05		;print "contains overlay"
+		movem.l	(SP)+,A0-1		;restore registers
+
+		move.l	A0,OvlHunk(A5)		;save base of overlay_hunk
+
+		addq.l	#4,A0			;skip hunk_id
+		move.l	(A0)+,D0		;read hunk_size
+		move.l	(A0)+,D1		;read max. tree_node
+		subq.l	#1,D1			;prepare register
+		sub.l	D1,D0			;skip tree_node buffers
+		subq.l	#1,D1			;prepare dbra_loop
+.ChkOverlay	tst.l	(A0)+			;node_buffers must be zero
+		bne	PrintError2		;branch if not
+		dbra	D1,.ChkOverlay		;check the next
+
+		lsl.l	#2,D0			;want it in bytes
+		lea	(A0,D0.l),A0		;skip overlay_hunk
+		bra	Loop			;go back (parse next hunk)
+
+* hunk_header #(1011/$3F3) ********************
+
+ParseHunk12	movea.l	A0,A2			;save base
+
+		addq.l	#4,A0			;skip hunk_id
+		tst.l	(A0)+			;must be 0 (resident libs)
+		bne	PrintError1		;branch if not
+		addq.l	#4,A0			;skip hunk counter
+		move.l	(A0)+,D1		;read first hunk to load
+		move.l	(A0)+,D0		;read last hunk to load
+		sub.l	D1,D0			;calc buffers to skip
+		lsl.l	#2,D0			;want it in bytes
+		lea	4(A0,D0.w),A0		;skip buffers (hunk length)
+
+************************
+
+		tst.b	EFlag1(A5)		;overlay file ?
+		beq	Loop			;no,go back (parse next hunk)
+
+		movea.l	OvlHunk(A5),A3		;get base (overlay_hunk)
+		addq.l	#4,A3			;skip hunk_id
+		move.l	(A3)+,D0		;read length in longs
+		move.l	(A3)+,D1		;read tree_node
+		subq.l	#1,D1			;prepare register
+		sub.l	D1,D0			;skip tree_node buffers
+		subq.l	#1,D1			;in case of dbra
+.ChkOverlay	tst.l	(A3)+			;test tree_node buffers
+		bne	PrintError2		;branch if not null
+		dbra	D1,.ChkOverlay		;check all buffers
+
+		move.l	RdSize(A5),D1		;set rdsize upto current pos.
+		move.l	A2,D2			;calculate overlay
+		sub.l	Memory(A5),D2		;seekOffset for the
+		sub.l	D1,D2			;current hunk_header
+
+.SetSOffset	cmp.l	(A3),D2			;search for ovl_seekOffset
+		bne.b	.SkipSOffset		;branch if not the same
+		add.l	D1,(A3)			;recalculate ovl_seekOffset
+.SkipSOffset	addq.l	#4,A3			;skip seekOffset_buffer
+		tst.l	(A3)+			;test dummy, must be zero
+		bne	PrintError2		;branch if not
+		tst.l	(A3)+			;test dummy, must be zero
+		bne	PrintError2		;branch if not
+		adda.w	#20,A3			;get next overlay_entry
+		subq.l	#8,D0			;reduce hunk_length
+		bne.b	.SetSOffset		;do for all entries
+		bra	Loop			;go back (parse next hunk)
+
+* hunk_reloc #(1004/$3EC) *********************
+
+ParseHunk05	tst.b	Reloc32(A5)		;want reloc32 ?
+		bne	Merge			;branch if so
+
+* extract drel32_entries **********************
+
+		movea.l	A0,A2			;set base of current hunk
+		movea.l	A1,A3			;set destination area
+
+		moveq	#11,D0			;prepare register
+		add.l	(A2)+,D0		;calculate new hunk_id
+		move.l	D0,(A3)+		;and write
+
+		moveq	#0,D3			;clr counter (drel32_entries)
+		move.l	A3,A4			;save buffer (# of drels)
+		move.l	(A2)+,D0		;get # of relocs
+		beq.b	EndDRel32		;branch if zero
+
+SplitDRel32	move.w	D0,(A3)+		;dummy_write # of drels
+		move.l	(A2)+,D1		;get module #
+		move.w	D1,(A3)+		;write module #
+		subq	#1,D0			;prepare dbra_loop
+		moveq	#0,D2			;clr counter (drel32_entries)
+NextDRel32	move.w	(A2)+,D1		;check the high_word
+		bne.b	SkipReloc32		;must be 0, skip
+		move.w	(A2),(A3)+		;copy drel32
+		addq	#1,D2			;inc. counter (drel32_entries)
+SkipReloc32	addq	#2,A2			;skip low-word
+		dbra	D0,NextDRel32		;do for all entries
+
+		move.w	D2,(A4)			;write new # of drels
+		bne.b	.NextModule		;split next module
+		move.l	A4,A3			;else, reset dest. address
+.NextModule	move.l	A3,A4			;save buffer (# of drels)
+		add.l	D2,D3			;add entries we found
+		move.l	(A2)+,D0		;read entries of next module
+		bne.b	SplitDRel32		;split next module if set
+
+EndDRel32	move.l	D0,(A3)			;write hunk_end
+
+***********************************************
+
+		tst.l	D3			;found some drels ?
+		beq.b	SkipHunk		;branch if not
+
+		addq	#2,A3			;skip hunk_end
+		move.l	A3,D0			;be sure it's long aligned
+		addq.l	#03,D0			;calculate long_align
+		andi.b	#-4,D0			;calculate long_align
+		move.l	D0,A3			;reset dest. address
+
+		move.l	A3,Buffer(A5)		;set hunk end (drel32 only)
+
+* extract reloc32_entries *********************
+
+		movea.l	A0,A2			;set reloc_hunk again
+
+		move.l	(A2)+,(A3)+		;copy hunk_id (reloc32)
+
+		moveq	#0,D4			;clear counter (reloc32)
+		movea.l	A3,A4			;save buffer (# of relocs)
+		move.l	(A2)+,D0		;read # of relocs
+		beq.b	EndReloc32		;branch if zero
+
+SplitReloc32	move.l	D0,(A3)+		;dummy_write # of relocs
+		move.l	(A2)+,(A3)+		;copy module #
+		subq	#1,D0			;prepare dbra_loop
+		moveq	#0,D2			;clear counter (reloc32)
+NextReloc32	move.w	(A2)+,D1		;check high word
+		beq.b	SkipDRel32		;branch if drel32
+		move.w	D1,(A3)+		;copy high word
+		move.w	(A2),(A3)+		;copy low word
+		addq	#1,D2			;inc. counter (reloc32)
+SkipDRel32	addq	#2,A2			;reset source address
+		dbra	D0,NextReloc32		;do for all relocs
+
+		move.l	D2,(A4)			;write new # of relocs
+		bne.b	.NextModule		;split next module
+		move.l	A4,A3			;reset dest. address
+.NextModule	move.l	A3,A4			;save buffer (# of relocs)
+		add.l	D2,D4			;add entries we found
+		move.l	(A2)+,D0		;read next # of relocs
+		bne.b	SplitReloc32		;do next module if set
+
+EndReloc32	move.l	D0,(A3)+		;write hunk_end
+
+************************
+
+		tst.l	D4			;found some relocs ?
+		beq.b	GenerateReloc		;branch if not
+
+		move.l	A3,Buffer(A5)		;set hunk end (both joined)
+
+		tst.b	Split(A5)		;want to split ?
+		beq.b	SkipHunk		;branch if not
+		moveq	#6,D0			;requires more than 5 drels
+		cmp.l	D0,D3			;check for more
+		bls.b	SkipHunk		;branch if not
+
+GenerateReloc	tst.b	DRel32(A5)		;want short_relocs ?
+		bne.b	SetDrel32		;branch if so
+
+SkipHunk	tst.b	Sort(A5)		;want to sort ?
+		bne	SortReloc32		;branch if so
+		movea.l	A2,A0			;reset parsing pointer
+		bra	Loop			;go parse next hunk
+
+************************
+
+SetDrel32	st	EFlag3(A5)		;set flag (file changed)
+
+		move.l	Buffer(A5),D1		;set hunk end (drel/joined)
+		sub.l	A1,D1			;calculate hunk size
+		lsr.l	#2,D1			;requires longs
+
+		move.l	A0,-(SP)		;save current parsing pointer
+
+		movea.l	A1,A3			;set base new hunk
+.ReplaceHunk	move.l	(A3)+,(A0)+		;replace hunk
+		subq.l	#1,D1			;long by long
+ 		bne.b	.ReplaceHunk		;until zero
+
+		move.l	A0,D0			;calculate size
+		sub.l	A2,D0			;to shrink
+		add.l	D0,RdSize(A5)		;add (reduced)size [over all]
+
+		movea.l	A2,A3			;calculate new
+		adda.l	D0,A3			;parsing pointer
+
+.Shrink		move.l	(A2),(A2,D0.l)		;shrink file
+		addq.l	#4,A2			;long by long
+		cmpa.l	A2,A1			;until eof
+		bne.b	.Shrink
+
+		adda.l	D0,A1			;file is now bit smaller
+
+		movea.l	(SP)+,A0		;restore current parsing ptr.
+
+		tst.b	Sort(A5)		;want to sort ?
+		bne.b	SortDRel32		;branch if so
+
+		movea.l	A3,A0			;reset parsing pointer
+		bra	Loop			;go back (parse next hunk)
+
+* hunk_drel32 #(1015/$3F7) ********************
+
+ParseHunk16
+
+* hunk_reloc32short #(1020/$3FC) **************
+
+ParseHunk21	tst.b	Reloc32(A5)		;want to revert ?
+		bne.b	Merge			;branch if so
+		tst.b	Sort(A5)		;want to sort ?
+		bne.b	SortDRel32		;branch if so
+
+		addq.l	#4,A0			;skip hunk_id
+		move.w	(A0)+,D0		;get words to skip
+		beq.b	.align4			;branch if zero
+
+.SkipDRel	add.w	D0,D0			;want it in bytes
+		lea	2(A0,D0.w),A0		;jump to the next module
+		move.w	(A0)+,D0		;get words to skip
+		bne.b	.SkipDRel		;do until eoh
+
+.align4		move.l	A0,D0			;be sure, it's long aligned
+		addq.l	#03,D0			;calculate long_align
+		andi.b	#-4,D0			;calculate long_align
+		movea.l	D0,A0			;reset parsing pointer
+		bra	Loop			;go back (parse next hunk)
+
+***********************************************  sort relocs (16 bit) *******
+
+* thanks dear thomas for the sort_part. i'm sure you will
+* read this. if so, send an email!!! :))
+
+SortDRel32	addq.l	#4,a0			;skip hunk_id
+		move.w	(A0)+,D0		;set # of relocs
+		beq.b	.QuitSort		;branch if zero
+
+.SortModule	addq.l	#2,A0			;skip # module
+		move.w	D0,D1			;set # of relocs
+		lsr.w	#1,D1			;calculate 1/2 of
+
+.Sort		move.w	D1,D2			;prepare register
+		move.w	D1,D3			;prepare register
+		sub.w	D0,D2			;calculate loop_counter
+		movea.l	A0,A2			;set module base
+		lsl.w	#1,D3			;want 1/2 of in bytes
+		lea	(A2,D3.W),A3		;set base of destination
+		moveq	#0,D3			;clear sort_flag
+.CheckEntry	cmpm.w	(A2)+,(A3)+		;compare entries
+		bcc.b	.SkipEntry		;branch if source lower
+		move.w	-2(A2),D4		;swap entries
+		move.w	-2(A3),-2(A2)		;swap entries
+		move.w	D4,-2(A3)		;swap entries
+		st	D3			;set flag (some sorted)
+		st	EFlag3(A5)		;set flag (file changed)
+.SkipEntry	addq.w	#1,D2			;increment loop counter
+		bmi.b	.CheckEntry		;do until zero
+
+		tst.b	D3			;sorted some bytes ?
+		bne.b	.Sort			;if so, sort part again!
+
+		lsr.w	#1,D1			;increment sort_range
+		bne.b	.Sort			;sort next part until zero
+
+		move.l	A3,A0			;get next module
+		move.w	(A0)+,D0		;get # of relocs
+		bne.b	.SortModule		;sort next when set!
+
+.QuitSort	move.l	A0,D0			;be sure, it's long aligned
+		addq.l	#03,D0			;calculate long_align
+		andi.b	#-4,D0			;calculate long_align
+		movea.l	D0,A0			;reset parsing pointer
+		bra	Loop			;go back (parse next hunk)
+
+*****************************************************************************
+
+Merge		movea.l	A0,A2			;prepare work_register
+		movea.l	A1,A3			;prepare work_register
+
+		moveq	#0,D1			;prepare work_register
+		moveq	#0,D7			;prepare work_register
+
+		move.l	#$3EC,(A3)+		;set hunk_id (reloc32)
+
+************************
+
+CheckMerge	pea	CheckMerge(pc)		;set return_address
+
+		move.l	(A2)+,D0		;get hunk_id
+
+		cmp.w	#$3EC,D0		;check for reloc32
+		beq.w	CopyReloc32		;branch if so
+
+		cmp.w	#$3F7,D0		;check for drel32 (2.00+)
+		beq.w	CopyDRel32		;branch if so
+
+		cmp.w	#$3FC,D0		;check for true drel32
+		beq.w	CopyDRel32		;branch if so
+
+		addq	#4,SP			;remove return_address
+
+************************
+
+		subq.l	#4,A2			;restore base
+		addq.l	#4,A3			;restore base
+
+		tst.l	D1			;found some hunks?
+		beq.b	QuitMerge		;branch if not
+
+		tst.b	D7			;found some drel32_hunks?
+		bne.b	MergeHunks		;branch if so
+
+QuitMerge	tst.b	Sort(A5)		;want to sort relocs?
+		bne.b	SortReloc32		;branch if so
+		movea.l	A2,A0			;reset parsing pointer
+		bra	Loop			;go back (parse next hunk)
+
+************************************************
+
+MergeHunks	subq.l	#1,D1			;found only one hunk?
+		beq.b	AddFile			;branch if so
+
+		move.l	A2,-(SP)		;save register
+		bsr	MergeModules		;merge all modules
+		move.l	(SP)+,A2		;restore register
+
+AddFile		move.l	A2,D0			;calc length (old reloc_hunk)
+		sub.l	A0,D0			;calc length (old reloc_hunk)
+		move.l	A3,D1			;calc length (new reloc_hunk)
+		sub.l	A1,D1			;calc length (new reloc_hunk)
+
+AddPart		move.l	(A2)+,(A3)+		;join rest of datas
+		cmp.l	A2,A1			;upto eof
+		bne.b	AddPart			;do until!
+
+		move.l	A3,D2			;calc length (new reloc_hunk)
+		sub.l	A1,D2			;+ rest of file
+		lsr.l	#2,D2			;want it in longwords
+		movea.l	A0,A2			;set destination
+		movea.l	A1,A3			;set source
+ReplacePart	move.l	(A3)+,(A2)+		;overwrite old reloc_hunk
+		subq.l	#1,D2			;replace by the new one
+		bne.b	ReplacePart		;do it until eof
+
+		st	EFlag3(A5)		;set flag (file changed)
+
+		sub.l	D1,D0			;calc new file_length
+		sub.l	D0,RdSize(A5)		;calc new file_length
+		movea.l	A2,A1			;set new file_end
+
+		tst.b	Sort(A5)		;want to sort relocs?
+		bne.b	SortReloc32		;branch if so
+
+		adda.l	D1,A0			;reset parsing pointer
+		bra	Loop			;go back (parse next hunk)
+
+***********************************************  sort relocs (32 bit) *******
+
+SortReloc32	addq.l	#4,A0			;skip hunk_id
+		move.l	(A0)+,D0		;set # of relocs
+		beq.b	.QuitSort		;branch if zero
+
+.SortModule	addq.l	#4,A0			;skip # module
+		move.l	D0,D1			;set # of relocs
+		lsr.l	#1,D1			;calculate 1/2 of
+
+.Sort		move.l	D1,D2			;prepare register
+		move.l	D1,D3			;prepare register
+		sub.l	D0,D2			;calculate loop_counter
+		movea.l	A0,A2			;set module base
+		lsl.l	#$2,D3			;want 1/2 of in bytes
+		lea	(A2,D3.L),A3		;set base of destination
+		moveq	#0,D3			;clear sort_flag
+.CheckEntry	cmpm.l	(A2)+,(A3)+		;compare entries
+		bcc.b	.SkipEntry		;branch if source lower
+		move.l	-4(A2),D4		;swap entries
+		move.l	-4(A3),-4(A2)		;swap entries
+		move.l	D4,-4(A3)		;swap entries
+		st	D3			;set flag (some sorted)
+		st	EFlag3(A5)		;set flag file changed
+.SkipEntry	addq.l	#1,D2			;increment loop counter
+		bmi.b	.CheckEntry		;do until zero
+
+		tst.b	D3			;sorted some bytes ?
+		bne.b	.Sort			;if so, sort part again!
+
+		lsr.l	#1,D1			;increment sort_range
+		bne.b	.Sort			;sort next part until zero
+
+		move.l	A3,A0			;get next module
+		move.l	(A0)+,D0		;get # of relocs
+		bne.b	.SortModule		;sort next when set!
+
+.QuitSort	bra	Loop			;else, go back
+
+*****************************************************************************
+
+MergeModules	moveq	#0,D0			;set module # to search for
+		moveq	#0,D4			;clear merge_flag
+		movea.l	A1,A2			;set base of reloc_hunk
+		addq.l	#4,A2			;skip hunk_id
+
+.SearchModule1	move.l	A2,D3			;prepare module_size
+		move.l	(A2)+,D1		;get # of relocs
+
+.SearchModule2	move.l	(A2)+,D2		;get module #
+		cmp.l	D0,D2			;we search for?
+		beq.b	.CopyModule		;branch if so
+
+.SkipModule	lsl.l	#2,D1			;want size in bytes
+		lea	(A2,D1.l),A2		;skip module
+		move.l	A2,D3			;save base (current module)
+		move.l	(A2)+,D1		;get # of relocs
+		beq.b	.MergeNextMod		;branch, no more modules
+
+		move.l	(A2)+,D2		;get module #
+		cmp.l	D0,D2			;we search for?
+		bne.b	.SkipModule		;branch if not
+
+.CopyModule	tst.b	D4			;test merge_flag
+		bne.b	.JoinModule		;join module if set
+
+		movea.l	A3,A4			;save buffer (# relocs)
+		move.l	D4,(A3)+		;clear # of relocs
+		move.l	D2,(A3)+		;set module #
+		st	D4			;set flag (next must joined)
+
+.JoinModule	add.l	D1,(A4)			;increment # of relocs
+.CopyEntry	move.l	(A2)+,(A3)+		;copy relocs
+		subq.l	#1,D1			;decrement counter
+		bne.b	.CopyEntry		;do until zero
+
+		sub.l	A2,D3			;calculate module length
+		move.l	A2,-(SP)		;save register
+.DeleteModule	move.l	(A2),(A2,D3.l)		;replace rest of reloc_hunk
+		addq.l	#4,A2			;long by long
+		cmpa.l	A2,A3			;do until
+		bne.b	.DeleteModule		;end of hunk
+		movea.l	(SP)+,A2		;restore register
+
+		adda.l	D3,A2			;reset address (next module)
+		adda.l	D3,A3			;reset destination area
+		adda.l	D3,A4			;reset ptr. (# of relocs)
+
+		move.l	A2,D3			;save base (next module)
+		move.l	(A2)+,D1		;get # of relocs
+		bne.b	.SearchModule2		;branch if set
+
+.MergeNextMod	addq.l	#1,D0			;inc. module # to search for
+		moveq	#0,D4			;clear merge_flag
+		movea.l	A1,A2			;get base of reloc_hunk
+		addq.l	#4,A2			;skip hunk_id
+		move.l	(A2),(A3)		;all modules merged ?
+		bne.b	.SearchModule1		;branch if not
+
+		addq.l	#4,A2			;skip hunk_end
+.ResetNewHunk	move.l	(A2),-4(A2)		;reset merged reloc_hunk
+		addq.l	#4,A2			;long by long
+		cmp.l	A3,A2			;until
+		bls.b	.ResetNewHunk		;end of hunk
+		rts				;go back
+
+*****************************************************************************
+
+CopyDRel32	moveq	#0,D0			;prepare register
+		moveq	#0,D2			;prepare register
+		move.w	(A2)+,D0		;get # of relocs
+		beq.b	.SetEndMark		;branch if zero
+.CopyModule	move.l	D0,(A3)+		;set # of relocs
+		move.w	(A2)+,D2		;get module #
+		move.l	D2,(A3)+		;write as long
+.CopyReloc	move.w	(A2)+,D2		;get reloc
+		move.l	D2,(A3)+		;write as long
+		subq.l	#1,D0			;decrement reloc_counter
+		bne.b	.CopyReloc		;do until zero
+		move.w	(A2)+,D0		;get # of relocs
+		bne.b	.CopyModule		;branch, copy module
+		addq.l	#1,D1			;increment # of hunks copied
+		st	D7			;flag, found drel32_hunk
+.SetEndMark	move.l	D0,(A3)			;set end_mark (zero)
+		move.l	A2,D0			;be sure, we are long aligned
+		addq.l	#03,D0			;calculate long_align
+		andi.b	#-4,D0			;calculate long_align
+		movea.l	D0,A2			;reset end_address
+		rts				;go back
+
+*****************************************************************************
+
+CopyReloc32	move.l	(A2)+,D0		;get # of relocs
+		beq.b	.SetEndMark		;branch if zero
+.CopyModule	move.l	D0,(A3)+		;copy # of relocs
+		move.l	(A2)+,(A3)+		;copy module number
+.CopyReloc	move.l	(A2)+,(A3)+		;copy entry
+		subq.l	#1,D0			;decrement counter
+		bne.b	.CopyReloc		;do for all entries
+		move.l	(A2)+,D0		;get # of relocs
+		bne.b	.CopyModule		;branch, copy next module
+		addq.l	#1,D1			;increment # of hunks copied
+.SetEndMark	move.l	D0,(A3)			;set end_mark (zero)
+		rts				;go back
+
+***********************************************  save file to disk **********
+
+SaveFile	moveq	#0,D4			;initialize own error code
+
+		bsr	PresetBFName		;set backup filename
+
+		move.l	SPath(A5),D1		;set pathpart
+		beq.b	MakeBackup		;use current dir. if unset
+
+		moveq	#ACCESS_READ,D2		;set lock option
+		jsr	_LVOLock(A6)		;use DOS to (lock) dir.
+		move.l	D0,SPLock(A5)		;save lock
+		beq.b	SaveError		;branch on lock error
+
+		move.l	D0,D1			;set lock
+		jsr	_LVOCurrentDir(A6)	;use DOS to set (currentdir)
+		move.l	D0,OldSDir(A5)		;save lock (prev. directory)
+
+MakeBackup	lea	BName(A5),A1		;get filename (backup)
+		move.l	A1,D1			;set filename
+		jsr	_LVODeleteFile(A6)	;use DOS to (deletefile)
+
+		lea	SName(A5),A0		;get filename (save)
+		lea	BName(A5),A1		;get filename (backup)
+		move.l	A0,D1			;set oldname
+		move.l	A1,D2			;set newname
+		jsr	_LVORename(A6)		;use DOS to (rename) file
+
+		lea	SName(A5),A1		;get filename
+		move.l	A1,D1			;set filename
+		move.l	#MODE_NEWFILE,D2	;want open a new file
+		jsr	_LVOOpen(A6)		;use DOS to (open) file
+		move.l	D0,FHandleS(A5)		;save filehandle
+		beq.b	SaveError		;branch on failure
+
+		move.l	D0,D1			;set filehandle
+		move.l	Memory(A5),D2		;set buffer
+		move.l	NFSize(A5),D3		;set length
+		jsr	_LVOWrite(A6)		;use DOS to (write) file
+		move.l	D0,D2			;save success value
+
+		move.l	FHandleS(A5),D1		;set filehandle
+		jsr	_LVOClose(A6)		;use DOS to (close) file
+
+		tst.l	D2			;check for success
+		bmi.b	SaveError		;branch if not
+
+		move.w	#207,D4			;preset (seek error)
+		cmp.l	D2,D3			;all bytes written ?
+		beq.b	QuitSaveFile		;branch if so
+
+***********************************************
+
+SaveError	st	EFlag4(A5)		;set flag (save error)
+
+		bsr	PrintError0		;print some information
+
+		addq.l	#4,SP			;clear old return address
+		pea	Main3(pc)		;set new one
+
+		lea	SName(A5),A1		;get filename
+		move.l	A1,D1			;set filename
+		jsr	_LVODeleteFile(A6)	;delete corrupt file
+
+		lea	BName(A5),A0		;get filename (backup)
+		lea	SName(A5),A1		;get filename (save)
+		move.l	A0,D1			;set oldname
+		move.l	A1,D2			;set newname
+		jsr	_LVORename(A6)		;use DOS to (rename) file
+
+***********************************************
+
+QuitSaveFile	tst.b	EFlag4(A5)		;save error ?
+		bne.b	ResetSDir		;branch if so
+
+		tst.b	Replace(A5)		;want to replace ?
+		beq.b	SetProtect		;branch if not
+
+		tst.b	EFlag1(A5)		;is it overlay ?
+		bne.b	SetProtect		;if so, force backup
+
+		tst.b	EFlag2(A5)		;removed some hunks/zeros ?
+		bne.b	SetProtect		;if so, force backup
+
+		lea	BName(A5),A1		;get filename
+		move.l	A1,D1			;set filename
+		jsr	_LVODeleteFile(A6)	;use DOS to (deletefile)
+
+SetProtect	lea	SName(A5),A3		;get filename
+		move.l	A3,D1			;set filename
+		lea	FIBlock(A5),A2		;get fileinfoblock
+		move.l	fib_Protection(A2),D2	;set protection bits
+		bclr	#FIBB_ARCHIVE,D2	;clear archive bit
+		jsr	_LVOSetProtection(A6)	;use DOS to (setprotection)
+
+		tst.b	fib_Comment(A2)		;is there a comment ?
+		beq.b	ResetSDir		;branch if not
+
+		move.l	A3,D1			;set filename
+		lea	fib_Comment(A2),A2	;get comment
+		move.l	A2,D2			;set comment
+		jsr	_LVOSetComment(A6)	;use DOS to (setcomment)
+
+ResetSDir	move.l	OldSDir(A5),D1		;set former directory
+		beq.b	UnLockSDir		;branch if not set
+		jsr	_LVOCurrentDir(A6)	;use DOS to set (currentdir)
+
+UnLockSDir	move.l	SPLock(A5),D1		;set dir. lock
+		beq.b	QuitSave		;branch if not set
+		jsr	_LVOUnLock(A6)		;use DOS to (unlock) dir.
+QuitSave	rts				;go back
+
+***********************************************  preset backup name *********
+
+PresetBFName	moveq	#-1,D0			;prepare char counter
+		lea	SName(A5),A0		;get savename buffer
+		lea	BName(A5),A1		;get backup buffer
+		lea	Suffix(pc),A2		;get suffix
+GetFNChar	addq.l	#1,D0			;add char counter
+		move.b	(A0)+,(A1)+		;copy char
+		bne.b	GetFNChar		;do it for all chars
+		subq.l	#1,A1			;restore address
+
+AddSuffix	sub.b	#26,D0			;is there room for suffix?
+		bmi.b	SetSuffix		;branch if so
+		suba.l	D0,A1			;else, reduce stringsize
+SetSuffix	move.b	(A2)+,(A1)+		;append extender
+		bne.b	SetSuffix		;until zero
+QuitSetName	rts				;go back
+
+*****************************************************************************
+
+Suffix		dc.b	".bak",0,0
+
+***********************************************  load file to memory ********
+
+LoadFile	moveq	#0,D4			;initialize own error code
+
+		move.l	LPLock(A5),D1		;get dir. lock, preset by ASL
+		bne.b	GetDir			;branch if set
+
+		move.l	LPath(A5),D1		;set pathpart
+		beq.b	GetFile			;use currentdir if unset
+
+		moveq	#ACCESS_READ,D2		;set lock option
+		jsr	_LVOLock(A6)		;use DOS to (lock) dir.
+		move.l	D0,LPLock(A5)		;save lock
+		beq	LoadError		;branch on failure
+
+		move.l	D0,D1			;set lock
+
+GetDir		jsr	_LVOCurrentDir(A6)	;use DOS to set (currentdir)
+		move.l	D0,OldLDir(A5)		;save lock (prev. directory)
+
+GetFile		lea	LName(A5),A1		;get filename
+		move.l	A1,D1			;set filename
+		move.l	#MODE_OLDFILE,D2	;want open an existing file
+		jsr	_LVOOpen(A6)		;use DOS to (open) file
+		move.l	D0,FHandleL(A5)		;save filehandle
+		beq.b	LoadError		;branch on failure
+
+***********************************************
+
+		move.l	D0,D1			;set filehandle
+		lea	ProgID(A5),A2		;get buffer (8 bytes)
+		move.l	A2,D2			;set base
+		moveq	#8,D3			;set size
+		jsr	_LVORead(A6)		;use DOS to (read) bytes
+		tst.l	D0			;test for success
+		bmi.b	LoadError		;branch if not
+
+***********************************************
+
+		move.w	#305,D4			;preset io_error (not exec.)
+
+		cmp.l	D0,D3			;8 bytes loaded ?
+		bne.b	LoadError		;branch if not?!?! hmmm...
+
+		cmp.l	#HUNK_HEADER,(A2)	;check for executable
+		bne.b	LoadError		;branch if not
+		tst.l	4(A2)			;check for executable
+		bne.b	LoadError		;branch if not
+
+***********************************************
+
+		move.l	FHandleL(A5),D1		;set filehandle
+		lea	FIBlock(A5),A3		;get fileinfoblock
+		move.l	A3,D2			;set fib
+		jsr	_LVOExamineFH(A6)	;use DOS to (examinefh)
+		tst.l	D0			;test for success
+		beq.b	LoadError		;branch if not
+
+		move.l	fib_Size(A3),D0		;set filesize
+		add.l	D0,D0			;add working area
+		moveq	#0,D1			;no memory options
+		movea.l	4.w,A6			;set EXEC to call a function
+		jsr	_LVOAllocMem(A6)	;use EXEC to (allocmem)
+
+		movea.l	DOSBase(A5),A6		;set DOS to call a function
+
+		move.l	D0,Memory(A5)		;save memorybase
+		beq.b	LoadError		;branch when no free store
+
+***********************************************
+
+		movea.l	D0,A0			;set membase
+		move.l	(A2)+,(A0)+		;copy hunk_id
+		move.l	(A2)+,(A0)+		;copy hunk_id
+
+		move.l	FHandleL(A5),D1		;set filehandle
+		move.l	A0,D2			;set membase
+		move.l	fib_Size(A3),D3		;set filesize
+		subq.l	#8,D3			;skip hunk_id
+		beq.b	LoadError		;no more bytes?!?! hmmm...
+		jsr	_LVORead(A6)		;use DOS to (read) bytes
+		tst.l	D0			;test for success
+		bmi.b	LoadError		;branch if not
+
+		move.w	#219,D4			;preset io_error (seek error)
+
+		cmp.l	D0,D3			;got we all bytes ?
+		beq.b	CloseLFile		;branch if so
+
+***********************************************
+
+LoadError	bsr.b	PrintError0		;print error information
+
+		addq.l	#4,SP			;clear old return address
+		pea	Main3(pc)		;set new return address
+
+***********************************************
+
+CloseLFile	move.l	FHandleL(A5),D1		;set filehandle
+		beq.b	ResetDir		;branch if not set
+		jsr	_LVOClose(A6)		;use DOS to (close) file
+
+ResetDir	move.l	OldLDir(A5),D1		;set former directory
+		beq.b	UnLockLDir		;branch if not set
+		jsr	_LVOCurrentDir(A6)	;use DOS to set (currentdir)
+
+UnLockLDir	tst.b	ASLFlag(A5)		;got file by ASL ?
+		bne.b	QuitLoad		;branch if so
+		move.l	LPLock(A5),D1		;set dir. lock
+		beq.b	QuitLoad		;branch if not set
+		jsr	_LVOUnLock(A6)		;use DOS to (unlock) dir.
+QuitLoad	rts				;go back
+
+***********************************************  print hunk error ***********
+
+PrintError2	addq	#4,SP			;clear old return address
+		pea	Main3(pc)		;set new one
+
+		moveq	#0,D5			;prepare register
+		moveq	#0,D4			;prepare register
+		move.w	#212,D4			;set error code (wrong type)
+		bra.b	PrintFailed0		;print error information
+
+***********************************************  print hunk error ***********
+
+PrintError1	addq	#4,SP			;clear old return address
+		pea	Main3(pc)		;set new one
+
+		moveq	#0,D5			;prepare register
+		moveq	#0,D4			;prepare register
+		move.w	#235,D4			;set error code (bad hunk)
+		bra.b	PrintFailed0		;print error information
+
+***********************************************  get load/save error ********
+
+PrintError0	jsr	_LVOIoErr(A6)		;use DOS to get (io_error)
+		move.l	D0,D5			;save io_error
+
+***********************************************  print error information ****
+
+PrintFailed0	move.b	Quiet(A5),D0		;test quiet-flag
+		beq.b	PrintFailed1		;branch if unset
+		bsr.b	PrintET01		;print filename first
+
+		move.b	EFlag1(A5),D0		;test for overlay found
+		beq.b	PrintFailed2		;branch if unset
+		bsr.b	PrintET05		;print text "contains ovl."
+
+PrintFailed2	move.b	EFlag4(A5),D0		;test for saving file
+		beq.b	PrintFailed1		;branch if unset
+		bsr.b	PrintET02		;print text "writing"
+
+PrintFailed1	bsr.b	PrintET03		;print text "*** FAILED ***"
+
+		move.l	D5,D1			;set io_error
+		bgt.b	PrintFault2		;branch if one
+
+		move.l	D4,D1			;force own error
+
+PrintFault2	move.l	D1,IOErr(A5)		;save io_error
+		lea	Header2(pc),A0		;get header text
+		move.l	A0,D2			;set header text
+		jsr	_LVOPrintFault(A6)	;use DOS to (printfault)
+
+		moveq	#1,D0			;set failat level
+		add.l	D0,RCode(A5)		;set returncode
+		rts				;go back / go main3
+
+***********************************************  print some information *****
+
+PrintET05	lea	Text05(pc),A0		;get text "contains overlay"
+		bra.b	PrintText0		;and print
+
+PrintET03	lea	Text03(pc),A0		;get text "*** FAILED ***"
+		bra.b	PrintText0		;and print
+
+PrintET02	lea	Text02(pc),A0		;get text "writing"
+		bra.b	PrintText0		;and print
+
+PrintET01	lea	Text01(pc),A0		;get text "FILE:"
+		bsr.b	PrintText0		;and print
+		lea	LName(A5),A0		;get filename
+		bra.b	PrintText0		;and print
+
+***********************************************
+
+PrintT06	lea	Text06(pc),A0		;get text "untouched"
+		bra.b	PrintText1		;and print
+
+PrintT05	lea	Text05(pc),A0		;get text "contains overlay"
+		bra.b	PrintText1		;and print
+
+PrintT04	lea	Text04(pc),A0		;get text "done."
+		bra.b	PrintText1		;and print
+
+PrintT02	lea	Text02(pc),A0		;get text "writing"
+		bra.b	PrintText1		;and print
+
+PrintT00	lea	Text00(pc),A0		;get text "processing"
+		bsr.b	PrintText1		;and print
+		lea	Text01(pc),A0		;get text "FILE:"
+		bsr.b	PrintText1		;and print
+		lea	LName(A5),A0		;get filename
+
+*********************************************** printtext (null-terminated) *
+
+PrintText1	move.b	Quiet(A5),D0		;test quiet-flag
+		bne.b	QuitPrint		;branch if set
+
+***********************************************
+
+PrintText0	move.l	A0,D2			;set text to print
+		moveq	#-1,D3			;prepare register
+CalcSize	addq.l	#1,D3			;calculate
+		tst.b	(A0)+			;text length
+		bne.b	CalcSize		;until null-byte
+
+		jsr	_LVOOutput(A6)		;use DOS to find (output)
+		move.l	D0,D1			;set output-handle
+		jsr	_LVOWrite(A6)		;use DOS to (write) text
+QuitPrint	rts				;go back
+
+*********************************************** printtext (null-terminated) *
+
+PrintTBS	move.b	Quiet(A5),D0		;test quiet-flag
+		bne.b	QuitPrintSB		;branch if set
+
+		lea	Text07(pc),A1		;get text "%ld bytes "
+		lea	RdSize(A5),A2		;get buffer
+		lea	Text09(pc),A3		;get text "lost"
+
+		tst.l	(A2)			;saved some ?
+		beq.b	QuitPrintSB		;branch if not
+		bpl.b	PrintSBytes		;lost some ?
+
+		neg.l	(A2)			;need positive
+		lea	Text08(pc),A3		;get text "saved"
+
+PrintSBytes	move.l	A1,D1			;set text
+		move.l	A2,D2			;set argv
+		jsr	_LVOVPrintf(A6)		;use DOS to (vprintf)
+
+		move.l	A3,D1			;set text
+		jsr	_LVOPutStr(A6)		;use DOS to (putstr)
+
+		jsr	_LVOOutput(A6)		;use DOS to find (output)
+		move.l	D0,D1			;set output-handle
+		jsr	_LVOFlush(A6)		;use DOS to (flush) handle
+QuitPrintSB	rts				;go back
+
+*****************************************************************************
+
+Text00		dc.b	"processing",0
+Text01		dc.b	" FILE: ",0
+Text02		dc.b	", writing...",0
+Text03		dc.b	" *** FAILED ***",$A,0
+Text04		dc.b	" done.",$A,0
+Text05		dc.b	", contains overlay",0
+Text06		dc.b	", untouched.",$A,0
+Text07		dc.b	", %ld bytes ",0
+Text08		dc.b	"saved",0
+Text09		dc.b	"lost",0
+
+Header2		dc.b	"ERROR",0
+
+		even
+
+***********************************************  prepare file/dir (dst.) ****
+
+PrepSDst	move.l	LPath(A5),SPath(A5)	;copy pathpart_ptr
+
+		lea	LName(A5),A0		;get buffer fname (load)
+		lea	SName(A5),A1		;set buffer fname (save)
+SetSName	move.b	(A0)+,(A1)+		;preset filename
+		bne.b	SetSName		;until zero
+
+		move.l	SREQBase(A5),D1		;set save_requester base
+		bne.b	PrepSASL		;branch if set
+
+		move.l	SFile(A5),D2		;check for dst. filename
+		beq.b	QuitPrepSArg		;branch if not set
+
+		move.l	D1,SPath(A5)		;clear pathpart_ptr
+
+		move.l	D2,D1			;set filename
+		jsr	_LVOFilePart(A6)	;use DOS to find (filepart)
+
+		movea.l	D0,A0			;set base of filename
+		lea	SName(A5),A1		;set buffer (max: 30 chars)
+		bsr.b	CopyFName		;copy filename
+
+		cmp.l	D0,D2			;is there a pathpart ?
+		beq.b	QuitPrepSArg		;branch if not
+
+		move.l	D2,SPath(A5)		;save pathpart_ptr
+
+QuitPrepSArg	rts				;go back
+
+***********************************************
+
+PrepSASL	movea.l	D1,A2			;set sreqbase
+		movea.l	fr_Drawer(A2),A0	;get pathpart
+		tst.b	(A0)			;is there one ?
+		beq.b	GetSFASL		;no, branch
+
+		move.l	A0,SPath(A5)		;set pathpart
+
+GetSFASL	movea.l	fr_File(A2),A0		;get filename
+		tst.b	(A0)			;is there one ?
+		beq.b	QuitSFASL		;no,branch
+		lea	SName(A5),A1		;set buffer
+		bsr.b	CopyFName		;copy filename
+QuitSFASL	rts				;go back
+
+***********************************************  prepare file/dir (src.) ****
+
+PrepLSrc	move.l	FileCnt(A5),D0		;get file counter
+		move.l	ASLFlag(A5),D1		;check for ASL
+		bne.b	PrepLASL		;branch if so
+
+************************************************
+
+PrepLARG	lsl.l	#2,D0			;use D0 as offset
+
+		movea.l	LFile(A5),A2		;set source list
+		move.l	0(A2,D0.w),D2		;get base of next filename
+
+		move.l	D2,D1			;set filename
+		jsr	_LVOFilePart(A6)	;use DOS to find (filepart)
+
+		movea.l	D0,A0			;set base of filename
+		lea	LName(A5),A1		;set buffer (max: 30 chars)
+		bsr.b	CopyFName		;copy filename
+
+		cmp.l	D0,D2			;is there a pathpart ?
+		beq.b	QuitPrepLArg		;branch if not
+
+		move.l	D2,LPath(A5)		;save pointer
+
+QuitPrepLArg	rts				;go back
+
+***********************************************  prepare asl filename *******
+
+PrepLASL	lsl.l	#3,D0			;use D0 as offset
+
+		movea.l	LREQBase(A5),A2		;get requester base
+		movea.l	fr_ArgList(A2),A2	;set filetable
+		move.l	0(A2,D0.w),LPLock(A5)	;copy lock
+
+		movea.l	4(A2,D0.w),A0		;set filename
+		lea	LName(A5),A1		;set buffer (max: 30 chars)
+
+***********************************************
+
+CopyFName	move.b	(A0),(A1)+		;copy first byte
+		move.b	#0,(A0)+		;set pathpart terminator
+CopyChar	move.b	(A0)+,(A1)+		;copy bytes (max: 30 chars)
+		bne.b	CopyChar		;until zero
+		rts				;go back
+
+***********************************************  check for break signal *****
+
+ChkBreak	moveq	#00,D1			;prepare signal mask
+		bset	#12,D1			;set break bit (ctrl_c)
+		jsr	_LVOCheckSignal(A6)	;use DOS to (checksignal)
+		btst	#12,D0			;test break bit (ctrl_c)
+		bne	ForceFault3		;if set, branch (set ioerr)
+		rts				;go back
+
+***********************************************  open asl requester (load) **
+
+OpenREQs	tst.l	AslReq(A5)		;test flag
+		beq	ForceFault1		;if unset, branch (arg miss.)
+
+		move.l	ASLBase(A5),D6		;is there ASL available ?
+		beq	ForceFault4		;print (invalid lib.) if not
+
+		moveq	#0,D0			;want a filerequester
+		lea	ASLTAG_L(pc),A0		;set taglist
+
+		moveq	#1,D1			;set tag item boolean value
+		lea	Title_L2(pc),A1		;get tag item req_title
+
+		move.l	D1,12(A0)		;set multiselect (true)
+		move.l	A1,04(A0)		;set req_title
+		movea.l	D6,A6			;set ASL to call a function
+		jsr	_LVOAllocAslRequest(A6)	;use ASL to (allocaslrequest)
+
+		move.l	D0,LREQBase(A5)		;save req_base
+		beq	PrintFault0		;branch on failure
+
+		movea.l	D0,A0			;set req_base
+		suba.l	A1,A1			;no more tags yet
+		jsr	_LVOAslRequest(A6)	;use ASL to open (aslrequest)
+		tst.l	D0			;test result
+		beq	PrintFault0		;branch on failure
+
+		movea.l	LREQBase(A5),A2		;set requester base
+		move.l	fr_NumArgs(A2),D2	;read number of files
+		subq.l	#1,D2			;prepare filecounter
+		move.l	D2,FileCnt(A5)		;and save
+
+***********************************************  open asl requester (save) **
+
+		moveq	#0,D0			;want a filerequester
+		lea	ASLTAG_S(pc),A0		;set taglist
+
+		moveq	#1,D1			;set tag item (drawers only)
+		lea	Title_S2(pc),A1		;get tag item req_title2
+
+		suba.l	A3,A3			;clear initialfile
+
+		tst.l	D2			;test for multiple files
+		bne.b	OpenLFile		;branch if so
+
+		moveq	#0,D1			;unset tag item (drawers.. )
+		lea	Title_S1(pc),A1		;get tag item req_title1
+
+		movea.l	fr_File(A2),A3		;get initialfile
+
+OpenLFile	move.l	D1,D3			;save boolean (temp.)
+
+		move.l	A3,20(A0)		;set initialfile
+
+		move.l	D1,12(A0)		;set boolean value
+		move.l	A1,04(A0)		;set req_title
+		jsr	_LVOAllocAslRequest(A6)	;use ASL to (allocaslrequest)
+		move.l	D0,SREQBase(A5)		;save req_base
+		beq	PrintFault0		;branch on failure
+
+		movea.l	D0,A0			;set req_base
+		suba.l	A1,A1			;no more tags yet
+		jsr	_LVOAslRequest(A6)	;use ASL to open (aslrequest)
+		tst.l	D0			;test result
+		beq	PrintFault0		;branch on failure
+
+		movea.l	SREQBase(A5),A2		;set requester base
+		movea.l	fr_File(A2),A2		;get filename
+		tst.b	(A2)			;test for empty
+		bne.b	QuitREQ			;branch if not
+		tst.l	D3			;test boolean (drawers only)
+		beq	ForceFault1		;if unset, branch (arg mis.)
+
+QuitREQ		st	ASLFlag(A5)		;set flag (using ASL)
+		rts				;go back
+
+*****************************************************************************
+
+ASLTAG_L	dc.l	ASLFR_TitleText,0
+		dc.l	ASLFR_DoMultiSelect,0
+		dc.l	ASLFR_DoPatterns,1,0
+
+ASLTAG_S	dc.l	ASLFR_TitleText,0
+		dc.l	ASLFR_DrawersOnly,0
+		dc.l	ASLFR_InitialFile,0
+		dc.l	ASLFR_DoSaveMode,1,0
+
+Title_L2	dc.b	"Select your files...",0
+Title_S1	dc.b	"Save file as...",0
+Title_S2	dc.b	"Select drawer to save...",0
+
+		even
+
+***********************************************  check for wrong arguments **
+
+CheckArgs	move.b	DRel32(A5),D0		;get flag, want drel32?
+		and.b	Reloc32(A5),D0		;get flag, want reloc32?
+		bne	ForceFault2		;error, one flag only!
+
+		move.b	DRel32(A5),D0		;get flag, want drel32?
+		bne.b	CheckFlags		;branch if so
+		move.b	Split(A5),D0		;get flag, want split?
+		bne	ForceFault2		;error, requires drel32!
+
+CheckFlags	or.b	Reloc32(A5),D0		;one of these must be set
+		or.b	Sort(A5),D0		;one of these must be set
+		or.b	Symbol(A5),D0		;one of these must be set
+		or.b	Debug(A5),D0		;one of these must be set
+		or.b	Name(A5),D0		;one of these must be set
+		or.b	Zeros(A5),D0		;one of these must be set
+		beq	ForceFault1		;error if not
+
+************************************************ sort reverse (7.11.00) *****
+
+		move.b	Reverse(A5),D0		;get flag (sort reverse)
+		beq.b	.Ready			;branch if not set
+		and.b	Sort(A5),D0		;reverse requires sort
+		beq	ForceFault1		;branch if not set
+
+		lea	SortDRel32(pc),A0	;patch sortroutine (drel32)
+		subq.b	#1,30(A0)		;from bhi -> bls
+		lea	SortReloc32(pc),A0	;patch sortroutine (reloc32)
+		subq.b	#1,30(A0)		;from bhi -> bls
+
+		movea.l	4.w,A6			;set EXEC to call a function
+		jsr	_LVOCacheClearU(A6)	;use EXEC to clear cache
+
+*****************************************************************************
+
+.Ready		tst.l	LFile(A5)		;test source list
+		bne.b	CountFiles		;branch if set
+
+		tst.l	SFile(A5)		;test destination
+		bne	ForceFault1		;branch if set (arg missing)
+		rts				;go back
+
+***********************************************
+
+CountFiles	tst.l	AslReq(A5)		;test flag
+		bne	ForceFault2		;branch if set (wrong number)
+
+		movea.l	LFile(A5),A1		;get filetable
+		tst.l	(A1)+			;skip first one
+		moveq	#0,D0			;initialize file counter
+		tst.l	(A1)+			;check for another entry
+		beq.b	QuitChkArgs		;branch if empty
+
+		tst.l	SFile(A5)		;is there a destination ?
+		bne	ForceFault2		;branch if so (wrong number)
+
+CntFiles	addq	#1,D0			;increment file counter
+		tst.l	(A1)+			;check next list-entry
+		bne.b	CntFiles		;until all files found
+
+QuitChkArgs	addq	#4,SP			;skip openreqs-routine
+		pea	Main1(pc)		;set new return address
+
+		move.l	D0,FileCnt(A5)		;save file count
+
+		rts				;go main1
+
+***********************************************  read arguments *************
+
+ReadArgs	lea	Template(pc),A0		;get argument template
+		lea	ArgArray(A5),A1		;get buffer (readarg array)
+		move.l	A0,D1			;set template
+		move.l	A1,D2			;set array
+		moveq	#0,D3			;no readarg structure
+		movea.l	DOSBase(A5),A6		;set DOS to call a function
+		jsr	_LVOReadArgs(A6)	;use DOS to (readarg)
+		move.l	D0,RArgPtr(A5)		;save pointer
+		beq	PrintFault0		;branch on fail
+		rts				;go back
+
+************************************************ sort reverse (7.11.00) *****
+
+Template dc.b	"FILE/M,TO=AS,REPLACE/S,DREL32/S,SPLIT/S,RELOC32/S,SORT/S,"
+	 dc.b	"REVERSE/S,SYMBOL/S,DEBUG/S,NAME/S,ZEROS/S,ASLREQ/S,QUIET/S",0
+	 even
+
+***********************************************  prepare pr_result2 error ***
+
+ForceFault4	move.w	#122,D1			;preset ioerr (invalid lib.)
+		bra.b	ForceFault0		;branch (set ioerr)
+
+ForceFault3	move.w	#304,D1			;preset ioerr (break by user)
+		bra.b	ForceFault0		;branch (set ioerr)
+
+ForceFault2	move.w	#118,D1			;preset ioerr (to many args)
+		bra.b	ForceFault0		;branch (set ioerr)
+
+ForceFault1	move.w	#116,D1			;preset ioerr (args missing)
+
+ForceFault0	ext.l	D1			;clear upper word
+		movea.l	DOSBase(A5),A6		;set DOS to call a function
+		jsr	_LVOSetIoErr(A6)	;use DOS to (setioerr)
+
+***********************************************  print pr_result2 error *****
+
+PrintFault0	movea.l	DOSBase(A5),A6		;set DOS to call a function
+		jsr	_LVOIoErr(A6)		;use DOS to get (ioerr)
+		move.l	D0,D1			;set io_error
+		beq.b	ForceFault1		;branch when got nothing
+
+		moveq	#0,D2			;prepare register (no header)
+		cmp.w	#304,D1			;check for break by user
+		beq.b	PrintFault1		;branch if so
+
+		lea	Header1(pc),A2		;get header text
+		move.l	A2,D2			;want to print
+
+PrintFault1	jsr	_LVOPrintFault(A6)	;use DOS to (printfault)
+
+		addq.l	#4,SP			;clear old return address
+		pea	Main4(pc)		;set new return address
+
+		moveq	#5,D0			;set failat level (WARN)
+		move.l	D0,RCode(A5)		;set returncode
+
+		rts				;quit program
+
+*****************************************************************************
+
+Header1		dc.b	"StripHunk",0
+
+*****************************************************************************
+
+		if	BSS_Section
+
+		SECTION	StripHunk_bss,BSS
+
+		elseif
+
+		cnop	0,4
+
+		endc
+
+*****************************************************************************
+
+DataBase	ds.b	BSS_Size1
+
+ end of file ****************************************************************

@@ -1,0 +1,51 @@
+;
+; FastBasic - Fast basic interpreter for the Atari 8-bit computers
+; Copyright (C) 2017-2022 Daniel Serpell
+;
+; This program is free software; you can redistribute it and/or modify
+; it under the terms of the GNU General Public License as published by
+; the Free Software Foundation, either version 2 of the License, or
+; (at your option) any later version.
+;
+; This program is distributed in the hope that it will be useful,
+; but WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+; GNU General Public License for more details.
+;
+; You should have received a copy of the GNU General Public License along
+; with this program.  If not, see <http://www.gnu.org/licenses/>
+;
+; In addition to the permissions in the GNU General Public License, the
+; authors give you unlimited permission to link the compiled version of
+; this file into combinations with other programs, and to distribute those
+; combinations without any restriction coming from the use of this file.
+; (The General Public License restrictions do apply in other respects; for
+; example, they cover modification of the file, and distribution when not
+; linked into a combine executable.)
+
+
+; Floating Point stack and variables
+; ----------------------------------
+
+        .export         fpstk_0, fpstk_1, fpstk_2, fpstk_3, fpstk_4, fpstk_5
+        .exportzp       DEGFLAG, FPSTK_SIZE, fptr
+        .import         stack_end
+
+        .zeropage
+
+        ; FP stack pointer
+fptr:   .res    1
+        ; DEG/RAD flag
+DEGFLAG:        .res    1
+
+        ; Floating point stack, 8 * 6 = 48 bytes.
+        ; Total stack = 128 bytes
+FPSTK_SIZE = 8
+fpstk_0 =       stack_end
+fpstk_1 =       fpstk_0 + FPSTK_SIZE
+fpstk_2 =       fpstk_1 + FPSTK_SIZE
+fpstk_3 =       fpstk_2 + FPSTK_SIZE
+fpstk_4 =       fpstk_3 + FPSTK_SIZE
+fpstk_5 =       fpstk_4 + FPSTK_SIZE
+
+; vi:syntax=asm_ca65

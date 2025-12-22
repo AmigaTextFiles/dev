@@ -1,0 +1,212 @@
+1     ' Comet ephemeris
+2     gosub 10000
+20    ' LET PI=3.1.159267
+30    LET CO$="COMET HALLEY"
+40    LET PH=1986.11
+50    LET PL = 170.011
+60    LET AN = 58.1453
+70    LET PY = 76.0081
+80    LET SM = 17.9435
+90    LET EO = 0.967267
+100   LET IO = 162.239
+110   REM -------------------------
+120   PRINT TAB (10);CO$
+130   PRINT "- - - - - - - - - - - - - - -"
+140   PRINT "   EPHEMERIS FOR DATES"
+150   PRINT "    BETWEEN 1946 AND 2026"
+160   PRINT "By Roger Browne"
+165   Print "Adapted for Amiga by Tim Holloway":print
+170   REM ========================
+180   ' INPUT THE DATE
+190   '
+200   PRN=0:PRINT "Input year";
+210   INPUT Y
+220   IF Y<1946 OR Y > 2026 THEN 200
+230   PRINT "Input month";
+240   INPUT M
+250   IF M < 1 OR M > 12 THEN 230
+260   PRINT "Input day";
+270   INPUT D
+280   PRINT
+290   PRINT INVERSE (1);" Calculating ... "
+300   ' CALCULATIONS FOR THE COMET
+310   '
+320   LET X = PH
+330   IF Y >= 1986 THEN Z=1984
+340   IF Y < 1986 THEN Z = 1988
+350   IF Y >= 1986 THEN S=0
+360   IF Y < 1986 THEN S = 1
+370   GOSUB 1780
+380   DS = N
+390   B = (360/PY)*(N/365.25)
+400   K=B
+410   GOSUB 1930
+420   B=(K*PI)/180
+430   E=B
+440   Y1=EO
+450   Q=E-(Y1*SIN(E))-B
+460   IF ABS(Q) <= 1.7E-05 THEN 500
+470   U=Q/(1-(Y1*COS(E)))
+480   E=E-U
+490   GOTO 450
+500   V=(SQR((1+Y1)/(1-Y1))*(SIN(E/2)/COS(E/2)))
+510   V=2*ATN(V)
+520   V1=(V*180)/PI
+530   L=V1+PL
+540   R=SM*(1-(Y1*Y1))/(1+Y1*COS(V))
+550   F=L-AN
+560   F2=IO
+570   F1=F*PI/180
+580   F2=F2*PI/180
+590   I=SIN(F1)*SIN(F2)
+600   I=ATN(I/SQR(-I*I+1))
+610   P=ATN((SIN(F1)/COS(F1))*COS(F2))
+620   P1=P*180/PI+AN
+630   IF F>= 90 AND F<= 270 THEN P1=P1+180
+640   IF P1 < 0 THEN P1=P1+360
+650   P=P1*PI/180
+660   R2=R*COS(I)
+670   '===========================
+680   ' Calculations for the Earth
+690   '
+700   X=1975
+710   IF Y>= X THEN Z=1972
+720   IF Y < X THEN Z=1976
+730   IF Y>= X THEN S=0
+740   IF Y<1976 THEN S=1
+750   GOSUB 1780
+760   T=(360/365.25)*(N/1.00004)
+770   K=T
+780   GOSUB 1930
+790   T=K
+800   T1=T*PI/180
+810   C=0.01672
+820   J=T+(360/PI)*C*SIN(T1-0.051943)
+830   J=J+99.5343
+840   IF J>360 THEN J=J-360
+850   IF J<0 THEN J=J+360
+860   h=((j-102.51044)*pi)/180
+870   r1 = (1-c*c)/(1+c*cos(h))
+880   REM ------------------------
+890   REM Compute Ecliptic coordinates
+900   REM ------------------------
+910   U1=((P1-J)*PI)/180
+920   U2=((J-P1)*PI)/180
+930   IF (R2<R1) THEN 990
+940   Q1=(R1*SIN(U1))
+950   Q1=Q1/(R2-(R1*COS(U1)))
+960   Q1=ATN(Q1)
+970   Q2=(Q1*180)/PI+P1
+980   GOTO 1030
+990   Q3=R2*SIN(U2)
+1000  Q3=Q3/(R1-(R2*COS(U2)))
+1010  Q3=ATN(Q3)
+1020  Q2=(Q3*180)/PI+J+180
+1030  IF Q2>360 THEN Q2=Q2-360
+1040  IF Q2<0 THEN Q2=Q2+360
+1050  Q4=Q2*PI/180
+1060  Q5=(R2*(SIN(I)/COS(I))*SIN(Q4-P))
+1070  Q5=Q5/(R1*SIN(U1))
+1080  Q5=ATN(Q5)
+1090  REM ------------------------
+1100  REM Convert to equatorial coordinates
+1110  REM ------------------------
+1120  E1=0.40893064
+1130  L1=SIN(Q5)*COS(E1)
+1140  L1=L1+COS(Q5)*SIN(E1)*SIN(Q4)
+1150  M1=ATN(L1/SQR(-L1*L1+1))
+1160  Y2=M1*180/PI
+1170  B1=(SIN(Q4)/COS(Q4))*COS(E1)
+1180  B1=B1-(((SIN(Q5)/COS(Q5))*SIN(E1))/COS(Q4))
+1190  G=ATN(B1)
+1200  H1=G*180/PI
+1210  I1=INT(Q2/90)
+1220  J1=INT(H1/90)
+1230  IF (I1-J1)=4 OR (I1-J1)=1 THEN H1=H1+360
+1240  IF (I1-J1)=2 OR (I1-J1)=3 THEN H1=H1+180
+1250  IF (I1-J1)=-4 THEN H1=H1+360
+1260  IF (I1-J1)=-2 THEN H1=H1-180
+1270  LET N1=H1/15
+1280  W=INT((N1-INT(N1))*60+0.5)
+1290  IF W=60 THEN N1=N1+1
+1300  IF W=60 THEN W=0
+1310  K1=ABS(Y2)
+1320  W1=INT((K1-INT(K1))*60+0.5)
+1325  G1=INT(K1)
+1330  IF W1=60 THEN G1=G1+1
+1340  IF W1=60 THEN W1=0
+1360  IF (Y2<0) AND (G1<1) THEN W1=-W1
+1370  D1=R1*R1+R2*R2
+1380  D1=D1-(2*R1*R2*COS(U1))
+1390  D2=SQR(D1)
+1400  R3=D2/COS(I)
+1410  K9=R
+1420  GOSUB 2040
+1430  R=K9
+1440  K9=R3/10
+1450  GOSUB 2040
+1460  R3=K9*10
+1470  MO=4.1:N=3.1
+1480  IF DS<0 THEN MO=5:N=4.44
+1490  MA=MO+5*0.4343*LOG(R3)
+1500  MA=MA+N*2.5*0.4343*LOG(R)
+1510  MA=(INT(10*MA))/10
+1520  IF Y2<0 THEN G1=-G1
+1530  REM ------------------------
+1540  REM Print ephemeris for date
+1550  REM ------------------------
+1560  PRINT "--------------------"
+1570  PRINT "Data for ";CO$:PRINT
+1575  gshape (200,150),pic%
+1580  print "Date: ";M;"/";D;"/";Y
+1590  print "Days to perihelion: ";int(ds)
+1600  print
+1610  print "Coordinates: epoch 1950"
+1620  print "RA ..... ";INT(N1);" hrs ";W; " min"
+1630  print "Dec .... ";G1;" deg ";w1;" min":print
+1650  print "Distances:"
+1660  print "Comet to sun: . ";R;" A.U."
+1670  print "Comet to Earth: ";R3;" A.U."
+1680  print
+1690  print "Predicted mag.  ";MA
+1700  print "--------------------"
+1710  INPUT "Run another date";DATE$
+1730  IF (DATE$<>"Y") AND (DATE$<> "y") THEN STOP
+1740  GOTO 200
+1770  REM ------------------------
+1780  ' DAYS TO PERIHELION
+1785  A=(Y-Z)/4
+1790  A1=INT(A+S)
+1800  N=365*(Y-X+S)+A1
+1810  IF INT(A)<> A THEN 1830
+1820  IF (M=2) AND (D<29) OR (M=1) THEN N=N-1
+1830  IF M>2 THEN 1870
+1840  M2=M-1
+1850  M2=31*M2
+1860  GOTO 1890
+1870  M2=M+1
+1880  M2=INT(30.6*M2)-63
+1890  N=N+M2+D-365*S
+1900  RETURN
+1910  REM ------------------------
+1920  REM PLACE BETWEEN 0 AND 360 DEG
+1930  IF K<0 THEN 1950
+1940  IF K>360 THEN 1980
+1950  K=K+360
+1960  IF K>=0 THEN 2010
+1970  GOTO 1950
+1980  K=K-360
+1990  IF K<= 360 THEN 2010
+2000  GOTO 1980
+2010  RETURN
+2020  REM ------------------------
+2030  REM ROUND OFF SUBROUTINE
+2040  K9=K9*1000
+2050  K9=INT(K9+0.5)
+2060  K9=K9/1000
+2070  RETURN
+10000 ' AMIGA GRAPHICS - OPTIONAL (TFH)
+10005 scnclr
+10010 dim pic%(138):bload "HALLEY.PIC",varptr(pic%(0))
+10020 gshape (220,20),pic%
+10030 return

@@ -1,0 +1,197 @@
+Short: EFindHit v1.2 (for Enforcer output)
+Type: dev/e
+Author: jason@fsel.com (Jason R. Hulance)
+
+EFindHit can be used to find the line number of an Enforcer hit in an
+E program, given the offset information that Enforcer produces.
+Unlike normal FindHit programs, EFindHit reports the line numbers of
+hits in E modules, too (i.e., not just the main program).  And it can
+also tell you which function the code was in.
+
+
+Usage
+-----
+
+To use EFindHit, the main source file *must* be compiled with the
+LINEDEBUG or DEBUG switches.  And if you want to track hits in modules
+used by the program, they too must be compiled with one of these
+switches.
+
+If you want to see the names of functions as well, then you need to
+use the SYM switch, too, but only on the main source file.  This is
+especially useful for tracking hits in E internal functions.  If you
+don't use the SYM switch when compiling your source then EFindHit
+cannot reliably identify hits that occur in E internal functions (it
+may report them as coming from the last line of one of the sources,
+and flag those offsets that appear to be too far beyond the last
+line).
+
+EFindHit takes the following arguments:
+
+  EXECUTABLE/A,DEBUG/S,OFFSETS/M
+
+So, you can supply a list of offsets.  Hexadecimal offsets can be
+specified using a leading '$' or '0x'.  Without these prefixes the
+offset is interpreted as decimal.
+
+New to v1.2 is the DEBUG switch: see below for an illustrative
+example.
+
+
+Example
+-------
+
+For example, consider the following output from Enforcer (when
+SegTracker is running):
+
+  BYTE-READ from 00000000                        PC: 7833432C
+  USP:  7834B4B0 SR: 0004 SW: 0751  (U0)(-)(-)  TCB: 7828F188
+  Data: 00000000 0000000D 78348FB8 7829016C 00000001 1E0CCF39 78348FB8 00000001
+  Addr: 00000000 7828F1E4 783343AE 7829016C 7834B6C0 7834B4B4 78019864 --------
+  Stck: 00000000 7829016C 78334306 783341F2 00000000 00000000 00000000 00000000
+  Stck: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+  ----> 7833432C - "xxx"  Hunk 0000 Offset 00000244
+  Name: "Shell Process"  CLI: "xxx"  Hunk 0000 Offset 00000244
+
+The interested lines are the first and last.  The first line says the
+hit was a byte read from $00000000 (probably from dereferencing a NIL
+pointer). The last line says that the culprit was the program "xxx"
+and that the hit happened at offset $00000244.  (You might also
+consider using the STACKCHECK option of Enforcer to get the backtrace
+of the call stack.)
+
+If "xxx" has been compiled with LINEDEBUG (or DEBUG) then you can run
+EFindHit on it to find the line number of the hit in one of the source
+files:
+
+  1.System:> efindhit xxx $244
+  EFindHit works better if you compile with the SYM option
+  Offset $244: "xxx.e" line 5 [$242]
+
+The first line of output is a reminder that using SYM makes EFindHit
+work better, then the information about the offset.  The trailing
+"[$242]" indicates the offset of the start of the code for line 5.
+
+If you've compiled "xxx" with the SYM option too, then things get a
+bit better:
+
+  1.System:> efindhit xxx $244
+  Offset $244: "xxx.e" line 5 [$242], in "fun()" [$238]
+
+This also states the function the hit occurred in, and gives the
+offset of the start of code for that function ($238).
+
+If you don't trust the output of EFindHit (???), then you can use the
+DEBUG switch to dump all the information from the executable that
+EFindHit uses.  (If this switch is specified then any supplied offsets
+are ignored.)  For example:
+
+  1.System:> efindhit xxx debug
+  $00000000       *** Startup1 ***
+  $00000196       *** End of startup1 ***
+  $00000374       *** End of code ***
+  $00000236       fun()
+  $000001D2       zzz()
+  $00000196       external()
+  $00000284       main()
+  $000002DA       WriteF()
+  $0000036A       Char()
+  $0000023A    14 xxx.e
+  $00000240    15 xxx.e
+  $00000244    16 xxx.e
+  $00000288    22 xxx.e
+  $0000028E    23 xxx.e
+  $000001D6     4 zzz.e
+  $0000019A     8 xyz.e
+  $000001EE       *** Startup2 ***
+  $00000200       *** End of Startup2 ***
+
+The first column is the offset, the second (if present) is the line
+number and the last column is the name of the file, the function or
+another significant part of the executable.  You could sort this
+output if you have pipes set up:
+
+  1.System:> efindhit xxx debug | sort in: out:
+  $00000000       *** Startup1 ***
+  $00000196       *** End of startup1 ***
+  $00000196       external()
+  $0000019A     8 xyz.e
+  $000001D2       zzz()
+  $000001D6     4 zzz.e
+  $000001EE       *** Startup2 ***
+  $00000200       *** End of Startup2 ***
+  $00000236       fun()
+  $0000023A    14 xxx.e
+  $00000240    15 xxx.e
+  $00000244    16 xxx.e
+  $00000284       main()
+  $00000288    22 xxx.e
+  $0000028E    23 xxx.e
+  $000002DA       WriteF()
+  $0000036A       Char()
+  $00000374       *** End of code ***
+
+Now it's really easy to see where any particular offset lies...
+
+
+Possible output
+---------------
+
+As well as complaining about errors (like you forgot to compile with
+LINEDEBUG), EFindHit might report:
+
+1) Offset $244: "xxx.e" line 5 [$242], in "fun()" [$238]
+
+The offset is in the identified function in the main source.
+
+2) Offset $200: "xyz.e" line 11 [$1E8], near EXPORTed "external()" [$196]
+
+The line number information for code in modules is more accurate than
+the function information, since only EXPORTed functions can be
+followed.  So EFindHit reminds you that the code at the offset is only
+"near" the EXPORTed function (i.e., some point after it but before the
+next EXPORTed function).
+
+3) Offset $280: E internal function "Char()"
+
+The hit has occurred in an E internal function.  You probably want the
+backtrace in this case (the STACKCHECK option of Enforcer), so you can
+spot which function this was called from.
+
+4) Offset $190: E startup code
+
+The hit has occurred outside user code, either when starting or
+cleaning up.  This didn't ought to happen unless your code has
+scribbled all over the place.  (These offsets will show up in the
+backtrace produced by the STACKCHECK option of Enforcer, as E code
+always starts in the startup code!)
+
+5) Invalid offset $330: not in code part
+
+The hit didn't occur within the code of the executable being analysed.
+This might happen if you're running EFindHit on the wrong program or a
+different version from that which produced the hit.
+
+6) No line number for offset $200
+
+EFindHit couldn't find a line number (but might still be able to
+identify a function, nonetheless, and this will be reported as "in" or
+"near" as appropriate [assuming you've compiled with the SYM option]).
+
+
+Limitations
+-----------
+
+There's no symbol information (currently?) for any methods or for
+functions which are not EXPORTed from modules.  So it's not possible
+to put names to offsets in these bits of code (the line numbers should
+be sufficicient in these cases).  And offsets in methods/INCBIN/other
+data in the main source file will be reported as being "in" the
+nearest function before it.
+
+The startup code recognition is pretty much specific to EC v3.2e.
+It's likely to change in future...
+
+
+
+Have fun!

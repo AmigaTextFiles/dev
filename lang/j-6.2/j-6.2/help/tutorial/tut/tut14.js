@@ -1,0 +1,23 @@
+             STRUCTURES: each Fb
+   text
+ i sing of olaf glad and big
+   
+   words=. ;: text
+   words
++-+----+--+----+----+---+---+
+|i|sing|of|olaf|glad|and|big|
++-+----+--+----+----+---+---+
+   
+   1 0 2 3 { words
++----+-+--+----+
+|sing|i|of|olaf|
++----+-+--+----+
+   |. &. > 1 0 2 3 { words
++----+-+--+----+
+|gnis|i|fo|falo|
++----+-+--+----+
+   
+   <;._1 text
++-+----+--+----+----+---+---+
+|i|sing|of|olaf|glad|and|big|
++-+----+--+----+----+---+---+

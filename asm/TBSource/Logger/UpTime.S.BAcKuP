@@ -1,0 +1,372 @@
+*************************************************
+*						*
+*		 (C)opyright 1992		*
+*						*
+*		by  Tomi Blinnikka		*
+*						*
+*	Don´t try to understand the code	*
+*						*
+* Version 0.01	05/07/1992			*
+*						*
+* BUGS:	UpDays should've been long not word	*
+*						*
+* Version 1.00	10/08/1992			*
+*						*
+* BUGS:	Gave things like '0 day'		*
+*						*
+* Version 1.01	13/08/1992			*
+*						*
+* Version 1.02	22/08/1992			*
+*						*
+*************************************************
+
+	INCLUDE	"JMPLibs.i"
+	INCLUDE	"exec/types.i"
+	INCLUDE	"libraries/dos.i"
+	INCLUDE	"libraries/dosextens.i"
+
+	INCLUDE	"XREF:2.0.xref"
+	INCLUDE	"XREF:exec.xref"
+	INCLUDE	"XREF:dos.xref"
+
+		section	UpTime,CODE
+
+		move.l	a0,a4
+		clr.b	-1(a0,d0.l)
+		openlib	Dos,ShutDown_Out
+
+		bsr	GetSysTime
+		bsr	CheckUpTime
+
+		cmp.b	#'?',(a4)
+		beq	CmdLineHelp
+		cmp.w	#'-?',(a4)
+		beq	CmdLineHelp
+		cmp.w	#'-h',(a4)
+		beq	CmdLineHelp
+		cmp.w	#'-i',(a4)
+		bne	Skip1
+		move.b	#1,Action
+		add.l	#2,a4
+Skip1:		cmp.w	#'-o',(a4)
+		bne	Skip2
+		move.b	#2,Action
+		add.l	#2,a4
+
+Skip2:		tst.b	Action
+		beq	Information
+
+Skip2.1:	cmp.b	#' ',(a4)
+		bne	Skip3
+		add.l	#1,a4
+		bra	Skip2.1
+Skip3:		cmp.b	#'c',(a4)
+		bne	Skip4
+		move.b	#'c',CurrentTTY
+		add.l	#1,a4			;skip 'c'
+		bra	Skip5
+Skip4:		cmp.b	#'0',(a4)
+		bcs	CmdLineHelp
+		cmp.b	#'9',(a4)
+		bhi	CmdLineHelp
+		move.b	(a4),CurrentTTY
+		add.l	#1,a4
+Skip5:		lea.l	TTYUser,a0
+		move.l	a0,a1
+		add.l	#20,a1
+		cmp.b	#' ',(a4)
+		bne	Skip6
+		add.l	#1,a4
+		bra	Skip5
+Skip6:		cmp.b	#'A',(a4)
+		bcs	Skip7
+		cmp.b	#'z',(a4)
+		bhi	Skip7
+		move.b	(a4)+,(a0)+
+		cmp.l	a0,a1
+		bne	Skip6
+
+Skip7:		clr.b	(a0)+
+		tst.b	TTYUser
+		bne	Skip8
+		move.l	#'root',TTYUser
+		move.b	#$00,TTYUser+4
+
+Skip8:		cmp.b	#1,Action
+		beq	Login
+		cmp.b	#2,Action
+		beq	Logout
+		bra	ShutDown
+
+;Get system time
+;Uptime equals (System time - NUT_timeval)
+;Try to read ENV:NUT_login + ENV:NUT_TTYX
+;Loop 0 - 9
+;try reading ENV:UT_loadavg
+
+Information:	bsr	GetUpTime
+		bsr	DoTTYTest
+		bsr	GetLoadAvg
+
+		cmp.w	#1,Users
+		bne	CheckUsrNum1
+		lea.l	SingleString1,a0
+		move.l	a0,UsersString
+CheckUsrNum1:	bsr	Format
+		lea.l	UpTimeText1,a0
+		bsr	Printer
+
+		lea.l	LoadAvgBuf,a0
+		bsr	Printer
+
+		lea.l	EndText1,a0
+		bsr	Printer
+		bra	ShutDown
+
+Login:		sub.l	a1,a1
+		lib	Exec,FindTask
+		move.l	d0,a0
+		move.l	$8c(a0),TTYTaskNum
+		cmp.b	#'c',CurrentTTY
+		bne	Login1
+		lea.l	UpTimeConsole,a0
+		bra	Login2
+Login1:		move.b	CurrentTTY,TTY
+		lea.l	UpTimeTTY,a0
+Login2:		move.l	a0,d1
+		move.l	#MODE_NEWFILE,d2
+		lib	Dos,Open
+		tst.l	d0
+		beq	ShutDown
+		move.l	d0,d4
+		move.l	d0,d1
+		lea.l	DateTime1,a0
+		move.l	a0,d2
+		move.l	#4*4+20,d3	;info + username
+		lib	Dos,Write
+		move.l	d4,d1
+		lib	Dos,Close
+		bra	ShutDown
+
+Logout:		cmp.b	#'c',CurrentTTY
+		bne	Logout1
+		lea.l	UpTimeConsole,a0
+		bra	Logout2
+Logout1:	move.b	CurrentTTY,TTY
+		lea.l	UpTimeTTY,a0
+Logout2:	move.l	a0,d1
+		lib	Dos,DeleteFile
+		bra	ShutDown
+
+CheckUpTime:	lea.l	UpTimeName,a3
+		move.l	a3,d1
+		move.l	#MODE_OLDFILE,d2
+		lib	Dos,Open
+		tst.l	d0
+		beq	CheckUpTime2
+		move.l	d0,d4
+		move.l	d0,d1
+		lea.l	UpTimeBuf,a0
+		move.l	a0,d2
+		move.l	#3*4,d3
+		lib	Dos,Read
+		move.l	d4,d1
+		lib	Dos,Close
+		rts
+CheckUpTime2:	move.l	a3,d1
+		move.l	#MODE_NEWFILE,d2
+		lib	Dos,Open
+		tst.l	d0
+		beq	CheckUpTime3
+		move.l	d0,d4
+		move.l	d0,d1
+		lea.l	DateTime1,a0
+		move.l	a0,d2
+		move.l	#3*4,d3
+		lib	Dos,Write
+		move.l	d4,d1
+		lib	Dos,Close
+		move.l	DateTime1,UpTimeBuf
+		move.l	DateTime1+4,UpTimeBuf+4
+		move.l	DateTime1+4,UpTimeBuf+4
+CheckUpTime3:	rts
+
+GetSysTime:	lea.l	DateTime1,a0
+		move.l	a0,d1
+		lib	Dos,DateStamp
+
+		move.l	DateTime1+4,d0
+		divu.w	#60,d0
+		move.w	d0,Hours
+		swap	d0
+		move.w	d0,Minutes
+		rts
+
+;GetSystime has already got the current time for us
+
+GetUpTime:	move.l	UpTimeBuf,d0
+		move.l	DateTime1,d1
+		sub.l	d0,d1
+		move.l	d1,UpDays
+		move.l	UpTimeBuf+4,d0
+		move.l	DateTime1+4,d1
+		sub.l	d0,d1
+		bmi	GetUpTime3
+GetUpTime1:	divu.w	#60,d1
+		move.w	d1,UpHours
+		swap	d1
+		move.w	d1,UpMinutes
+GetUpTime2:	rts
+GetUpTime3:	move.l	UpTimeBuf+4,d0
+		move.l	DateTime1+4,d1
+		add.l	#1440,d1
+		sub.l	d0,d1
+		sub.l	#1,UpDays
+		cmp.l	#1,UpDays
+		bne	GetUpTime1
+		lea.l	SingleString1,a0
+		move.l	a0,DaysString
+		bra	GetUpTime1
+
+DoTTYTest:	lea.l	UpTimeConsole,a0
+		move.l	a0,d1
+		move.l	#MODE_OLDFILE,d2
+		lib	Dos,Open
+		tst.l	d0
+		beq	DoTTYTest1
+		move.l	d0,d1
+		add.w	#1,Users
+		lib	Dos,Close
+DoTTYTest1:	move.b	#'0',TTY
+
+DoTTYTest2:	lea.l	UpTimeTTY,a0
+		move.l	a0,d1
+		move.l	#MODE_OLDFILE,d2
+		lib	Dos,Open
+		tst.l	d0
+		beq	DoTTYTest3
+		move.l	d0,d1
+		add.w	#1,Users
+		lib	Dos,Close
+DoTTYTest3:	cmp.b	#'9',TTY
+		beq	DoTTYTest4
+		add.b	#1,TTY
+		bra	DoTTYTest2
+DoTTYTest4:	rts
+
+GetLoadAvg:	lea.l	LoadAvgName,a0
+		move.l	a0,d1
+		move.l	#MODE_OLDFILE,d2
+		lib	Dos,Open
+		tst.l	d0
+		bne	GetLoadAvg2
+GetLoadAvg1:	move.l	#'N/A,',LoadAvgBuf
+		move.l	#'  N/',LoadAvgBuf+4
+		move.l	#'A,  ',LoadAvgBuf+8
+		move.l	#'N/A ',LoadAvgBuf+12
+		move.b	#$00,LoadAvgBuf+16
+		rts
+GetLoadAvg2:	move.l	d0,d4
+		move.l	d0,d1
+		lea.l	LoadAvgBuf,a0
+		move.l	a0,d2
+		move.l	#19,d3
+		lib	Dos,Read
+
+		cmp.l	#19,d0
+		beq	GetLoadAvg3
+		bsr	GetLoadAvg1
+GetLoadAvg3:	move.l	d4,d1
+		lib	Dos,Close
+		rts
+
+Format:		lea.l	fstrl1,a0		;HEX->ASCII
+		lea.l	Hours,a1		;Start of information
+		lea.l	PutChProc,a2
+		lea.l	UpTimeText1,a3		;Destination
+		lib	Exec,RawDoFmt
+		rts
+
+ShutDown:	closlib	Dos
+ShutDown_Out:	move.l	#RETURN_OK,d0
+		rts
+
+CmdLineHelp:	lea.l	UsageText1,a0
+		bsr	Printer	
+		bra	ShutDown
+
+Printer:	printa	a0
+		rts
+
+PutChProc:	tst.b	d0
+		beq	PutChProc_OUT
+		move.b	d0,(a3)+
+PutChProc_OUT:	rts
+
+;Structures & reservations
+
+CurrentTTY:	dc.b	0
+Action:		dc.b	0		;0=show, 1=login, 2=logout
+
+Hours:		dc.w	0
+Minutes:	dc.w	0
+UpDays:		dc.l	0
+DaysString:	dc.l	PluralString1
+UpHours:	dc.w	0
+UpMinutes:	dc.w	0
+Users:		dc.w	0
+UsersString:	dc.l	PluralString1
+PluralString1:	dc.b	's,',0
+SingleString1:	dc.b	', ',0
+
+;Filenames
+
+LoadAvgName:	dc.b	"ENV:UT_loadavg",0
+UpTimeName:	dc.b	"ENV:NUT_timeval",0
+UpTimeConsole:	dc.b	"ENV:NUT_console",0
+UpTimeTTY:	dc.b	"ENV:NUT_ttyp"
+TTY:		dc.b	0,0
+
+;Error strings etc...
+
+
+;Information & other strings
+
+		dc.b	"$VER: "
+AuthorText1:	dc.b	"Uptime 1.02 (22.8.92) by Tomi Blinnikka",13,10,13,10
+;		dc.b	13,10,"!!! BETA TESTER VERSION !!!",13,10,13,10,13,10
+		dc.b	0
+
+UsageText1:	dc.b	"USAGE: Uptime [-i] [-o] [Number] [User]",13,10,13,10
+		dc.b	"       Where: [-i] for login",13,10
+		dc.b	"              [-o] for logout",13,10
+		dc.b	"              [Number] is the tty number 0-9",13,10
+		dc.b	"              [User] is the username",13,10,13,10
+		dc.b	"Tells how long the system has been up and its CPU usage.",13,10
+		dc.b	"It also records the login time and username for a TTY.",13,10
+		dc.b	"See docs for more information.",13,10,0
+fstrl1:		dc.b	"  %02.2d:%02d up %ld day%s %02.2d:%02.2d, %2.2d user%s load average: ",0
+UpTimeText1:	dcb.b	100,0
+EndText1:	dc.b	13,10,0
+		ds.l	0
+
+;Structures
+
+DateTime1:	dc.l	0		;days past 1978
+		dc.l	0		;mins past 00:00
+		dc.l	0		;ticks past min
+TTYTaskNum:	dc.l	0		;pr_TaskNum
+TTYUser:	dc.b	'root'		;user on this tty
+		dcb.b	20-4,0
+TTYReal:	dcb.b	20,0		;users' real name
+
+;library stuff
+
+		libnames
+
+;Buffers
+
+UpTimeBuf:	dcb.b	3*4,0		;read NUT_timeval here
+LoadAvgBuf:	dcb.b	20,0		;read UT_loadavg here
+		END
+

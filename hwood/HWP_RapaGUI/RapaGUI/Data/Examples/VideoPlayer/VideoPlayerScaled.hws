@@ -1,0 +1,426 @@
+/****************************************************************
+**                                                             **
+** Name:        VideoPlayer                                    **
+** Author:      Andreas Falkenhahn                             **
+** Version:     1.1                                            **
+** Date:        08.09.18                                       **
+** Interpreter: Hollywood 8.0                                  **
+** Licence:     Sample program for RapaGUI                     **
+** Function:    Shows how to combine Hollywood displays and    **
+**              native GUIs created with RapaGUI               **
+**                                                             **
+** History:                                                    **
+**                                                             **
+** 1.1: (08.09.18)                                             **
+**                                                             **
+** - added high dpi support                                    **
+**                                                             **
+** 1.0: (24.04.16)                                             **
+**                                                             **
+** - initial release                                           **
+**                                                             **
+****************************************************************/
+
+/*
+** Make sure we have at least Hollywood 8.0!
+*/
+@VERSION 8,0
+
+
+/*
+** This script requires the RapaGUI plugin
+*/
+@REQUIRE "RapaGUI", {ScaleHollywood = False}
+
+
+/*
+** Information about this app
+*/
+@APPTITLE "VideoPlayer"
+@APPVERSION "$VER: VideoPlayer 1.1 (08.09.18)"
+@APPCOPYRIGHT "(C) Copyright 2012-2018 by Andreas Falkenhahn"
+@APPAUTHOR "Andreas Falkenhahn"
+@APPDESCRIPTION "A simple video player done in Hollywood"
+
+
+/*
+** Button and list view images
+*/
+@ICON 1, {{Image = "data/tapestart.png"}, {Image = "data/large_tapestart.png"}}
+@ICON 2, {{Image = "data/tapeplay.png"}, {Image = "data/large_tapeplay.png"}}
+@ICON 3, {{Image = "data/tapepause.png"}, {Image = "data/large_tapepause.png"}}
+@ICON 4, {{Image = "data/tapestop.png"}, {Image = "data/large_tapestop.png"}}
+@ICON 5, {{Image = "data/tapeend.png"}, {Image = "data/large_tapeend.png"}}
+@ICON 6, {{Image = "data/add.png"}, {Image = "data/large_add.png"}}
+@ICON 7, {{Image = "data/remove.png"}, {Image = "data/large_remove.png"}}
+@ICON 8, {{Image = "data/moveup.png"}, {Image = "data/large_moveup.png"}}
+@ICON 9, {{Image = "data/movedown.png"}, {Image = "data/large_movedown.png"}}
+@ICON 10, {{Image = "data/video.png"}, {Image = "data/large_video.png"}}
+
+
+/*
+** Our BGPic
+*/
+@BRUSH 11, "data/cover.png"
+
+
+/*
+** Our XML GUI definition
+*/
+@FILE 1, "VideoPlayer.xml"
+
+
+/*
+** Use a black background for our Hollywood display
+*/
+@DISPLAY {Color = #BLACK, ScaleMode = #SCALEMODE_AUTO}
+
+
+/*
+** Enable/disable buttons depending on current list selection
+*/
+Function p_SetStates(p$, ac, num)
+
+	moai.Set(p$ .. "rem", "disabled", (ac = -1))
+	moai.Set(p$ .. "mvdn", "disabled", (ac = num - 1) Or (ac = -1))
+	moai.Set(p$ .. "mvup", "disabled", (ac = 0) Or (ac = -1))
+	moai.Set(p$ .. "play", "disabled", (ac = -1))
+
+	If musstate$ <> "stopped"
+		moai.Set(p$ .. "last", "disabled", (ac = 0))
+		moai.Set(p$ .. "next", "disabled", (ac = num - 1))
+	EndIf
+
+EndFunction
+
+
+/*
+** Disable buttons that only work while playback is active
+*/
+Function p_SetStopStates(p$)
+
+	moai.Set(p$ .. "last", "disabled", True)
+	moai.Set(p$ .. "next", "disabled", True)
+	moai.Set(p$ .. "pause", "disabled", True)
+	moai.Set(p$ .. "stop", "disabled", True)
+
+EndFunction
+
+
+/*
+** Enable/disable buttons depending on current list selection
+*/
+Function p_RefreshActive()
+
+	Local ac = moai.Get("lv", "active")
+	Local num = moai.Get("lv", "entries")
+
+	If GetType(ac) = #STRING
+		If ac = "Off" Then ac = -1
+	EndIF
+
+	p_SetStates("", ac, num)
+	p_SetStates("mn_", ac, num)
+
+EndFunction
+
+
+/*
+** Convert milliseconds into a hh:mm:ss time string
+*/
+Function p_Milliseconds2Time(msg)
+
+	Local ms = msg.value
+	Local hrs = ms / (1000 * 60 * 60)
+	Local Min = (ms % (1000 * 60 * 60)) / (1000 * 60)
+	Local sec = ((ms % (1000 * 60 * 60)) % (1000 * 60)) / 1000
+
+	Return(FormatStr("%.2d:%.2d:%.2d", hrs, Min, sec))
+
+EndFunction
+
+
+/*
+** Skip to previous track
+*/
+Function p_Last()
+
+	Local ac = moai.Get("lv", "active")
+	Local num = moai.Get("lv", "entries")
+
+	If ac - 1 >= 0
+		moai.Set("lv", "active", ac - 1)
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Skip to next track
+*/
+Function p_Next()
+
+	Local ac = moai.Get("lv", "active")
+	Local num = moai.Get("lv", "entries")
+
+	If ac + 1 < num
+		moai.Set("lv", "active", ac + 1)
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Return file name of currently selected video
+*/
+Function p_GetVideoSelection()
+
+	Return(moai.DoMethod("lv", "getentry", "active"))
+
+EndFunction
+
+
+/*
+** Start/resume playback
+*/
+Function p_Play()
+
+	If musstate$ = "paused"
+
+		ResumeVideo(1)
+		musstate$ = "playing"
+
+	Else
+
+		Local f$ = p_GetVideoSelection()
+		Local ac = moai.Get("lv", "active")
+		Local num = moai.Get("lv", "entries")
+
+		; do not fail if unknown error format
+		ExitOnError(False)
+		OpenVideo(1, f$)
+		Local err = GetLastError()
+		ExitOnError(True)
+
+		If err <> #ERR_NONE
+			moai.Request("VideoPlayer", "Unrecognized video format!", "OK")
+			Return
+		EndIf
+
+		Local w = GetAttribute(#VIDEO, 1, #ATTRWIDTH)
+		Local h = GetAttribute(#VIDEO, 1, #ATTRHEIGHT)
+		
+		ChangeDisplaySize(w, h)
+		
+		; enable buttons that can be used now
+		moai.Set("pause", "disabled", False)
+		moai.Set("stop", "disabled", False)
+		moai.Set("last", "disabled", (ac = 0))
+		moai.Set("next", "disabled", (ac = num - 1))
+
+		moai.Set("mn_pause", "disabled", False)
+		moai.Set("mn_stop", "disabled", False)
+		moai.Set("mn_last", "disabled", (ac = 0))
+		moai.Set("mn_next", "disabled", (ac = num - 1))
+
+		; prepare time slider
+		moai.Set("time", "min", 0, "max", GetAttribute(#VIDEO, 1, #ATTRDURATION), "disabled", False)
+		moai.Set("vol", "disabled", False)
+
+		; and go!
+		SetVideoVolume(1, curvol)
+						
+		PlayVideo(1, 0, 0)
+
+		musstate$ = "playing"
+		lastlevel$ = ""
+
+		curvideo$ = f$
+		curwidth = w
+		curheight = h
+	EndIf
+
+EndFunction
+
+
+/*
+** Stop playback
+*/
+Function p_Stop(callstop)
+
+	If callstop = True
+		If musstate$ = "paused" Then ResumeVideo(1)
+		StopVideo(1)
+	EndIf
+
+	musstate$ = "stopped"
+	curvideo$ = ""
+
+	moai.Set("time", "nonotify", True, "level", 0, "disabled", True)
+	moai.Set("vol", "disabled", True)
+
+	moai.Set("timelab", "text", "00:00:00")
+
+	p_SetStopStates("")
+	p_SetStopStates("mn_")
+
+EndFunction
+
+
+/*
+** Pause playback
+*/
+Function p_Pause()
+
+	If musstate$ = "playing"
+		PauseVideo(1)
+		musstate$ = "paused"
+	Else
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Event handler for the GUI
+*/
+Function p_GUIEvent(id)
+
+	Switch id
+	Case "add":
+		Local f$ = FileRequest("Select video", "mpg|ogg|m2v|avi|flv|mp4|cdxl|xl|mov", #REQ_NORMAL)
+		If f$ <> "" Then moai.DoMethod("lv", "insert", "active", 10, f$)
+	Case "mvup"
+		Local ac = moai.Get("lv", "active")
+		moai.DoMethod("lv", "move", "active", "previous")
+		moai.Set("lv", "active", ac - 1)
+	Case "mvdn"
+		Local ac = moai.Get("lv", "active")
+		moai.DoMethod("lv", "move", "active", "next")
+		moai.Set("lv", "active", ac + 1)
+	Case "play":
+		p_Play()
+	Case "stop":
+		p_Stop(True)
+	Case "pause":
+		p_Pause()
+	Case "last"
+		p_Last()
+	Case "next"
+		p_Next()
+	Case "rem":
+		If p_GetVideoSelection() = curvideo$ Then p_Stop(True)
+		moai.DoMethod("lv", "remove", "active")
+	Case "quit":
+		End
+	Case "about":
+		moai.Request("VideoPlayer", "VideoPlayer\n(C) 2012-2018 by Andreas Falkenhahn\n\nVisit the official Hollywood portal at:\nhttp://www.hollywood-mal.com", "OK")
+	Case "aboutrapagui":
+		moai.DoMethod("app", "aboutrapagui")
+	Case "pl":
+		moai.Set("playlist", "open", moai.Get("mn_pl", "selected"))
+	Case "aa":
+		enableaa = moai.Get("mn_aa", "selected")
+		If HaveObject(#VIDEO, 1) = True Then SetVideoSize(1, curwidth, curheight, enableaa)
+	EndSwitch
+
+EndFunction
+
+
+/*
+** Handles all incoming events
+*/
+Function p_EventFunc(msg)
+	
+	Switch msg.action
+	Case "RapaGUI":
+		;
+		; all events from RapaGUI are passed as type "RapaGUI"!
+		;
+		Switch msg.attribute
+		Case "CloseRequest":
+			moai.Set(msg.id, "open", False)
+			moai.Set("mn_pl", "selected", False)
+		Case "Pressed":
+			p_GUIEvent(msg.id)
+		Case "Selected":
+			p_GUIEvent(UnrightStr(msg.id, 3))
+		Case "DoubleClick":
+			p_Play()
+		Case "Active":
+			p_RefreshActive()
+		Case "Level":
+			Switch msg.id
+			Case "time":
+				seekms = moai.Get("time", "level")
+				moai.Set("timelab", "text", p_Milliseconds2Time({value = seekms}))				
+			Case "vol":
+				curvol = msg.triggervalue
+				If HaveObject(#VIDEO, 1) = True Then SetVideoVolume(1, curvol)
+				moai.Set("vollab", "text", curvol)					
+			EndSwitch
+		Case "Release":
+			If seekms < GetAttribute(#VIDEO, 1, #ATTRDURATION) - 100
+				SeekVideo(1, seekms)	
+			Else
+				p_Stop(True)
+			EndIf	
+			seekms = -1			
+		EndSwitch
+
+	Case "SizeWindow":
+		If HaveObject(#VIDEO, 1) = True
+			curwidth = msg.width
+			curheight = msg.height
+			SetVideoSize(1, msg.width, msg.height, enableaa)
+		Else
+			DisplayBrush(11, #CENTER, #CENTER)
+		EndIf
+
+	Case "Interval":
+		; update time slider but not if the user is currently dragging the time slider
+		If (musstate$ = "playing") And (seekms = -1)
+			Local ms = GetAttribute(#VIDEO, 1, #ATTRPOSITION)
+			Local level$ = p_Milliseconds2Time({value = ms})
+			If level$ <> lastlevel$
+				; must use "nonotify" here because otherwise the event handler that calls SeekVideo()
+				; would be triggered
+				moai.Set("time", "nonotify", True, "level", ms)
+				moai.Set("timelab", "text", level$)				
+				lastlevel$ = level$
+			EndIf
+		EndIf
+
+	Case "OnVideoEnd":
+		p_Stop(False)
+		p_Next()
+	EndSwitch
+
+EndFunction
+
+DisplayBrush(11, #CENTER, #CENTER)
+
+SetFillStyle(#FILLCOLOR)
+
+curvol = 64
+seekms = -1
+
+; dynamically create GUI from an external *.xml file definition
+moai.CreateApp(ReadString(1))
+
+; listen to these events!
+InstallEventHandler({RapaGUI = p_EventFunc, SizeWindow = p_EventFunc, OnVideoEnd = p_EventFunc})
+
+; create an interval function that updates the time slider
+SetInterval(1, p_EventFunc, 1000\10)
+
+musstate$ = "stopped"
+
+; main loop!
+Repeat
+	WaitEvent
+Forever
+

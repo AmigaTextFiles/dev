@@ -1,0 +1,976 @@
+PED81C DOCUMENTATION
+
+
+--------------------------------------------------------------------------------
+LEGAL
+
+ACKNOWLEDGEMENTS - The colorful lion and the tree-lined avenue pictures have
+been derived by means of automated conversion from, respectively, a drawing by
+fun-sized-lex (https://www.deviantart.com/fun-sized-lex) and a painting by
+Leonid Afremov (https://afremov.com). They are the property of their respective
+owners.
+
+DEFINITIONS - In this agreement: "Software" refers to any and all files
+constituting the project PED81C and its accessory utitilies and data, with the
+exception of the pictures mentioned in the ACKNOWLEDGEMENTS.
+
+RIGHTS AND RESTRICTIONS - You can: make copies of the Software; distribute
+unmodified copies of the Software. You cannot: distribute modified copies of the
+Software; use (any part of) the Software for a profit.
+
+DISCLAIMER - THE SOFTWARE IS PROVIDED "AS-IS", WITHOUT ANY WARRANTY. TO THE
+FULLEST EXTENT ALLOWED BY LAW, THE AUTHOR CANNOT BE HELD LIABLE FOR ANY DAMAGE
+ARISING OUT OF THE (INABILITY OF MAKING) USE OF IT. USE AT YOUR OWN RISK.
+
+GOVERNING LAW AND JURISDICTION - This agreement shall be governed by the laws of
+the country of residence of the author at the time of the dispute. The author
+reserves the right to appoint the venue for the dispute.
+
+EPILEPSY WARNING - Some people are susceptible to epileptic seizures when
+exposed to certain flashing lights or light patterns, and they may even be
+unaware of it. The Software may cause problems to such people. Who experiences
+blurred vision, dizziness, disorientation, loss of consciousness, twitches,
+involuntary movements, convulsions while playing/watching the Software must stop
+doing so immediately and receive the due medical assistance.
+
+
+--------------------------------------------------------------------------------
+OVERVIEW
+
+PED81C is a video system for AGA Amigas that provides pseudo-native chunky
+screens, i.e. screens where each byte in CHIP RAM corresponds to a dot on the
+display. In short, it offers chunky screens without chunky-to-planar conversion
+or any CPU/Blitter/Copper sweat.
+
+
+--------------------------------------------------------------------------------
+CORE IDEA
+
+The core idea is using SHRES pixels ("pixels" from now on) to simulate dots in a
+CRT/LCD-like fashion.
+
+Each dot is made of 4 pixels as follows:
+
+ ABCD
+ ABCD
+ ABCD
+ ABCD
+
+where
+
+ X
+ X
+ X
+ X
+
+represents a pixel.
+
+The eye cannot really distinguish the pixels and, instead, perceives them almost
+as a single dot whose color is given by the mix of the colors of the pixels. The
+pixels thus constitute the color elements ("elements" from now on) of the dot.
+The effect is not perfect though, as the pixels can still more or less be seen.
+The sharper the display / the bigger the pixels, the worse the visual mix. In
+practice, though, the effect works acceptably well on CRT, LCD and LED displays
+alike.
+
+The pixels can be assigned any RGB values ("base colors" from now on).
+For example, the most obvious choice is:
+
+ RGBW
+ RGBW
+ RGBW
+ RGBW
+
+Starting from the left, the pixels are used for the red, green, blue and white
+elements of dots. The pixels can be assigned any values in these ranges:
+
+ R: $rr0000, where $rr in [$00, $ff]
+ G: $00gg00, where $gg in [$00, $ff]
+ B: $0000bb, where $bb in [$00, $ff]
+ W: $wwwwww, where $ww in [$00, $ff]
+
+As a consequence, there is an overall brightness loss of at least 50%. For
+example, the white dot (the brighest one) is obtained by assigning the pixels
+the maximum values in the ranges (i.e. R = $ff0000, G = $00ff00, B = $0000ff,
+W = $ffffff), which add up to $ffffff*2, the half of the absolute maximum value
+of the 4 pixels, i.e. $ffffff*4.
+
+Each set of base colors ("color model" from now on) produces the specific
+palette that the dots are perceived in ("dots palette" from now on). To
+understand how to calculate the dots palette, it is first necesssary to look at
+how the screens work.
+
+The raster, i.e. the matrix of the bytes (stored as a linear buffer) that
+represent the dots, must reside in CHIP RAM. It is used as bitplane 1 and also
+as bitplane 2, shifted 4 pixels to the right.
+This how a byte %76543210 (where each digit represents at bit) in the raster is
+displayed:
+
+ bitplane 2:     76543210
+ bitplane 1: 76543210
+                 ****
+
+The marked bits are those that produce the dot that corresponds to the byte:
+
+                 ABCD
+                 ABCD
+                 ABCD
+                 ABCD
+
+                 ^^^^
+
+ bitplane 2:     76543210
+ bitplane 1: 76543210
+
+The elements are thus indicated by the bit pairs in the byte:
+
+ %73 -> element A
+ %62 -> element B
+ %51 -> element C
+ %40 -> element D
+
+Replacing the digits with letters gives a better representation:
+
+ %ABCDabcd
+
+where:
+
+ X = most significant bit for element X
+ x = least significant bit for element X
+
+Each element can have only 4 values corresponding to the bit pairs %00, %01,
+%10 and %11. Such values are those stored in COLORxx. Therefore, the bit pairs
+represent the COLORxx indexes:
+
+ %00 -> COLOR00
+ %01 -> COLOR01
+ %10 -> COLOR02
+ %11 -> COLOR03
+
+However, there are 4 elements, so it is necessary to distinguish them; this is
+achieved by adding two selector bitplanes filled with fixed patterns:
+
+                 ABCD
+                 ABCD
+                 ABCD
+                 ABCD
+
+                 ^^^^
+
+ bitplane 4: 001100110011
+ bitplane 3: 010101010101
+ bitplane 2:     ABCDabcd
+ bitplane 1: ABCDabcd
+
+Therefore:
+
+ bitplane 4 and 3 = %00 -> element A -> COLOR00 thru COLOR03
+ bitplane 4 and 3 = %01 -> element B -> COLOR04 thru COLOR07
+ bitplane 4 and 3 = %10 -> element C -> COLOR08 thru COLOR11
+ bitplane 4 and 3 = %11 -> element D -> COLOR12 thru COLOR15
+
+Given that there are 4 elements and that each element can have 4 different
+values, the total number of combinations (i.e. of dots colors) is 4^4 = 256.
+
+In the RGBW color model, COLORxx could be set up as follows (for simplicity, the
+low-order 12 bits are left to the automatic copy performed by AGA):
+
+        R      |        G      |        B      |        W
+ --------------+---------------+---------------+--------------
+ COLOR00: $000 | COLOR04: $000 | COLOR08: $000 | COLOR12: $000
+ COLOR01: $500 | COLOR05: $050 | COLOR09: $005 | COLOR13: $555
+ COLOR02: $a00 | COLOR06: $0a0 | COLOR10: $00a | COLOR14: $aaa
+ COLOR03: $f00 | COLOR07: $0f0 | COLOR11: $00f | COLOR15: $fff
+
+Consequently, the bit pairs in the bytes yield these colors:
+
+     |   %00   |   %01   |   %10   |   %11
+ ----+---------+---------+---------+--------
+ %Aa | $000000 | $550000 | $aa0000 | $ff0000
+ %Bb | $000000 | $005500 | $00aa00 | $00ff00
+ %Cc | $000000 | $000055 | $0000aa | $0000ff
+ %Dd | $000000 | $555555 | $aaaaaa | $ffffff
+
+For example, the byte %RGBWrgbw = %10011010 (%Rr = %11, %Gg = %00, %Bb = %01,
+%Ww = %10) represents this dot:
+
+                 f00a
+                 f00a
+                 000a
+                 000a
+                 005a
+                 005a
+
+                 ^^^^
+
+ bitplane 2:     10011010
+ bitplane 1: 10011010
+
+The dot RGB color is thus:
+
+ R: ($ff + $00 + $00 + $aa) / 4 = (255 + 170) / 4 = 106.2 = $6a \
+ G: ($00 + $00 + $00 + $aa) / 4 =        170  / 4 =  42.5 = $2b  > $6a2b40
+ B: ($00 + $00 + $55 + $aa) / 4 = ( 85 + 170) / 4 =  63.7 = $40 /
+
+A critical aspect of PED81C is that each dot is surrounded by spurious bits:
+
+ bitplane 2:     ABCDabcd
+ bitplane 1: ABCDabcd
+             ****    ****
+
+Without CPU and/or Blitter intervention, those bits cannot be eliminated - but
+processing data is precisely what PED81C tries to avoid, so it is necessary to
+find a way to deal with the spurious bits.
+This is what happens with two consecutive bytes %ABCDabcd and %EFGHefgh:
+
+                 ABCD????EFGH
+                 ABCD????EFGH
+                 ABCD????EFGH
+                 ABCD????EFGH
+
+                 ^^^^^^^^^^^^
+
+ bitplane 2:     ABCDabcdEFGHefgh
+ bitplane 1: ABCDabcdEFGHefgh
+
+Between the dots produced by the bytes as explained above ("desired dots" from
+now on) is a dot that is made of bits coming from both the bytes ("middle dot"
+from now on), i.e. %EFGH and %abcd. The simplest solution would be masking the
+middle dot out with a no-DMA vertically repeating jailbar mask sprite, but that
+would introduce a horrible vertical spacing between the columns of dots and
+reduce further the brightness of the screen.
+A smarter solution would be adding one more selector bitplane to distinguish
+between desired dots and middle dots (for readability, from now on, 0 bits are
+replaced with '·' where needed):
+
+                 ABCD????ABCD
+                 ABCD????ABCD
+                 ABCD????ABCD
+                 ABCD????ABCD
+
+                 ^^^^^^^^^^^^
+
+ bitplane 5: 1111····1111····1111
+ bitplane 4: ··11··11··11··11··11
+ bitplane 3: ·1·1·1·1·1·1·1·1·1·1
+ bitplane 2:     ABCDabcdEFGHefgh
+ bitplane 1: ABCDabcdEFGHefgh
+
+COLOR16 thru COLOR31 could then be set up so that the middle dots are mixes of
+the desired dots, keeping in mind that the middle dots have the most and least
+significant bits swapped around (the least significant bits of the left dot end
+up in the most significant bits of the middle dot and the most significant bits
+of the right dot end up in the least significant bits of the middle dot). The
+simplest settings reflect the settings of the desired dots, but with the RGB
+values assigned to the %01 and %10 bit pairs swapped around.
+For example, in the RGBW color model:
+
+        R      |        G      |        B      |        W
+ --------------+---------------+---------------+--------------
+ COLOR16: $000 | COLOR20: $000 | COLOR24: $000 | COLOR28: $000
+ COLOR17: $500 | COLOR21: $0a0 | COLOR25: $00a | COLOR29: $555
+ COLOR18: $a00 | COLOR22: $050 | COLOR26: $005 | COLOR30: $aaa
+ COLOR19: $f00 | COLOR23: $0f0 | COLOR27: $00f | COLOR31: $fff
+
+For example, two identical bytes %10001000 ($ff0000) would give this result
+(which is correct):
+
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+
+                 f···f···f···
+                 f···f···f···
+                 ············
+                 ············
+                 ············
+                 ············
+
+                 ^^^^^^^^^^^^
+
+ bitplane 5: 1111····1111····1111
+ bitplane 4: ··11··11··11··11··11
+ bitplane 3: ·1·1·1·1·1·1·1·1·1·1
+ bitplane 2:     1···1···1···1···
+ bitplane 1: 1···1···1···1···
+
+ left dot:   $ff0000
+ middle dot: $ff0000
+ right dot:  $ff0000
+
+However, if the bytes were %00001000 ($550000) and %10000000 ($aa0000), the
+result would be:
+
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+
+                 5···f···a···
+                 5···f···a···
+                 ············
+                 ············
+                 ············
+                 ············
+
+                 ^^^^^^^^^^^^
+
+ bitplane 5: 1111····1111····1111
+ bitplane 4: ··11··11··11··11··11
+ bitplane 3: ·1·1·1·1·1·1·1·1·1·1
+ bitplane 2:     ····1···1·······
+ bitplane 1: ····1···1·······
+
+ left dot:   $550000
+ middle dot: $ff0000
+ right dot:  $aa0000
+
+The middle dot would end up being a full red, stronger than the desired dots,
+which is not visually correct nor logical, as the middle dots would be more
+prominent than the desired dots. A solution could be dimming the RGB values of
+middle dots.
+For example, if they were halved, the result would be:
+
+ left dot:   $550000
+ middle dot: $800000
+ right dot:  $aa0000
+
+The middle dot would be a good average of the desired dots. That works
+conceptually, but in practice it causes the middle dots columns to look like
+vertical scanlines - which is not desirable either.
+
+The case of different hues is even more complicated. For example, if the bytes
+were %10001000 ($ff0000) and %010001000 ($00ff00), the result would be:
+
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+
+                 f···5a···f··
+                 f···5a···f··
+                 ············
+                 ············
+                 ············
+                 ············
+
+                 ^^^^^^^^^^^^
+
+ bitplane 5: 1111····1111····1111
+ bitplane 4: ··11··11··11··11··11
+ bitplane 3: ·1·1·1·1·1·1·1·1·1·1
+ bitplane 2:     1···1····1···1··
+ bitplane 1: 1···1····1···1···
+
+ left dot:   $ff0000
+ middle dot: $55aa00
+ right dot:  $00ff00
+
+The middle dot would be a kind of average of the actual dots, although not
+really good (a good average would be $808000).
+It is possible to experiment with the COLORxx values to achieve different
+results, but the overall scanlines-like effect would still remain. Moreover,
+the 3rd selector bitplane would steal a lot of DMA slots. An alternative is
+required.
+
+The proposed solution consists in eliminating the 3rd selector bitplane and
+assigning the bit pairs %01 and %10 the same RGB values (which basically gives
+the most and least significant bits the same weight). As a downside, this
+reduces the amount of dots colors: given that each element can have only 3
+different values, the total number of colors falls down to 3^4 = 81.
+
+For example, in the RGBW color model:
+
+        R      |        G      |        B      |        W
+ --------------+---------------+---------------+--------------
+ COLOR00: $000 | COLOR04: $000 | COLOR08: $000 | COLOR12: $000
+ COLOR01: $800 | COLOR05: $080 | COLOR09: $008 | COLOR13: $888
+ COLOR02: $800 | COLOR06: $080 | COLOR10: $008 | COLOR14: $888
+ COLOR03: $f00 | COLOR07: $0f0 | COLOR11: $00f | COLOR15: $fff
+
+The case of two identical bytes %10001000 ($ff0000) would still give the same
+(correct) result as before:
+
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+
+                 f···f···f···
+                 f···f···f···
+                 ············
+                 ············
+                 ············
+                 ············
+
+                 ^^^^^^^^^^^^
+
+ bitplane 4: ··11··11··11··11··11
+ bitplane 3: ·1·1·1·1·1·1·1·1·1·1
+ bitplane 2:     1···1···1···1···
+ bitplane 1: 1···1···1···1···
+
+ left dot:   $ff0000
+ middle dot: $ff0000
+ right dot:  $ff0000
+
+The case of the bytes %00001000 ($880000) and %10000000 ($880000), would give
+this result:
+
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+
+                 8···f···8···
+                 8···f···8···
+                 ············
+                 ············
+                 ············
+                 ············
+
+                 ^^^^^^^^^^^^
+
+ bitplane 4: ··11··11··11··11··11
+ bitplane 3: ·1·1·1·1·1·1·1·1·1·1
+ bitplane 2:     ····1···1·······
+ bitplane 1: ····1···1·······
+
+ left dot:   $880000
+ middle dot: $ff0000
+ right dot:  $880000
+
+Again the middle dot would be brighter than the actual dots, but now this can
+be easily solved by simply forbidding the %01 bit pair in bytes, given that it
+can always be replaced by the %10 bit pair. So, the bytes would instead be both
+%10000000 ($880000) and the result would be:
+
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+
+                 8···8···8···
+                 8···8···8···
+                 ············
+                 ············
+                 ············
+                 ············
+
+                 ^^^^^^^^^^^^
+
+ bitplane 4: ··11··11··11··11··11
+ bitplane 3: ·1·1·1·1·1·1·1·1·1·1
+ bitplane 2:     1·······1·······
+ bitplane 1: 1·······1·······
+
+ left dot:   $880000
+ middle dot: $880000
+ right dot:  $880000
+
+Also the case of different hues, %10001000 ($ff0000) and %01000100 ($00ff00),
+gives a correct result (for complete correctness, in this example the low-order
+bits of COLOR02 and COLOR05 are set to 0):
+
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+                 RGBWRGBWRGBW
+
+                 f···88···f··
+                 f···00···f··
+                 ············
+                 ············
+                 ············
+                 ············
+
+                 ^^^^^^^^^^^^
+
+ bitplane 4: ··11··11··11··11··11
+ bitplane 3: ·1·1·1·1·1·1·1·1·1·1
+ bitplane 2:     1···1····1···1··
+ bitplane 1: 1···1····1···1··
+
+ left dot:   $ff0000
+ middle dot: $808000
+ right dot:  $00ff00
+
+
+--------------------------------------------------------------------------------
+COLOR MODELS
+
+The CORE IDEA section introduces the RGBW color model, but the number of
+possible color models is huge (2^288). For best results, it is adviceable to
+define the color models that are most suitable to the graphics to be displayed.
+
+The most obvious general-purpose color models are:
+ * CMYW: Cyan Magenta Yellow White
+ * G: Greyscale
+ * KC: Key Colors (red yellow green cyan blue magenta white)
+ * RGBW: Red Green Blue White
+
+This table shows the COLORxx settings for the general-purpose color models.
+
+                   |    CMYW   |     G     |     KC    |   RGBW
+ ELEMENT | COLORxx | RGB hi/lo | RGB hi/lo | RGB hi/lo | RGB hi/lo
+ --------+---------+-----------+-----------+-----------+----------
+       A | COLOR00 | $000/$000 | $000/$000 | $000/$000 | $000/$000
+         | COLOR01 | $088/$000 | $222/$222 | $f00/$f00 | $800/$000
+         | COLOR02 | $088/$000 | $222/$222 | $f00/$f00 | $800/$000
+         | COLOR03 | $0ff/$0ff | $fff/$fff | $ff0/$ff0 | $f00/$f00
+ --------+---------+-----------+-----------+-----------+----------
+       B | COLOR04 | $000/$000 | $000/$000 | $000/$000 | $000/$000
+         | COLOR05 | $808/$000 | $555/$555 | $0f0/$0f0 | $080/$000
+         | COLOR06 | $808/$000 | $555/$555 | $0f0/$0f0 | $080/$000
+         | COLOR07 | $f0f/$f0f | $fff/$fff | $0ff/$0ff | $0f0/$0f0
+ --------+---------+-----------+-----------+-----------+----------
+       C | COLOR08 | $000/$000 | $000/$000 | $000/$000 | $000/$000
+         | COLOR09 | $880/$000 | $aaa/$aaa | $00f/$00f | $008/$000
+         | COLOR10 | $880/$000 | $aaa/$aaa | $00f/$00f | $008/$000
+         | COLOR11 | $ff0/$ff0 | $fff/$fff | $f0f/$f0f | $00f/$00f
+ --------+---------+-----------+-----------+-----------+----------
+       D | COLOR12 | $000/$000 | $000/$000 | $000/$000 | $000/$000
+         | COLOR13 | $888/$000 | $888/$000 | $888/$000 | $888/$000
+         | COLOR14 | $888/$000 | $888/$000 | $888/$000 | $888/$000
+         | COLOR15 | $fff/$fff | $fff/$fff | $fff/$fff | $fff/$fff
+
+For the G color model, the aritmetically perfect assignment would be:
+ * COLOR01, COLOR02: $333333
+ * COLOR05, COLOR06: $666666
+ * COLOR09, COLOR10: $999999
+ * COLOR13, COLOR14: $cccccc
+However, the resulting dots palette would contain only 26 unique colors.
+
+Each color model has strenghts and weaknesses. This table provides an evaluation
+of the general-purpose color models (COLORS = number of unique colors in the
+resulting dots palette).
+
+COLOR MODEL | BRIGHTNESS | SATURATION | CONTRAST | COLORS | NOTES
+------------+------------+------------+----------+--------+--------------------
+       CMYW | **         | *          | *        | 73     | no red, green, blue
+          G | ****       |            | ****     | 45     |
+         KC | ***        | **         | **       | 46     | noisy middle dots
+       RGBW | *          | ***        | ***      | 65     |
+
+
+--------------------------------------------------------------------------------
+CALCULATING/GENERATING DOTS PALETTES
+
+Once the color model is defined, the corresponding dots palette can be
+calculated by mixing the RGB values assigned to the bit pairs in the bytes from
+0 to 255. The bytes which include a %01 bit pair should be treated as illegal
+and thus be assigned one of the RGB values also assigned to a legal byte
+(the easiest solution is to use the value of byte 0). The calculation of the RGB
+value ($6a2b40) corresponding to the byte %10011010 in the RGBW color model,
+done in the CORE IDEA section, makes for a practical example.
+
+The PED81C archive includes GeneratePalette, a handy tool that generates a dots
+palette according to the desired color model and then saves it to an ILBM file.
+It normalizes to $ff the components of the calculated colors, so that the latter
+are brighter and have a higher dynamic range than the actual dots palette
+colors, allowing for better graphics conversion. Also, it assigns the value of
+byte 0 to the illegal bytes.
+
+The command line arguments are:
+
+ A0/A,A2/A,A3/A,B0/A,B2/A,B3/A,C0/A,C2/A,C3/A,D0/A,D2/A,D3/A,FFIS100/S,FILE/A
+
+ X0:      24-bit RGB value for the %00 pair of element X
+ X2:      24-bit RGB value for the %10 pair of element X
+ X3:      24-bit RGB value for the %11 pair of element X
+ FFIS100: $ff treated internally as $100 (for better rounding)
+ FILE:    output file
+
+ The 24-bit RGB values must be in hexadecimal format without prefix.
+
+The palettes are suitable for screens which use bitplanes 3 and 4 as selector
+bitplanes.
+
+The PED81C archive also includes:
+ * the palettes for the general-purpose color models, stored as ILBM pictures;
+ * DoPalettes, a script that generates a few palettes (it can be used also as a
+   reference for GeneratePalette usage).
+
+
+--------------------------------------------------------------------------------
+PRODUCING GRAPHICS
+
+The palettes can be used to draw/convert graphics.
+For example, to display a picture in an RGBW screen:
+ 1. remap the picture with the RGBW palette;
+ 2. save the remapped picture as raw chunky data;
+ 3. copy the raw chunky data to the raster or use it directly as the raster.
+
+
+--------------------------------------------------------------------------------
+SETTING UP AND USING SCREENS
+
+PED81C screens are obtained by opening SHRES screens with these peculiarities:
+ * the raster must be used as bitplane 1 and 2;
+ * bitplane 3 must be filled with %01010101 ($55);
+ * bitplane 4 must be filled with %00110011 ($33);
+ * bitplanes 2 and 4 must be shifted horizontally by 4 pixels;
+ * COLORxx must be set according to the chosen color model;
+ * the 4 pixels in the leftmost column are made of just the least significant
+   bits of the leftmost dots, so it is generally recommendable to hide them by
+   moving the left side of the window area by 1 LORES pixel to the right.
+
+Notes:
+ * to obtain a screen which is W LORES pixels wide, the width of the raster must
+   be W*4 SHRES pixels = W/2 bytes (e.g. 320 LORES pixels -> 1280 SHRES pixels =
+   160 bytes = 160 dots);
+ * to obtain a scrollable screen, allocate a raster bigger than the visible area
+   and, in case of horizontal scrolling, set BPLxMOD to the amount of non-
+   fetched dots (e.g. for a raster which is 256 dots wide and is displayed in
+   a 320 LORES pixels area, BPLxMOD must be 256 - 320/2 = 96);
+ * HIRES/SHRES resolution scrolling is possible, but it alters the colors of the
+   leftmost dots;
+ * given the high DMA load caused by the bitplanes fetch, it is best to enable
+   the 64-bit fetch mode (FMODE.BPLx = 3).
+
+Example registers settings for:
+ * screen equivalent to a 319x256 LORES screen
+ * 160 dots wide raster
+ * blanked border
+ * 64-bit sprites and bitplanes fetch mode
+ * sprites on top of bitplanes
+ * sprites colors assigned to COLOR16 thru COLOR31
+
+ REGISTER | VALUE | ENABLED BITS
+ ---------+-------+----------------------------
+  BPLCON0 | $4241 | BPU2 COLOR SHRES ECSENA
+  BPLCON1 | $0010 | PF2H2
+  BPLCON2 | $0224 | KILLEHB PF2P2 PF1P2
+  BPLCON3 | $0020 | BRDRBLNK
+  BPLCON4 | $0011 | OSPRM5 ESPRM5
+  BPL1MOD | $0000 |
+  BPL2MOD | $0000 |
+  DDFSTRT | $0038 |
+  DDFSTOP | $00D0 |
+  DIWSTRT | $2C82 |
+  DIWSTOP | $2CC1 |
+  DIWHIGH | $A100 |
+  FMODE   | $000F | SPRAGEM SPR32 BPLAGEM BPL32
+
+Given a raster which is W dots wide and H dots tall, the byte at <X, Y> is
+located at <raster address> + W*Y + X.
+
+
+--------------------------------------------------------------------------------
+TWEAKS/EXTENSIONS
+
+#1
+
+The selector bitplanes need a lot of RAM. To save RAM drastically it is enough
+to store just 1 line for each of them and to reset BPLxPTx with the Copper
+during the horizontal blanking period of every rasterline. As a downside, this
+steals some DMA cycles and complicates Copperlists.
+
+#2
+
+If a selector bitplane is omitted, the elements become 2 couples of identical
+elements; if both the selector bitplanes are omitted, all the elements become
+equal. Omitting the selector bitplanes saves (a lot of) DMA bandwidth and can be
+useful in particular cases. For example, the demo THE CURE does not use any
+selector bitplanes and uses bytes of the kind %HHHHLLLL, where H = High bit,
+L = Low bit; this, thanks to jailbar mask sprites produces perfect LORES-looking
+4-color pixels (which, together with bitplanes DMA toggling every other
+rasterline, produces a dot-matrix display).
+
+#3
+
+If, due to the nature of the graphics, the visual output looks very "vertical",
+it can be improved by applying a crosshatch dither effect by shifting the
+rasterlines by 4 pixels on an alternate line basis as follows - for example:
+
+ ****************************************
+  ########################################
+ ++++++++++++++++++++++++++++++++++++++++
+  @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+ ...
+
+#4
+
+To lessen the dithering of tweak #3 and improve the color mix, the shifting can
+also be inverted on an alternate frame basis - for example, the rasterlines
+could be shown on the next frame as follows:
+
+  ****************************************
+ ########################################
+  ++++++++++++++++++++++++++++++++++++++++
+ @@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@@
+  ...
+
+This tweak causes flickering visuals (especially on displays with quick
+response), so it is not really recommendable.
+
+#5
+
+Depending on the base colors, to achieve a better visual mix, shifting the lines
+by 1 pixel on an alternate frame (and possibly line) basis could help without
+causing too much flicker. Still, not really recommendable.
+
+#6
+
+Adding a horizontal scanlines effect by swapping the elements palette on an
+alternate line basis (through BPLCON4) makes the visual output resemble that of
+a CRT display.
+
+#7
+
+To reduce the amount of graphics to draw and the memory usage, the raster size
+can be halved by repeating each rasterline once (which is easily obtained by
+means of FMODE.BSCAN2 and BPLxMOD). This combines well with tweak #6.
+
+#8
+
+If needed, the bitplanes order can be reversed, i.e. the selector bitplanes
+could be assigned bitplanes 1 and 2, and the raster bitplanes could be assigned
+bitplanes 3 and 4:
+
+ bitplane 4:     76543210
+ bitplane 3: 76543210
+ bitplane 2: 001100110011
+ bitplane 1: 010101010101
+
+In this case, COLORxx need to be set up differently:
+
+ bitplane 2 and 1 = %00 -> element A -> COLOR00 COLOR04 COLOR08 COLOR12
+ bitplane 2 and 1 = %01 -> element B -> COLOR01 COLOR05 COLOR09 COLOR13
+ bitplane 2 and 1 = %10 -> element C -> COLOR02 COLOR06 COLOR10 COLOR14
+ bitplane 2 and 1 = %11 -> element D -> COLOR03 COLOR07 COLOR11 COLOR15
+
+Note: GeneratePalette does not support such arrangement.
+
+#9
+
+With a careful setup of COLORxx, the unused 4 bitplanes can be used to overlay
+other graphics or even up to two more chunky screens, optionally with colorkey
+and translucency. That, however, would increase noticeably the CHIP bus load.
+
+
+--------------------------------------------------------------------------------
+NOTES
+
+#1
+
+The meaning of PED81C is "Pixel Elements Dots, 81 Colors".
+
+#2
+
+Although due to the middle dots the logical horizontal resolution is half of the
+physical one, the averaging provided by the middle dots and SHRES quite fool the
+eye.
+
+#3
+
+Visually, the best results are obtained with complex/dithered images, as plain
+color areas and geometrical shapes reveal the pixels and the middle dots. In
+particular, isolated dots look 3x-ish wide.
+
+#4
+
+PED81C is very DMA intensive: the bitplanes data fetched are twice that of an
+equivalent 256 colors LORES screen. (If only Lisa had been able to use the
+BPLxDAT values of inactive bitplanes - like, for example, Denise does with
+bitplanes 5 and 6 when 4 bitplanes only and HAM are enabled - BPL3DAT and
+BPL4DAT could have been loaded with the selector values thus halving the DMA
+fetches.)
+
+#5
+
+81 is only the theoretical maximum number of dots colors. The actual number
+depends on the chosen base colors.
+
+#6
+
+The core idea could be used also to display 24-bit pictures, but the coarseness
+of the method wastes completely the subtlety of such high color resolution (also
+verified experimentally).
+
+#7
+
+Usage of PED81C is of course welcome and encouraged. It would be nice if credit
+were given. If used in a commercial production, I would appreciate if permission
+were asked first and if I could receive a little share of the profits.
+
+
+--------------------------------------------------------------------------------
+BACKGROUND
+
+#1
+
+The idea of using SHRES pixels as elements is by Fabio Bizzetti, who used it for
+his Virtual Karting and Virtual Karting II games.
+In the late 90s, I was in touch with him and he told me that his idea was to
+"fool the RF signal" (or something along these lines). This got me thinking and
+I came up with the core idea. Before writing here (in 2022!) I had never
+bothered checking what he actually had done, but now I deemed it appropriate to
+do it in order to provide a brief description of his method, both as an
+acknowledgement of his brilliant idea and to provide more food for thought.
+After starting Virtual Karting II in UAE, having a look at the moving graphics,
+grabbing a screenshot, checking the values of BPLCON0 and BPLCON1, and checking
+the bitplanes memory, I found out that he used bitplanes 1-3 as selector
+bitplanes and assigned the pixels these elements (from left to right): red-
+orange-yellow-green-cyan-azure-blue-purple (so, there are no middle dots and
+dots are really 2x-wide). To mitigate the columns-looking result, he applied the
+crosshatch tweak, swapping the scroll offsets on an alternate frame basis.
+
+#2
+
+Between the end of the 90s and 2003 I had created a system (implemented as a
+shared library) based on the same core idea, but using 3 selector bitplanes.
+PED81C is actually a simplification of that system, born from precisely from the
+removal of the middle dots selector bitplane to improve the speed.
+
+The old system was really rich feature-wise, as it provided:
+ * 256 colors screens
+ * HalfRes screens: screens like PED81C's
+ * FullRes screens: screens without middle dots - this was achieved by means of
+   a conversion performed by the CPU, optionally assisted by the Blitter (for
+   the record, the CPU-only conversion allowed 320x256 screens at about 50 fps
+   on an Amiga 1200 equipped with a Blizzard 1230-IV and 60 ns FAST RAM)
+ * chequer effect: crosshatch tweak for HalfRes screens
+ * double and triple buffering
+ * 5 embedded color models (RGBW, RGBM, RGBP, RGBPS, RGB332)
+ * color/palette handling functions (color setting, color remapping, 24-bit
+   fading and 24-bit cross-fading)
+ * Cross Playfield mode: 256 color screen overlay on top of another screen with
+   any degree of opacity between 0 and 256 (in practice, this produced 16-bit
+   graphics)
+ * Dual Cross Playfield mode: like Cross Playfield mode, but with a selectable
+   colorkey
+ * graphical contexts (clipping, drawing modes)
+ * pixmap fuctions (blitting, zooming, rotzooming)
+ * graphical primitives
+ * font functions
+ * ILBM functions
+
+One might wonder why such system is not public - the reasons are:
+ * the core would need to be re-designed;
+ * the implementation could be better;
+ * the accessory functions (like the graphical ones) should be in a separate
+   library;
+ * the documentation would need a major overhaul.
+
+Basically, I do not consider the system suitable for public distribution. I
+would rather redo it from scratch... but that is precisely why PED81C was born:
+while thinking how to improve the system, I realized how to eliminate the 3rd
+selector bitplane and decided to get rid of the FullRes screens, because the
+point of these systems is obtaining chunky screens without data conversion
+(otherwise, it is better to use one of the traditional C2P methods, which give
+better visual results).
+
+#3
+
+Originally I had planned to use PED81C to make a new game. However, I could not
+come up with a satisfactory idea; moreover, due to personal reasons, I had to
+stop software development. Given that I could not predict when/if I would able
+to produce something with PED81C and given that the war in Ukraine put the world
+in deep uncertainty, I decided that it was better to release PED81C to avoid
+that it went wasted and also as a gift to the Amiga community.
+I must admit I have been tempted to provide an implementation of PED81C in the
+form of a library or of a collection of functions, but since setting up PED81C
+screens is easy and since general-purpose routines would perform worse than
+tailor-made ones, I decided to let programmers implement it in the way that fits
+best their projects.
+
+
+--------------------------------------------------------------------------------
+DEMOS
+
+The demos are suitable for any AGA Amiga. They all with the source graphics so
+that you can compare them with the visual result and check the dots palettes. To
+quit, use the right mouse button.
+
+MM - Moving Maps
+Raster size: 160x256
+Screen size: 320x256
+This shows a ghost effect achieved by applying a distorsion map. This was a
+proof-of-concept for a static screen ghost-blasting game.
+Use the joystick to move the ghost over the painting.
+
+MPS - Mirrored Parallax Scroller
+Raster size: 160x100
+Screen size: 320x200
+This shows a tunnel with parallax floor and ceiling. Floor and ceiling are
+mirrored. The parallax is obtained by scaling each line in real time. Floor and
+ceiling are rendered while the background wall is drawn by the Blitter. The
+whole raster gets redrawn every frame, so that it would not be necessary to
+restore the graphics under other graphics (e.g. bobs). The rasterlines are
+doubled with a scanlines effect. On an unexpanded Amiga 1200, rendering 1 frame
+takes about all the rasterlines during which no bitplane DMA occurs.
+Use the joystick to move left/right.
+
+PCMYW1 - Picture in the CMYW color model / 1-pixel-tall dots
+Raster size: 160x256
+Screen size: 320x256
+This shows a colorful picture in the CMYW palette.
+
+PCMYW2 - Picture in the CMYW color model / 2-pixel-tall dots
+Raster size: 160x128
+Screen size: 320x256
+This shows a colorful picture in the CMYW palette. The rasterlines are doubled
+with a scanlines effect.
+
+PG1 - Picture in the G color model / 1-pixel-tall dots
+Raster size: 160x256
+Screen size: 320x256
+This shows a colorful picture in the KC palette.
+
+PG2 - Picture in the G color model / 2-pixel-tall dots
+Raster size: 160x128
+Screen size: 320x256
+This shows a colorful picture in the KC palette. The rasterlines are doubled
+with a scanlines effect.
+
+PKC1 - Picture in the KC color model / 1-pixel-tall dots
+Raster size: 160x256
+Screen size: 320x256
+This shows a colorful picture in the KC palette.
+
+PKC2 - Picture in the KC color model / 2-pixel-tall dots
+Raster size: 160x128
+Screen size: 320x256
+This shows a colorful picture in the KC palette. The rasterlines are doubled
+with a scanlines effect.
+
+PRGBW1 - Picture in the RGBW color model / 1-pixel-tall dots
+Raster size: 160x256
+Screen size: 320x256
+This shows a colorful picture in the RGBW palette.
+
+PRGBW2 - Picture in the RGBW color model / 2-pixel-tall dots
+Raster size: 160x128
+Screen size: 320x256
+This shows a colorful picture in the RGBW palette. The rasterlines are doubled
+with a scanlines effect.
+
+ST - Spinning Tunnel
+Raster size: 160x100
+Screen size: 320x200
+This shows a tunnel with a tube effect. Each line in scaled in real time. The
+whole raster gets redrawn every frame, so that it would not be necessary to
+restore the graphics under other graphics (e.g. bobs). The rasterlines are
+doubled with a scanlines effect. The moving objects are 64-pixel 15-color
+sprites. On an unexpanded Amiga 1200, rendering 1 frame takes about 98% of the
+time.
+Use the joystick to move the spaceship.
+
+
+--------------------------------------------------------------------------------
+EXAMPLE
+
+The example is an AMOS Professional program that shows how to set up a PED81C
+screen and to perform some basic operations on it. For the details, please refer
+to the source code.
+
+
+--------------------------------------------------------------------------------
+
+rev. 20230623
+
+www.retream.com/PED81C
+contact@retream.com
+(c) 2022 RETREAM

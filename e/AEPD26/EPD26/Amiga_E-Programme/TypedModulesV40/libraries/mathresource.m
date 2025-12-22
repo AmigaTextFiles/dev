@@ -1,0 +1,27 @@
+OPT MODULE
+OPT EXPORT
+
+MODULE 'exec/io'
+
+CONST DEFPITCH=$6E,
+      DEFRATE=$96,
+      DEFVOL=$40,
+      DEFFREQ=$56B8,
+      NATURALF0=0,
+      ROBOTICF0=1,
+      MANUALF0=2,
+      MALE=0,
+      FEMALE=1,
+      DEFSEX=0,
+      DEFMODE=0,
+      DEFARTIC=$64,
+      DEFCENTRAL=0,
+      DEFF0PERT=0,
+      DEFF0ENTHUS=$20,
+      DEFPRIORITY=$64,
+      MINRATE=$28,
+      MAXRATE=$190,
+      MINPITCH=$41,
+      MAXPITCH=$140,
+      MINFREQ=$1388,
+      

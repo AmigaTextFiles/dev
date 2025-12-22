@@ -1,0 +1,284 @@
+DEFINITION FOR LIBRARY MODULE AmigaGuide ;
+
+FROM SYSTEM	IMPORT ADDRESS, STRING, LONGSET ;
+FROM Utility	IMPORT TagItemPtr, Tag, TAG_USER, HookPtr, Hook ;
+FROM Exec	IMPORT Node, Message, LibraryPtr ;
+FROM Dos	IMPORT FileLockPtr ;
+FROM Intuition	IMPORT ScreenPtr ;
+
+TYPE
+  XRefPtr		= POINTER TO XRef ;
+  AmigaGuideMsgPtr	= POINTER TO AmigaGuideMsg ;
+  NewAmigaGuidePtr	= POINTER TO NewAmigaGuide ;
+  AmigaGuideHostPtr	= POINTER TO AmigaGuideHost ;
+  opFindHostPtr		= POINTER TO opFindHost ;
+  opNodeIOPtr		= POINTER TO opNodeIO ;
+  opExpungeModePtr	= POINTER TO opExpungeNode ;
+
+CONST
+  APSH_TOOL_ID		= 11000 ;
+  StartupMsgID		= APSH_TOOL_ID+1 ;	(* Startup message	   *)
+  LoginToolID		= APSH_TOOL_ID+2 ;	(* Login a tool SIPC port  *)
+  LogoutToolID		= APSH_TOOL_ID+3 ;	(* Logout a tool SIPC port *)
+  ShutdownMsgID		= APSH_TOOL_ID+4 ;	(* Shutdown message	   *)
+  ActivateToolID	= APSH_TOOL_ID+5 ;	(* Activate tool	   *)
+  DeactivateToolID	= APSH_TOOL_ID+6 ;	(* Deactivate tool	   *)
+  ActiveToolID		= APSH_TOOL_ID+7 ;	(* Tool Active		   *)
+  InactiveToolID	= APSH_TOOL_ID+8 ;	(* Tool Inactive	   *)
+  ToolStatusID		= APSH_TOOL_ID+9 ;	(* Status message	   *)
+  ToolCmdID		= APSH_TOOL_ID+10 ;	(* Tool command message	   *)
+  ToolCmdReplyID	= APSH_TOOL_ID+11 ;	(* Reply to tool command   *)
+  ShutdownToolID	= APSH_TOOL_ID+12 ;	(* Shutdown tool	   *)
+
+(* Attributes accepted by GetAmigaGuideAttr() *)
+  AGA_Dummy		= TAG_USER ;
+  AGA_Path		= AGA_Dummy+1 ;
+  AGA_XRefList		= AGA_Dummy+2 ;
+  AGA_Activate		= AGA_Dummy+3 ;
+  AGA_Context		= AGA_Dummy+4 ;
+
+  AGA_HelpGroup		= AGA_Dummy+5 ;
+  (* (ULONG) Unique identifier *)
+
+  AGA_Reserved1		= AGA_Dummy+6 ;
+  AGA_Reserved2		= AGA_Dummy+7 ;
+  AGA_Reserved3		= AGA_Dummy+8 ;
+
+  AGA_ARexxPort		= AGA_Dummy+9 ;
+    (* MsgPortPtr ) Pointer to the ARexx message port (V40) *)
+
+  AGA_ARexxPortName	= AGA_Dummy+10 ;
+   (* (STRING) Used to specify the ARexx port name (V40) (not copied) *)
+
+
+TYPE
+  AMIGAGUIDECONTEXT = ADDRESS ;
+
+TYPE
+  AmigaGuideMsg = RECORD
+    agm_Msg     : Message ; (* Embedded Exec message structure	*)
+    agm_Type    : LONGINT ; (* Type of message			*)
+    agm_Data    : ADDRESS ; (* Pointer to message data		*)
+    agm_DSize   : LONGINT ; (* Size of message data		*)
+    agm_DType   : LONGINT ; (* Type of message data		*)
+    agm_Pri_Ret : LONGINT ; (* Primary return value		*)
+    agm_Sec_Ret : LONGINT ; (* Secondary return value		*)
+    agm_System1 : ADDRESS ;
+    agm_System2 : ADDRESS ;
+  END ;
+
+(* Allocation description structure *)
+
+  NewAmigaGuide = RECORD
+    nag_Lock	   : FileLockPtr;(* Lock on the document directory	     *)
+    nag_Name 	   : STRING ;	 (* Name of document file		     *)
+    nag_Screen	   : ScreenPtr ; (* Screen to place windows within	     *)
+    nag_PubScreen  : STRING ;	 (* Public screen name to open on	     *)
+    nag_HostPort   : STRING ;	 (* Application's ARexx port name	     *)
+    nag_ClientPort : STRING ;	 (* Name to assign to the clients ARexx port *)
+    nag_BaseName   : STRING ;	 (* Base name of the application	     *)
+    nag_Flags	   : LONGSET ;	 (* Flags				     *)
+    nag_Context	   : POINTER TO ARRAY OF STRING ;
+    nag_Node	   : STRING ;	 (* Node to align on first (defaults to Main)*)
+    nag_Line	   : LONGINT ;	 (* Line to align on			     *)
+    nag_Extens	   : TagItemPtr; (* Tag array extension			     *)
+    nag_Client	   : ADDRESS ;	 (* Private! MUST be NULL		     *)
+  END ;
+
+(* public Client flags *)
+CONST
+  HTF_LOAD_INDEX = {0}  ;	(* Force load the index at init time      *)
+  HTF_LOAD_ALL   = {1}  ;	(* Force load the entire database at init *)
+  HTF_CACHE_NODE = {2}  ; 	(* Cache each node as visited		  *)
+  HTF_CACHE_DB	 = {3}  ; 	(* Keep the buffers around until expunge  *)
+  HTF_UNIQUE	 = {15} ;	(* Unique ARexx port name		  *)
+  HTF_NOACTIVATE = {16} ;	(* Don't activate window		  *)
+
+  HTFC_SYSGADS	 = 080000000H ;
+
+(* Callback function ID's *)
+  HTH_OPEN	 = 0 ;
+  HTH_CLOSE	 = 1 ;
+
+  HTERR_NOT_ENOUGH_MEMORY	= 100 ;
+  HTERR_CANT_OPEN_DATABASE	= 101 ;
+  HTERR_CANT_FIND_NODE		= 102 ;
+  HTERR_CANT_OPEN_NODE		= 103 ;
+  HTERR_CANT_OPEN_WINDOW	= 104 ;
+  HTERR_INVALID_COMMAND		= 105 ;
+  HTERR_CANT_COMPLETE		= 106 ;
+  HTERR_PORT_CLOSED		= 107 ;
+  HTERR_CANT_CREATE_PORT	= 108 ;
+  HTERR_KEYWORD_NOT_FOUND	= 113 ;
+
+TYPE
+  AMIGAGUIDEHOST = AmigaGuideHostPtr ;
+
+(* Cross reference node *)
+TYPE
+  XRef = RECORD
+    xr_Node : Node ;	   (* Embedded node		*)
+    xr_Pad  : CARDINAL ;   (* Padding			*)
+    xr_DF   : ADDRESS ;	   (* Document defined in	*)
+    xr_File : STRING ;	   (* Name of document file	*)
+    xr_Name : STRING ;	   (* Name of item		*)
+    xr_Line : LONGINT ;	   (* Line defined at		*)
+  END ;
+
+CONST
+  XRSIZE = SIZE( XRef ) ;
+
+(* Types of cross reference nodes *)
+  XR_GENERIC	= 0 ;
+  XR_FUNCTION	= 1 ;
+  XR_COMMAND	= 2 ;
+  XR_INCLUDE	= 3 ;
+  XR_MACRO	= 4 ;
+  XR_STRUCT	= 5 ;
+  XR_FIELD	= 6 ;
+  XR_TYPEDEF	= 7 ;
+  XR_DEFINE	= 8 ;
+
+(* Callback handle *)
+TYPE
+  AmigaGuideHost = RECORD
+    agh_Dispatcher : Hook    ; (* Dispatcher		  *)
+    agh_Reserved   : LONGINT ; (* Must be 0		  *)
+    agh_Flags	   : LONGSET ;
+    agh_UseCnt	   : LONGINT ; (* Number of open nodes	  *)
+    agh_SystemData : ADDRESS ; (* Reserved for system use *)
+    agh_UserData   : ADDRESS ; (* Anything you want..	  *)
+  END ;
+
+(* Methods *)
+CONST
+  HM_FINDNODE	= 1  ;
+  HM_OPENNODE	= 2  ;
+  HM_CLOSENODE	= 3  ;
+  HM_EXPUNGE	= 10 ; (* Expunge DataBase *)
+
+(* HM_FINDNODE *)
+TYPE
+  opFindHost = RECORD
+    MethodID  : LONGINT ;
+    ofh_Attrs : TagItemPtr ;
+    			 (*  R: Additional attributes		*)
+    ofh_Node  : STRING ; (*  R: Name of node			*)
+    ofh_TOC   : STRING ; (*  W: Table of Contents 		*)
+    ofh_Title : STRING ; (*  W: Title to give to the node	*)
+    ofh_Next  : STRING ; (*  W: Next node to browse to		*)
+    ofh_Prev  : STRING ; (*  W: Previous node to browse to	*)
+  END ;
+
+(* HM_OPENNODE, HM_CLOSENODE *)
+
+  opNodeIO = RECORD
+    MethodID	  : LONGINT ;
+    onm_Attrs	  : TagItemPtr ; (*  R: Additional attributes	*)
+    onm_Node	  : STRING ;	 (*  R: Node name and arguments *)
+    onm_FileName  : STRING ;	 (*  W: File name buffer	*)
+    onm_DocBuffer : STRING ;	 (*  W: Node buffer		*)
+    onm_BuffLen   : LONGINT ;	 (*  W: Size of buffer		*)
+    onm_Flags	  : LONGSET ;	 (* RW: Control flags		*)
+  END ;
+
+(* onm_Flags *)
+CONST
+  HTNF_KEEP	 = {0} ;	(* Don't flush this node until database is *)
+				(* closed.				   *)
+  HTNF_RESERVED1 = {1} ;	(* Reserved for system use		   *)
+  HTNF_RESERVED2 = {2} ;	(* Reserved for system use		   *)
+  HTNF_ASCII	 = {3} ;	(* Node is straight ASCII		   *)
+  HTNF_RESERVED3 = {4} ;	(* Reserved for system use		   *)
+  HTNF_CLEAN	 = {5} ;	(* Remove the node from the database	   *)
+  HTNF_DONE	 = {6} ;	(* Done with node			   *)
+
+(* onm_Attrs *)
+  HTNA_Dummy	 = TAG_USER ;
+  HTNA_Screen	 = HTNA_Dummy+1 ; (* struct ScreenPtr Screen that window   *)
+  				  (* resides in				   *)
+  HTNA_Pens	 = HTNA_Dummy+2 ; (* Pen array (from DrawInfo)		   *)
+  HTNA_Rectangle = HTNA_Dummy+3 ; (* Window box				   *)
+
+  HTNA_HelpGroup = HTNA_Dummy+5 ; (* (ULONG) unique identifier		   *)
+
+
+(* HM_EXPUNGE *)
+TYPE
+  opExpungeNode = RECORD
+    MethodID  : LONGINT ;
+    oen_Attrs : TagItemPtr ;	(*  R: Additional attributes *)
+  END ;
+
+
+(*--- functions in V40 or higher (Release 3.1) ---*)
+
+(* Public entries *)
+
+VAR
+  AmigaGuideBase : LibraryPtr ;
+
+PROCEDURE LockAmigaGuideBase( handle : ADDRESS ) : LONGINT ;
+PROCEDURE UnlockAmigaGuideBase( key : LONGINT ) ;
+
+PROCEDURE OpenAmigaGuideA( nag  : NewAmigaGuidePtr ;
+ 			   attr : TagItemPtr ) : ADDRESS ;
+
+PROCEDURE OpenAmigaGuide( nag  : NewAmigaGuidePtr ;
+		          tag1 : Tag ; .. ) : ADDRESS ;
+
+PROCEDURE OpenAmigaGuideAsyncA( nag   : NewAmigaGuidePtr ;
+				attrs : TagItemPtr ) : ADDRESS ;
+
+PROCEDURE OpenAmigaGuideAsync( nag  : NewAmigaGuidePtr ;
+			       tag1 : Tag ; .. ) : ADDRESS ;
+
+PROCEDURE CloseAmigaGuide ( cl : ADDRESS ) ;
+PROCEDURE AmigaGuideSignal( cl : ADDRESS ) : LONGINT ;
+PROCEDURE GetAmigaGuideMsg( cl : ADDRESS ) : AmigaGuideMsgPtr ;
+
+PROCEDURE ReplyAmigaGuideMsg( amsg : AmigaGuideMsgPtr ) ;
+
+PROCEDURE SetAmigaGuideContextA( cl	: ADDRESS ;
+				 id	: LONGINT ;
+				 attrs	: TagItemPtr ) : LONGINT ;
+
+PROCEDURE SetAmigaGuideContext( cl   : ADDRESS ;
+				id   : LONGINT ;
+				tag1 : Tag ; .. ) : LONGINT ;
+
+PROCEDURE SendAmigaGuideContextA( cl : ADDRESS ; attrs : TagItemPtr ) : LONGINT;
+PROCEDURE SendAmigaGuideContext( cl : ADDRESS ; tag1 : Tag ; .. ) : LONGINT ;
+
+PROCEDURE SendAmigaGuideCmdA( cl    : ADDRESS ;
+			      cmd   : STRING ;
+			      attrs : TagItemPtr ) : LONGINT ;
+
+PROCEDURE SendAmigaGuideCmd( cl   : ADDRESS ;
+			     cmd  : STRING  ;
+			     tag1 : Tag ; .. ) : LONGINT  ;
+
+PROCEDURE SetAmigaGuideAttrsA( cl : ADDRESS ; attrs : TagItemPtr ) : LONGINT ;
+PROCEDURE SetAmigaGuideAttrs( cl : ADDRESS ; tag1 : Tag ; .. ) : LONGINT ;
+
+PROCEDURE GetAmigaGuideAttr( tag : Tag ;
+			     cl  : ADDRESS ;
+			     storage : ADDRESS ) : LONGINT ;
+
+PROCEDURE LoadXRef( lock : FileLockPtr ; name : STRING ) : LONGINT ;
+PROCEDURE ExpungeXRef( ) ;
+
+PROCEDURE AddAmigaGuideHostA( h     : HookPtr ;
+			      name  : STRING ;
+			      attrs : TagItemPtr ) : ADDRESS ;
+
+PROCEDURE AddAmigaGuideHost( h    : HookPtr ;
+			     name : STRING ;
+			     tag1 : Tag ; .. ) : ADDRESS ;
+
+PROCEDURE RemoveAmigaGuideHostA( hh : ADDRESS ; attrs : TagItemPtr ) : LONGINT ;
+PROCEDURE RemoveAmigaGuideHost( hh : ADDRESS ; tag1 : Tag ; .. ) : LONGINT ;
+
+PROCEDURE GetAmigaGuideString( id : LONGINT ) : STRING ;
+
+END AmigaGuide.

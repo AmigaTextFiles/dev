@@ -1,0 +1,312 @@
+G4C
+
+; Show a Scala event (without sounds, wipes etc)
+; -----------------------------------------------------------
+; USE: GuiLoad Path:gcScala.gc GUI ID EventLine
+
+; - GUI		  : The name of the gui containing the listview
+; - ID		  : The ID of the listview holding the script
+; - EventLine : The line number where the event starts
+; -----------------------------------------------------------
+
+xOnLoad gui id evline
+	; Start up gcview - if it's already running, clear it
+	; and do not set the RMB notify
+	ifexists port ~gcview
+		run 'guis:ext/gcview/gcview'
+		wait port gcview 100
+		if $$retcode > 0
+			ezreq 'Could not start GCView' Abort ''
+			guiquit #this
+			stop
+		endif
+		call gcview notify RMB 'Gui4Cli' 'gosub gcScala.gc quit'
+		IStartedGCV = 1		; flag to quit it at end
+	else
+		call gcview unload #PIC
+		call gcview unload #ANIM
+		IStartedGCV = 0
+	endif
+
+	gosub #this playevent
+
+xOnReload gui id evline
+	call gcview unload #PIC
+	call gcview unload #ANIM
+	gosub #this playevent
+
+xRoutine quit					; this is the routine gcview will call on RMB
+	if $IStartedGCV = 1		; quit gcview if we were the ones that started it
+		call gcview quit force
+	endif
+	guiquit #this
+
+; ---------------------------------------------------------
+;	PlayEvent	- Main routine to load & play event
+; ---------------------------------------------------------
+
+xRoutine PlayEvent
+
+	Remap	  = OFF					; default attribute settings
+	APen	  = 2
+	BPen	  = 1
+	PenMode = JAM1
+	call gcview unload mypic	; in case it was loaded
+	call gcview info text aa   ; store old font name/size
+	font = $$call.ret
+	parsevar font
+	oldfontname = $$parse.5
+	oldfontsize = $$parse.1
+
+	gosub #this ClipEvent	; store event into our lv
+	lvuse #this 1
+
+	gosub #this LoadPic		; load BLANK, PICTURE or ANIM
+
+	; go through lv loading brush, font, text etc
+	lvgo first
+	while $$lv.line > ''
+		docase $$lv.rec[0][4]
+
+		case = BRUS				; BRUSH
+			gosub #this LoadBrush $$lv.rec
+			break
+
+		case = FONT
+			gosub #this SetFont $$lv.rec
+			break
+
+		case = PALE				; PALETTE
+			call gcview set SCpalette mypic $$lv.rec[8]
+			break
+
+		case = COLO				; COLOR
+			gosub #this SetColor $$lv.rec
+			break
+
+		case = TEXT
+			if $$lv.rec[4][1] = ' '	 ; avoid textwipe, textout etc
+			and $.sced != NOTEXT ; ################### my fix !!!!!!!!!!!
+				gosub #this ShowText $$lv.rec
+			endif
+			break
+
+		case = ATTR				; ATTRIBUTES (check for Remap/outline)
+			curline = $$lv.rec
+			searchvar curline "edge" ci first
+			if $$search.pos != ''
+				PenMode = OUTLINE
+			else
+				PenMode = JAM1
+			endif
+			searchvar curline "remap" ci first
+			if $$search.pos != ''
+				Remap = ON
+			else
+				Remap = OFF
+			endif
+			break
+		endcase
+
+		if $$lv.rec[0][3] == BOX		; BOX - has only 3 letters..
+			gosub #this DoBox $$lv.rec
+		endif
+
+		lvgo next
+	endwhile
+
+	; bring finished screen to front
+	call gcview open mypic
+	; restore old font
+	call gcview set font $oldfontname $oldfontsize 000
+	
+; ---------------------------------------------------------
+;	LoadPic	- Load pic/anim, resize & open - Alias = mypic
+;	Screen will be opened *behind* (so we can add to it)
+; ---------------------------------------------------------
+
+xRoutine LoadPic
+	local stopflag
+	stopflag = 0
+
+	; go through lv, find main item - BLANK, PICTURE or ANIM
+	lvuse #this 1
+	lvgo first
+
+	while $$lv.line > ''
+	and stopflag != 2				; extra loop for resolution
+
+		docase $$lv.rec[0][4]
+
+		case = BLAN					; BLANK 640 512 4 lace hires 0
+			curline = $$lv.rec	; - use only the width/height/depth
+			parsevar curline
+			call gcview create mypic $$parse.1 $$parse.2 $$parse.3
+			stopflag = 2
+			gcview.gc/type = PIC
+			break
+
+		case = ANIM					; ANIM
+			curline = $$lv.rec
+			parsevar curline
+
+			ifexists gui gcview.gc				; use gcview settings if found
+				gcview.gc/file = $$parse.1
+				gcview.gc/type = ANIM
+				if $gcview.gc/loadall == ON
+					gcview.gc/loadedas = LOADALL
+					if $gcview.gc/userange = 1
+						call gcview anload $$parse.1 mypic $gcview.gc/start $gcview.gc/frames $gcview.gc/andir
+					else
+						call gcview anload $$parse.1 mypic 0 1000 $gcview.gc/andir
+					endif
+				else
+					gcview.gc/loadedas = NORMAL
+					call gcview load $$parse.1 mypic
+				endif
+				gosub gcview.g showinfo
+
+			else
+				call gcview anload $$parse.1 mypic 0 -1 FORWARD ; load anim
+			endif
+
+			call gcview set speed mypic $$parse.2			; anim speed
+			; call gcview set loops mypic $$parse.3			; loops (-1=forever)
+			stopflag = 2
+			break
+
+		case = PICT					; PICTURE
+			curline = $$lv.rec
+			parsevar curline
+			call gcview load $$parse.1 mypic
+			stopflag = 1 ; continue, looking for resolution
+			gcview.gc/type = PIC
+			break
+
+		case = RESO					; RESOLUTION (only in pictures)
+			curline = $$lv.rec
+			parsevar curline
+			call gcview set mode mypic 'x$$parse.4' ; viewmode is in hex
+			call gcview resize mypic $$parse.1 $$parse.2
+			stopflag = 2
+			break
+
+		endcase
+		lvgo next
+	endwhile
+
+	if $stopflag = 0		; nothing found..
+		ezreq 'Could not find BLANK, PICTURE or ANIM!' Abort ''
+		stop
+	endif
+
+; ---------------------------------------------------------
+;	LoadBrush	- Load, resize/Remap, paste & free Brush
+; ---------------------------------------------------------
+
+xRoutine LoadBrush curline
+
+	; BRUSH 128 134 "SQ0:name" size 163 350
+	parsevar curline
+	call gcview load $$parse.3 mybrush
+
+	; resize if needed
+	if $$parse.4 == 'size'
+		call gcview resize mybrush $$parse.5 $$parse.6
+	endif
+
+	; paste brush
+	if $Remap = ON
+		call gcview paste mybrush mypic $$parse.1 $$parse.2 Remap
+	else
+		call gcview paste mybrush mypic $$parse.1 $$parse.2
+	endif
+	
+	call gcview unload mybrush ; no longer needed
+
+; ---------------------------------------------------------
+;	SetFont		- Set the current font to use
+; ---------------------------------------------------------
+
+xRoutine SetFont curline
+	local fsize
+
+	; FONT Scala.font 20 11 ->> 20=??, 11=size (always last)
+	parsevar curline
+	if $$parse.tot = 4
+		fsize = $$parse.3
+	else
+		fsize = $$parse.2
+	endif
+
+	call gcview set font $$parse.1 $fsize 000
+
+; ---------------------------------------------------------
+;	SetColor		- 1st num = text color, 2nd=outline color
+; ---------------------------------------------------------
+
+xRoutine SetColor curline
+
+	; COLOR 13 1 2 13 2 0 1 0 0 1 1 2 2 1 1
+	parsevar curline
+	APen = $$parse.1
+	BPen = $$parse.2
+
+; ---------------------------------------------------------
+;	ShowText		- TEXT 285 224 "text"
+; ---------------------------------------------------------
+
+xRoutine ShowText curline
+
+	call gcview set pens $APen $BPen $PenMode	 ; set the pens
+
+	parsevar curline
+	call gcview text mypic $$parse.1 $$parse.2 $$parse.3
+
+; ---------------------------------------------------------
+;	DoBox			- BOX l t w h
+; ---------------------------------------------------------
+
+xRoutine DoBox curline
+
+	call gcview set pens $APen $BPen $PenMode	 ; set the pens
+
+	parsevar curline
+	call gcview rect mypic $$parse.1 $$parse.2 $$parse.3 $$parse.4
+
+; ---------------------------------------------------------
+;	ClipEvent - put event into our lv so we handle it easier
+; ---------------------------------------------------------
+
+xRoutine ClipEvent
+
+	lvuse $gui $id
+	lvgo	#$evline
+	if $$lv.rec[0][5] != 'EVENT'
+		ezreq 'Could not find event\nat line $evline' Abort ''
+		stop
+	endif
+
+	; count No of lines till end of event
+	count = 0
+	while $$lv.line > ''
+	and $$lv.rec[0][3] != END
+		lvgo next
+		++count
+	endwhile
+	
+	; clip the lines into our own lv
+	lvgo #$evline
+	lvclip copy $count paste #this 1
+
+; ---------------------------------------------------------
+;	temp lv to hold the event
+; ---------------------------------------------------------
+
+xListview 0 0 0 0 '' var '' 0 NUM
+gadid 1
+
+
+
+
+

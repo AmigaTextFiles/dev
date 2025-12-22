@@ -1,0 +1,14 @@
+VERSION		EQU	1
+REVISION	EQU	159
+DATE	MACRO
+		dc.b	'2.12.96'
+	ENDM
+VERS	MACRO
+		dc.b	'ball 1.159'
+	ENDM
+VSTRING	MACRO
+		dc.b	'ball 1.159 (2.12.96)',13,10,0
+	ENDM
+VERSTAG	MACRO
+		dc.b	0,'$VER: ball 1.159 (2.12.96)',0
+	ENDM

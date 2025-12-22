@@ -1,0 +1,10 @@
+stdout=-8
+conout=-12
+stdin=-92
+arg=-32
+stdrast=-16
+wbmessage=-36
+execbase=-40
+dosbase=-44
+intuibase=-48
+gfxbase=-52

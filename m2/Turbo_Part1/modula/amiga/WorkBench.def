@@ -1,0 +1,212 @@
+DEFINITION FOR LIBRARY MODULE Workbench ;
+
+FROM SYSTEM	IMPORT ADDRESS, STRING, LONGSET, BADDRESS ;
+FROM Exec	IMPORT Message, MsgPortPtr, List, LibraryPtr ;
+FROM Intuition	IMPORT NewWindow, Gadget, WindowPtr, ScreenPtr ;
+FROM Utility	IMPORT TagItemPtr ;
+FROM Dos	IMPORT FileLockPtr ;
+
+TYPE
+  OldDrawerDataPtr = POINTER TO OldDrawerData	;
+  DrawerDataPtr    = POINTER TO DrawerData	;
+  DiskObjectPtr	   = POINTER TO DiskObject	;
+  FreeListPtr	   = POINTER TO FreeList	;
+  AppMessagePtr    = POINTER TO AppMessage	;
+  AppWindowPtr	   = POINTER TO AppWindow	;
+  AppIconPtr	   = POINTER TO AppIcon		;
+  AppMenuItemPtr   = POINTER TO AppMenuItem	;
+  WBStartupPtr 	   = POINTER TO WBStartup	;
+  ToolTypeArrayPtr = POINTER TO ARRAY OF STRING ;
+
+CONST
+  WBDISK    = 1 ;
+  WBDRAWER  = 2 ;
+  WBTOOL    = 3 ;
+  WBPROJECT = 4 ;
+  WBGARBAGE = 5 ;
+  WBDEVICE  = 6 ;
+  WBKICK    = 7 ;
+  WBAPPICON = 8 ;
+
+TYPE
+  OldDrawerData = RECORD (* pre V36 definition *)
+    dd_NewWindow : NewWindow ;	  (* args to open window	    *)
+    dd_CurrentX  : LONGINT ;	  (* current x coordinate of origin *)
+    dd_CurrentY  : LONGINT ;	  (* current y coordinate of origin *)
+  END ;
+
+(* the amount of DrawerData actually written to disk *)
+
+CONST
+  OLDDRAWERDATAFILESIZE	= SIZE( OldDrawerData ) ;
+
+TYPE
+  DrawerData = RECORD
+    dd_NewWindow : NewWindow ;	  (* args to open window	    *)
+    dd_CurrentX  : LONGINT ;	  (* current x coordinate of origin *)
+    dd_CurrentY	 : LONGINT ;	  (* current y coordinate of origin *)
+    dd_Flags	 : LONGSET ;	  (* flags for drawer		    *)
+    dd_ViewModes : BITSET  ;	  (* view mode for drawer	    *)
+  END ;
+
+(* the amount of DrawerData actually written to disk *)
+CONST
+  DRAWERDATAFILESIZE = SIZE( DrawerData ) ;
+
+TYPE
+  DiskObject = RECORD
+    do_Magic	   : CARDINAL ; (* a magic number at the start of the file *)
+    do_Version	   : CARDINAL ; (* a version number, so we can change it   *)
+    do_Gadget	   : Gadget ;	(* a copy of in core gadget		   *)
+    do_Type	   : SHORTINT ;
+    do_DefaultTool : STRING ;
+    do_ToolTypes   : ToolTypeArrayPtr ;
+    do_CurrentX    : LONGINT ;
+    do_CurrentY    : LONGINT ;
+    do_DrawerData  : DrawerDataPtr ;
+    do_ToolWindow  : STRING ;	(* only applies to tools *)
+    do_StackSize   : LONGINT ;	(* only applies to tools *)
+  END ;
+
+CONST
+  WB_DISKMAGIC		= 0E310H ; (* a magic number, not easily impersonated *)
+  WB_DISKVERSION	= 1 ;	   (* our current version number	      *)
+  WB_DISKREVISION	= 1 ;	   (* our current revision number	      *)
+(* I only use the lower 8 bits of Gadget.UserData for the revision # *)
+  WB_DISKREVISIONMASK	= 255 ;
+
+TYPE
+  FreeList = RECORD
+    fl_NumFree : INTEGER ;
+    fl_MemList : List	 ;
+  END ;
+
+(* workbench does different complement modes for its gadgets.		     *)
+(* It supports separate images, complement mode, and backfill mode.	     *)
+(* The first 2 are identical to intuitions GFLG_GADGIMAGE and GFLG_GADGHCOMP *)
+(* backfill is similar to GFLG_GADGHCOMP, but the region outside of the	     *)
+(* image (which normally would be color three when complemented)	     *)
+(* is flood-filled to color zero.					     *)
+
+CONST
+  GFLG_GADGBACKFILL = 00001H ;
+  GADGBACKFILL	    = 00001H ; (* an old synonym *)
+
+(* if an icon does not really live anywhere, set its current position to here *)
+
+  NO_ICON_POSITION = 080000000H ;
+
+(* workbench now is a library.	this is it's name *)
+  WORKBENCH_NAME   = "workbench.library" ;
+
+(* If you find am_Version >= AM_VERSION, you know this structure has *)
+(* at least the fields defined in this version of the include file   *)
+
+  AM_VERSION	   = 1 ;
+
+TYPE
+
+  WBArg = RECORD
+    wa_Lock : FileLockPtr ;	(* a lock descriptor			*)
+    wa_Name : STRING ;		(* a string relative to that lock	*)
+  END ;
+
+  WBArgPtr = POINTER TO ARRAY OF WBArg ;
+
+  AppMessage = RECORD
+    am_Message	: Message  ;	(* standard message structure	*)
+    am_Type	: CARDINAL ;	(* message type			*)
+    am_UserData : LONGINT  ;	(* application specific		*)
+    am_ID	: LONGINT  ;	(* application definable ID	*)
+    am_NumArgs	: LONGINT  ;	(* # of elements in arglist	*)
+    am_ArgList	: WBArgPtr ;	(* the arguements themselves	*)
+    am_Version	: CARDINAL ;	(* will be AM_VERSION		*)
+    am_Class	: CARDINAL ;	(* message class		*)
+    am_MouseX	: INTEGER  ;	(* mouse x position of event	*)
+    am_MouseY	: INTEGER  ;	(* mouse y position of event	*)
+    am_Seconds	: LONGINT  ;	(* current system clock time	*)
+    am_Micros	: LONGINT  ;	(* current system clock time	*)
+    am_Reserved : ARRAY [0..7] OF LONGINT ;
+    				(* avoid recompilation		*)
+  END ;
+
+CONST
+(* types of app messages *)
+  AMTYPE_APPWINDOW   = 7 ; (* app window message	 *)
+  AMTYPE_APPICON     = 8 ; (* app icon message		 *)
+  AMTYPE_APPMENUITEM = 9 ; (* app menu item message	 *)
+
+
+(* The following structures are private.  These are just stub	*)
+(* structures for code compatibility...				*)
+
+TYPE
+  AppWindow	= RECORD aw_PRIVATE  : ADDRESS END ;
+  AppIcon	= RECORD ai_PRIVATE  : ADDRESS END ;
+  AppMenuItem	= RECORD ami_PRIVATE : ADDRESS END ;
+
+  WBStartup = RECORD
+    sm_Message	  : Message    ; (* a standard message structure	*)
+    sm_Process	  : MsgPortPtr ; (* the process descriptor for you	*)
+    sm_Segment	  : BADDRESS   ; (* a descriptor for your code		*)
+    sm_NumArgs	  : LONGINT    ; (* the number of elements in ArgList	*)
+    sm_ToolWindow : STRING     ; (* description of window		*)
+    sm_ArgList	  : WBArgPtr   ; (* the arguments themselves		*)
+  END ;
+
+VAR
+  WBMsg		: WBStartupPtr ;
+  WorkbenchBase : LibraryPtr   ;
+
+PROCEDURE AddAppWindowA( id	  : LONGINT ;
+			 userdata : LONGINT ;
+			 window	  : WindowPtr ;
+			 msgport  : MsgPortPtr ;
+			 taglist  : TagItemPtr ) : AppWindowPtr ;
+
+PROCEDURE AddAppWindow( id	 : LONGINT ;
+			userdata : LONGINT ;
+			window	 : WindowPtr ;
+			msgport  : MsgPortPtr ;
+			tag1	 : LONGINT ; .. ) : AppWindowPtr ;
+
+PROCEDURE RemoveAppWindow( appWindow : AppWindowPtr ) : BOOLEAN ;
+
+PROCEDURE AddAppIconA( id	: LONGINT ;
+		       userdata	: LONGINT ;
+		       text	: STRING ;
+		       msgport	: MsgPortPtr ;
+		       lock	: FileLockPtr ;
+		       diskobj	: DiskObjectPtr ;
+		       taglist	: TagItemPtr ) : AppIconPtr ;
+
+PROCEDURE AddAppIcon( id	: LONGINT ;
+		      userdata	: LONGINT ;
+		      text	: STRING ;
+		      msgport	: MsgPortPtr ;
+		      lock	: FileLockPtr ;
+		      diskobj	: DiskObjectPtr ;
+		      tag1	: LONGINT ; .. ) : AppIconPtr ;
+
+PROCEDURE RemoveAppIcon( appIcon : AppIconPtr ) : BOOLEAN ;
+
+PROCEDURE AddAppMenuItemA( id	    : LONGINT ;
+			   userdata : LONGINT ;
+			   text	    : STRING ;
+			   msgport  : MsgPortPtr ;
+			   taglist  : TagItemPtr ) : AppMenuItemPtr ;
+
+PROCEDURE AddAppMenuItem( id	   : LONGINT ;
+			  userdata : LONGINT ;
+			  text	   : STRING ;
+			  msgport  : MsgPortPtr ;
+			  tag1     : LONGINT ; .. ) : AppMenuItemPtr ;
+
+PROCEDURE RemoveAppMenuItem( appMenuItem : AppMenuItemPtr ) : BOOLEAN ;
+
+(*--- functions in V39 or higher (Release 3) ---*)
+
+PROCEDURE WBInfo( lock : FileLockPtr ; name : STRING ; screen : ScreenPtr ) ;
+
+END Workbench.
+

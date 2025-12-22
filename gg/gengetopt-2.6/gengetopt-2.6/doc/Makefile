@@ -1,0 +1,492 @@
+# Generated automatically from Makefile.in by configure.
+# Makefile.in generated automatically by automake 1.4 from Makefile.am
+
+# Copyright (C) 1994, 1995-8, 1999 Free Software Foundation, Inc.
+# This Makefile.in is free software; the Free Software Foundation
+# gives unlimited permission to copy and/or distribute it,
+# with or without modifications, as long as this notice is preserved.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY, to the extent permitted by law; without
+# even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+# PARTICULAR PURPOSE.
+
+# Copyright (C) 1999, 2000, 2001  Free Software Foundation, Inc.
+#  
+# This file is part of GNU gengetopt 
+#
+# GNU gengetopt is free software; you can redistribute it and/or modify 
+# it under the terms of the GNU General Public License as published by 
+# the Free Software Foundation; either version 2, or (at your option) 
+# any later version. 
+#
+# GNU gengetopt is distributed in the hope that it will be useful, but 
+# WITHOUT ANY WARRANTY; without even the implied warranty of 
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General
+# Public License for more details. 
+#
+# You should have received a copy of the GNU General Public License along 
+# with gengetopt; see the file COPYING. If not, write to the Free Software 
+# Foundation, Inc., 59 Temple Place - Suite 330, Boston, MA 02111-1307, USA. 
+
+
+SHELL = /bin/sh
+
+srcdir = .
+top_srcdir = ..
+prefix = /usr
+exec_prefix = ${prefix}
+
+bindir = ${exec_prefix}/bin
+sbindir = ${exec_prefix}/sbin
+libexecdir = ${exec_prefix}/libexec
+datadir = ${prefix}/share
+sysconfdir = ${prefix}/etc
+sharedstatedir = ${prefix}/com
+localstatedir = ${prefix}/var
+libdir = ${exec_prefix}/lib
+infodir = ${prefix}/info
+mandir = ${prefix}/man
+includedir = ${prefix}/include
+oldincludedir = /usr/include
+
+DESTDIR =
+
+pkgdatadir = $(datadir)/gengetopt
+pkglibdir = $(libdir)/gengetopt
+pkgincludedir = $(includedir)/gengetopt
+
+top_builddir = ..
+
+ACLOCAL = aclocal
+AUTOCONF = autoconf
+AUTOMAKE = automake
+AUTOHEADER = autoheader
+
+INSTALL = /bin/install -c
+INSTALL_PROGRAM = ${INSTALL} $(AM_INSTALL_PROGRAM_FLAGS)
+INSTALL_DATA = ${INSTALL} -m 644
+INSTALL_SCRIPT = ${INSTALL_PROGRAM}
+transform = s,x,x,
+
+NORMAL_INSTALL = :
+PRE_INSTALL = :
+POST_INSTALL = :
+NORMAL_UNINSTALL = :
+PRE_UNINSTALL = :
+POST_UNINSTALL = :
+AWK = gawk
+CC = gcc
+CPP2HTML = 
+CXX = c++
+EXEEXT = 
+LEX = flex
+MAKEINFO = makeinfo
+PACKAGE = gengetopt
+TAR = /bin/tar
+TXTC = $(SHELL) $(top_builddir)/txtc.sh
+VERSION = 2.6
+YACC = bison -b y -d -p
+YFLAGS =  -d
+gengetoptdocdir = ${prefix}/share/doc/gengetopt
+gengetoptexamplesdir = ${prefix}/share/doc/gengetopt/examples
+
+PROGNAME = $(top_builddir)/src/gengetopt$(EXEEXT)
+MAKE_SAMPLES = $(MAKE) $(AM_MAKEFLAGS) $(EXTRA_PROGRAMS)
+SAMPLES_STAMP = samples.stamp
+GGO_FILES = $(srcdir)/sample1.ggo $(srcdir)/sample2.ggo 
+
+# we don't have to link to anything
+LIBS = 
+GETOPTLONG_O = $(top_builddir)/src/getopt.o $(top_builddir)/src/getopt1.o
+#GETOPTLONG_O = 
+#STRDUP_O = $(top_builddir)/src/strdup.o
+STRDUP_O = 
+
+# man page
+man_MANS = gengetopt.1
+
+EXTRA_PROGRAMS = sample1 sample2
+sample1_SOURCES = cmdline1.c main1.cc
+sample2_SOURCES = cmdline2.c main2.c
+
+LDADD = $(GETOPTLONG_O) $(STRDUP_O)
+
+INCLUDES = -I../src/
+
+gengetoptdoc_DATA = gengetopt.html                     cmdline1.c.html                     man_getopt.html no_getopt_long.txt old_changes.html
+
+
+gengetoptexamples_DATA = sample1.ggo sample2.ggo main1.cc main2.c                          cmdline1.c cmdline1.h cmdline2.c cmdline2.h
+
+
+# info_TEXINFOS = gengetopt.texi
+
+EXTRA_DIST = sample1.ggo sample2.ggo samples.stamp              cmdline1.c cmdline1.h cmdline2.c cmdline2.h cmdline1.c.html              $(man_MANS).in $(gengetoptdoc_DATA) cxxconfig.h              testdata
+
+
+# session for tests
+RUN_SAMPLE1 = ./sample1$(EXEEXT) -i 10 --flag-opt cmdline?.c
+RUN_SAMPLE1_1 = ./sample1$(EXEEXT) --help --int-opt -34
+# the next one generates an error 'cause -i option is not given
+RUN_SAMPLE1_2 = ./sample1$(EXEEXT) -F
+RUN_SAMPLE2 = ./sample2$(EXEEXT) -i 10 -l 20
+RUN_SAMPLE2_1 = ./sample2$(EXEEXT) --version
+RUN_SAMPLE2_2 = ./sample2$(EXEEXT) --help
+
+CLEANFILES = $(EXTRA_PROGRAMS)
+MAINTAINERCLEANFILES = cmdline1.c cmdline2.c cmdline1.h cmdline2.h                        $(SAMPLES_STAMP)
+
+mkinstalldirs = $(SHELL) $(top_srcdir)/mkinstalldirs
+CONFIG_HEADER = ../config.h
+CONFIG_CLEAN_FILES =  gengetopt.1 gengetopt.html
+
+DEFS = -DHAVE_CONFIG_H -I. -I$(srcdir) -I..
+CPPFLAGS = 
+LDFLAGS = 
+sample1_OBJECTS =  cmdline1.o main1.o
+sample1_LDADD = $(LDADD)
+#sample1_DEPENDENCIES = 
+#sample1_DEPENDENCIES =  \
+#$(top_builddir)/src/getopt.o \
+#$(top_builddir)/src/getopt1.o \
+#$(top_builddir)/src/strdup.o
+sample1_DEPENDENCIES =  \
+$(top_builddir)/src/getopt.o \
+$(top_builddir)/src/getopt1.o
+##sample1_DEPENDENCIES =  \
+##$(top_builddir)/src/strdup.o
+sample1_LDFLAGS = 
+sample2_OBJECTS =  cmdline2.o main2.o
+sample2_LDADD = $(LDADD)
+#sample2_DEPENDENCIES = 
+#sample2_DEPENDENCIES =  \
+#$(top_builddir)/src/getopt.o \
+#$(top_builddir)/src/getopt1.o \
+#$(top_builddir)/src/strdup.o
+sample2_DEPENDENCIES =  \
+$(top_builddir)/src/getopt.o \
+$(top_builddir)/src/getopt1.o
+##sample2_DEPENDENCIES =  \
+##$(top_builddir)/src/strdup.o
+sample2_LDFLAGS = 
+CXXFLAGS = -g -O2
+CXXCOMPILE = $(CXX) $(DEFS) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CXXFLAGS) $(CXXFLAGS)
+CXXLD = $(CXX)
+CXXLINK = $(CXXLD) $(AM_CXXFLAGS) $(CXXFLAGS) $(LDFLAGS) -o $@
+CFLAGS = -g -O2
+COMPILE = $(CC) $(DEFS) $(INCLUDES) $(AM_CPPFLAGS) $(CPPFLAGS) $(AM_CFLAGS) $(CFLAGS)
+CCLD = $(CC)
+LINK = $(CCLD) $(AM_CFLAGS) $(CFLAGS) $(LDFLAGS) -o $@
+man1dir = $(mandir)/man1
+MANS = $(man_MANS)
+
+NROFF = nroff
+DATA =  $(gengetoptdoc_DATA) $(gengetoptexamples_DATA)
+
+DIST_COMMON =  Makefile.am Makefile.in gengetopt.1.in gengetopt.html.in \
+mdate-sh texinfo.tex
+
+
+DISTFILES = $(DIST_COMMON) $(SOURCES) $(HEADERS) $(TEXINFOS) $(EXTRA_DIST)
+
+GZIP_ENV = --best
+SOURCES = $(sample1_SOURCES) $(sample2_SOURCES)
+OBJECTS = $(sample1_OBJECTS) $(sample2_OBJECTS)
+
+all: all-redirect
+.SUFFIXES:
+.SUFFIXES: .S .c .cc .o .s
+$(srcdir)/Makefile.in: Makefile.am $(top_srcdir)/configure.in $(ACLOCAL_M4) 
+	cd $(top_srcdir) && $(AUTOMAKE) --gnu --include-deps doc/Makefile
+
+Makefile: $(srcdir)/Makefile.in  $(top_builddir)/config.status
+	cd $(top_builddir) \
+	  && CONFIG_FILES=$(subdir)/$@ CONFIG_HEADERS= $(SHELL) ./config.status
+
+gengetopt.1: $(top_builddir)/config.status gengetopt.1.in
+	cd $(top_builddir) && CONFIG_FILES=$(subdir)/$@ CONFIG_HEADERS= $(SHELL) ./config.status
+gengetopt.html: $(top_builddir)/config.status gengetopt.html.in
+	cd $(top_builddir) && CONFIG_FILES=$(subdir)/$@ CONFIG_HEADERS= $(SHELL) ./config.status
+
+.c.o:
+	$(COMPILE) -c $<
+
+.s.o:
+	$(COMPILE) -c $<
+
+.S.o:
+	$(COMPILE) -c $<
+
+mostlyclean-compile:
+	-rm -f *.o core *.core
+
+clean-compile:
+
+distclean-compile:
+	-rm -f *.tab.c
+
+maintainer-clean-compile:
+
+sample1$(EXEEXT): $(sample1_OBJECTS) $(sample1_DEPENDENCIES)
+	@rm -f sample1$(EXEEXT)
+	$(CXXLINK) $(sample1_LDFLAGS) $(sample1_OBJECTS) $(sample1_LDADD) $(LIBS)
+
+sample2$(EXEEXT): $(sample2_OBJECTS) $(sample2_DEPENDENCIES)
+	@rm -f sample2$(EXEEXT)
+	$(LINK) $(sample2_LDFLAGS) $(sample2_OBJECTS) $(sample2_LDADD) $(LIBS)
+.cc.o:
+	$(CXXCOMPILE) -c $<
+
+install-man1:
+	$(mkinstalldirs) $(DESTDIR)$(man1dir)
+	@list='$(man1_MANS)'; \
+	l2='$(man_MANS)'; for i in $$l2; do \
+	  case "$$i" in \
+	    *.1*) list="$$list $$i" ;; \
+	  esac; \
+	done; \
+	for i in $$list; do \
+	  if test -f $(srcdir)/$$i; then file=$(srcdir)/$$i; \
+	  else file=$$i; fi; \
+	  ext=`echo $$i | sed -e 's/^.*\\.//'`; \
+	  inst=`echo $$i | sed -e 's/\\.[0-9a-z]*$$//'`; \
+	  inst=`echo $$inst | sed '$(transform)'`.$$ext; \
+	  echo " $(INSTALL_DATA) $$file $(DESTDIR)$(man1dir)/$$inst"; \
+	  $(INSTALL_DATA) $$file $(DESTDIR)$(man1dir)/$$inst; \
+	done
+
+uninstall-man1:
+	@list='$(man1_MANS)'; \
+	l2='$(man_MANS)'; for i in $$l2; do \
+	  case "$$i" in \
+	    *.1*) list="$$list $$i" ;; \
+	  esac; \
+	done; \
+	for i in $$list; do \
+	  ext=`echo $$i | sed -e 's/^.*\\.//'`; \
+	  inst=`echo $$i | sed -e 's/\\.[0-9a-z]*$$//'`; \
+	  inst=`echo $$inst | sed '$(transform)'`.$$ext; \
+	  echo " rm -f $(DESTDIR)$(man1dir)/$$inst"; \
+	  rm -f $(DESTDIR)$(man1dir)/$$inst; \
+	done
+install-man: $(MANS)
+	@$(NORMAL_INSTALL)
+	$(MAKE) $(AM_MAKEFLAGS) install-man1
+uninstall-man:
+	@$(NORMAL_UNINSTALL)
+	$(MAKE) $(AM_MAKEFLAGS) uninstall-man1
+
+install-gengetoptdocDATA: $(gengetoptdoc_DATA)
+	@$(NORMAL_INSTALL)
+	$(mkinstalldirs) $(DESTDIR)$(gengetoptdocdir)
+	@list='$(gengetoptdoc_DATA)'; for p in $$list; do \
+	  if test -f $(srcdir)/$$p; then \
+	    echo " $(INSTALL_DATA) $(srcdir)/$$p $(DESTDIR)$(gengetoptdocdir)/$$p"; \
+	    $(INSTALL_DATA) $(srcdir)/$$p $(DESTDIR)$(gengetoptdocdir)/$$p; \
+	  else if test -f $$p; then \
+	    echo " $(INSTALL_DATA) $$p $(DESTDIR)$(gengetoptdocdir)/$$p"; \
+	    $(INSTALL_DATA) $$p $(DESTDIR)$(gengetoptdocdir)/$$p; \
+	  fi; fi; \
+	done
+
+uninstall-gengetoptdocDATA:
+	@$(NORMAL_UNINSTALL)
+	list='$(gengetoptdoc_DATA)'; for p in $$list; do \
+	  rm -f $(DESTDIR)$(gengetoptdocdir)/$$p; \
+	done
+
+install-gengetoptexamplesDATA: $(gengetoptexamples_DATA)
+	@$(NORMAL_INSTALL)
+	$(mkinstalldirs) $(DESTDIR)$(gengetoptexamplesdir)
+	@list='$(gengetoptexamples_DATA)'; for p in $$list; do \
+	  if test -f $(srcdir)/$$p; then \
+	    echo " $(INSTALL_DATA) $(srcdir)/$$p $(DESTDIR)$(gengetoptexamplesdir)/$$p"; \
+	    $(INSTALL_DATA) $(srcdir)/$$p $(DESTDIR)$(gengetoptexamplesdir)/$$p; \
+	  else if test -f $$p; then \
+	    echo " $(INSTALL_DATA) $$p $(DESTDIR)$(gengetoptexamplesdir)/$$p"; \
+	    $(INSTALL_DATA) $$p $(DESTDIR)$(gengetoptexamplesdir)/$$p; \
+	  fi; fi; \
+	done
+
+uninstall-gengetoptexamplesDATA:
+	@$(NORMAL_UNINSTALL)
+	list='$(gengetoptexamples_DATA)'; for p in $$list; do \
+	  rm -f $(DESTDIR)$(gengetoptexamplesdir)/$$p; \
+	done
+
+tags: TAGS
+
+ID: $(HEADERS) $(SOURCES) $(LISP)
+	list='$(SOURCES) $(HEADERS)'; \
+	unique=`for i in $$list; do echo $$i; done | \
+	  awk '    { files[$$0] = 1; } \
+	       END { for (i in files) print i; }'`; \
+	here=`pwd` && cd $(srcdir) \
+	  && mkid -f$$here/ID $$unique $(LISP)
+
+TAGS:  $(HEADERS) $(SOURCES)  $(TAGS_DEPENDENCIES) $(LISP)
+	tags=; \
+	here=`pwd`; \
+	list='$(SOURCES) $(HEADERS)'; \
+	unique=`for i in $$list; do echo $$i; done | \
+	  awk '    { files[$$0] = 1; } \
+	       END { for (i in files) print i; }'`; \
+	test -z "$(ETAGS_ARGS)$$unique$(LISP)$$tags" \
+	  || (cd $(srcdir) && etags $(ETAGS_ARGS) $$tags  $$unique $(LISP) -o $$here/TAGS)
+
+mostlyclean-tags:
+
+clean-tags:
+
+distclean-tags:
+	-rm -f TAGS ID
+
+maintainer-clean-tags:
+
+distdir = $(top_builddir)/$(PACKAGE)-$(VERSION)/$(subdir)
+
+subdir = doc
+
+distdir: $(DISTFILES)
+	@for file in $(DISTFILES); do \
+	  d=$(srcdir); \
+	  if test -d $$d/$$file; then \
+	    cp -pr $$/$$file $(distdir)/$$file; \
+	  else \
+	    test -f $(distdir)/$$file \
+	    || ln $$d/$$file $(distdir)/$$file 2> /dev/null \
+	    || cp -p $$d/$$file $(distdir)/$$file || :; \
+	  fi; \
+	done
+main1.o: main1.cc cmdline1.h
+main2.o: main2.c ../config.h cxxconfig.h ../src/getopt.h cmdline2.h
+
+info-am:
+info: info-am
+dvi-am:
+dvi: dvi-am
+check-am: all-am
+check: check-am
+installcheck-am:
+installcheck: installcheck-am
+install-exec-am:
+install-exec: install-exec-am
+
+install-data-am: install-man install-gengetoptdocDATA \
+		install-gengetoptexamplesDATA
+install-data: install-data-am
+
+install-am: all-am
+	@$(MAKE) $(AM_MAKEFLAGS) install-exec-am install-data-am
+install: install-am
+uninstall-am: uninstall-man uninstall-gengetoptdocDATA \
+		uninstall-gengetoptexamplesDATA
+uninstall: uninstall-am
+all-am: Makefile $(MANS) $(DATA)
+all-redirect: all-am
+install-strip:
+	$(MAKE) $(AM_MAKEFLAGS) AM_INSTALL_PROGRAM_FLAGS=-s install
+installdirs:
+	$(mkinstalldirs)  $(DESTDIR)$(mandir)/man1 $(DESTDIR)$(gengetoptdocdir) \
+		$(DESTDIR)$(gengetoptexamplesdir)
+
+
+mostlyclean-generic:
+
+clean-generic:
+	-test -z "$(CLEANFILES)" || rm -f $(CLEANFILES)
+
+distclean-generic:
+	-rm -f Makefile $(CONFIG_CLEAN_FILES)
+	-rm -f config.cache config.log stamp-h stamp-h[0-9]*
+
+maintainer-clean-generic:
+	-test -z "$(MAINTAINERCLEANFILES)" || rm -f $(MAINTAINERCLEANFILES)
+mostlyclean-am:  mostlyclean-compile mostlyclean-tags \
+		mostlyclean-generic
+
+mostlyclean: mostlyclean-am
+
+clean-am:  clean-compile clean-tags clean-generic mostlyclean-am
+
+clean: clean-am
+
+distclean-am:  distclean-compile distclean-tags distclean-generic \
+		clean-am
+
+distclean: distclean-am
+
+maintainer-clean-am:  maintainer-clean-compile maintainer-clean-tags \
+		maintainer-clean-generic distclean-am
+	@echo "This command is intended for maintainers to use;"
+	@echo "it deletes files that may require special tools to rebuild."
+
+maintainer-clean: maintainer-clean-am
+
+.PHONY: mostlyclean-compile distclean-compile clean-compile \
+maintainer-clean-compile install-man1 uninstall-man1 install-man \
+uninstall-man uninstall-gengetoptdocDATA install-gengetoptdocDATA \
+uninstall-gengetoptexamplesDATA install-gengetoptexamplesDATA tags \
+mostlyclean-tags distclean-tags clean-tags maintainer-clean-tags \
+distdir info-am info dvi-am dvi check check-am installcheck-am \
+installcheck install-exec-am install-exec install-data-am install-data \
+install-am install uninstall-am uninstall all-redirect all-am all \
+installdirs mostlyclean-generic distclean-generic clean-generic \
+maintainer-clean-generic clean mostlyclean distclean maintainer-clean
+
+
+# if cpp2html is not installed we simply ignore the changes
+# FIXME: maybe we have to notify the developer about it
+cmdline1.c.html: cmdline1.c
+	touch $@
+#cmdline1.c.html: cmdline1.c
+#	$(CPP2HTML) -i $< --doc
+
+cmdline1.c: sample1.ggo
+	$(PROGNAME) -i$< -Fcmdline1 --long-help -u
+
+cmdline2.c: sample2.ggo
+	$(PROGNAME) --input=$< --func-name=my_cmdline_parser --file-name=cmdline2 --unamed-opts --no-handle-help --no-handle-version
+
+cmdline1.o: cmdline1.c
+	$(CC) $(INCLUDES) -c $<
+
+cmdline2.o: cmdline2.c
+	$(CC) $(INCLUDES) -DPACKAGE=\"sample2\" -DVERSION=\"2.0\" -c $<
+
+check: testdata
+	rm -f test.out
+	touch $(GGO_FILES)
+	$(MAKE) $(AM_MAKEFLAGS) sample1$(EXEEXT) sample2$(EXEEXT)
+	$(RUN_SAMPLE1) >> test.out && \
+	$(RUN_SAMPLE1_1) >> test.out && \
+	$(RUN_SAMPLE2) >> test.out || \
+	$(RUN_SAMPLE1_2) 2>> test.out
+	$(RUN_SAMPLE2_1) >> test.out 
+	$(RUN_SAMPLE2_2) >> test.out 
+	@echo expect no output from diff
+	diff $(srcdir)/testdata test.out
+
+testdata:
+	rm -f testdata
+	$(RUN_SAMPLE1) >> testdata
+	$(RUN_SAMPLE1_1) >> testdata
+	$(RUN_SAMPLE2) >> testdata || \
+	$(RUN_SAMPLE1_2) 2>> testdata
+	$(RUN_SAMPLE2_1) >> testdata
+	$(RUN_SAMPLE2_2) >> testdata
+
+# this is to build samples once gengetopt has changed
+# this is for development only.
+samples: $(SAMPLES_STAMP)
+	$(MAKE) $(AM_MAKEFLAGS) $(EXTRA_PROGRAMS)
+#	echo timestamp > $(SAMPLES_STAMP)
+
+$(SAMPLES_STAMP): $(PROGNAME)
+	touch $(GGO_FILES)
+	echo timestamp > $(SAMPLES_STAMP)
+
+# Tell versions [3.59,3.63) of GNU make to not export all variables.
+# Otherwise a system limit (for SysV at least) may be exceeded.
+.NOEXPORT:

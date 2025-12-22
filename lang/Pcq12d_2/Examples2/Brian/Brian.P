@@ -1,0 +1,1117 @@
+PROGRAM Brian;
+
+{$I "Include:Intuition/IntuitionBase.i"}
+{$I "Include:Graphics/GfxBase.I" }
+{$I "Include:Graphics/Graphics.i"}
+{$I "Include:Graphics/Pens.i"}
+{$I "Include:Graphics/Text.I" }
+{$I "Include:Exec/Libraries.i"}
+{$I "Include:Exec/Memory.i"}
+{$I "Include:Exec/Exec.i" }
+{$I "include:utils/stringlib.i"}
+{$I "Include:libraries/Dosextens.i"}
+{$I "Include:libraries/Diskfont.I" }
+{$I "Include:Utils/Parameters.i"}
+{$I "Include:Utils/DieselReq.i"}
+{$I "Include:Utils/DOSUtils.I" }
+{$I "Include:Utils/IOUtils.I" }
+{$I "Include:Utils/CRT.I" }
+{$I "Include:Utils/ConsoleUtils.i" }
+{$I "Include:Utils/DeadKeyConvert.i" }
+
+{$I "Include:Wurzelstuff/WurzelPP.i" }
+
+
+(*
+    Programmname    :   Brian               Version         :   0.10
+
+    © 1995 by Andreas Neumann ; Brian ist FD, jeder darf es zu
+    nichtkommerziellen Zwecken verwenden - Verbreitung nur komplett
+    mit Anleitung erlaubt
+
+    Veränderungen am Sourcecode für private Zwecke sind gestattet.
+    Eine Veröffentlichung der Veränderungen muß jedoch vorher mit mir
+    abgestimmt werden. See ya....
+*)
+
+
+CONST
+
+    ESC_RAW         =   $45;
+    HOME_RAW        =   $3D;
+    END_RAW         =   $1D;
+    PGUP_RAW        =   $3F;
+    PGDN_RAW        =   $1F;
+    RETURN_RAW      =   $44;
+    ENTER_RAW       =   $43;
+
+    GIMREL = GADGIMMEDIATE+RELVERIFY;
+
+    MYMAXPOT    :   INTEGER =   $FFFF;
+    MYMAXBODY   :   INTEGER =   $FFFF;
+
+    BRPropInfo  : PropInfo = (AUTOKNOB+FREEVERT+PROPBORDERLESS,0,0,0,0,0,0,0,0,0,0);
+
+    BRControl03 :   Gadget = (NIL,0,0,0,0,gadghComp,
+                              GIMREL,propGadget,NIL,NIL,NIL,0,NIL,3,NIL);
+    BRControl02 :   Gadget = (NIL,0,0,0,0, gadghComp,
+                              GIMREL,boolGadget,NIL,NIL,NIL,0,NIL,2,NIL);
+    BRControl01 :   Gadget = (NIL,0,0,0,0, gadghComp,
+                              GIMREL,boolGadget,NIL,NIL,NIL,0,NIL,1,NIL);
+
+    brianimage      :   Image = (0,0,0,0,1,NIL,%1,0,NIL);
+
+    brianfontattr   :   TextAttr = ("topaz.font",8,FS_NORMAL,FPF_ROMFONT);
+
+    BrianTitle      :   String = "\0$VER: Brian V0.10 (06.05.95) © 1995 by Andreas Neumann";
+
+    BrianMini       :   String = "Brian";
+
+    MyNewBrianWindow    :   NewWindow = (0,0,0,0,-1,-1,
+                                         MOUSEBUTTONS_f+GADGETUP_f+RAWKEY_f+
+                                         GADGETDOWN_f+CLOSEWINDOW_f,
+                                         WINDOWDRAG+WINDOWDEPTH+
+                                         ACTIVATE +SMART_REFRESH+
+                                         WINDOWCLOSE+RMBTRAP,
+                                         NIL,NIL,NIL,NIL,NIL,0,0,0,0,
+                                         WBENCHSCREEN_f);
+
+    MyNewMiniWindow     :   NewWindow = (0,0,0,0,-1,-1,
+                                         MOUSEBUTTONS_f+CLOSEWINDOW_f,
+                                         WINDOWDRAG+WINDOWDEPTH+
+                                         ACTIVATE+SMART_REFRESH+
+                                         WINDOWCLOSE+RMBTRAP,
+                                         NIL,NIL,NIL,NIL,NIL,0,0,0,0,
+                                         WBENCHSCREEN_f);
+
+    StdInName   :   String  =   NIL;
+    StdOutName  :   String  =   NIL;
+
+    brianwait   :   CHIP ARRAY [1..40] OF SHORT =
+                    ($0000,$0000,$0400,$07c0,$0000,$07c0,$0100,$0380,
+                     $0000,$07e0,$07c0,$1ff8,$1ff0,$3fec,$3ff8,$7fde,
+                     $3ff8,$7fbe,$7ffc,$ff7f,$7efc,$ffff,$7ffc,$ffff,
+                     $3ff8,$7ffe,$3ff8,$7ffe,$1ff0,$3ffc,$07c0,$1ff8,
+                     $0000,$07e0,$0000,$0000,$0000,$03f2,$0000,$0000);
+
+TYPE
+
+    BrianText   =   RECORD
+                        bt_prev,
+                        bt_next     :   ^briantext;
+                        bt_text     :   String;
+                    END;
+    BrianTextPtr    =   ^BrianText;
+
+    Pointerfeld =   ARRAY [1..40] OF WORD;
+
+VAR minwin,
+    outwin      :   WindowPtr;
+    WB          :   WBStartupPtr;
+    tname       :   String;
+    myibase     :   IntuitionBasePtr;
+    brianfont   :   TextFontPtr;
+    bscreen     :   ScreenPtr;
+    firstbrian,
+    actbrian    :   BrianTextPtr;
+    brianle,
+    briante,
+    briantop,
+    brianonside,
+    brianlines  :   INTEGER;
+    briancon    :   BOOLEAN;
+
+PROCEDURE CFreeString (VAR str : String);
+
+BEGIN
+ IF str<>NIL THEN FreeString (str);
+ str:=NIL;
+END;
+
+
+PROCEDURE MakeGadgetBorders (fg : GadgetPtr);
+
+VAR ngadget : GadgetPtr;
+    bt, bs, bp : BorderPtr;
+    kt, ks, kp : ^ARRAY[0..5] OF SHORT;
+
+BEGIN
+ ngadget:=fg;
+ REPEAT
+  IF (ngadget^.Flags AND GADGIMAGE)<>GADGIMAGE THEN
+  IF ngadget^.GadgetType=boolGadget THEN
+  IF ngadget^.userData=NIL THEN
+  BEGIN
+   kp:=AllocMem(SizeOf(Short)*6,MEMF_CLEAR+MEMF_PUBLIC);
+   bp:=AllocMem(SizeOf(Border),MEMF_CLEAR+MEMF_PUBLIC);
+
+   bt:=AllocMem(SizeOf(Border),MEMF_CLEAR+MEMF_PUBLIC);
+   bs:=AllocMem(SizeOf(Border),MEMF_CLEAR+MEMF_PUBLIC);
+   kt:=AllocMem(SizeOf(Short)*6,MEMF_CLEAR+MEMF_PUBLIC);
+   ks:=AllocMem(SizeOf(Short)*6,MEMF_CLEAR+MEMF_PUBLIC);
+
+   IF ks<>NIL THEN
+   BEGIN
+    WITH bt^ DO
+    BEGIN
+     FrontPen:=2;
+     BackPen:=1;
+     DrawMode:=JAM1;
+     Count:=3;
+    END;
+    WITH bs^ DO
+    BEGIN
+     FrontPen:=1;
+     BackPen:=2;
+     DrawMode:=JAM1;
+     Count:=3;
+    END;
+    WITH bp^ DO
+    BEGIN
+     FrontPen:=1;
+     BackPen:=2;
+     DrawMode:=JAM1;
+     Count:=3;
+    END;
+
+    bt^.NextBorder:=bs;
+    bs^.NextBorder:=bp;
+
+    bt^.XY:=kt;
+    bs^.XY:=ks;
+    bp^.XY:=kp;
+
+    WITH ngadget^ DO
+    BEGIN
+     kt^[0]:=0; kt^[1]:=Height-1; kt^[2]:=0; kt^[3]:=0; kt^[4]:=Width-1; kt^[5]:=0;
+     ks^[0]:=Width-1; ks^[1]:=1; ks^[2]:=Width-1; ks^[3]:=Height-1; ks^[4]:=1; ks^[5]:=Height-1;
+
+     IF GadgetID=2 THEN
+     BEGIN
+      kp^[0]:=2; kp^[1]:=Height-4; kp^[2]:=(Width DIV 2); kp^[3]:=2; kp^[4]:=Width-3; kp^[5]:=Height-4;
+     END
+     ELSE
+     BEGIN
+      kp^[0]:=2; kp^[1]:=2; kp^[2]:=(Width DIV 2); kp^[3]:=Height-4; kp^[4]:=Width-3; kp^[5]:=2;
+     END;
+
+     GadgetRender:=bt;
+    END;
+
+   END;
+  END;
+  ngadget:=ngadget^.NextGadget;
+ UNTIL (ngadget=NIL);
+
+END;
+
+
+PROCEDURE FreeGadgetBorders (fg : GadgetPtr);
+
+VAR ngadget : GadgetPtr;
+    bptr, bptr2 , bptr3 : BorderPtr;
+
+BEGIN
+ ngadget:=fg;
+ REPEAT
+  IF (ngadget^.Flags AND GADGIMAGE)<>GADGIMAGE THEN
+  IF ngadget^.GadgetType=boolGadget THEN
+  IF ngadget^.userData=NIL THEN
+  BEGIN
+   bptr:=ngadget^.GadgetRender;
+   IF bptr<>NIL THEN
+   BEGIN
+    IF bptr^.XY<>NIL THEN FreeMem (bptr^.XY,SizeOf(Short)*6);
+    bptr2:=bptr^.NextBorder;
+    IF bptr2<>NIL THEN
+    BEGIN
+     IF bptr2^.XY<>NIL THEN FreeMem (bptr2^.XY,SizeOf(Short)*6);
+     bptr3:=bptr2^.NextBorder;
+     IF bptr3<>NIL THEN
+     BEGIN
+      IF bptr3^.XY<>NIL THEN FreeMem (bptr3^.XY,SizeOf(Short)*6);
+      FreeMem (bptr3,SizeOf(Border));
+     END;
+     FreeMem (bptr2,SizeOf(Border));
+    END;
+    FreeMem(bptr,SizeOf(Border));
+    ngadget^.GadgetRender:=NIL;
+   END;
+  END;
+  ngadget:=ngadget^.NextGadget;
+ UNTIL (ngadget=NIL);
+
+END;
+
+
+FUNCTION w2i (sh : SHORT) : INTEGER;
+
+BEGIN
+ IF sh<0 THEN
+  w2i:=sh+65536
+ ELSE
+  w2i:=sh;
+END;
+
+FUNCTION i2w (inte : INTEGER) : SHORT;
+
+VAR inti : INTEGER;
+
+BEGIN
+ inti:=inte-65536;
+ IF inti<0 THEN
+  i2w:=inti
+ ELSE
+  i2w:=inte;
+END;
+
+PROCEDURE AdjustPropGadget (win : WindowPtr; gad : GadgetPtr ; pro : PropInfoPtr ; pos , maxpos : INTEGER);
+
+VAR fl, hp , vp , hb , vb : INTEGER;
+    apfakt  :   REAL;
+
+BEGIN
+ fl:=pro^.Flags;
+
+ apfakt:=MYMAXPOT/maxpos;
+ vp:=ROUND(pos*apfakt);
+
+ hp:=pro^.HorizPot;
+
+ vb:=ROUND(MYMAXBODY/ maxpos);
+
+ hb:=pro^.HorizBody;
+
+ NewModifyProp (gad,win,NIL,fl, hp,i2w(vp),hb,i2w(vb),-1);
+
+END;
+
+
+FUNCTION ReadOutProp (pro : PropInfoPtr ; maxpos : INTEGER) : INTEGER;
+
+VAR
+    rop1,
+    rop2    :   REAL;
+
+BEGIN
+ rop1:=MYMAXBODY/maxpos;
+ rop2:=w2i(pro^.VertPot)/rop1;
+ ReadOutProp:=ROUND(rop2);
+END;
+
+
+PROCEDURE AdProp;
+
+BEGIN
+ IF brianlines>(brianonside+1) THEN
+  AdjustPropGadget (outwin,Adr(BRControl03),Adr(BRPropInfo),briantop-1,(brianlines-brianonside-1));
+END;
+
+
+PROCEDURE CloseOutDisplay;
+
+BEGIN
+ IF outwin^.FirstGadget<>NIL THEN
+ BEGIN
+  IF RemoveGList (outwin,outwin^.FirstGadget,-1)=0 THEN ;
+  FreeGadgetBorders (Adr(BRControl01));
+ END;
+ CloseWindow (outwin);
+ outwin:=NIL;
+END;
+
+PROCEDURE CloseMinDisplay;
+
+BEGIN
+ CloseWindow (minwin);
+ minwin:=NIL;
+END;
+
+
+PROCEDURE CloseWork;
+
+PROCEDURE CloseLibs;
+
+BEGIN
+ IF DiskFontBase<>NIL THEN CloseLibrary (DiskFontBase);
+ IF PPBase<>NIL THEN CloseLibrary (PPBase);
+ IF GfxBase<>NIL THEN CloseLibrary (GfxBase);
+END;
+
+
+PROCEDURE FreeStrings;
+
+BEGIN
+ CFreeString (tname);
+END;
+
+
+PROCEDURE FreeBrians;
+
+VAR fb1,
+    fb2     :   BrianTextPtr;
+
+BEGIN
+ fb1:=FirstBrian;
+ WHILE fb1<>NIL DO
+ BEGIN
+  fb2:=fb1^.bt_next;
+  IF fb1^.bt_text<>NIL THEN FreeString (fb1^.bt_text);
+  FreeMem (fb1,SizeOf(BrianText));
+  fb1:=fb2;
+ END;
+ FirstBrian:=NIL;
+END;
+
+BEGIN
+ IF briancon THEN CloseConsoleDevice;
+ IF outwin<>NIL THEN
+  CloseOutDisplay;
+ IF minwin<>NIL THEN
+  CloseMinDisplay;
+ IF brianimage.ImageData<>NIL THEN
+  FreeMem (brianimage.ImageData,SIZEOF(SHORT)*(TRUNC((BRControl03.Width-1)/16)+1)*(bscreen^.Height-(3*brianfont^.tf_YSize)-16));
+ FreeBrians;
+ FreeStrings;
+ CloseLibs;
+ Exit;
+END;
+
+
+
+PROCEDURE OpenOutDisplay;
+
+PROCEDURE MacheGadgets;
+
+VAR mg1,
+    mg2     :   INTEGER;
+
+BEGIN
+ mg1:=TextLength(Adr(bscreen^.SRastPort),"W",1)+4;
+ IF mg1<12 THEN mg1:=12;
+ mg2:=TRUNC((mg1-1)/16);
+ Inc(mg2);
+ brianimage.ImageData:=AllocMem (SIZEOF(SHORT)*mg2*(bscreen^.Height-(3*brianfont^.tf_YSize)-16),MEMF_CHIP+MEMF_CLEAR);
+ IF brianimage.ImageData=NIL THEN CloseWork;
+ BRPropInfo.HorizBody:=MYMAXBODY;
+ BRPropInfo.HorizPot:=0;
+ BRPropInfo.VertBody:=MYMAXBODY;
+ BRPropInfo.VertPot:=0;
+ WITH BRControl03 DO
+ BEGIN
+  TopEdge:=brianfont^.tf_YSize+8;
+  LeftEdge:=bscreen^.Width-4-mg1;
+  Width:=mg1-3;
+  Height:=(bscreen^.Height-(3*brianfont^.tf_YSize)-16);
+  SpecialInfo:=Adr(BRPropInfo);
+  GadgetRender:=Adr(brianimage);
+ END;
+ WITH BRControl02 DO
+ BEGIN
+  TopEdge:=BRControl03.TopEdge+BRControl03.Height;
+  LeftEdge:=BRControl03.LeftEdge-1;
+  Width:=BRControl03.Width+2;
+  Height:=brianfont^.tf_YSize+2;
+  NextGadget:=Adr(BRControl03);
+ END;
+ WITH BRControl01 DO
+ BEGIN
+  TopEdge:=BRControl02.TopEdge+BRControl02.Height;
+  LeftEdge:=BRControl02.LeftEdge;
+  Width:=BRControl02.Width;
+  Height:=BRControl02.Height;
+  NextGadget:=Adr(BRControl02);
+ END;
+ MakeGadgetBorders (Adr(BRControl01));
+ MyNewBrianWindow.FirstGadget:=Adr(BRControl01);
+END;
+
+PROCEDURE Line (w : WindowPtr; x1 , y1 , x2 , y2 , col : Short);
+
+BEGIN
+ SetAPen (w^.RPort,col);
+ Move (w^.RPort,x1,y1);
+ Draw (w^.RPort,x2,y2);
+END;
+
+
+BEGIN
+ MacheGadgets;
+ outwin:=OpenWindow (Adr(MyNewBrianWindow));
+ IF outwin=NIL THEN CloseWork;
+ SetFont (outwin^.RPort,brianfont);
+ WITH BRControl03 DO
+ BEGIN
+  Line (outwin,LeftEdge-1,TopEdge-1,LeftEdge-1,TopEdge+Height,2);
+  Line (outwin,LeftEdge-1,TopEdge-1,LeftEdge+Width,TopEdge-1,2);
+  Line (outwin,LeftEdge+Width,TopEdge,LeftEdge+Width,TopEdge+Height,1);
+  Line (outwin,LeftEdge,TopEdge+Height,LeftEdge+Width,TopEdge+Height,1);
+ END;
+END;
+
+
+PROCEDURE OpenMinDisplay;
+
+BEGIN
+ WITH MyNewMiniWindow DO
+ BEGIN
+  IF brianle>=0 THEN
+   LeftEdge:=brianle
+  ELSE
+   LeftEdge:=0;
+  IF briante>=0 THEN
+   TopEdge:=briante
+  ELSE
+   TopEdge:=0;
+ END;
+ minwin:=OpenWindow (Adr(MyNewMiniWindow));
+ IF minwin=NIL THEN CloseWork;
+END;
+
+
+FUNCTION CAllocString (size : INTEGER) : String;
+
+VAR castr   :   String;
+
+BEGIN
+ castr:=AllocString (size);
+ IF castr=NIL THEN CloseWork;
+ CAllocString:=castr;
+END;
+
+
+FUNCTION FileExists (fname : String) : BOOLEAN;
+
+VAR flock   :   FileLock;
+    fres    :   BOOLEAN;
+
+BEGIN
+ flock:=Lock(fname,ACCESS_READ);
+ IF flock<>NIL THEN
+ BEGIN
+  fres:=TRUE;
+  UnLock(flock);
+ END
+ ELSE
+  fres:=FALSE;
+ FileExists:=fres;
+END;
+
+
+FUNCTION GetActualFont (gb : ^GfxBaseRec) : TextFontPtr;
+
+VAR garesult        :   TextFontPtr;
+    gat             :   TextAttrPtr;
+
+BEGIN
+ garesult:=gb^.DefaultFont;
+ IF bscreen<>NIL THEN
+ BEGIN
+  gat:=bscreen^.Font;
+  IF gat<>NIL THEN
+  BEGIN
+   garesult:=NIL;
+   CopyMem (gat,Adr(brianfontattr),SizeOf(TextAttr));
+  END;
+ END;
+ GetActualFont:=garesult;
+END;
+
+
+PROCEDURE DisplayPageOfBrians;
+
+VAR dp1,
+    dp2     :   INTEGER;
+    dpb     :   BrianTextPtr;
+
+BEGIN
+ SetAPen (outwin^.RPort,0);
+ RectFill (outwin^.RPort,5,brianfont^.tf_YSize+8,BRControl02.LeftEdge-1,outwin^.Height-8);
+ dpb:=ActBrian;
+ SetAPen (outwin^.RPort,1);
+ SetDrMd (outwin^.RPort,JAM1);
+ FOR dp1:=1 TO brianonside DO
+ BEGIN
+  IF dpb<>NIL THEN
+  BEGIN
+   IF dpb^.bt_text<>NIL THEN
+   BEGIN
+    Move (outwin^.RPort,5,(brianfont^.tf_YSize+8)+((dp1-1)*brianfont^.tf_YSize)+brianfont^.tf_Baseline);
+    GText (outwin^.RPort,dpb^.bt_text,StrLen(dpb^.bt_text));
+   END;
+   dpb:=dpb^.bt_next;
+  END;
+ END;
+ AdProp;
+END;
+
+PROCEDURE SetUpSystem;
+
+PROCEDURE SetEverythingZero;
+
+BEGIN
+ GfxBase:=NIL;
+ DiskFontBase:=NIL;
+ PPBase:=NIL;
+ outwin:=NIL;
+ minwin:=NIL;
+ tname:=NIL;
+ myibase:=NIL;
+ WB:=NIL;
+ brianfont:=NIL;
+ bscreen:=NIL;
+ firstbrian:=NIL;
+ actbrian:=NIL;
+
+ brianlines:=0;
+ briancon:=FALSE;
+ brianle:=-1;
+ briante:=-1;
+END;
+
+
+PROCEDURE OpenLibs;
+
+CONST
+        gfxname         : String = "graphics.library";
+        diskfontname    : String = "diskfont.library";
+        intuitionname   : String = "intuition.library";
+
+BEGIN
+ GfxBase:=OpenLibrary(gfxname , 0);
+ IF GfxBase=NIL THEN CloseWork;
+ PPBase:=OpenLibrary (PPNAME,PPVERSION);
+ DiskFontBase:=OpenLibrary (diskfontname,0);
+ myibase:=Address(OpenLibrary (intuitionname,0));
+ IF myibase=NIL THEN CloseWork;
+END;
+
+PROCEDURE AllocStrings;
+
+BEGIN
+ tname:=CAllocString (255);
+END;
+
+
+PROCEDURE GetFont;
+
+BEGIN
+ brianfont:=GetActualFont (GfxBase);
+
+ IF DiskFontBase<>NIL THEN
+ BEGIN
+  IF brianfont=NIL THEN
+   brianfont:=OpenDiskFont (Adr(brianfontattr));
+ END;
+
+ IF brianfont=NIL THEN
+  brianfont:=OpenFont (Adr(brianfontattr));
+ IF brianfont=NIL THEN
+  CloseWork;
+END;
+
+
+PROCEDURE GetBScreen;
+
+BEGIN
+ bscreen:=myibase^.ActiveScreen;
+ IF bscreen=NIL THEN
+   bscreen:=myibase^.FirstScreen;
+END;
+
+PROCEDURE MacheWindowGroesse;
+
+BEGIN
+ IF bscreen<>NIL THEN
+ BEGIN
+  WITH MyNewBrianWindow DO
+  BEGIN
+   LeftEdge:=bscreen^.LeftEdge;
+   TopEdge:=bscreen^.TopEdge;
+   Width:=bscreen^.Width;
+   Height:=bscreen^.Height;
+   Title:=Address(Integer(BrianTitle)+7);
+   Screen:=bscreen;
+  END;
+  WITH MyNewMiniWindow DO
+  BEGIN
+   Width:=TextLength(Adr(bscreen^.SRastPort),BrianMini,StrLen(BrianMini))+100;
+   Height:=brianfont^.tf_YSize+3;
+   Title:=BrianMini;
+   Screen:=bscreen;
+  END;
+ END
+ ELSE
+  CloseWork;
+END;
+
+PROCEDURE ReadText;
+
+VAR rthandle    :   FileHandle;
+    rt1,
+    rt2         :   INTEGER;
+    rtbuffer    :   Address;
+
+
+PROCEDURE GetBrian;
+
+VAR
+    gbold,
+    gbpointer   :   ^BYTE;
+    gbbrian     :   BrianTextPtr;
+    gblen       :   INTEGER;
+
+PROCEDURE NewBrian (off : INTEGER);
+
+VAR nb1,
+    nb2     :   BrianTextPtr;
+    nblen   :   INTEGER;
+
+BEGIN
+ nb1:=AllocMem (SizeOf(BrianText),MEMF_CLEAR+MEMF_PUBLIC);
+ IF nb1<>NIL THEN
+ BEGIN
+  IF gbbrian=NIL THEN
+   FirstBrian:=nb1
+  ELSE
+   gbbrian^.bt_next:=nb1;
+  nb1^.bt_prev:=gbbrian;
+  Inc(brianlines);
+
+  nblen:=Integer(gbpointer)-Integer(gbold)+off;
+  IF nblen>0 THEN
+  BEGIN
+   nb1^.bt_text:=AllocString (nblen+1);
+   IF nb1^.bt_text<>NIL THEN
+   BEGIN
+    StrNCpy (nb1^.bt_text,Address(gbold),nblen);
+   END;
+  END;
+
+  gbold:=Address(Integer(gbpointer)+1+off);
+
+  gblen:=0;
+  gbbrian:=nb1;
+ END;
+END;
+
+BEGIN
+ IF rt1>0 THEN
+ BEGIN
+  gbpointer:=rtbuffer;
+  gbold:=gbpointer;
+  gbbrian:=NIL;
+  gblen:=0;
+  WHILE (Integer(gbpointer)<=(Integer(rtbuffer)+rt1-1)) DO
+  BEGIN
+   IF (gbpointer^=$0A) THEN
+    NewBrian (0)
+   ELSE
+    Inc(gblen,TextLength (outwin^.RPort,Address(gbpointer),1));
+   IF gblen>(BRControl02.LeftEdge-6) THEN
+   BEGIN
+    NewBrian (-1);
+    gbold:=Address(Integer(gbold)-1);
+    gblen:=TextLength(outwin^.RPort,Address(gbold),Integer(gbpointer)-Integer(gbold)+1);
+   END;
+   gbpointer:=Address(Integer(gbpointer)+1);
+  END;
+  IF Integer(gbold)<>(Integer(gbpointer)-1) THEN
+   NewBrian (-1);
+  FreeMem (rtbuffer,rt1);
+ END;
+END;
+
+BEGIN
+ IF PPBase<>NIL THEN
+ BEGIN
+  rt2:=ppLoadData (tname,DECR_NONE,MEMF_CLEAR+MEMF_PUBLIC,Adr(rtbuffer),Adr(rt1),nil);
+  IF rtbuffer<>NIL THEN
+  BEGIN
+   GetBrian;
+  END;
+ END
+ ELSE
+ BEGIN
+  rthandle:=DOSOpen (tname,MODE_OLDFILE);
+  IF rthandle<>NIL THEN
+  BEGIN
+   rt1:=Seek(rthandle,0,OFFSET_END);
+   rt1:=Seek(rthandle,0,OFFSET_BEGINNING);
+   rtbuffer:=AllocMem (rt1,MEMF_CLEAR+MEMF_PUBLIC);
+   IF rtbuffer<>NIL THEN
+   BEGIN
+    rt2:=DOSRead (rthandle,rtbuffer,rt1);
+    DOSClose (rthandle);
+    GetBrian;
+   END;
+  END;
+ END;
+END;
+
+
+
+BEGIN
+ SetEverythingZero;
+ OpenLibs;
+ AllocStrings;
+
+ WB:=GetStartupMsg;
+ IF WB<>NIL THEN
+ BEGIN
+  IF CurrentDir (WB^.sm_ArgList^[1].wa_Lock)=NIL THEN ;
+  StrCpy (tname,WB^.sm_ArgList^[2].wa_Name);
+  IF CurrentDir (WB^.sm_ArgList^[2].wa_Lock)=NIL THEN ;
+ END
+ ELSE
+  GetParam (1,tname);
+
+ IF StrLen(tname)<=1 THEN CloseWork;
+ IF FileExists (tname)=FALSE THEN CloseWork;
+
+ GetBScreen;
+ GetFont;
+
+ MacheWindowGroesse;
+
+ OpenOutDisplay;
+ SetPointer(outwin,Adr(brianwait),16,16,-1,-1);
+
+ ReadText;
+ ActBrian:=FirstBrian;
+ briantop:=1;
+
+ IF brianfont^.tf_YSize>0 THEN
+  brianonside:=TRUNC ((outwin^.Height-16-brianfont^.tf_YSize)/brianfont^.tf_YSize)
+ ELSE
+  brianonside:=0;
+
+ DisplayPageOfBrians;
+
+ AdProp;
+ OpenConsoleDevice;
+ briancon:=TRUE;
+ ClearPointer (outwin);
+END;
+
+
+PROCEDURE HandleWork;
+
+VAR himes   :   IntuiMessagePtr;
+    hwscroll,
+    hw1,
+    hw2,
+    hw3     :   INTEGER;
+    hwicon,
+    hwende  :   BOOLEAN;
+    hwbrian :   BrianTextPtr;
+    hwbuf   :   ARRAY [0..7] OF CHAR;
+
+PROCEDURE ScrollPageUp;
+
+VAR sp1 :   INTEGER;
+
+BEGIN
+ FOR sp1:=1 TO brianonside DO
+ BEGIN
+  hwbrian:=ActBrian^.bt_prev;
+  IF hwbrian<>NIL THEN
+  BEGIN
+   ActBrian:=hwbrian;
+   Dec(briantop);
+  END;
+ END;
+ DisplayPageOfBrians;
+END;
+
+PROCEDURE ScrollBrianUp;
+
+BEGIN
+ ScrollRaster (outwin^.RPort,0,-brianfont^.tf_YSize,5,brianfont^.tf_YSize+8,BRControl02.LeftEdge-1,7+((brianonside+1)*brianfont^.tf_YSize));
+ SetAPen (outwin^.RPort,0);
+ RectFill (outwin^.RPort,5,brianfont^.tf_YSize+8,BRControl02.LeftEdge-1,(2*brianfont^.tf_YSize)+7);
+ ActBrian:=ActBrian^.bt_prev;
+ Dec(briantop);
+ SetAPen (outwin^.RPort,1);
+ SetDrMd (outwin^.RPort,JAM1);
+ IF ActBrian^.bt_text<>NIL THEN
+ BEGIN
+  Move (outwin^.RPort,5,(brianfont^.tf_YSize+8)+brianfont^.tf_Baseline);
+  GText (outwin^.RPort,ActBrian^.bt_text,StrLen(ActBrian^.bt_text));
+ END;
+ AdProp;
+END;
+
+
+PROCEDURE ScrollPageDown;
+
+VAR sp1     :   INTEGER;
+    spbrian :   BrianTextPtr;
+
+BEGIN
+ FOR sp1:=1 TO brianonside DO
+ BEGIN
+  hwbrian:=ActBrian^.bt_next;
+  IF hwbrian<>NIL THEN
+  BEGIN
+   ActBrian:=hwbrian;
+   Inc(briantop);
+  END;
+ END;
+ hwbrian:=ActBrian;
+ FOR sp1:=1 TO brianonside DO
+ BEGIN
+  IF hwbrian<>NIL THEN
+  BEGIN
+   spbrian:=hwbrian;
+   hwbrian:=hwbrian^.bt_next;
+  END;
+ END;
+ IF hwbrian=NIL THEN
+ BEGIN
+  FOR sp1:=1 TO brianonside DO
+   spbrian:=spbrian^.bt_prev;
+  IF spbrian=NIL THEN spbrian:=FirstBrian;
+  ActBrian:=spbrian;
+  briantop:=brianlines-brianonside;
+  IF briantop<1 THEN briantop:=1;
+ END;
+ DisplayPageOfBrians;
+END;
+
+PROCEDURE ScrollBrianDown;
+
+VAR sb1 :   INTEGER;
+
+BEGIN
+ ScrollRaster (outwin^.RPort,0,brianfont^.tf_YSize,5,brianfont^.tf_YSize+8,BRControl02.LeftEdge-1,8+((brianonside+1)*brianfont^.tf_YSize));
+ SetAPen (outwin^.RPort,0);
+ RectFill (outwin^.RPort,5,brianfont^.tf_YSize+8+((brianonside-1)*brianfont^.tf_YSize),BRControl02.LeftEdge-1,outwin^.Height-8);
+ ActBrian:=ActBrian^.bt_next;
+ Inc(briantop);
+ SetAPen (outwin^.RPort,1);
+ SetDrMd (outwin^.RPort,JAM1);
+ hwbrian:=ActBrian;
+ FOR sb1:=1 TO (brianonside-1) DO
+  IF hwbrian<>NIL THEN hwbrian:=hwbrian^.bt_next;
+ IF hwbrian<>NIL THEN
+ IF hwbrian^.bt_text<>NIL THEN
+ BEGIN
+  Move (outwin^.RPort,5,(brianfont^.tf_YSize+8)+((brianonside-1)*brianfont^.tf_YSize)+brianfont^.tf_Baseline);
+  GText (outwin^.RPort,hwbrian^.bt_text,StrLen(hwbrian^.bt_text));
+ END;
+ AdProp;
+END;
+
+
+FUNCTION GetGadgetID (iadr : GadgetPtr) : Short;
+
+BEGIN
+ GetGadgetID:=iadr^.GadgetID;
+END;
+
+
+PROCEDURE TickleItDown;
+
+BEGIN
+ hwbrian:=ActBrian;
+ FOR hw1:=1 TO (brianonside+1) DO
+  IF hwbrian<>NIL THEN hwbrian:=hwbrian^.bt_next;
+END;
+
+
+PROCEDURE SimplyDown;
+
+BEGIN
+ TickleItDown;
+ IF hwbrian<>NIL THEN
+  ScrollBrianDown;
+END;
+
+
+PROCEDURE Iconify;
+
+VAR icmes   :   IntuiMessagePtr;
+    ic1,
+    ic2     :   INTEGER;
+
+BEGIN
+ CloseOutDisplay;
+ OpenMinDisplay;
+ REPEAT
+  ic1:=0;
+  WaitPort (minwin^.UserPort);
+  icmes:=Address(GetMsg (minwin^.UserPort));
+  IF icmes<>NIL THEN
+  BEGIN
+   ic1:=icmes^.Class;
+   ic2:=icmes^.Code;
+   ReplyMsg (Address(icmes));
+  END;
+ UNTIL (ic1=CLOSEWINDOW_f) OR ((ic1=MOUSEBUTTONS_f) AND (ic2=MENUUP));
+ brianle:=minwin^.LeftEdge;
+ briante:=minwin^.TopEdge;
+ CloseMinDisplay;
+ IF ic1=MOUSEBUTTONS_f THEN
+ BEGIN
+  OpenOutDisplay;
+  DisplayPageOfBrians;
+  AdProp;
+ END
+ ELSE
+  hwende:=TRUE;
+END;
+
+
+PROCEDURE GoToTheTop;
+
+BEGIN
+ IF ActBrian<>FirstBrian THEN
+ BEGIN
+  ActBrian:=FirstBrian;
+  briantop:=1;
+  DisplayPageOfBrians;
+ END;
+END;
+
+
+PROCEDURE GoToTheBottom;
+
+BEGIN
+ TickleItDown;
+ IF hwbrian<>NIL THEN
+ BEGIN
+  WHILE hwbrian^.bt_next<>NIL DO
+   hwbrian:=hwbrian^.bt_next;
+  FOR hw1:=1 TO brianonside DO
+  IF hwbrian<>NIL THEN
+   hwbrian:=hwbrian^.bt_prev;
+  IF hwbrian=NIL THEN hwbrian:=FirstBrian;
+  ActBrian:=hwbrian;
+  briantop:=brianlines-brianonside;
+  IF briantop<1 THEN briantop:=1;
+  DisplayPageOfBrians;
+ END;
+END;
+
+
+BEGIN
+ hwende:=FALSE;
+ hwicon:=FALSE;
+ hwscroll:=0;
+ REPEAT
+  CASE hwscroll OF
+   -1 : BEGIN
+         IF ActBrian^.bt_prev<>NIL THEN
+          ScrollBrianUp;
+         AdProp;
+        END;
+    1 : BEGIN
+         TickleItDown;
+         IF hwbrian<>NIL THEN
+          ScrollBrianDown;
+        END;
+   ELSE ;
+  END;
+  himes:=Address(GetMsg (outwin^.UserPort));
+  IF brianlines>(brianonside+1) THEN
+   hw1:=ReadOutProp(Adr(BRPropInfo),(brianlines-brianonside-1))+1
+  ELSE
+   hw1:=briantop;
+  IF briantop<>hw1 THEN
+  BEGIN
+   ActBrian:=FirstBrian;
+   briantop:=1;
+   WHILE hw1>1 DO
+   BEGIN
+    IF ActBrian<>NIL THEN ActBrian:=ActBrian^.bt_next;
+    Inc(briantop);
+    Dec(hw1);
+   END;
+   DisplayPageOfBrians;
+  END;
+  IF himes<>NIL THEN
+  BEGIN
+   IF himes^.Class=MOUSEBUTTONS_f THEN IF himes^.Code=MENUUP THEN hwicon:=TRUE;
+   IF himes^.Class=CLOSEWINDOW_f THEN hwende:=TRUE;
+   IF himes^.Class=GADGETDOWN_f THEN
+   BEGIN
+    CASE GetGadgetID(himes^.IAddress) OF
+     1 : hwscroll:=1;
+     2 : hwscroll:=-1;
+     ELSE hwscroll:=0;
+    END;
+   END
+   ELSE
+    hwscroll:=0;
+
+   IF himes^.Class=RAWKEY_F THEN
+   BEGIN
+    hw1:=DeadKeyConvert (himes,Adr(hwbuf),6,NIL);
+    IF hw1<=0 THEN
+     hwbuf[0]:=CHR(0);
+
+    CASE ToUpper(hwbuf[0]) OF
+     'Q',
+     'E'    :   hwende:=TRUE;
+     ' '    :   SimplyDown;
+     'T'    :   GoToTheTop;
+     'B'    :   GoToTheBottom;
+     ELSE   ;
+    END;
+
+    CASE himes^.Code OF
+     ESC_RAW    :   hwende:=TRUE;
+     CURSORUP   :   BEGIN
+                     IF ActBrian^.bt_prev<>NIL THEN
+                     BEGIN
+                      IF (himes^.Qualifier AND (IEQUALIFIER_LSHIFT OR IEQUALIFIER_RSHIFT))>0 THEN
+                       ScrollPageUp
+                      ELSE
+                       ScrollBrianUp;
+                     END;
+                    END;
+     CURSORDOWN :   BEGIN
+                         TickleItDown;
+                         IF hwbrian<>NIL THEN
+                         BEGIN
+                          IF (himes^.Qualifier AND (IEQUALIFIER_LSHIFT OR IEQUALIFIER_RSHIFT))>0 THEN
+                           ScrollPageDown
+                          ELSE
+                           ScrollBrianDown;
+                         END;
+                        END;
+     HOME_RAW   :   GoToTheTop;
+     END_RAW    :   GoToTheBottom;
+     PGUP_RAW   :   IF ActBrian^.bt_prev<>NIL THEN
+                     ScrollPageUp;
+     PGDN_RAW   :   BEGIN
+                     TickleItDown;
+                     IF hwbrian<>NIL THEN
+                      ScrollPageDown
+                    END;
+     RETURN_RAW,
+     ENTER_RAW  :   SimplyDown;
+     ELSE ;
+    END;
+
+
+   END;
+   ReplyMsg (Address(himes));
+
+  END;
+
+  IF hwicon THEN
+  BEGIN
+   Iconify;
+   hwicon:=FALSE;
+  END;
+
+ UNTIL hwende;
+END;
+
+BEGIN
+ SetUpSystem;
+ HandleWork;
+ CloseWork;
+END.

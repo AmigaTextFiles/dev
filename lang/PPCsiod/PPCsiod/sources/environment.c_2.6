@@ -1,0 +1,440 @@
+/* Scheme In One Define.
+ 
+The garbage collector, the name and other parts of this program are
+
+ *                     COPYRIGHT (c) 1989 BY                              *
+ *      PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+
+Conversion  to  full scheme standard, characters, vectors, ports, complex &
+rational numbers, and other major enhancments by
+
+ *      Scaglione Ermanno, v. Pirinoli 16 IMPERIA P.M. 18100 ITALY        * 
+
+Permission  to use, copy, modify, distribute and sell this software and its
+documentation  for  any purpose and without fee is hereby granted, provided
+that  the  above  copyright  notice appear in all copies and that both that
+copyright   notice   and   this  permission  notice  appear  in  supporting
+documentation,  and that the name of Paradigm Associates Inc not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.
+
+PARADIGM  DISCLAIMS  ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL  IMPLIED  WARRANTIES  OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+PARADIGM  BE  LIABLE  FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <math.h>
+
+#include "siod.h"
+
+LISP envcons(LISP bindings,LISP parent)
+{long flag;
+ LISP e;
+ flag = no_interrupt(1);
+ NEWCELL(e,tc_environment);
+ BINDINGS(e)=bindings;
+ PARENT(e)=parent;
+ no_interrupt(flag);
+ return(e);}
+
+LISP extend_env(LISP bindings,LISP env)
+{LISP list;
+ list=car(bindings);
+ if(CONSP(list))
+   {for(list=bindings;CONSP(CDR(list));list = CDR(list));
+    CDR(list) = BINDINGS(env);
+    BINDINGS(env)=bindings;
+    return(env);}
+ BINDINGS(env)=cons(bindings,BINDINGS(env));
+ return(env);}  
+
+LISP envlookup(LISP name,LISP env)
+{LISP tmp,l;
+ if(NULLP(env)) return(NIL);
+ for(l=BINDINGS(env);CONSP(l);l=CDR(l))
+   {tmp = CAR(l);
+    if (EQ(car(tmp),name)) return(tmp);}
+ return(envlookup(name,PARENT(env)));}
+
+LISP framelookup(LISP name,LISP bindings)
+{LISP tmp,l;
+ for(l=bindings;CONSP(l);l=CDR(l))
+   {tmp = CAR(l);
+    if (EQ(car(tmp),name)) return(tmp);}
+ return(NIL);}
+
+LISP proc_env(LISP proc)
+{if(NTYPEP(proc,tc_closure) &&
+    NTYPEP(proc,tc_rec) &&
+    NTYPEP(proc,tc_fluidclosure))
+         err("procedure-environment",proc,ERR_GEN_ARG | ERR_NPRO);
+ return(DEFENV(proc));}
+
+LISP proc_code(LISP proc)
+{if(NTYPEP(proc,tc_closure) && 
+    NTYPEP(proc,tc_rec) && 
+    NTYPEP(proc,tc_fluidclosure))
+         err("procedure-code",proc,ERR_GEN_ARG | ERR_NPRO);
+ return(CODE(proc));}
+
+LISP environment_bindings(LISP env)
+{if(EQ(env,sym_user_environment)) return(NIL);
+ else if(NENVP(env)) err("environment-bindings",env,ERR_GEN_ARG | ERR_NENV);
+ return(BINDINGS(env));}
+
+LISP environment_parent(LISP env)
+{if(EQ(env,sym_user_environment)) return(NIL);
+ else if(NENVP(env)) err("environment-parent",env,ERR_GEN_ARG | ERR_NENV);
+ return(NULLP(PARENT(env))?sym_user_environment:PARENT(env));}
+
+LISP envp(LISP env)
+{if(ENVP(env)||EQ(env,sym_user_environment))return(truth);
+ return(NIL);}
+
+LISP syntax_define(LISP args)
+{LISP s;
+ s = car(args);
+ if NCONSP(s) return(args);
+ return(syntax_define(
+        cons(CAR(s),
+	cons(cons(sym_lambda,
+	     cons(CDR(s),
+		  cdr(args))),
+	     NIL))));}
+      
+LISP leval_define(LISP args,LISP env)
+{long flag;
+ LISP tmp,var,val;
+ if(NULLP(args))err("nothing to define",NIL,ERR_GEN);
+ tmp = syntax_define(args);
+ var = car(tmp);
+ if(TYPEP(VCELL(var),tc_fsubr)||
+    TYPEP(VCELL(var),tc_msubr))
+   put_st("WARNING: modifing a special form");
+ flag = no_interrupt(1);
+ if NSYMBOLP(var) 
+   err("attempting to define a non symbol value",var,ERR_GEN);
+ val = leval(car(cdr(tmp)),env);
+ if(NULLP(env))
+   VCELL(var) = val;
+ else
+  {tmp = framelookup(var,BINDINGS(env));
+   if NNULLP(tmp) 
+     CDR(tmp) = val;
+   else
+     extend_env(cons(var,val),env);}
+ no_interrupt(flag);
+ return(var);}
+
+LISP laccess(LISP form,LISP env)
+{LISP tmp,pair,renv;
+ tmp = car(form);
+ renv = leval(car(cdr(form)),env);
+ if(NSYMBOLP(tmp))
+   err("access",tmp,ERR_FIRST | ERR_NSYM);
+ if(EQ(renv,sym_user_environment)) 
+    renv = NIL;
+ else if(NULLP(renv))
+    renv = env;
+ else if(NENVP(renv))
+   err("access",renv,ERR_SECOND | ERR_NENV);
+ pair = envlookup(tmp,renv); 
+ if(NNULLP(pair))
+   return(cdr(pair));
+ if(NEQ(VCELL(tmp),unbound_marker))
+   return(VCELL(tmp));
+ err("symbol not defined in current environment",tmp,ERR_GEN);
+}
+
+LISP unboundp(LISP form,LISP env)
+{LISP tmp,renv,pair;
+ tmp = car(form);
+ renv = leval(car(cdr(form)),env);
+ if(NSYMBOLP(tmp))
+   err("unbound?",tmp,ERR_FIRST | ERR_NSYM);
+ if(EQ(renv,sym_user_environment)) 
+    renv = NIL;
+ else if(NULLP(renv))
+  renv = env;
+ else if(NENVP(renv))
+   err("unbound?",renv,ERR_SECOND | ERR_NENV);
+ pair = envlookup(tmp,renv);
+ if(NULLP(pair) && EQ(VCELL(tmp),unbound_marker))
+   return(truth);
+ else
+   return(NIL);}
+
+LISP setvar(LISP var,LISP val,LISP env)
+{LISP tmp;
+ if (NSYMBOLP(var) && NCONSP(var)) 
+   err("set!",var,ERR_FIRST | ERR_NSYM);
+ if CONSP(var)
+  {if(EQ(CAR(var),cintern("access")))
+    {env=leval(car(cdr(CDR(var))),env);
+     var=car(CDR(var));}
+   else if(EQ(CAR(var),cintern("fluid")))
+     return(setfluidvar(car(CDR(var)),val));
+   else if(EQ(CAR(var),cintern("vector-ref")))
+     return(vectorset(leval(car(CDR(var)),env),
+                      leval(car(cdr(CDR(var))),env),val));}
+ tmp = envlookup(var,env);
+ if NULLP(tmp)
+  {if(EQ(VCELL(var),unbound_marker))
+     err("simbol not found in current environment",var,ERR_GEN);
+   if(TYPEP(VCELL(var),tc_fsubr)||
+      TYPEP(VCELL(var),tc_msubr))
+      put_st("WARNING: modifing a special form");
+   VCELL(var) = val;
+   return(var);}
+ CDR(tmp)=val;
+ return(var);}
+
+LISP setv(LISP var,LISP val)
+{VCELL(var) = val;
+ return(var);}
+
+LISP leval_setq(LISP args,LISP env)
+{return(setvar(car(args),leval(car(cdr(args)),env),env));}
+
+LISP leval_tenv(LISP args,LISP env)
+{if(NULLP(env)) 
+    return sym_user_environment;
+ else return(env);}
+
+LISP leval_lambda(LISP args,LISP env)
+{LISP body;
+ if NULLP(args) err("lambda",args,ERR_FIRST | ERR_NPAI);
+ body = cdr(args);
+ if NULLP(cdr(body))
+   body = car(body);
+ else body = cons(sym_progn,body);
+ return(closure(env,cons(arglchk(car(args)),body)));}
+                         
+LISP leval_macro(LISP args,LISP env)
+{long flag;
+ char *p;
+ LISP expander,sym,tmp,mac;
+ sym = car(args);
+ expander = leval(car(cdr(args)),env);
+ if (!(procp(expander))) err("macro",expander,ERR_SECOND | ERR_NPRO);
+ if (NSYMBOLP(sym)) 
+    err("macro",sym,ERR_FIRST | ERR_NSYM);
+ flag = no_interrupt(1);
+ mac = symcons(PNAME(sym),expander);
+ (*mac).type = tc_macro;
+ if(NULLP(env))
+   VCELL(sym) = mac;
+ else
+  {tmp = framelookup(sym,BINDINGS(env));
+   if NNULLP(tmp) 
+     CDR(tmp) = mac;
+   else
+     extend_env(cons(sym,mac),env);}
+ no_interrupt(flag);
+ return(sym);}
+
+LISP leval_aut_fr_fi(LISP args,LISP env)
+{LISP name,vars,envi,expand;
+ name = leval(car(args),env);
+ vars = leval(car(cdr(args)),env);
+ envi = leval(car(cdr(cdr(args))),env);
+ if NSTRINGP(name) err("autoload-from-file",name,ERR_FIRST | ERR_NSTR);
+ if NCONSP(vars) err("autoload-from-file",vars,ERR_SECOND | ERR_NPAI);
+ if(NULLP(envi))
+    {if(NULLP(env))
+        envi = cintern("user-global-environment");
+     else
+        envi=env;}
+ else if EQ(envi,sym_user_environment)
+    envi = cintern("user-global-environment");
+ else if NENVP(envi)
+    err("autoload-from-file",envi,ERR_THIRD | ERR_NENV);
+ expand = closure(env,
+                  cons(cons(cintern("x"),NIL),
+                       cons(sym_progn,
+                            cons(cons(cintern("load"),
+                                      cons(name,cons(envi,NIL))),
+                                 cons(cintern("x"),NIL)))));  
+ while(CONSP(vars))
+  {leval_macro(cons(car(vars),cons(expand,NIL)),env);
+   vars=cdr(vars);}
+ return(name);}
+
+LISP leval_named_lambda(LISP args,LISP env)
+{LISP body;
+ if NCONSP(car(args)) err("named-lambda",args,ERR_FIRST | ERR_NPAI);
+ body = cdr(args);
+ if NULLP(cdr(body))
+   body = car(body);
+  else body = cons(sym_progn,body);
+ return(rec_closure(env,cons(arglchk(car(args)),body)));}
+
+LISP arglchk(LISP x)
+{LISP l;
+ if SYMBOLP(x) return(x);
+ for(l=x;CONSP(l);l=CDR(l))
+   if NSYMBOLP(CAR(l)) 
+      err("improper formal argument list",x,ERR_GEN);
+ if (NNULLP(l) && NSYMBOLP(l)) 
+    err("improper formal argument list",x,ERR_GEN);
+ return(x);}
+
+void env_test(LISP env)
+{LISP l,tmp;
+ for(l=env;CONSP(l);l=CDR(l))
+   {tmp = CAR(l);
+    if (NCONSP(tmp) || NSYMBOLP(car(tmp)) || NCONSP(cdr(tmp))) 
+        err("improper binding found in a let-form variable list",tmp,ERR_GEN);}
+ if NNULLP(l) err("improper binding found in a let-form variable list",l,ERR_GEN);}
+   
+LISP leval_let_env(LISP bind,LISP env)
+{LISP l,tmp,nbi;
+ nbi = NIL;
+ for(l=bind;CONSP(l);l=CDR(l))
+  {tmp=CAR(l);
+   nbi = cons(cons(car(tmp),
+              leval(car(cdr(tmp)),env)),nbi);}
+ return(nbi);}
+   
+LISP leval_let(LISP *pform,LISP *penv)
+{LISP env,l,bin;
+ l = cdr(*pform);
+ if NULLP(l) err("let",l,ERR_FIRST | ERR_NPAI);
+ bin = car(l);
+ env = *penv;
+ env_test(bin);
+ *penv = envcons(leval_let_env(bin,env),env);
+ l = cdr(l);
+ if(NNULLP(cdr(l)))
+   *pform = cons(sym_progn,l);
+ else
+   *pform = car(l);
+ return(truth);}
+
+LISP leval_let_star_env(LISP bind,LISP env)
+{LISP l,newenv,tmp,nbis;
+ newenv = env;
+ for(l=bind;CONSP(l);l=CDR(l))
+  {tmp=CAR(l);
+   newenv = envcons(NIL,newenv);
+   nbis = cons(car(tmp),car(cdr(tmp)));
+   CDR(nbis) = leval(CDR(nbis),newenv);
+   extend_env(nbis,newenv);}
+ return(newenv);}
+
+LISP leval_let_star(LISP *pform,LISP *penv)
+{LISP env,l,bin;
+ l = cdr(*pform);
+ if NULLP(l) err("let*",l,ERR_FIRST | ERR_NPAI);
+ bin = car(l);
+ env = *penv;
+ env_test(bin);
+ *penv = leval_let_star_env(bin,env);
+ l = cdr(l);
+ if(NNULLP(cdr(l)))
+   *pform = cons(sym_progn,l);
+ else
+   *pform = car(l);
+ return(truth);}
+   
+LISP leval_letrec_env(LISP bind,LISP env)
+{LISP l,newenv,tmp;
+ newenv = envcons(NIL,env);
+ for(l=bind;CONSP(l);l=CDR(l))
+  {tmp=CAR(l);
+   extend_env(cons(car(tmp),
+              car(cdr(tmp))),newenv);}
+ for(l=BINDINGS(newenv);CONSP(l);l=CDR(l))
+  {tmp=CAR(l);
+   CDR(tmp) = leval(cdr(tmp),newenv);}
+ return(newenv);}
+
+LISP leval_letrec(LISP *pform,LISP *penv)
+{LISP env,l,bin;
+ l = cdr(*pform);
+ if NULLP(l) err("letrec",l,ERR_FIRST | ERR_NPAI);
+ bin = car(l);
+ env = *penv;
+ env_test(bin);
+ *penv = leval_letrec_env(bin,env);
+ l = cdr(l);
+ if(NNULLP(cdr(l)))
+   *pform = cons(sym_progn,l);
+ else
+   *pform = car(l);
+ return(truth);}
+
+LISP fluid(LISP form,LISP env)
+{LISP tmp,pair;
+ tmp = car(form);
+ if(NSYMBOLP(tmp))
+   err("fluid",tmp,ERR_GEN_ARG | ERR_NSYM);
+ pair = envlookup(tmp,sym_fluid_environment); 
+ if(NULLP(pair))
+   err("symbol not defined in fluid environment",tmp,ERR_GEN);
+ return(cdr(pair));}
+
+LISP fluid_boundp(LISP form,LISP env)
+{LISP tmp,pair;
+ tmp = car(form);
+ if(NSYMBOLP(tmp))
+   err("fluid-bound?",tmp,ERR_GEN_ARG | ERR_NSYM);
+ pair = envlookup(tmp,sym_fluid_environment);
+ if(NULLP(pair))
+   return(NIL);
+ else
+   return(truth);}
+
+LISP setfluidvar(LISP var,LISP val)
+{LISP tmp;
+ if NSYMBOLP(var) 
+   err("set-fluid!",var,ERR_FIRST | ERR_NSYM);
+ tmp = envlookup(var,sym_fluid_environment);
+ if NULLP(tmp)
+  {err("cannot find simbol in fluid environment",var,ERR_GEN);}
+ CDR(tmp)=val;
+ return(var);}
+
+LISP leval_lambda_fluid(LISP args,LISP env)
+{LISP body;
+ if NULLP(args) err("fluid-lambda",args,ERR_FIRST | ERR_NPAI);
+ body = cdr(args);
+ if NULLP(cdr(body))
+   body = car(body);
+  else body = cons(sym_progn,body);
+ return(fluidclosure(env,cons(arglchk(car(args)),body)));}
+
+LISP leval_setfluid(LISP args,LISP env)
+{return(setfluidvar(car(args),leval(car(cdr(args)),env)));}
+
+LISP leval_fluidlet(LISP form,LISP env)
+{LISP bin,nenv,res;
+ bin = car(form);
+ env_test(bin);
+ env = envcons(NIL,env);
+ nenv = sym_fluid_environment;
+ sym_fluid_environment = envcons(NIL,sym_fluid_environment);
+ fluid_extend_env(leval_let_env(bin,env));
+ form = cons(sym_progn,cdr(form));
+ res = leval(form,env);
+ sym_fluid_environment = nenv;
+ return(res);}
+
+LISP fluid_extend_env(LISP bindings)
+{LISP list,tmp;
+ for(list=bindings; CONSP(list); list = CDR(list))
+  {tmp = envlookup(car(CAR(list)),sym_fluid_environment);
+   if NNULLP(tmp)
+       CDR(tmp)=cdr(CAR(list));
+   else
+       BINDINGS(sym_fluid_environment)=cons(CAR(list),BINDINGS(sym_fluid_environment));}
+ return(sym_fluid_environment);}  

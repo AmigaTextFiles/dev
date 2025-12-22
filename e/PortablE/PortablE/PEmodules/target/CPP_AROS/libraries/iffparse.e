@@ -1,0 +1,107 @@
+OPT NATIVE
+MODULE 'target/exec/lists', 'target/exec/ports', 'target/exec/types', 'target/devices/clipboard', 'target/aros/macros'
+MODULE 'target/exec/nodes'
+{#include <libraries/iffparse.h>}
+NATIVE {LIBRARIES_IFFPARSE_H} CONST
+
+NATIVE {IFFHandle} OBJECT iffhandle
+    {iff_Stream}	stream	:IPTR
+    {iff_Flags}	flags	:ULONG  /* see below */
+    {iff_Depth}	depth	:VALUE
+ENDOBJECT
+
+/* iff_Flags */
+NATIVE {IFFF_READ}     CONST IFFF_READ     = 0
+NATIVE {IFFF_WRITE}    CONST IFFF_WRITE    = 1 SHL 0
+NATIVE {IFFF_RWBITS}   CONST IFFF_RWBITS   = (IFFF_READ OR IFFF_WRITE)
+NATIVE {IFFF_FSEEK}    CONST IFFF_FSEEK    = 1 SHL 1
+NATIVE {IFFF_RSEEK}    CONST IFFF_RSEEK    = 1 SHL 2
+NATIVE {IFFF_RESERVED} CONST IFFF_RESERVED = $FFFF0000
+
+NATIVE {IFFStreamCmd} OBJECT iffstreamcmd
+    {sc_Command}	command	:VALUE
+    {sc_Buf}	buf	:APTR
+    {sc_NBytes}	nbytes	:VALUE
+ENDOBJECT
+
+NATIVE {IFFCMD_INIT}     CONST IFFCMD_INIT     = 0
+NATIVE {IFFCMD_CLEANUP}  CONST IFFCMD_CLEANUP  = 1
+NATIVE {IFFCMD_READ}     CONST IFFCMD_READ     = 2
+NATIVE {IFFCMD_WRITE}    CONST IFFCMD_WRITE    = 3
+NATIVE {IFFCMD_SEEK}     CONST IFFCMD_SEEK     = 4
+NATIVE {IFFCMD_ENTRY}    CONST IFFCMD_ENTRY    = 5
+NATIVE {IFFCMD_EXIT}     CONST IFFCMD_EXIT     = 6
+NATIVE {IFFCMD_PURGELCI} CONST IFFCMD_PURGELCI = 7
+
+NATIVE {ContextNode} OBJECT contextnode
+    {cn_Node}	mln	:mln
+
+    {cn_ID}	id	:VALUE
+    {cn_Type}	type	:VALUE
+    {cn_Size}	size	:VALUE
+    {cn_Scan}	scan	:VALUE
+ENDOBJECT
+
+NATIVE {LocalContextItem} OBJECT localcontextitem
+    {lci_Node}	mln	:mln
+
+    {lci_ID}	id	:ULONG
+    {lci_Type}	type	:ULONG
+    {lci_Ident}	ident	:ULONG
+ENDOBJECT
+
+NATIVE {StoredProperty} OBJECT storedproperty
+    {sp_Size}	size	:VALUE
+    {sp_Data}	data	:APTR
+ENDOBJECT
+
+NATIVE {CollectionItem} OBJECT collectionitem
+    {ci_Next}	next	:PTR TO collectionitem
+    {ci_Size}	size	:VALUE
+    {ci_Data}	data	:APTR
+ENDOBJECT
+
+NATIVE {ClipboardHandle} OBJECT clipboardhandle
+    {cbh_Req}	iocr	:ioclipreq
+    {cbh_CBport}	cbport	:mp
+    {cbh_SatisfyPort}	satisfyport	:mp
+ENDOBJECT
+
+/* ParseIFF() */
+NATIVE {IFFPARSE_SCAN}    CONST IFFPARSE_SCAN    = 0
+NATIVE {IFFPARSE_STEP}    CONST IFFPARSE_STEP    = 1
+NATIVE {IFFPARSE_RAWSTEP} CONST IFFPARSE_RAWSTEP = 2
+
+/* StoreLocalItem() */
+NATIVE {IFFSLI_ROOT} CONST IFFSLI_ROOT = 1
+NATIVE {IFFSLI_TOP}  CONST IFFSLI_TOP  = 2
+NATIVE {IFFSLI_PROP} CONST IFFSLI_PROP = 3
+
+NATIVE {IFFSIZE_UNKNOWN} CONST IFFSIZE_UNKNOWN = -1
+
+/* Errors */
+NATIVE {IFFERR_EOF}        CONST IFFERR_EOF        = -1
+NATIVE {IFFERR_EOC}        CONST IFFERR_EOC        = -2
+NATIVE {IFFERR_NOSCOPE}    CONST IFFERR_NOSCOPE    = -3
+NATIVE {IFFERR_NOMEM}      CONST IFFERR_NOMEM      = -4
+NATIVE {IFFERR_READ}       CONST IFFERR_READ       = -5
+NATIVE {IFFERR_WRITE}      CONST IFFERR_WRITE      = -6
+NATIVE {IFFERR_SEEK}       CONST IFFERR_SEEK       = -7
+NATIVE {IFFERR_MANGLED}    CONST IFFERR_MANGLED    = -8
+NATIVE {IFFERR_SYNTAX}     CONST IFFERR_SYNTAX     = -9
+NATIVE {IFFERR_NOTIFF}     CONST IFFERR_NOTIFF     = -10
+NATIVE {IFFERR_NOHOOK}     CONST IFFERR_NOHOOK     = -11
+NATIVE {IFF_RETURN2CLIENT} CONST IFF_RETURN2CLIENT = -12
+
+NATIVE {MAKE_ID} CONST	->MAKE_ID(a,b,c,d) AROS_MAKE_ID((a),(b),(c),(d))
+
+NATIVE {ID_FORM} CONST ID_FORM = "FORM"
+NATIVE {ID_LIST} CONST ID_LIST = "LIST"
+NATIVE {ID_CAT}  CONST ID_CAT  = "CAT "
+NATIVE {ID_PROP} CONST ID_PROP = "PROP"
+NATIVE {ID_NULL} CONST ID_NULL = "    "
+
+NATIVE {IFFLCI_PROP}         CONST IFFLCI_PROP         = "prop"
+NATIVE {IFFLCI_COLLECTION}   CONST IFFLCI_COLLECTION   = "coll"
+NATIVE {IFFLCI_ENTRYHANDLER} CONST IFFLCI_ENTRYHANDLER = "enhd"
+NATIVE {IFFLCI_EXITHANDLER}  CONST IFFLCI_EXITHANDLER  = "exhd"

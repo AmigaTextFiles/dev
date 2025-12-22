@@ -1,0 +1,130 @@
+;:ts=8
+;
+; crt0.a68
+; ~~~~~~~~
+;   Copyright (C) 1986,1987 by Manx Software Systems, Inc.
+;   Copyright (C) 1992 by Anthon Pang, Omni Communications Products.
+;
+
+;	Initial startup routine for Aztec C.
+
+;	NOTE: code down to "start" must be placed at beginning of
+;		all programs linked with Aztec Linker using small
+;		code or small data.
+
+    mc68881
+    entry   .begin
+    public  .begin
+
+.begin
+
+    ifd __RESSTART_MAIN
+        bsr     __geta4                 ;get A4 (the first time)
+    endc
+    ifnd __RESSTART_MAIN
+        bsr     _geta4                  ;get A4
+    endc
+
+    lea     __H1_end,a1
+    lea     __H2_org,a2
+    cmp.l   a1,a2                   ;check if BSS and DATA together
+    bne     start                   ;no, don't have to clear
+    move.w  #((__H2_end-__H2_org)/4)-1,d1
+    bmi     start                   ;skip if no bss
+    move.l  #0,d2
+
+loop
+    move.l  d2,(a1)+                ;clear out memory
+    dbra    d1,loop
+
+start
+    move.l  sp,__savsp              ;save stack pointer
+    move.l  4,a6                    ;get Exec's library base pointer
+    move.l  a6,_SysBase             ;put where we can get it
+    movem.l d0/a0,-(sp)             ;save CLI command parameters
+
+    btst.b  #4,$129(a6)             ;check for 68881 flag in AttnFlags
+    beq     1$                      ;skip if not
+    lea     2$,a5
+    jsr     -30(a6)                 ;do it in supervisor mode
+    bra     1$
+
+2$
+    clr.l   -(sp)
+    frestore (sp)+                  ;reset the ffp stuff
+    rte                             ;and return
+
+1$
+    lea     dos_name,a1             ;get name of dos library
+    jsr     -408(a6)                ;open the library any version
+    move.l  d0,_DOSBase             ;set it up
+    bne     3$                      ;skip if okay
+
+    move.l  #$38007,d7              ;AG_OpenLib | AO_DOSLib
+    jsr     -108(a6)                ;Alert
+    bra     4$
+
+3$
+    jsr     __main                  ;call the startup stuff
+
+4$
+    add.w   #8,sp                   ;pop args
+    rts                             ;and return
+
+dos_name:
+    dc.b    'dos.library',0
+
+    ifd __RESSTART_MAIN
+__geta4:
+        bsr     _geta4
+
+        movem.l d0-d1/a0-a1/a6,-(sp)    ;save temporary registers
+        move.l  #(__H2_end-__H1_org),d0 ;get size of data hunk
+        move.l  d0,-(sp)                ;save hunk size on stack
+
+        move.l  $10000,d1               ;requirements (MEMF_CLEAR)
+        move.l  $0004,a6                ;LoadExecBase
+        jsr     -$00c6(a6)              ;jsr AllocMem
+        tst.l   d0
+
+        bne     alloc_ok
+        addq.w  #4,sp                   ;AllocMem failed, clean up stack
+        bra     exitgeta4               ;and exit
+
+alloc_ok:
+        lea     -32766(a4),a4
+
+        move.l  d0,a0                   ;start of pseudo data hunk
+        move.w  #((__H2_end-__H1_org)/4)-1,d1
+        bmi     nocopy                  ;skip if empty data hunk
+copyloop:
+        move.l  (a4)+,(a0)+             ;copy from data hunk to pseudo data hunk
+        dbra    d1,copyloop
+
+nocopy:
+        move.l  d0,a4                   ;get base of global data
+        lea     32766(a4),a4
+        move.l  (sp)+,__H_size#
+
+exitgeta4:
+        movem.l (sp)+,d0-d1/a0-a1/a6    ;restore temporary registers
+        rts
+    endc
+
+    public  _geta4
+_geta4:
+    far data
+    lea __H1_org+32766,a4
+    near data
+    rts
+
+    public  __main,__H0_org
+
+    dseg
+
+    public  _SysBase,__savsp,_DOSBase
+    public  __H1_org,__H1_end,__H2_org,__H2_end
+
+  ifd __RESSTART_MAIN
+    public __H_size
+  endc

@@ -1,0 +1,634 @@
+/****h *SysMemory.c ************************************************
+** 
+** NAME
+**    SysMemory.c
+**
+** DESCRIPTION
+**    Display parameters associated with system memory.
+**
+**  GUI Designed by : Jim Steichen
+********************************************************************
+*/
+
+#include <stdio.h>
+#include <string.h>
+
+#include <exec/types.h>
+#include <exec/execbase.h>
+#include <exec/memory.h>
+
+#include <AmigaDOSErrs.h>
+
+#include <intuition/intuition.h>
+#include <intuition/classes.h>
+#include <intuition/classusr.h>
+#include <intuition/imageclass.h>
+#include <intuition/gadgetclass.h>
+
+#include <libraries/gadtools.h>
+
+#include <graphics/displayinfo.h>
+#include <graphics/gfxbase.h>
+
+#include <clib/exec_protos.h>
+#include <clib/intuition_protos.h>
+#include <clib/gadtools_protos.h>
+#include <clib/graphics_protos.h>
+#include <clib/utility_protos.h>
+#include <clib/diskfont_protos.h>
+
+#include "CPGM:GlobalObjects/CommonFuncs.h"
+
+#include "SysLists.h"
+
+#define MLV      0
+#define Update   1
+#define Priority 2
+#define Cancel   3
+#define More     4
+
+#define MEM_CNT  5
+
+#define LISTVIEWGADGET MemGadgets[ MLV ]
+
+PRIVATE char ver[] = "$VER: SysMemory 1.0 (12/20/1999) by J.T. Steichen";
+
+PRIVATE struct Window       *MemWnd   = NULL;
+PRIVATE struct Gadget       *MemGList = NULL;
+PRIVATE struct IntuiMessage  MemMsg;
+PRIVATE struct Gadget       *MemGadgets[ MEM_CNT ];
+
+PRIVATE UWORD MemLeft   = 0;
+PRIVATE UWORD MemTop    = 16;
+PRIVATE UWORD MemWidth  = 632;
+PRIVATE UWORD MemHeight = 228;
+PRIVATE UBYTE *MemWdt   = (UBYTE *) "System Memory Info:";
+
+PRIVATE struct TextFont *MFont = NULL;
+
+#define MAXMEMS  10
+
+PRIVATE struct MinList MemList;
+PRIVATE struct Node    MemNode;
+PRIVATE struct Node    MemNodes[ MAXMEMS       ] = { NULL, };
+PRIVATE UBYTE          NodeStrs[  MAXMEMS * 80 ] = "";
+
+PRIVATE UWORD MemGTypes[] = {
+
+   LISTVIEW_KIND, BUTTON_KIND, BUTTON_KIND,
+   BUTTON_KIND,   BUTTON_KIND
+};
+
+PRIVATE int MLVClicked(      int whichitem );
+PRIVATE int UpdateClicked(   int dummy     );
+PRIVATE int PriorityClicked( int dummy     );
+PRIVATE int CancelClicked(   int dummy     );
+PRIVATE int MoreClicked(     int dummy     );
+
+PRIVATE struct NewGadget MemNGad[] = {
+
+     2,   3, 627, 200,                 NULL, NULL, MLV, 
+   0, NULL, (APTR) MLVClicked,
+   
+     2, 205,  71,  17, (UBYTE *) "_Update",  NULL, Update, 
+   PLACETEXT_IN, NULL, (APTR) UpdateClicked,
+
+   396, 205,  72,  17, (UBYTE *) "Priority", NULL, Priority, 
+   PLACETEXT_IN, NULL, (APTR) PriorityClicked,
+ 
+   554, 205,  72,  17, (UBYTE *) "_Cancel",  NULL, Cancel, 
+   PLACETEXT_IN, NULL, (APTR) CancelClicked,
+
+    82, 205,  71,  17, (UBYTE *) "_More",    NULL, More, 
+   PLACETEXT_IN, NULL, (APTR) MoreClicked
+};
+
+PRIVATE ULONG MemGTags[] = {
+
+   GTLV_ShowSelected, NULL, LAYOUTA_Spacing, 2, TAG_DONE,
+   GT_Underscore,      '_', TAG_DONE,
+   GA_Disabled,       TRUE, TAG_DONE,
+   GT_Underscore,      '_', TAG_DONE,
+   GT_Underscore,      '_', GA_Disabled, TRUE, TAG_DONE
+
+};
+
+/* -------------------------------------------------------------- */
+
+PRIVATE struct MemHeader *GetMemoryHeader( ULONG address )
+{
+   IMPORT struct ExecBase *SysBase;
+
+   struct MemHeader *addr = NULL;   
+   struct List      *lptr = NULL;
+
+   Forbid();
+
+     lptr  = &SysBase->MemList;
+     addr  = (struct MemHeader *) lptr->lh_Head;
+     
+     while ((addr != (struct MemHeader *) address) && (addr != NULL))
+        addr = (struct MemHeader *) addr->mh_Node.ln_Succ;
+
+   Permit();
+
+   if (addr != NULL)
+      return( addr );
+   else
+      return( NULL );
+}
+
+PRIVATE ULONG GetMemoryLargest( int memtype )
+{
+   return( AvailMem( memtype | MEMF_LARGEST ) );
+}
+
+PRIVATE ULONG GetMemorySize( int memtype )
+{
+   return( AvailMem( memtype | MEMF_TOTAL ) );
+}
+
+PRIVATE int InitializeMemoryList( void )
+{
+   IMPORT struct ExecBase *SysBase;
+
+   struct List      *lptr = &SysBase->MemList;
+   struct MemHeader *addr = (struct MemHeader *) lptr->lh_Head;   
+   struct MemHeader *mp   = GetMemoryHeader( (ULONG) addr );
+   ULONG             lrg  = GetMemoryLargest( addr->mh_Attributes );
+   ULONG             max  = 0L; 
+   ULONG             tmax = 0L, tuse = 0L, tfree = 0L;
+   int               i, rval = 0;
+      
+   HideListFromView( LISTVIEWGADGET, MemWnd );
+
+   max = GetMemorySize( addr->mh_Attributes );
+
+   for (i = 1; i <= MAXMEMS; i++)
+      {
+      // i = 1 so we don't overwrite the column headings.
+
+      sprintf( &NodeStrs[i * 80], 
+               "%08LX %4d %08LX %08LX %5uK %5uK  %5uK %5uK  %-20.20s",
+               mp, mp->mh_Node.ln_Pri, mp->mh_Lower, mp->mh_Upper,
+               max / 1000, 
+               (max - mp->mh_Free) / 1000, 
+               mp->mh_Free / 1000, 
+               lrg / 1000,
+               mp->mh_Node.ln_Name
+             );
+
+      tmax  += max;
+      tuse  += max - mp->mh_Free;
+      tfree += mp->mh_Free;
+
+      rval++;
+            
+      if (addr != NULL) 
+         {
+         addr = (struct MemHeader *) addr->mh_Node.ln_Succ;
+
+         if (strcmp( "chip memory", addr->mh_Node.ln_Name ) == 0)
+            {
+            mp   = GetMemoryHeader( (ULONG) addr );
+            lrg  = GetMemoryLargest( addr->mh_Attributes );
+            max  = GetMemorySize( addr->mh_Attributes );
+
+            sprintf( &NodeStrs[(i + 1) * 80], 
+                     "%08LX %4d %08LX %08LX %5uK %5uK  %5uK %5uK  %-20.20s",
+                     mp, mp->mh_Node.ln_Pri, mp->mh_Lower, mp->mh_Upper,
+                     max / 1000, 
+                     (max - mp->mh_Free) / 1000, 
+                     mp->mh_Free / 1000, 
+                     lrg / 1000,
+                     mp->mh_Node.ln_Name
+                   );
+
+            tmax  += max;
+            tuse  += max - mp->mh_Free;
+            tfree += mp->mh_Free;
+            rval++;
+                 
+            break; // chip memory MemHeader is the last valid MemHeader!
+            }
+
+         mp   = GetMemoryHeader( (ULONG) addr );
+         lrg  = GetMemoryLargest( addr->mh_Attributes );
+         max  = GetMemorySize( addr->mh_Attributes );
+         }
+      else
+         break;
+      }
+
+   if ((i + 2) < MAXMEMS)
+      sprintf( &NodeStrs[ 80 * (i + 2)], 
+               "                       TOTALS:  %5uK %5uK  %5uK",
+               tmax / 1000, tuse / 1000, tfree / 1000
+             );
+
+   // Turn on the list view gadget again:   
+   GT_SetGadgetAttrs( LISTVIEWGADGET, MemWnd, NULL,
+                      GTLV_Labels,       &MemList,
+                      GTLV_Selected,     0, 
+                      GTLV_MaxPen,       255,
+                      GTLV_ItemHeight,   12,
+                      TAG_END
+                    );
+   return( rval );
+}
+
+PRIVATE ULONG CurrentMem  = 0L;
+PRIVATE int   CurrentType = MEMF_CHIP;
+
+PRIVATE char mt[80], *modtitle = &mt[0];
+
+PRIVATE int MLVClicked( int whichitem )
+{
+   ULONG addr = 0L;
+
+   if (whichitem == 0)
+      {
+      // Disable buttons because user selected the title item:
+
+      GT_SetGadgetAttrs( MemGadgets[ More ], MemWnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( MemGadgets[ Priority ], MemWnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+   
+      SetWindowTitles( MemWnd, MemWdt, (UBYTE *) -1 );
+
+      CurrentMem = 0L;
+
+      return( (int) TRUE );
+      }
+
+   // Now get address from the item:
+   
+   (void) stch_l( MemNodes[ whichitem ].ln_Name, (long *) &addr );
+   CurrentMem = (ULONG) addr;
+
+   if (addr == NULL)
+      {
+      GT_SetGadgetAttrs( MemGadgets[ More ], MemWnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+
+      GT_SetGadgetAttrs( MemGadgets[ Priority ], MemWnd, NULL,
+                         GA_Disabled, TRUE, TAG_DONE 
+                       );
+   
+      SetWindowTitles( MemWnd, MemWdt, (UBYTE *) -1 );
+
+      return( (int) TRUE );
+      }    
+   else
+      {
+      sprintf( modtitle, "%s  You Selected:  %08LX", MemWdt, addr );
+      SetWindowTitles( MemWnd, modtitle, (UBYTE *) -1 );
+      }
+
+   // Enable buttons because user sel'd a Memory Block from the ListView:
+
+   GT_SetGadgetAttrs( MemGadgets[ More ], MemWnd, NULL,
+                      GA_Disabled, FALSE, TAG_DONE 
+                    );
+
+   GT_SetGadgetAttrs( MemGadgets[ Priority ], MemWnd, NULL,
+                      GA_Disabled, FALSE, TAG_DONE 
+                    );
+
+   return( (int) TRUE );
+}
+
+PRIVATE int UpdateClicked( int dummy )
+{
+   int i;
+   
+   for (i = 1; i <= MAXMEMS; i++)
+       NodeStrs[ i * 80 ] = '\0'; // Kill old ListView strings.
+
+   // Disable buttons until user selects an item again:
+
+   GT_SetGadgetAttrs( MemGadgets[ More ], MemWnd, NULL,
+                      GA_Disabled, TRUE, TAG_DONE 
+                    );
+
+   GT_SetGadgetAttrs( MemGadgets[ Priority ], MemWnd, NULL,
+                      GA_Disabled, TRUE, TAG_DONE 
+                    );
+   
+   SetWindowTitles( MemWnd, MemWdt, (UBYTE *) -1 );
+
+   CurrentMem = 0L;
+
+   if (InitializeMemoryList() < 0)
+      {
+      // No Memory Blocks known to SysBase!!
+      SetReqButtons( "OKAY" );
+
+      (void) Handle_Problem( "No Memory Blocks found!", 
+                             "OS ERROR??", NULL
+                           );
+
+      SetReqButtons( "CONTINUE|ABORT" );
+      }  
+
+   GT_RefreshWindow( MemWnd, NULL );
+
+   return( (int) TRUE );
+}
+
+PRIVATE int PriorityClicked( int dummy )
+{
+   (void) Handle_Problem( "NOT Implemented yet!", 
+                          "User Information:", NULL
+                        );
+   
+   return( (int) TRUE );
+}
+
+PRIVATE void CloseMemWindow( void )
+{
+   if (MemWnd != NULL)
+      {
+      CloseWindow( MemWnd );
+      MemWnd = NULL;
+      }
+
+   if (MemGList != NULL)
+      {
+      FreeGadgets( MemGList );
+      MemGList = NULL;
+      }
+
+   if (MFont != NULL)
+      {
+      CloseFont( MFont );
+      MFont = NULL;
+      }
+
+   return;
+}
+
+PRIVATE int MemCloseWindow( void )
+{
+   CloseMemWindow();
+   return( (int) FALSE );
+}
+
+PRIVATE int MoreClicked( int dummy )
+{
+   IMPORT int ViewMemory( int type, ULONG startaddress, ULONG endaddress );
+   
+   (void) Handle_Problem( "NOT Implemented yet!", "USER Info:", NULL );
+
+/*
+   if (ViewMemory( CurrentType, CurrentMem, ???? ) < 0)
+      {
+      // User asked to abort in ViewMemory()!
+      return( MemCloseWindow() );
+      }
+*/
+   return( (int) TRUE );
+}
+
+
+PRIVATE int CancelClicked( int dummy )
+{
+   return( MemCloseWindow() );
+}
+
+PRIVATE BOOL MemVanillaKey( int whichkey )
+{
+   BOOL rval = TRUE;
+   
+   switch (whichkey)
+      {
+      case 'c':
+      case 'C':
+         rval = CancelClicked( 0 );
+         break;
+               
+      case 'u':
+      case 'U':
+         rval = UpdateClicked( 0 );
+         break;
+         
+      case 'm':
+      case 'M':
+         rval = MoreClicked( 0 );
+         break;
+      }
+  
+  return( rval );
+}
+
+
+PRIVATE int OpenMemWindow( void )
+{
+   struct NewGadget  ng;
+   struct Gadget    *g;
+   UWORD             lc, tc;
+   UWORD             wleft = MemLeft, wtop = MemTop, ww, wh;
+
+   ComputeFont( Scr, Font, &CFont, MemWidth, MemHeight );
+
+   ww = ComputeX( CFont.FontX, MemWidth );
+   wh = ComputeY( CFont.FontY, MemHeight );
+
+   if ((wleft + ww + CFont.OffX + Scr->WBorRight) > Scr->Width)
+      wleft = Scr->Width - ww;
+
+   if ((wtop + wh + CFont.OffY + Scr->WBorBottom) > Scr->Height)
+      wtop = Scr->Height - wh;
+
+   if ( !(MFont = OpenDiskFont( Font )))
+      return( -5 );
+
+   if ( !(g = CreateContext( &MemGList )))
+      return( -1 );
+
+   for (lc = 0, tc = 0; lc < MEM_CNT; lc++)
+      {
+      CopyMem( (char *) &MemNGad[lc], (char *) &ng, 
+               (long) sizeof( struct NewGadget )
+             );
+
+      ng.ng_VisualInfo = VisualInfo;
+      ng.ng_TextAttr   = Font;
+      ng.ng_LeftEdge   = CFont.OffX + ComputeX( CFont.FontX, 
+                                                ng.ng_LeftEdge
+                                              );
+
+      ng.ng_TopEdge    = CFont.OffY + ComputeY( CFont.FontY, 
+                                                ng.ng_TopEdge
+                                              );
+
+      ng.ng_Width      = ComputeX( CFont.FontX, ng.ng_Width );
+      ng.ng_Height     = ComputeY( CFont.FontY, ng.ng_Height );
+
+      MemGadgets[lc] = g = CreateGadgetA( (ULONG) MemGTypes[lc], 
+                             g, 
+                             &ng, 
+                             (struct TagItem *) &MemGTags[tc] );
+
+      while (MemGTags[tc] != NULL)
+         tc += 2;
+
+      tc++;
+
+      if (NOT g)
+         return( -2 );
+      }
+
+   if ( !(MemWnd = OpenWindowTags( NULL,
+
+                     WA_Left,        wleft,
+                     WA_Top,         wtop,
+                     WA_Width,       ww + CFont.OffX + Scr->WBorRight,
+                     WA_Height,      wh + CFont.OffY + Scr->WBorBottom,
+                     
+                     WA_IDCMP,       LISTVIEWIDCMP | BUTTONIDCMP 
+                       | IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW
+                       | IDCMP_VANILLAKEY,
+                       
+                     WA_Flags,       WFLG_DRAGBAR | WFLG_DEPTHGADGET 
+                       | WFLG_CLOSEGADGET | WFLG_SMART_REFRESH 
+                       | WFLG_ACTIVATE | WFLG_RMBTRAP,
+
+                     WA_Gadgets,     MemGList,
+                     WA_Title,       MemWdt,
+                     WA_ScreenTitle, "System Info",
+                     TAG_DONE )) 
+      )
+      return( -4 );
+
+   GT_RefreshWindow( MemWnd, NULL );
+
+   return( 0 );
+}
+
+PRIVATE int HandleMemIDCMP( void )
+{
+   struct IntuiMessage  *m;
+   int                 (*func)( int code );
+   BOOL                  running = TRUE;
+
+   while (running == TRUE)
+      {
+      if ((m = GT_GetIMsg( MemWnd->UserPort )) == NULL)
+         {
+         (void) Wait( 1L << MemWnd->UserPort->mp_SigBit );
+         continue;
+         }
+
+      CopyMem( (char *) m, (char *) &MemMsg, 
+               (long) sizeof( struct IntuiMessage )
+             );
+
+      GT_ReplyIMsg( m );
+
+      switch (MemMsg.Class)
+         {
+         case IDCMP_REFRESHWINDOW:
+            GT_BeginRefresh( MemWnd );
+            GT_EndRefresh( MemWnd, TRUE );
+            break;
+
+         case IDCMP_CLOSEWINDOW:
+            running = MemCloseWindow();
+            break;
+
+         case IDCMP_VANILLAKEY:
+            running = (int) MemVanillaKey( MemMsg.Code );
+            break;
+
+         case IDCMP_GADGETUP:
+         case IDCMP_GADGETDOWN:
+            func = (void *) ((struct Gadget *)MemMsg.IAddress)->UserData;
+            if (func != NULL)
+               running = func( MemMsg.Code );
+            break;
+         }
+      }
+
+   return( running );
+}
+
+PUBLIC int HandleMemoryLV( void )
+{
+   int i = 0;
+
+   if (SetupSystemList( &OpenMemWindow ) < 0)
+      {
+      (void) Handle_Problem( "Couldn't open a System ListViewer!", 
+                             "Allocation Problem:", NULL 
+                           );
+      return( -1 );
+      }
+
+   // Disable buttons until user selects an item from the ListView:
+
+   GT_SetGadgetAttrs( MemGadgets[ More ], MemWnd, NULL,
+                      GA_Disabled, TRUE, TAG_DONE 
+                    );
+
+   GT_SetGadgetAttrs( MemGadgets[ Priority ], MemWnd, NULL,
+                      GA_Disabled, TRUE, TAG_DONE 
+                    );
+   
+   MemNode.ln_Succ = (struct Node *) MemList.mlh_Tail;
+   MemNode.ln_Pred = (struct Node *) MemList.mlh_Head;
+   MemNode.ln_Type = 0;
+   MemNode.ln_Pri  = MAXMEMS;
+   MemNode.ln_Name = "Address   Pri Lower    Upper    Maximum In-Use"
+                     " Free   Largest Name";
+
+   MemNodes[0]     = MemNode;
+
+   SetNotifyWindow( MemWnd ); // For Handle_Problem().
+  
+   // MemNodes[0] is already set up:
+
+   for (i = 1; i <= MAXMEMS; i++)
+       {
+       MemNodes[i].ln_Name = &NodeStrs[ i * 80 ];
+       MemNodes[i].ln_Pri  = MAXMEMS - i;
+       }     
+
+   NewList( (struct List *) &MemList );
+
+   for (i = 0; i < MAXMEMS; i++)
+      Enqueue( (struct List *) &MemList, &MemNodes[i] );
+
+   (void) InitializeMemoryList();
+
+   GT_SetGadgetAttrs( LISTVIEWGADGET, MemWnd, NULL,
+                      GTLV_Labels,       &MemList,
+                      GTLV_Selected,     0, 
+                      GTLV_MaxPen,       255,
+                      GTLV_ItemHeight,   12,
+                      TAG_END
+                    );
+
+   GT_RefreshWindow( MemWnd, NULL );
+
+   (void) HandleMemIDCMP();
+   
+   ShutdownSystemList();
+   return( 0 );
+}
+
+#ifdef DEBUG
+
+PUBLIC int main( void )
+{
+   return( HandleMemoryLV() );
+}
+
+#endif
+
+/* --------------------- END of SysMemory.c file! --------------- */

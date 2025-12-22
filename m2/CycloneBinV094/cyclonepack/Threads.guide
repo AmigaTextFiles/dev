@@ -1,0 +1,701 @@
+@database Threads
+@master Ram Disk:Threads.guide
+@$VER: V 0.10
+@author "Robert Ennals"
+@(c) "Robert Ennals"
+@index main
+
+@node "main" "Using Threads with Cyclone"
+@{b}Using Threads@{ub}
+
+By Robert Ennals
+
+
+Introduction
+
+@{"What are Threads?            " link "what" 0}
+@{"When should I use them?      " link "when" 0} 
+@{"How do I use them?           " link "how" 0}
+@{"Who wrote the Threads module?" link "who" 0} 
+@{"What do the examples show?   " link "ex" 0}
+
+
+Using the Threads module
+
+@{"Threads            " link "threads" 0}
+@{"Terminating Threads" link "terminate" 0}
+@{"Priorities         " link "pri" 0} 
+@{"ThreadStreams      " link "streams" 0}
+
+
+Problems
+
+@{"What not to do" link "mistake" 0}
+@{"Syncronisation" link "sync" 0}
+
+
+@{"Technical Information" link "tech" 0} - How the Threads module works
+
+@endnode
+
+@node "what" "What are Threads?"
+
+ A standard sequential program will do things one at a time. For example
+I might write a program that read an image and then displayed it on
+the screen. I might also write a spellchecker that searched for misspelt
+words and then asked the user to correct them. You could think of these
+program as having only one thread as they only do one thing at a time.
+
+Often however it is useful to be able to do more than one thing at once.
+For example we might want to display the image and read it from disk at the
+same time or have our spellchecker find more wrongly spelt words while the
+user is correcting those the spellchecker has already found.
+
+Eg
+
+Sequential Image Viewer
+> Load image from disk
+> View image
+
+
+Multithreaded Image Viewer Thread 1
+> Load Image and send data to a stream as it is read
+
+Thread 2
+> Read Image data from stream and display into window as it is read
+
+
+The multithreaded version would have several advantages
+* It is better for the users as they can see what the image is like
+    as it loads
+* It is faster as the image is displayed in the wait states while Thread 1
+    is loading data
+
+Theoretically in this example you could have a loop that read a few
+bytes then displayed them, but using threads is faster as the io is
+asyncronous and it is much easier with threads.
+
+
+
+Sequential Spell Checker
+> Find badly spelt word
+> Ask user for new spelling
+
+
+Multithreaded Spell Checker
+Thread 1 > Bad badly spelt words and send them to a stream
+Thread 2 > Read words from the stream and ask the user to correct them.
+
+
+In this example, finding wrongly spelt words and suggested replacements
+is quite CPU intensive so the difference made by using multiple threads
+is incredible.
+
+@endnode
+
+@node "when" "When should I use threads?"
+
+ You should use threads whenever your program would otherwise have to
+wait, even though it needed to do something.
+
+Usually this will be when you are waiting for something else to
+provide input. For example when reading from a disk, printing a document,
+or interacting with the user.
+
+Here are some common examples of places where you should use extra threads.
+
+
+
+>@{b}Reading or writing from a device@{ub}
+
+Few devices are able to accept input and output as fast as your machine
+can prepare it, therefore you are likely to have some CPU time spare. If
+you need to process the data you are reading/writing then it is often a
+good idea to do this at the same time as reading/writing it to/from the
+device. See the RKM example on asyncronous IO for more on this topic. Note
+that because of the Threads module in Cyclone, Threads are much easier to
+use in Cyclone than in C, so don't worry if the RKM examples seem complex.
+
+
+>@{b}Interacting with a user@{ub}
+
+Users will usually give input much more slowly then the computer is
+capable of reading it. If you have other things that you need to do then it
+is very wasteful to stop everything while you wait for the user to do
+something. Instead you should put the user interface and background
+crunching into different threads so that the computer can continue working
+while the user is holding up other threads. If you have several users then
+you may wish to give them a thread each.
+
+
+>@{b}Jobs that take a long time@{ub}
+
+If you are going to do something that will take a while then it is
+useful for the user to be able to abort the job if they change their minds.
+In order to maintain responsiveness in the main program and to allow the job
+to be easily aborted it is useful to make the time consuming job a
+separate thread.
+
+
+>@{b}Background Printing and other background tasks@{ub}
+
+Often the user will want to be able to continue working while performing
+a time consuming task such as printing or rendering. Here it is useful
+to branch off the background job as a separate thread.
+
+
+>@{b}Previews and non-essential tasks@{ub}
+
+Image previews for loading or processing images can be nice for the
+user, but if the program calculates a preview every time something changes
+the program will become too slow to be usable. Instead the preview
+generator should be moved into a new thread. This thread will stop and
+restart whenever the preview parameters change (eg new effect selected).
+This approach is also useful for many other non-essential, but
+useful operations.
+
+
+
+There are of course many other times when threads are useful.
+
+
+
+Here is a simple style guide. If your program does not conform to it
+then you need to use more threads.
+
+
+>The user is always able to interact with the program.
+
+>Any operation taking more than about a second can be aborted.
+
+>The program remains responsive at all times.
+
+>If a job needs doing and the required data is available no CPU time
+should be wasted waiting for IO or user input.
+
+>Input never gets blocked (eg mouse goes to sleep) unless there is a
+very good reason.
+
+@endnode
+
+@node "how" "How should I use them?"
+ Threads are very easy to use in Cyclone because of the Threads module
+by Robert Ennals.
+
+The Threads module enables you to treat Threads in an object orientated
+way. Here is a simple example of a thread. This one just writes some text to
+the console and then terminates.
+
+
+-----------------------------------------------------------------------
+
+
+MODULE TestThreadModule3;
+
+FROM InOut          IMPORT WriteString, WriteCard, WriteLn;
+FROM Threads        IMPORT Thread, ThreadStream, SetupThread;
+FROM DosL           IMPORT Delay;
+
+(*$ ReloadA4+ *)
+
+VAR
+    mythread : Thread;
+
+PROCEDURE ThreadA; BEGIN
+    WriteString("Text from a thread"); WriteLn; END ThreadA;
+
+
+BEGIN
+    NEW(mythread);
+    SetupThread(mythread, ThreadA, "THREAD", 0, NIL, NIL);
+
+    mythread^.Start; (* Start the Thread running *)
+
+    WriteString("Text from the main routine"); WriteLn;
+
+    mythread^.Terminate; (* Stop the Thread running *)
+
+    WriteString("Wasn't that easy!!"); WriteLn;
+    DISPOSE(mythread);
+
+END TestThreadModule3.
+		       
+
+-----------------------------------------------------------------------
+
+
+This example should be fairly easy to understand.
+
+The thread mythread is declared in the VAR statement and intialised
+with NEW.
+
+It is then set up with the procedure setupthread. You can also set
+thread settings manually by editing members of the Thread object with lines
+like:
+
+mythread^.th_Proc:=ThreadA
+
+mythread^.Start starts the thread by calling it's start method. This
+is quite a complex operation.
+
+mythread^.Terminate stops the thread running. You must always terminate
+a thread before you close the thread that it was created with or DISPOSE
+the thread. Until mythread^.Terminate is called the thread could be
+still running. The Terminate method is quite complex and involves throwing
+signals around between the threads.
+
+Finally mythread is DISPOSED and then it is safe to finish.
+
+Creation of threads is explained in more detail in the
+@{"Creating Threads" link "threads" 0} section.
+
+@endnode
+
+@node "who" "Who wrote the Threads module?"
+ The Threads module was written by Robert Ennals.
+
+If you have any problems with the Threads module, find any bugs in it
+or just want to have a chat then the following methods of contact may
+be used.
+
+Email: ennals@aol.com (If this doesn't work then ask Marcel what my
+address is. It may change)
+
+Phone: England(+44)-(01)81-941-5201
+
+Snail: 19 Belgrade Road, Hampton, Middx, TW12 2AZ
+
+@endnode
+
+@node "ex" "What do the examples show?"
+
+ Several examples are provided with the Threads module. Here is what
+they show:
+
+
+TestThreadModule
+
+Starts a thread that writes some text to the console. It is very simple.
+
+
+ThreadReSync
+
+Demonstrates use of the resync command to terminate Threads and
+using exception handling within threads. This example starts a Thread
+that displays as many numbers as possible before the parent thread tells it
+to terminate.
+
+
+TestThreadStreams
+
+Creates a simple thread linked to it's parent by a Stream. The server
+thread then sends the numbers one to ten to the parent which then displays
+them on the console. An artificial delay is used to ensure that sends and
+gets are interleaved. if the delay were not there then all the items would
+be written and read at once.
+
+@endnode
+
+@node "threads" "Threads"
+ Threads are very easy to create. You simply create a Thread object, set
+it up (using a provide procedure or manually) and then call it's Start
+method.
+
+Here is some pseudocode for usage of a thread.
+
+MODULE Thingy;
+
+VAR
+    mythread : Thread;
+
+PROCEDURE ThreadProc; BEGIN
+    Whatever; END ThreadProc;
+
+BEGIN
+    NEW(mythread);
+    SetupThread(mythread, ThreadProc, "Thread", 0, NIL, NIL);
+    mythread^.Start;
+
+    Whatever;
+
+    mythread^.Terminate;
+    DISPOSE(mythread);
+END Thingy;
+
+
+Thread objects have two methods, Start and Terminate.
+
+Start starts the thread running and @{"Terminate" link "terminate" 0} stops it running.
+
+SetupThread is a simple procedure that sets up the Thread object ready to
+be started. If you look at the source code for SetupThread in Threads.mod
+you will see tht it only fills in the Thread Class.
+
+The usuage of SetupThread is as follows:
+
+SetupThread(Thread, Procedure, Name, Priority, Instream, OutStream)
+
+Thread : The Thread you wish to set up
+
+Procedure : A procedure to be
+the main procedure of the thread.
+
+Name : A simple string that will become the Thread name.
+
+Priority : the @{"priority" link "pri" 0} of the Thread.
+
+InStream : The input @{"stream" link "streams" 0} for the Thread
+
+OutStream : The output @{"stream" link "streams" 0} for the Thread.
+
+
+SetupThread, Start and Terminate are the only procedures you will need
+in order to create Threads.
+
+There are other procedures for the following:
+
+@{"Syncronisation" link "sync" 0} @{"Termination   " link "terminate" 0} @{"Streams       " link "streams" 0}
+
+
+Also, if you wish to access the current thread you can use the
+procedure ThisThread.
+
+ThisThread will return the Thread that it was called from. Usually you
+will not need to use ThisThread, but it may be useful if you are using
+the special user attributes of Thread objects.
+
+
+If you wish togive attributes or arguments to threads then you can use
+the Attributes section of the Thread class. This can be made topoint to
+whatever you want.
+
+You might set it like:
+
+mythread^.Attributes:=ADR(thing);
+
+
+And then retreive the contents within your thread like:
+
+th:=ThisThread; thing:=th^.Attributes^
+
+
+You can do pretty much what you like with the Attributes pointer as
+the control procedures leave it alone.
+
+@endnode
+
+@node "mistake" "What not to do"
+ There are some things that you must not do if you are using theads.
+
+
+Always use ThreadWait instead of exec.library/Wait
+
+Using Wait willstop you being able to terminate waiting threads.
+
+
+Never import the module "NoGuru" or turn on any runtime checks
+
+The NoGuru module only works with Tasks that it has started itself.
+Any tasks started by the Threads module (tasks are used at the back end
+of Threads) will not work with NoGuru and can cause your machine to
+crash. Other runtime checks can cause similar problems so turn all of them
+off for any module that uses the Threads module.
+
+
+Do not use a conventional debugger
+
+Most debuggers cannot cope with multithreaded programs. Sad but true
+:-( Unfortunately there is no easy way round this. Debuggers can't debug
+tasks they don't start and if a task is launched as a thread then the
+debugger hasn't started it.
+
+If you really have to use a debugger or runtime checking in a Thread
+then run it sequentially instead of as a Thread and then debug it, switching
+it back toa thread when you know it works.
+
+
+Do not attempt to start the same Thread twice without terminating it first.
+
+If you need more than one instance of a thread then you must create
+create another Thread object. Note that each thread will use very little
+memory. The OS will not duplicate any code so you can have many Threads
+running the same code with very little overhead.
+
+
+Do not use too many local variables in a Thread.
+
+It is better to reserve memory on the heap than on the stack.
+
+
+Always use ReloadA4 for any procedures that are called as threads
+
+If you don't have ReloadA4 on (*$ ReloadA4+ *) then global data
+and procedures will not be found and your program is likely to crash.
+
+
+
+@endnode
+
+@node "sync" "Syncronisation"
+ If you have several threads running you will need to syncronise them.
+Most of the syncronisation you will need is handled within the Start
+and Terminate methods of the Thread class and the Get, GetWait, Send
+and SendWait methods of the ThreadStream class.
+
+Often however it can be useful to write your own syncronisation
+routines specific to what you are doing.
+
+
+Here are the available procedures for syncronisation.
+
+
+ReSync
+
+This is a very important procedure. It raises an exception if the
+thread should terminate.
+
+
+Sleep
+
+Puts the thread to sleep until it is terminated or woken. You should
+not usually need to use this directly.
+
+
+Thread.Wake
+
+Wake up a thread that is sleeping. Usually Sleep and Wake will not be
+called directly. You will normaly use common objects like ThreadStreams.
+
+
+ThreadWait
+
+Use instead of exec.library/Wait when waiting for signal within a thread
+to allow the thread to be terminated while it waits.
+
+@endnode
+
+@node "terminate" "Terminating Threads"
+ Terminating threads is very important. In the Threads module it is
+handled through Cyclone exceptions, making it very easy to do.
+
+A normal thread will be based around the following form.
+
+PROCEDURE Thingy BEGIN
+    [Setup]
+    TRY
+	ReSync;
+	[whatever];
+    FINALLY
+	[cleanup stuff]
+    END; END;
+
+As soon as the parent thread calls Thread^.Terminate an exception will
+be thrown causing control to move to the finally section. Here you must
+cleanup after your thread.
+
+
+You may also terminate your thread from within your thread when it has
+done all that was needed. Quite a common structure is the following:
+
+PROCEDURE Thingy BEGIN
+    [Setup]
+    TRY
+	REPEAT
+	    ReSync;
+	    [whatever];
+	UNTIL [something]
+    FINALLY
+	[cleanup stuff]
+    END; END; 
+
+Note that ReSync is also called from within any procedure that causes
+your thread togo to sleep so procedures like GetWait and SendWait can
+raise exceptions.
+
+
+The exception number thrown by ReSync is 1. Exception 2 may also be
+thrown if you try to read or write to a stream that has been removed. Youmay
+wish to catch and ignore stream errors, but if you get a terminate exception
+you must terminate.
+
+
+A parent can terminate a thread by calling Threadname^.Terminate. Even
+if you are sure that the thread will have terminated itself you must use
+the terminate method.
+
+
+Note that you should use ThreadWait rather than exec.library/Wait so as to
+allow your threads to terminate while waiting.
+
+
+@endnode
+
+@node "pri" "Priorities"
+ Every Amiga task has a priority and Threads are no exception. The
+priority of a thread can be set by the parent with SetupThread (or
+setting Thread^.th_Pri) or from within the thread using the methods
+explained in the Autodocs.
+
+The priority of a thread decides how much CPU time a thread will be
+given. Priorities can range from -127 to 127, but normal tasks should not
+have priorities above 5 is order to avoid disrupting important system tasks.
+Only use high priorities if you know what you are doing and keep CPU usage
+very low (eg spend little time out of a wait state).
+
+Normally you should give a priority of 0 to most threads and
+lower priorities to things that you don't want to slow the machine down.
+
+Typical priorities are 0 for a normal thread and -63 for a thread that
+you don't want to waste CPU time.
+
+
+Here are some examples of threads that should be given low priorites
+
+Background printing Screen redraw Image preview Processing data as it
+is read
+
+
+Threads with low priorities will not run very slowly, but will give
+way totasks of higher priorities that need the time more such as tasks
+that handle user interaction.
+
+@endnode
+
+@node "streams" "ThreadStreams"
+ Threadstreams are a means by which threads can communicate. A Thread
+stream can have one thread that reads it and many threads that write to it.
+In some ways it is similar to a message port.
+
+ThreadStreams can have a limit set that determines how many items
+are allowed in the stream. If 0 is specified then an infinite number of
+items are allowed. If you try to send another item to a thread when it is
+full the operation will fail. Geting items from a thread reduces the number
+of items in the stream. The items in the stream act like a buffer.
+
+Threads can send and get items from a threadstream by useing the
+following methods:
+
+ThreadStream^.Send(item : ADDRESS) : BOOLEAN
+
+Sends the item pointer to into the ThreadStream. If a thread is waiting
+to read from the stream then it will be woken so that it can read your
+input. If the stream is full then it will return FALSE, otherwise it will
+return TRUE. Normally it is easier to use SendWait.
+
+
+ThreadStream^.SendWait(item : ADDRESS)
+
+Sends the item. If it fails the first time then it puts itself to
+sleep until it can write to the stream. This will only return when it has
+sent the item or thrown an exception.
+
+
+ThreadStream^.Get : ADDRESS
+
+Gets an item from the stream. If there is noitem to get it will return
+NIL. Normally it is easier to use GetWait instead.
+
+
+ThreadStream^.GetWait : ADDRESS
+
+Gets an item from the stream. This will always return a valid item. If
+the stream is terminated it will throw exception 2.
+
+
+If a ThreadStream has been terminated then any attempts to read or write
+to it will result in exception 2 being thrown.
+
+
+ThreadStream^.Finish
+
+Terminates a stream. Any further attempts to read or write to it, by
+any thread will throw an exception.
+
+
+
+Streams can be attatched to a thread as the default input and output
+streams by setting InStream and OutStream or using SetupThread (see
+@{"Threads" link "threads" 0}).
+
+The following extra procedures are provided for using defualt input
+and output streams.
+
+StreamRead : ADDRESS Read an item from the input stream (calls GetWait);
+
+StreamWrite(item : ADDRESS) Sends an item to the default output
+stream (calls Sendwait)
+
+Both of these can throw exception 2 if the stream is terminated.
+
+FinishInStream and FinishOutStream Terminates the input or output
+stream causing accesses to them by anythread to throw an expection.
+
+
+
+Make sure that you allocate any items you put on the stream before
+sending them and deallocate them after reading them. Do not post local
+variables as these will become invalid outside the current procedure. Look
+at the examples to see how easy streams are to create.
+
+@endnode
+
+@node "tech" "Technical Information - how the Threads module works"
+ General methods used
+
+Signals are used for syncronisation between threads. Whever a thread
+needs to wait for an event it waits for the signal ctrlE. If it is woken up,
+it checks to see if the condition has been satisfied and if it has it
+resumes. If it has not been satisfied the thread will go back to sleep.
+
+If a thread does something that another thread might be waiting for
+it signals the other thread with ctrlE.
+
+
+The Thread object is held in the userdata field of the task.
+
+
+
+What each function does
+
+
+Thread^.Start
+
+Creates a new process based on the information in the Threads object.
+It points npEntry at a special launch stub that handles all setup and
+shutdown opertaions. It also places the Thread object in the userdata field
+of the created task.
+
+
+LaunchStub
+
+Whenever a new thread is created it starts by calling Launchstub.
+Launchstub calls the procedure specified bythe user and then, after the
+procedure has finished informs the parent procedure that it has closed by
+setting a bit in the Thread strucutre and signalling the parent.
+
+
+Thread^.Terminate
+
+If the Thread is running it sets it's terminate flag and sends it a
+ctrlE signal incase it is sleeping and goes to sleep. If the thread has
+already stopped (Dead flag set) it will do nothing. If the thread to be
+terminated was sleeping it will raise an exception and will terminate
+cleanly. Then the thread sends a ctrlE message to the thread that terminated
+it so that it knows that the child thread has been terminated. Sart use of
+Forbid and permit ensures that when Terminate returns the thread has
+certainly terminated.
+
+
+Sleep
+
+Puts the current thread to sleep, waiting for a ctrlE signal. This is
+not normally used directly. Usually you will be put to sleep by
+other procedures.
+
+
+Thread.Wake
+
+Wake up a thread if it is sleeping by sending it a ctrlE signal.
+
+@endnode
+

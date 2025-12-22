@@ -1,0 +1,415 @@
+EXTERNAL B$
+EXTERNAL A6
+SUB _LOGO(X1,Y1,X2,Y2) EXTERNAL
+  'X1 - THE X COORDINATE
+  'Y1 - THE Y COORDINATE
+  'X2 - SIZE OF X UNITS
+  'Y2 - SIZE OF Y UNITS
+  COLOURA = 2
+  COLOURB = 1
+  LINE (X1,Y1)-(X1+(X2*19),Y1),COLOURB
+  LINE (X1,Y1)-(X1,Y1+(Y2*1)),COLOURB
+  LINE (X1+(X2*19),Y1)-(X1+(X2*19),Y1+(Y2*1)),COLOURA
+  LINE (X1,Y1+(Y2*1))-(X1+(X2*6),Y1+(Y2*1)),COLOURA
+  LINE (X1+(X2*7),Y1+(Y2*1))-(X1+(X2*19),Y1+(Y2*1)),COLOURA
+  LINE (X1,Y1+(Y2*2))-(X1+(X2*1),Y1+(Y2*2)),COLOURB
+  LINE (X1+(X2*2),Y1+(Y2*2))-(X1+(X2*5),Y1+(Y2*2)),COLOURB
+  LINE (X1+(X2*8),Y1+(Y2*2))-(X1+(X2*11),Y1+(Y2*2)),COLOURB
+  LINE (X1+(X2*12),Y1+(Y2*2))-(X1+(X2*15),Y1+(Y2*2)),COLOURB
+  LINE (X1+(X2*16),Y1+(Y2*2))-(X1+(X2*19),Y1+(Y2*2)),COLOURB
+  LINE (X1+(X2*3),Y1+(Y2*3))-(X1+(X2*4),Y1+(Y2*3)),COLOURA
+  LINE (X1+(X2*3),Y1+(Y2*4))-(X1+(X2*4),Y1+(Y2*4)),COLOURB
+  LINE (X1+(X2*9),Y1+(Y2*3))-(X1+(X2*10),Y1+(Y2*3)),COLOURA
+  LINE (X1+(X2*9),Y1+(Y2*4))-(X1+(X2*10),Y1+(Y2*4)),COLOURB
+  LINE (X1+(X2*13),Y1+(Y2*3))-(X1+(X2*14),Y1+(Y2*3)),COLOURA
+  LINE (X1+(X2*13),Y1+(Y2*4))-(X1+(X2*14),Y1+(Y2*4)),COLOURB
+  LINE (X1+(X2*17),Y1+(Y2*3))-(X1+(X2*18),Y1+(Y2*3)),COLOURA
+  LINE (X1+(X2*17),Y1+(Y2*4))-(X1+(X2*18),Y1+(Y2*4)),COLOURB
+  LINE (X1+(X2*2),Y1+(Y2*5))-(X1+(X2*5),Y1+(Y2*5)),COLOURA
+  LINE (X1+(X2*6),Y1+(Y2*5))-(X1+(X2*7),Y1+(Y2*5)),COLOURA
+  LINE (X1+(X2*8),Y1+(Y2*5))-(X1+(X2*11),Y1+(Y2*5)),COLOURA
+  LINE (X1+(X2*12),Y1+(Y2*5))-(X1+(X2*14),Y1+(Y2*5)),COLOURA
+  LINE (X1+(X2*17),Y1+(Y2*5))-(X1+(X2*18),Y1+(Y2*5)),COLOURA
+  LINE (X1+(X2*1),Y1+(Y2*6))-(X1+(X2*11),Y1+(Y2*6)),COLOURB
+  LINE (X1+(X2*12),Y1+(Y2*6))-(X1+(X2*14),Y1+(Y2*6)),COLOURB
+  LINE (X1+(X2*17),Y1+(Y2*6))-(X1+(X2*18),Y1+(Y2*6)),COLOURB
+  LINE (X1,Y1+(Y2*7))-(X1+(X2*11),Y1+(Y2*7)),COLOURA
+  LINE (X1+(X2*12),Y1+(Y2*7))-(X1+(X2*15),Y1+(Y2*7)),COLOURA
+  LINE (X1+(X2*16),Y1+(Y2*7))-(X1+(X2*19),Y1+(Y2*7)),COLOURA
+  LINE (X1,Y1+(Y2*2))-(X1,Y1+(Y2*7)),COLOURB
+  LINE (X1+(X2*1),Y1+(Y2*2))-(X1+(X2*1),Y1+(Y2*6)),COLOURA
+  LINE (X1+(X2*2),Y1+(Y2*2))-(X1+(X2*2),Y1+(Y2*5)),COLOURB
+  LINE (X1+(X2*3),Y1+(Y2*3))-(X1+(X2*3),Y1+(Y2*4)),COLOURA
+  LINE (X1+(X2*4),Y1+(Y2*3))-(X1+(X2*4),Y1+(Y2*4)),COLOURB
+  LINE (X1+(X2*5),Y1+(Y2*2))-(X1+(X2*5),Y1+(Y2*5)),COLOURA
+  LINE (X1+(X2*6),Y1+(Y2*1))-(X1+(X2*6),Y1+(Y2*5)),COLOURB
+  LINE (X1+(X2*7),Y1+(Y2*1))-(X1+(X2*7),Y1+(Y2*5)),COLOURA
+  LINE (X1+(X2*8),Y1+(Y2*2))-(X1+(X2*8),Y1+(Y2*5)),COLOURB
+  LINE (X1+(X2*9),Y1+(Y2*3))-(X1+(X2*9),Y1+(Y2*4)),COLOURA
+  LINE (X1+(X2*10),Y1+(Y2*3))-(X1+(X2*10),Y1+(Y2*4)),COLOURB
+  LINE (X1+(X2*11),Y1+(Y2*2))-(X1+(X2*11),Y1+(Y2*5)),COLOURA
+  LINE (X1+(X2*11),Y1+(Y2*6))-(X1+(X2*11),Y1+(Y2*7)),COLOURA
+  LINE (X1+(X2*12),Y1+(Y2*2))-(X1+(X2*12),Y1+(Y2*5)),COLOURB
+  LINE (X1+(X2*12),Y1+(Y2*6))-(X1+(X2*12),Y1+(Y2*7)),COLOURB
+  LINE (X1+(X2*13),Y1+(Y2*3))-(X1+(X2*13),Y1+(Y2*4)),COLOURA
+  LINE (X1+(X2*14),Y1+(Y2*3))-(X1+(X2*14),Y1+(Y2*4)),COLOURB
+  LINE (X1+(X2*14),Y1+(Y2*5))-(X1+(X2*14),Y1+(Y2*6)),COLOURB
+  LINE (X1+(X2*15),Y1+(Y2*2))-(X1+(X2*15),Y1+(Y2*7)),COLOURA
+  LINE (X1+(X2*16),Y1+(Y2*2))-(X1+(X2*16),Y1+(Y2*7)),COLOURB
+  LINE (X1+(X2*19),Y1+(Y2*2))-(X1+(X2*19),Y1+(Y2*7)),COLOURA
+  LINE (X1+(X2*17),Y1+(Y2*3))-(X1+(X2*17),Y1+(Y2*4)),COLOURA
+  LINE (X1+(X2*17),Y1+(Y2*5))-(X1+(X2*17),Y1+(Y2*6)),COLOURA
+  LINE (X1+(X2*18),Y1+(Y2*3))-(X1+(X2*18),Y1+(Y2*4)),COLOURB
+  LINE (X1+(X2*18),Y1+(Y2*5))-(X1+(X2*18),Y1+(Y2*6)),COLOURB
+  'PAINT (X1+1,Y1+1),2,1
+  'PAINT (X1+1,Y1+(Y2*2)+1),2,1
+  'PAINT (X1+(X2*2)+1,Y1+(Y2*2)+1),2,1
+  'PAINT (X1+(X2*8)+1,Y1+(Y2*2)+1),2,1
+  'PAINT (X1+(X2*12)+1,Y1+(Y2*2)+1),2,1
+  'PAINT (X1+(X2*16)+1,Y1+(Y2*2)+1),2,1
+  'FONT "DICT.FONT",8
+  'STYLE 0
+  'PENUP
+  'SETXY (X1+3),(Y1+(Y2*9))
+  'PRINT "The Predictor & Checker Program"
+END SUB
+SUB _REMOVE1 EXTERNAL
+  FOR N=195 TO 255
+    GADGET CLOSE N
+  NEXT N
+END SUB
+SUB _REMOVE EXTERNAL
+  FOR N=249 TO 255
+    GADGET CLOSE N
+  NEXT N
+END SUB
+SUB _QUIT EXTERNAL
+  IF MSGBOX ("Sure you want to Quit?","Quit","Cancel") THEN
+    CLS 0
+    CALL _REMOVE1
+    WINDOW CLOSE 9
+    STOP
+  END IF
+END SUB
+SUB _WIPE EXTERNAL
+  FOR N=13 TO 59
+    LINE (23,N)-(216,N),0
+  NEXT N
+END SUB
+SUB _WIPE1 EXTERNAL
+  FOR N=63 TO 132
+    LINE (21,N)-(219,N),0
+  NEXT N
+END SUB
+SUB _WIPE2 EXTERNAL
+  FOR N=64 TO 131
+    LINE (23,N)-(216,N),0
+  NEXT N
+END SUB
+SUB _REMOVE2 EXTERNAL
+  FOR N=245 TO 255
+    GADGET CLOSE N
+  NEXT N
+END SUB
+SUB _PERCENT(X1,Y1,A1,A2,PR) EXTERNAL
+  REM PR CAN EQUAL:
+  REM 250        - TO DRAW BOX 3D BOX
+  REM 1-100      - THE CURRENT PERCENTAGE
+  REM 101        - TO CLEAR AWAY
+  A1=A1+2
+  A2=A2+2
+  A3=A2-1
+  PR=FIX(PR)
+  IF PR=250 THEN
+      LINE (X1,Y1)-(X1+A1,Y1),1
+      LINE (X1,Y1)-(X1,Y1+A2),1
+      LINE (X1,Y1+A2)-(X1+A1,Y1+A2),2
+      LINE (X1+A1,Y1)-(X1+A1,Y1+A2),2
+      A6 = 0
+  END IF
+  IF PR>0 AND PR<101 THEN
+    IF PR > A6 THEN
+      FOR N = A6 TO PR
+        LINE ((X1+1)+N,Y1+1)-((X1+1)+N,Y1+A3),3
+        PENUP
+        SETXY (X1+A1)+1,(Y1+A2)-1
+        PRINT N;"%"
+      NEXT N
+      A6=PR
+    END IF
+  END IF
+  IF PR=101 THEN
+    FOR N=0 TO A1+40
+    LINE (X1+N,Y1)-(X1+N,Y1+A2),0
+    NEXT N
+    A6=PR
+  END IF
+END SUB
+SUB _BUTTON EXTERNAL
+  GADGET 255,ON,"Generate Some Numbers",(21,63)-(219,75),BUTTON,1,"DICT.FONT",8,0
+  GADGET 254,ON,"Edit Board Database",(21,77)-(219,89),BUTTON,1,"DICT.FONT",8,0
+  GADGET 253,ON,"Enter Numbers Drawn",(21,91)-(219,103),BUTTON,1,"DICT.FONT",8,0
+  GADGET 252,ON,"View Board Results",(21,105)-(219,117),BUTTON,1,"DICT.FONT",8,0
+  GADGET 251,ON,"Print Winware Form",(21,119)-(219,131),BUTTON,1,"DICT.FONT",8,0
+  GADGET 250,ON,"About",(21,133)-(118,145),BUTTON,1,"DICT.FONT",8,0
+  GADGET 249,ON,"Quit",(122,133)-(219,145),BUTTON,1,"DICT.FONT",8,0
+END SUB
+SUB _BUTTON6 EXTERNAL
+  GADGET 255,ON,"Random Number Method 1",(21,63)-(219,75),BUTTON,1,"DICT.FONT",8,0
+  GADGET 254,ON,"Random Number Method 2",(21,77)-(219,89),BUTTON,1,"DICT.FONT",8,0
+  GADGET 253,ON,"Random Number Method 3",(21,91)-(219,103),BUTTON,1,"DICT.FONT",8,0
+  GADGET 252,OFF,"Random Number Method 4",(21,105)-(219,117),BUTTON,1,"DICT.FONT",8,0
+  GADGET 251,OFF,"Random Number Method 5",(21,119)-(219,131),BUTTON,1,"DICT.FONT",8,0
+  GADGET 250,ON,"Go Back",(21,133)-(118,145),BUTTON,1,"DICT.FONT",8,0
+  GADGET 249,ON,"Quit",(122,133)-(219,145),BUTTON,1,"DICT.FONT",8,0
+END SUB
+SUB _BUTTON13 EXTERNAL
+  BEVELBOX (21,63)-(218,130),1
+  FONT "DICT.FONT",8 : STYLE 2
+  PENUP : SETXY 26,72 : PRINT "About LoTo98 v1.11"
+  FONT "DICT.FONT",8 : STYLE 0
+  PENUP : SETXY 26,81 : PRINT "Welcome to  LoTo98 , my  latest"
+  PENUP : SETXY 26,90: PRINT "program   under  the   TickSoft"
+  PENUP : SETXY 26,99: PRINT "label.  LoTo98 is the first GUI"
+  PENUP : SETXY 26,108: PRINT "based lottery program I've made"
+  PENUP : SETXY 26,117: PRINT "which is designed to be easy to"
+  PENUP : SETXY 26,126: PRINT "use  and  have a  compact  GUI."
+  GADGET 255,ON,"Go Back",(21,133)-(118,145),BUTTON,1,"DICT.FONT",8,0
+  GADGET 254,ON,"Quit",(122,133)-(219,145),BUTTON,1,"DICT.FONT",8,0
+END SUB
+SUB _BUTTON7 EXTERNAL
+  GADGET 255,ON,"20",(31,118)-(220,130),LONGINT,1,"DICT.FONT",8,0
+  GADGET 254,ON,"Go Back",(21,133)-(118,145),BUTTON,1,"DICT.FONT",8,0
+  GADGET 253,ON,"Accept",(122,133)-(219,145),BUTTON,1,"DICT.FONT",8,0
+END SUB
+SUB _BUTTON8 EXTERNAL
+  BEVELBOX (21,63)-(218,130),1
+  FONT "DICT.FONT",8 : STYLE 2
+  PENUP : SETXY 26,72 : PRINT "Random Number Method 1"
+  FONT "DICT.FONT",8 : STYLE 0
+  PENUP : SETXY 26,80 : PRINT "This method will generate  an x"
+  PENUP : SETXY 26,88 : PRINT "amount of random numbers from 1"
+  PENUP : SETXY 26,96 : PRINT "to  49  of  which  the  6  most"
+  PENUP : SETXY 26,104 : PRINT "popular are retained. Now enter"
+  PENUP : SETXY 26,112 : PRINT "a value for x and press return."
+END SUB
+SUB _BUTTON11 EXTERNAL
+  BEVELBOX (21,63)-(218,130),1
+  FONT "DICT.FONT",8 : STYLE 2
+  PENUP : SETXY 26,72 : PRINT "Random Number Method 2"
+  FONT "DICT.FONT",8 : STYLE 0
+  PENUP : SETXY 26,80 : PRINT "This method will generate  some"
+  PENUP : SETXY 26,88 : PRINT "random  numbers and  retain the"
+  PENUP : SETXY 26,96 : PRINT "first six which have appeared x"
+  PENUP : SETXY 26,104 : PRINT "times. Please now enter a value"
+  PENUP : SETXY 26,112 : PRINT "for x and  then  press  return."
+END SUB
+SUB _BUTTON12 EXTERNAL
+  BEVELBOX (21,63)-(218,130),1
+  FONT "DICT.FONT",8 : STYLE 2
+  PENUP : SETXY 26,72 : PRINT "Random Number Method 3"
+  FONT "DICT.FONT",8 : STYLE 0
+  PENUP : SETXY 26,80 : PRINT "This method will generate  some"
+  PENUP : SETXY 26,88 : PRINT "random  numbers and  retain the"
+  PENUP : SETXY 26,96 : PRINT "xth number generated in each of"
+  PENUP : SETXY 26,104 : PRINT "six  occurences.  Now  enter  a"
+  PENUP : SETXY 26,112 : PRINT "value  for x  and press return."
+END SUB
+SUB _BUTTON9 EXTERNAL
+  GADGET 255,OFF,"Go Back",(21,133)-(69,145),BUTTON,1,"DICT.FONT",8,0
+  GADGET 254,ON,"Stop",(71,133)-(119,145),BUTTON,1,"DICT.FONT",8,0
+  GADGET 253,OFF,"Print",(121,133)-(169,145),BUTTON,1,"DICT.FONT",8,0
+  GADGET 252,OFF,"Save It",(171,133)-(219,145),BUTTON,1,"DICT.FONT",8,0
+END SUB
+SUB _MENU1 EXTERNAL
+  BEVELBOX (21,63)-(218,130),1
+  FONT "DICT.FONT",8 : STYLE 2
+  PENUP : SETXY 26,72 : PRINT "Please wait, processing data..."
+  FONT "DICT.FONT",8 : STYLE 0
+  PENUP : SETXY 26,94 : PRINT "LoTo98 is currently  generating"
+  PENUP : SETXY 26,102 : PRINT "random  numbers  which  will be"
+  PENUP : SETXY 26,110 : PRINT "used  to calculate  six numbers"
+  PENUP : SETXY 26,118 : PRINT "as required. If you wish LoTo98"
+  PENUP : SETXY 26,126 : PRINT "to   stop,  then  press   stop."
+END SUB
+SUB _CONVERT(A) EXTERNAL
+  IF A=0 THEN
+    B$="0"
+  END IF
+  IF A=1 THEN
+    B$="1"
+  END IF
+  IF A=2 THEN
+    B$="2"
+  END IF
+  IF A=3 THEN
+    B$="3"
+  END IF
+  IF A=4 THEN
+    B$="4"
+  END IF
+  IF A=5 THEN
+    B$="5"
+  END IF
+  IF A=6 THEN
+    B$="6"
+  END IF
+  IF A=7 THEN
+    B$="7"
+  END IF
+  IF A=8 THEN
+    B$="8"
+  END IF
+  IF A=9 THEN
+    B$="9"
+  END IF
+  IF A=10 THEN
+    B$="10"
+  END IF
+  IF A=11 THEN
+    B$="11"
+  END IF
+  IF A=12 THEN
+    B$="12"
+  END IF
+  IF A=13 THEN
+    B$="13"
+  END IF
+  IF A=14 THEN
+    B$="14"
+  END IF
+  IF A=15 THEN
+    B$="15"
+  END IF
+  IF A=16 THEN
+    B$="16"
+  END IF
+  IF A=17 THEN
+    B$="17"
+  END IF
+  IF A=18 THEN
+    B$="18"
+  END IF
+  IF A=19 THEN
+    B$="19"
+  END IF
+  IF A=20 THEN
+    B$="20"
+  END IF
+  IF A=21 THEN
+    B$="21"
+  END IF
+  IF A=22 THEN
+    B$="22"
+  END IF
+  IF A=23 THEN
+    B$="23"
+  END IF
+  IF A=24 THEN
+    B$="24"
+  END IF
+  IF A=25 THEN
+    B$="25"
+  END IF
+  IF A=26 THEN
+    B$="26"
+  END IF
+  IF A=27 THEN
+    B$="27"
+  END IF
+  IF A=28 THEN
+    B$="28"
+  END IF
+  IF A=29 THEN
+    B$="29"
+  END IF
+  IF A=30 THEN
+    B$="30"
+  END IF
+  IF A=31 THEN
+    B$="31"
+  END IF
+  IF A=32 THEN
+    B$="32"
+  END IF
+  IF A=33 THEN
+    B$="33"
+  END IF
+  IF A=34 THEN
+    B$="34"
+  END IF
+  IF A=35 THEN
+    B$="35"
+  END IF
+  IF A=36 THEN
+    B$="36"
+  END IF
+  IF A=37 THEN
+    B$="37"
+  END IF
+  IF A=38 THEN
+    B$="38"
+  END IF
+  IF A=39 THEN
+    B$="39"
+  END IF
+  IF A=40 THEN
+    B$="40"
+  END IF
+  IF A=41 THEN
+    B$="41"
+  END IF
+  IF A=42 THEN
+    B$="42"
+  END IF
+  IF A=43 THEN
+    B$="43"
+  END IF
+  IF A=44 THEN
+    B$="44"
+  END IF
+  IF A=45 THEN
+    B$="45"
+  END IF
+  IF A=46 THEN
+    B$="46"
+  END IF
+  IF A=47 THEN
+    B$="47"
+  END IF
+  IF A=48 THEN
+    B$="48"
+  END IF
+  IF A=49 THEN
+    B$="49"
+  END IF
+  IF A=51 THEN
+    B$="5 + B"
+  END IF
+END SUB
+SUB _CONVERT1(A) EXTERNAL
+  IF A=0 THEN
+    B$="Nothing"
+  END IF
+  IF A=1 THEN
+    B$="One Number"
+  END IF
+  IF A=2 THEN
+    B$="Two Numbers"
+  END IF
+  IF A=3 THEN
+    B$="Three Numbers"
+  END IF
+  IF A=4 THEN
+    B$="Four Numbers"
+  END IF
+  IF A=5 THEN
+    B$="Five Numbers"
+  END IF
+  IF A=6 THEN
+    B$="Six Numbers"
+  END IF
+  IF a=7 THEN
+    B$="Five + Bonus"
+  END IF
+END SUB

@@ -1,0 +1,377 @@
+~ Uuencode Out
+~ Version 1.0 by Roland Acton - November 1993
+~ Internet address: xracton@ccvax.fullerton.edu
+
+~ Version 1.1 by Roland Acton - January 1994
+~ Changes: The program now uses register variables and makes proper
+~ procedure and library calls.
+
+~ This program is public domain. You may use any part of it you wish
+~ in a program of your own, provided that you credit me and send me
+~ a copy of the program.
+
+define procedure Reiko
+define procedure word=GetMemory
+define procedure GiveBackMemory
+define procedure GetNextLine
+define procedure ReadLine
+define procedure WriteOutLine
+set startup Reiko
+
+open library exec
+open library dos
+
+constant uulinelength=62
+
+global srcfilehandle:long,destfilehandle:long,linepointer:long
+global inname:long,outname:long,uucodename:long,deletename1:long
+global deletename2:long,lastfile:word,bufferstart:long
+global buffercount:word,bufferpos:word
+global stopwriting:word,disabledelete:word,kludge:long
+
+string (returnchar) 10
+
+
+
+procedure Reiko
+local filenumber:word,temp:word,z:word,copystatus:word,x:byte,y:byte
+local temppoint:long,kirishima:long,kloop:word,alldone:word
+local allocfailed:word
+
+string (info1) "Uuencoded file joiner",10
+string (info2) "Version 1.1 by Roland Acton - January 1994",10,10
+print info1
+print info2
+if commandlength>1
+  proc call allocfailed=GetMemory
+  if allocfailed=0
+    lib call destfilehandle=open(outname,1006)
+    if destfilehandle=0
+      string (tempfileerror) "Couldn't open intermediate file "
+      print tempfileerror
+      print outname
+      print returnchar
+    else
+      stopwriting=0
+      disabledelete=0
+      alldone=0
+      lastfile=0
+      filenumber=1
+      repeat
+        if lastfile=1
+          string (lengtherror1) "Wrong-length line found in file "
+          print lengtherror1
+          print inname
+          print returnchar
+          disabledelete=1
+        end if
+        temp=filenumber/10*10
+        byte poke inname+commandlength,temp/10+48
+        byte poke inname+commandlength+1,filenumber-temp+48
+        lib call srcfilehandle=open(inname,1005)
+        if srcfilehandle=0
+          exit
+        end if
+        libcall buffercount=read(srcfilehandle,bufferstart,8192)
+        bufferpos=0
+        for z=1;5
+          proc call GetNextLine
+        next
+        data register copystatus,filenumber,kloop,x,y,z,temp
+        address register kirishima,temppoint,linepointer
+        regload
+        copystatus=0
+        loop ;;
+          if copystatus=0
+            if filenumber=1
+              byte data (begincheck) "begin "
+              load address kirishima=begincheck
+              long peek temppoint=linepointer
+              for temp=0;5
+                byte peek x=kirishima+temp
+                byte peek y=temppoint+temp
+                if y<>x
+                  exit
+                end if
+              next
+              for kloop=22;28;2
+                word peek z=linepointer+kloop
+                if z<>uulinelength
+                  exit
+                end if
+              next
+              if temp=6 & kloop=30
+                copystatus=1
+                proc call WriteOutLine
+              end if
+            else
+              for kloop=20;28;2
+                word peek z=linepointer+kloop
+                if z<>uulinelength
+                  exit
+                end if
+              next
+              if kloop=30
+                byte data (sectionbegincheck) "BEGIN"
+                load address kirishima=sectionbegincheck
+                long peek temppoint=linepointer
+                for temp=0;4
+                  byte peek x=kirishima+temp
+                  byte peek y=temppoint+temp
+                  if y<>x
+                    exit
+                  end if
+                next
+                if temp<5
+                  copystatus=1
+                  proc call WriteOutLine
+                end if
+              end if
+            end if
+            for kloop=20;28;2
+              word peek z=linepointer+kloop
+              if z<>0
+                exit
+              end if
+            next
+            if kloop=30
+              string (cannotmatch) ~
+              "Insufficient uuencoded lines for positive match",10
+              print cannotmatch
+              disabledelete=1
+              alldone=1
+              exit
+            end if
+          else
+            byte data (sectioncheck) "END"
+            load address kirishima=sectioncheck
+            long peek temppoint=linepointer
+            for temp=0;2
+              byte peek x=kirishima+temp
+              byte peek y=temppoint+temp
+              if y<>x
+                exit
+              end if
+            next
+            if temp=3
+              exit
+            end if
+            word peek z=linepointer+20
+            if z=uulinelength
+              proc call WriteOutLine
+            else
+              if z<2
+                exit
+              end if
+              lastfile=1
+              proc call WriteOutLine
+              byte data (endcheck) "end",10
+              load address kirishima=endcheck
+              long peek temppoint=linepointer
+              for temp=0;3
+                byte peek x=kirishima+temp
+                byte peek y=temppoint+temp
+                if y<>x
+                  exit
+                end if
+              next
+              if temp=4
+                alldone=1
+                exit
+              end if
+            end if
+          end if
+          proc call GetNextLine
+        end loop
+        lib call close(srcfilehandle)
+        filenumber=filenumber+1
+      until alldone=1
+      lib call close(destfilehandle)
+      if srcfilehandle=0
+        string (error1) "Couldn't open "
+        print error1
+        print inname
+        print returnchar
+        lib call execute(deletename1,0,0)
+        proc call GiveBackMemory
+      else
+        lib call execute(uucodename,0,0)
+        lib call execute(deletename1,0,0)
+        if disabledelete=0
+          for z=1;filenumber-1
+            temp=z/10*10
+            byte poke deletename2+7+commandlength,temp/10+48
+            byte poke deletename2+7+commandlength+1,z-temp+48
+            lib call execute(deletename2,0,0)
+          next
+        end if
+        proc call GiveBackMemory
+      end if
+    end if
+  end if
+else
+  string (error2) "Error in command line",10
+  string (error3) "Syntax: UOut <file-list-prefix>",10
+  print error2
+  print error3
+end if
+end procedure
+
+
+
+procedure word=GetMemory
+local z:byte,lpcount:word,annoy1:long,annoy2:long
+local allocholder:long
+
+lib call inname=allocmem(commandlength+3,0)
+lib call outname=allocmem(commandlength+3,0)
+lib call uucodename=allocmem(commandlength+12,0)
+lib call deletename1=allocmem(commandlength+10,0)
+lib call deletename2=allocmem(commandlength+10,0)
+bytedata (deletedata) "delete "
+load address annoy1=deletedata
+for lpcount=0;6
+  bytepeek z=annoy1+lpcount
+  bytepoke deletename1+lpcount,z
+  bytepoke deletename2+lpcount,z
+next
+bytedata (uucodedata) "uudecode "
+load address annoy2=uucodedata
+for lpcount=0;8
+  bytepeek z=annoy2+lpcount
+  bytepoke uucodename+lpcount,z
+next
+bytepoke outname,117
+bytepoke outname+1,111
+bytepoke outname+2,116
+for lpcount=0;commandlength-2
+  bytepeek z=commandpointer+lpcount
+  bytepoke inname+lpcount,z
+  bytepoke outname+3+lpcount,z
+  bytepoke deletename2+7+lpcount,z
+next
+for lpcount=0;commandlength+1
+  bytepeek z=outname+lpcount
+  bytepoke uucodename+9+lpcount,z
+  bytepoke deletename1+7+lpcount,z
+next
+bytepoke inname+commandlength-1,46
+bytepoke deletename2+7+commandlength-1,46
+bytepoke inname+commandlength+2,0
+bytepoke outname+commandlength+2,0
+bytepoke uucodename+9+commandlength+2,0
+bytepoke deletename1+7+commandlength+2,0
+bytepoke deletename2+7+commandlength+2,0
+lib call linepointer=allocmem(30,0)
+for lpcount=0;16;4
+  lib call allocholder=allocmem(256,0)
+  long poke linepointer+lpcount,allocholder
+next
+
+~ The memory allocations before this one are really too trivial to
+~ check for failure.
+
+lib call bufferstart=allocmem(8192,0)
+string (nomemory) "Couldn't allocate 8k for file buffer",10
+if bufferstart=0
+  print nomemory
+  getmemory=1
+else
+  getmemory=0
+end if
+end procedure
+
+
+
+procedure GiveBackMemory
+local lpcount:word,allocholder:long
+
+lib call freemem(inname,commandlength+3)
+lib call freemem(outname,commandlength+3)
+lib call freemem(uucodename,commandlength+12)
+lib call freemem(deletename1,commandlength+10)
+lib call freemem(deletename2,commandlength+10)
+for lpcount=0;16;4
+  long peek allocholder=linepointer+lpcount
+  lib call freemem(allocholder,256)
+next
+lib call freemem(linepointer,30)
+lib call freemem(bufferstart,8192)
+end procedure
+
+
+
+
+procedure GetNextLine
+local inpointer:long,coppoint:long,coplen:word,counter:word
+
+data register counter,coppoint,coplen
+address register linepointer
+regload
+long peek inpointer=linepointer
+for counter=0;12;4
+  long peek coppoint=linepointer+counter+4
+  long poke linepointer+counter,coppoint
+next
+for counter=20;26;2
+  word peek coplen=linepointer+counter+2
+  word poke linepointer+counter,coplen
+next
+long poke linepointer+16,inpointer
+proc call ReadLine
+end procedure
+
+
+
+procedure ReadLine
+local linemem:long,length:word,z:byte
+
+data register length,z,bufferpos,buffercount
+address register linepointer,linemem,bufferstart
+regload
+long peek linemem=linepointer+16
+length=0
+if buffercount>0
+  repeat
+    bytepeek z=bufferstart+bufferpos
+    bytepoke linemem+length,z
+    bufferpos=bufferpos+1
+    length=length+1
+    if bufferpos=buffercount
+      libcall buffercount=read(srcfilehandle,bufferstart,8192)
+      bufferpos=0
+    end if
+  until z=10 | buffercount=0 | length=256
+end if
+word poke linepointer+28,length
+end procedure
+
+
+
+procedure WriteOutLine
+local linetowrite:long,length:long
+
+data register length
+address register linetowrite
+regload
+long peek linetowrite=linepointer
+word peek length=linepointer+20
+byte poke linetowrite+length,0
+
+~ The error most likely to occur during writing will be that the
+~ disk is full. DOS will report this to the user via a pop-up
+~ window, so we don't have to. Strictly speaking, the program should
+~ terminate immediately when there's a write error. Doing this,
+~ though, would complicate the program structure. It's much easier
+~ to just not try to write to the disk anymore. This prevents the
+~ "disk full" window from coming up over and over, and allows us to
+~ use our normal termination code.
+
+if stopwriting=0
+  lib call length=write(destfilehandle,linetowrite,length)
+  if length<0
+    stopwriting=1
+    disabledelete=1
+  end if
+end if
+end procedure

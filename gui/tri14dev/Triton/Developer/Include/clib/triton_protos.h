@@ -1,0 +1,111 @@
+#ifndef CLIB_TRITON_PROTOS_H
+#define CLIB_TRITON_PROTOS_H
+
+/*
+**	$VER: triton_protos.h 3.59 (11.1.95)
+**	Triton Release 1.1
+**
+**	triton.library prototypes
+**	triton.lib definitions
+**
+**	(C) Copyright 1993-1995 Stefan Zeiger
+**	All Rights Reserved
+*/
+
+
+/* ////////////////////////////////////////////////////////////////////// */
+/* /////////////////////////////////////////// Compiler specific stuff // */
+/* ////////////////////////////////////////////////////////////////////// */
+
+#ifdef _DCC
+
+#ifndef EXEC_TYPES_H
+#include <exec/types.h>
+#endif
+
+#define REG(x) __ ## x
+#define ASM
+#define STACK  __stkargs
+#define REGS   __regargs
+
+#else
+
+#ifdef __GNUC__
+
+#define REG(x)
+#define ASM
+#define STACK
+#define REGS
+
+#else /* __SASC__ */
+
+#define REG(x) register __ ## x
+#define ASM    __asm
+#define STACK  __stdargs
+#define REGS   __regargs
+
+#endif /* __GNUC__ */
+
+#endif /* _DCC */
+
+
+/* ////////////////////////////////////////////////////////////////////// */
+/* /////////////////////////////////////////////////////// Main system // */
+/* ////////////////////////////////////////////////////////////////////// */
+
+ASM extern struct TR_Project *    TR_OpenProject(REG(a1) struct TR_App *app, REG(a0) struct TagItem *);
+ASM extern VOID                   TR_CloseProject(REG(a0) struct TR_Project *);
+
+ASM extern LONG                   TR_FirstOccurance(REG(d0) UBYTE ch, REG(a0) STRPTR str);
+ASM extern LONG                   TR_NumOccurances(REG(d0) UBYTE ch, REG(a0) STRPTR str);
+ASM extern STRPTR                 TR_GetErrorString(REG(d0) UWORD num);
+ASM extern UWORD                  TR_GetLastError(REG(a1) struct TR_App *app);
+ASM extern VOID                   TR_CloseWindowSafely(REG(a0) struct Window *win);
+
+ASM extern struct TR_Message *    TR_GetMsg(REG(a1) struct TR_App *app);
+ASM extern VOID                   TR_ReplyMsg(REG(a1) struct TR_Message *message);
+ASM extern ULONG                  TR_Wait(REG(a1) struct TR_App *app, REG(d0) ULONG otherbits);
+
+ASM extern ULONG                  TR_SendMessage(REG(a0) struct TR_Project *project, REG(d0) ULONG objectid, REG(d1) ULONG messageid, REG(a1) void *messagedata);
+ASM extern VOID                   TR_SetAttribute(REG(a0) struct TR_Project *, REG(d0) ULONG ID, REG(d1) ULONG attribute, REG(d2) ULONG value);
+ASM extern ULONG                  TR_GetAttribute(REG(a0) struct TR_Project *, REG(d0) ULONG ID, REG(d1) ULONG attribute);
+
+ASM extern VOID                   TR_LockProject(REG(a0) struct TR_Project *project);
+ASM extern VOID                   TR_UnlockProject(REG(a0) struct TR_Project *project);
+
+ASM extern ULONG                  TR_AutoRequest(REG(a1) struct TR_App *app, REG(a0) struct TR_Project *lockproject, REG(a2) struct TagItem *request_trwintags);
+ASM extern ULONG                  TR_EasyRequest(REG(a1) struct TR_App *app, REG(a2) STRPTR bodymft, REG(a3) STRPTR gadfmt, REG(a0) struct TagItem *taglist);
+
+ASM extern struct TR_App *        TR_CreateApp(REG(a1) struct TagItem *apptags);
+ASM extern VOID                   TR_DeleteApp(REG(a1) struct TR_App *app);
+
+ASM extern struct Screen *        TR_LockScreen(REG(a0) struct TR_Project *project);
+ASM extern VOID                   TR_UnlockScreen(REG(a0) struct Screen *screen);
+
+ASM extern struct Window *        TR_ObtainWindow(REG(a0) struct TR_Project *project);
+ASM extern VOID                   TR_ReleaseWindow(REG(a0) struct Window *window);
+
+
+/* ////////////////////////////////////////////////////////////////////// */
+/* /////////////////////////////////////////////////// Support library // */
+/* ////////////////////////////////////////////////////////////////////// */
+
+#ifndef TR_NOSUPPORT
+
+STACK extern BOOL                 TR_OpenTriton(ULONG version, ULONG taglist,...);
+REGS  extern VOID                 TR_CloseTriton(VOID);
+STACK extern struct TR_App     *  TR_CreateAppTags(ULONG taglist,...);
+STACK extern struct TR_Project *  TR_OpenProjectTags(struct TR_App *app, ULONG taglist,...);
+STACK extern ULONG                TR_EasyRequestTags(struct TR_App *app, STRPTR bodymft, STRPTR gadfmt, ULONG taglist,...);
+STACK extern ULONG                TR_AutoRequestTags(struct TR_App *app, struct TR_Project *lockproject, ULONG taglist,...);
+REGS  extern BOOL                 TRIM_trLogo_Init(VOID);
+REGS  extern VOID                 TRIM_trLogo_Free(VOID);
+
+#endif
+
+
+/* ////////////////////////////////////////////////////////////////////// */
+/* /////////////////////////////////////////////////////////// The End // */
+/* ////////////////////////////////////////////////////////////////////// */
+
+#endif /* CLIB_TRITON_PROTOS_H */

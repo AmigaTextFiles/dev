@@ -1,0 +1,28 @@
+
+CC = $(WLAVALGRIND) wla-6502
+CFLAGS = -i -o
+LD = $(WLAVALGRIND) wlalink
+LDFLAGS = -i -v -s
+
+SFILES = main.s more.s last.s
+IFILES = 
+OFILES = main.o more.o last.o
+
+all: $(OFILES) makefile
+	$(LD) $(LDFLAGS) linkfile linked.rom
+
+main.o: main.s
+	$(CC) $(CFLAGS) main.o main.s
+
+more.o: more.s
+	$(CC) $(CFLAGS) more.o more.s
+
+last.o: last.s
+	$(CC) $(CFLAGS) last.o last.s
+
+
+$(OFILES): $(HFILES)
+
+
+clean:
+	rm -f $(OFILES) core *~ linked.rom linked.sym main.lst more.lst last.lst

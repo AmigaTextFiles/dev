@@ -1,0 +1,414 @@
+	opt l+	; linkable
+
+
+;  V11
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+;  нн                    Patch Module V1.00                        нн
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+;  нн  й Roger Fischlin, Steigerwaldweg 6, 6450 Hanau 7, Germany   нн
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+	opt	p+
+
+
+	XDEF	PATCH_MODULE_START,PATCH_MODULE_END
+	XDEF.l	PATCH_MODULE_SIZE
+
+	incdir   	"ram:include/"
+
+        	include 	exec/memory.i
+	include	exec/exec_lib.i
+	include	exec/interrupts.i
+	include	libraries/dos_lib.i
+	include	libraries/dos.i
+	include	libraries/dosextens.i
+
+PATCH_MODULE_START
+
+; Commands
+
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+;  нн BEGIN		"B"	Byte                  нн
+;  нн 		0	Byte                  нн
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+;  нн END		"E"	Byte                  нн
+;  нн 		0	Byte                  нн
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+;  нн QUIT		"Q"	Byte                  нн
+;  нн 		0	Byte                  нн
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+;  нн TEXT		"T"	Byte                  нн
+;  нн 		Size	Byte                  нн
+;  нн 		ASCII	Byte (word alligned)  нн
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+;  нн PATCH		"P"	Byte                  нн
+;  нн 		Size	Byte                  нн
+;  нн 		Address	Long                  нн
+;  нн 		Data	Byte (word alligned)  нн
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+;  нн CHECK		"C"	Byte                  нн
+;  нн 		Size	Byte                  нн
+;  нн 		Address	Long                  нн
+;  нн 		Data	Byte (word alligned)  нн
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+;  нн IF 		"I"	Byte                  нн
+;  нн 		true/false	Byte (true = 0)       нн
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+;  нн end of patch	"."	Byte                  нн
+;  нн 		0	Byte                  нн
+;  нннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+
+DOS	macro			; one library, one macro .....
+	move.l	a5,a6
+	jsr	_LVO\1(a6)
+	endm
+
+		
+
+OpenThem	clr.b	-1(a0,d0)		; a0 ^begin of arg
+	move.l	a0,a4
+	lea	dosname(pc),a1		; open DOS
+	moveq.l	#33,d0
+	CALLEXEC 	OpenLibrary
+	move.l	d0,a5
+	tst.l	d0
+	beq	NoDOS
+	bsr	Main
+	move.l	a5,a1		; close DOS
+	CALLEXEC	CloseLibrary
+NoDOS	moveq.l	#0,d0
+	rts
+dosname	DOSNAME
+
+
+Main	cmp.b	#"?",(a4)		; check args !
+	beq	INFO
+	tst.b	(a4)
+	beq	INFO		; no arg ?
+.Loop1	move.b	(a4)+,d0
+	cmp.b	#" ",d0		; skip spaces and tabs 
+	beq.s	.Loop1
+	cmp.b	#9,d0
+	beq.s	.Loop1
+	cmp.b	#"'",d0
+	beq.s	.Quote
+	cmp.b	#'"',d0
+	bne.s	.Label1
+.Quote	move.l	a4,a0		; save ^file name
+.Loop2	move.b	(a0)+,d1		; skip name
+	beq.s	OpenFile		; file name not in quotation marks !
+	cmp.b	d0,d1		; same quotation mark ?
+	bne.s	.Loop2
+	clr.b	-1(a0)		; terminate file name
+	addq.l	#1,a4		; skip next command ..
+	bra.s	OpenFile
+
+.Label1	move.l	a4,a0		; terminate end of file name
+.Loop3	move.b	(a0)+,d0
+	beq.s	OpenFile
+	cmp.b	#" ",d0
+	beq.s	.Label2
+	cmp.b	#9,d0
+	bne.s	.Loop3
+.Label2	clr.b	-1(a0)		; terminate with $00 byte
+	
+
+OpenFile	subq.l	#1,a4
+
+	move.l	a4,d1		; open file
+	move.l	#MODE_OLDFILE,d2
+	DOS	Open
+	lea.l	Filehandle(pc),a0
+	move.l	d0,(a0)
+	bne.s	.Label1
+
+	lea.l	.ErrorText1(pc),a0	; write error msg
+	moveq.l	#.ErrorText1E-.ErrorText1,d0
+	bra	CLI_Text
+.ErrorText1	dc.b	"Couldn't open file !",$a
+.ErrorText1E	even	
+
+.Label1	lea.l	Command(pc),a4		; start patching
+.Label0	tst.b	(a4)+		; skip info text
+	bne.s	.Label0
+	move.l	a4,d0		; word alligned !
+	addq.l	#1,d0
+	bclr	#0,d0
+	move.l	d0,a4
+
+
+Next	moveq.l	#0,d0		; CTRL-C ?
+	moveq.l	#0,d1
+	CALLEXEC	SetSignal
+	btst	#12,d0
+	bne	UserBreak
+
+	move.b	(a4)+,d0		; get command
+	cmp.b	#"T",d0		; text ?
+	beq	TEXT
+	cmp.b	#"P",d0		; patch ?
+	beq	PATCH
+	cmp.b	#"C",d0		; check ?
+	beq	CHECK
+	cmp.b	#"I",d0		; If ?
+	beq	_IF
+	cmp.b	#"B",d0		; begin ?
+	beq	BEGIN
+	cmp.b	#"E",d0		; end ?
+	beq	END
+	cmp.b	#"Q",d0		; quit ?
+	beq.s	QUIT	
+	cmp.b	#".",d0		; end of patch ?
+	beq.s	QUIT	
+
+UnknownCommand	lea.l	UCText1(pc),a0		; write "unknown command"
+	moveq.l	#UCText1E-UCText1,d0
+	bsr	CLI_Text
+	bra.s	QUIT
+UserBreak	lea.l	UBText1(pc),a0		; write "user break"
+	moveq.l	#UBText1E-UBText1,d0
+	bsr	CLI_Text
+
+QUIT	move.l	Filehandle(pc),d1	; close file
+	DOS	Close
+	rts
+
+UCText1	dc.b	"unknown command !",$a
+UCText1E	even	
+UBText1	dc.b	"user break.",$a
+UBText1E	even	
+
+Filehandle	dc.l	0
+CountBEGIN	dc.l	0
+Flag	dc.b	0
+	even
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                      BEGIN                           нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+BEGIN	addq.l	#1,a4
+	lea.l	CountBEGIN(pc),a0	; one more BEGIN
+	addq.l	#1,(a0)
+	bra	Next
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                      END                             нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+END	addq.l	#1,a4
+	lea.l	CountBEGIN(pc),a0
+	tst.l	(a0)		; check if there are more ENDs than BEGINs
+	beq	.MoreENDs
+	subq.l	#1,(a0)		; one BEGIN-END depth less
+	bra	Next
+.MoreENDs	lea.l	.ErrorText1(pc),a0	; write error msg
+	moveq.l	#.ErrorText1E-.ErrorText1,d0
+	bsr	CLI_Text
+	bra	QUIT
+.ErrorText1	dc.b	"END without BEGIN !",$a
+.ErrorText1E	even	
+	
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                      TEXT                            нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+TEXT	moveq.l	#0,d0		; get text length
+	move.b	(a4),d0
+	moveq.l	#0,d1
+	move.b	(a4)+,d1		; get pointer to next command
+	move.l	a4,a0
+	addq.l	#1,d1
+	bclr	#0,d1
+	add.l	d1,a4
+	bsr	CLI_Text		; write text
+	beq	Next
+	bra	QUIT		; write error
+	
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                      PATCH                           нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+PATCH	moveq.l	#0,d4		; get patch length
+	move.b	(a4)+,d4
+	move.l	Filehandle(pc),d1	; get file position to patch
+	move.l	(a4)+,d2
+	moveq.l	#OFFSET_BEGINNING,d3
+	DOS	Seek
+
+	move.l	d4,d3	
+	move.l	a4,d2
+	move.l	d4,d0		; get pointer to next command
+	addq.l	#1,d0
+	bclr	#0,d0
+	add.l	d0,a4
+	
+	move.l	Filehandle(pc),d1	; patch
+	DOS	Write
+	cmp.l	d0,d3		; write error ?
+	beq	Next
+	
+	lea.l	.ErrorText1(pc),a0	; write error msg
+	moveq.l	#.ErrorText1E-.ErrorText1,d0
+	bsr	CLI_Text
+	bra	QUIT
+.ErrorText1	dc.b	"Write error !",$a
+.ErrorText1E	even	
+	
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                      CHECK                           нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+CHECK	moveq.l	#0,d4		; get check length
+	move.b	(a4)+,d4
+	move.l	Filehandle(pc),d1	; get file position
+	move.l	(a4)+,d2
+	moveq.l	#OFFSET_BEGINNING,d3
+	DOS	Seek
+
+	lea.l	.Buffer(pc),a0
+	move.l	a0,d2
+	move.l	d4,d3
+	move.l	Filehandle(pc),d1	; get file data
+	DOS	Read
+	cmp.l	d0,d3		; write error ?
+	bne	.Error
+	
+	lea.l	Flag(pc),a2
+	clr.b	(a2)		; set flag to true
+
+	subq.l	#1,d4
+	lea.l	.Buffer(pc),a0
+	move.l	a4,a1
+	move.l	d4,d0		; get pointer to next command
+	addq.l	#1+1,d0
+	bclr	#0,d0
+	add.l	d0,a4
+	
+.Loop	cmpm.b	(a0)+,(a1)+		; compare
+	bne.s	.False
+	dbra	d4,.Loop
+	bra	Next
+
+.False	move.b	#1,(a2)		; set flag to false
+	bra	Next
+	
+.Error	lea.l	.ErrorText1(pc),a0	; write error msg
+	moveq.l	#.ErrorText1E-.ErrorText1,d0
+	bsr	CLI_Text
+	bra	QUIT
+.ErrorText1	dc.b	"Read error !",$a
+.ErrorText1E	even	
+	
+.Buffer	ds.b	255
+	even
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                        IF                            нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+_IF	move.b	(a4)+,d0		; true or false ?
+	cmp.w	#"B"<<8,(a4)		; next command "BEGIN" ?
+	bne.s	.Error
+	cmp.b	Flag(pc),d0
+	beq	Next		; execute next commands
+
+
+	move.l	CountBEGIN(pc),d5 	; continue with same depth
+	
+.Skip
+.WordCommand	move.b	(a4)+,d0		; skip command
+	moveq.l	#0,d1
+	move.b	(a4)+,d1
+	cmp.b	#"B",d0
+	beq.s	.Begin
+	cmp.b	#"E",d0
+	beq.s	.End
+	cmp.b	#"Q",d0		; command consists of one word
+	beq.s	.WordCommand
+	cmp.b	#"I",d0		; command consists of one word
+	beq.s	.WordCommand
+	cmp.b	#".",d0		; end of patch ?!?
+	beq	.Error2
+	cmp.b	#"P",d0		; command consists of several bytes
+	beq.s	.BytesCommand
+	cmp.b	#"C",d0		; command consists of several bytes
+	beq.s	.BytesCommand
+	cmp.b	#"T",d0		; text command
+	beq.s	.TextCommand
+	bra	UnknownCommand		; unknown .....
+
+.BytesCommand	addq.l	#4,a4
+.TextCommand	addq.l	#1,d1	
+	bclr	#0,d1		; word alligned
+	add.l	d1,a4
+	bra.s	.Skip
+
+.Begin	lea.l	CountBEGIN(pc),a0	; one more BEGIN
+	addq.l	#1,(a0)
+	bra	.Skip
+
+.End	lea.l	CountBEGIN(pc),a0
+	tst.l	(a0)		; check if there are more ENDs than BEGINs
+	beq	.Error3
+	subq.l	#1,(a0)
+	cmp.l	(a0),d5		; reached old depth ?
+	beq	Next
+	bra	.Skip
+	
+
+.Error	lea.l	.ErrorText1(pc),a0	; write error msg
+	moveq.l	#.ErrorText1E-.ErrorText1,d0
+.Label1	bsr	CLI_Text
+	bra	QUIT
+.ErrorText1	dc.b	"IF without BEGIN !",$a
+.ErrorText1E	even	
+.Error2	lea.l	.ErrorText2(pc),a0	; write error msg
+	moveq.l	#.ErrorText2E-.ErrorText2,d0
+	bra.s	.Label1
+.ErrorText2	dc.b	"Unextected end of patch !",$a
+.ErrorText2E	even	
+.Error3	lea.l	.ErrorText3(pc),a0	; write error msg
+	moveq.l	#.ErrorText3E-.ErrorText3,d0
+	bra.s	.Label1
+.ErrorText3	dc.b	"END without BEGIN !",$a
+.ErrorText3E	even	
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                      INFO                            нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+	
+INFO	lea.l	Command(pc),a0		; get length of info string
+	moveq.l	#-1,d0
+.Label1	addq.l	#1,d0
+	tst.b	(a0)+
+	bne.s	.Label1
+	lea.l	Command(pc),a0		; write string
+;	bra	CLI_Text	
+
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+; нн                Write Text to CLI                     нн
+; нннннннннннннннннннннннннннннннннннннннннннннннннннннннннн
+
+CLI_Text	movem.l	a0/d0,-(sp)
+	DOS	Output		; get handle to CLI window
+	move.l	d0,d1
+	move.l	(sp)+,d3
+	move.l	(sp)+,d2
+	DOS	Write
+	cmp.l	d0,d3		; write error
+	beq.s	.OK
+	moveq.l	#-1,d0
+	tst	d0
+	rts
+.OK	moveq.l	#0,d0
+	tst	d0
+	rts
+
+Command
+PATCH_MODULE_END
+
+PATCH_MODULE_SIZE equ PATCH_MODULE_END-PATCH_MODULE_START
+

@@ -1,0 +1,391 @@
+(**************************************************************************)
+(*                                                                        *)
+(* Definition Module GadtoolsD by Marcel Timmermans.                      *)
+(* Date     : 21 Feb 1994                                                 *)
+(* Language : Modula-2                                                    *)
+(*                                                                        *)
+(**************************************************************************)
+
+(*$ Implementation- *)
+DEFINITION MODULE GadToolsD;
+
+FROM SYSTEM IMPORT ADDRESS,BITSET,LONGSET,CAST;
+
+IMPORT gd:GraphicsD,id:IntuitionD;
+FROM UtilityD  IMPORT tagUser;
+
+TYPE
+ StrPtr=ADDRESS;
+
+CONST
+
+(* The kinds (almost classes) of gadgets that GadTools supports.
+ * Use these identifiers when calling CreateGadgetA()
+ *)
+
+  genericKind    = 0;
+  buttonKind     = 1;
+  checkboxKind   = 2;
+  integerKind    = 3;
+  listviewKind   = 4;
+  mxKind         = 5;
+  numberKind     = 6;
+  cycleKind      = 7;
+  paletteKind    = 8;
+  scrollerKind   = 9;
+(* Kind number 10 is reserved *)
+  sliderKind     = 11;
+  stringKind     = 12;
+  textKind       = 13;
+
+  numKinds       = 14;
+
+(*------------------------------------------------------------------------*)
+
+(*  'Or' the appropriate set together for your Window IDCMPFlags: *)
+
+  arrowIDCMP      = id.IDCMPFlagSet{id.gadgetUp,id.gadgetDown,id.intuiTicks,id.mouseButtons};
+
+  buttonIDCMP     = id.IDCMPFlagSet{id.gadgetUp};
+  checkboxIDCMP   = id.IDCMPFlagSet{id.gadgetUp};
+  integerIDCMP    = id.IDCMPFlagSet{id.gadgetUp};
+  listviewIDCMP   = id.IDCMPFlagSet{id.gadgetUp,id.gadgetDown,id.mouseMove}+arrowIDCMP;
+
+  mxIDCMP         = id.IDCMPFlagSet{id.gadgetDown};
+  numberIDCMP     = id.IDCMPFlagSet{};
+  cycleIDCMP      = id.IDCMPFlagSet{id.gadgetUp};
+  paletteIDCMP    = id.IDCMPFlagSet{id.gadgetUp};
+
+  scrollerIDCMP   = id.IDCMPFlagSet{id.gadgetUp,id.gadgetDown,id.mouseMove};
+  sliderIDCMP     = id.IDCMPFlagSet{id.gadgetUp,id.gadgetDown,id.mouseMove};
+  stringIDCMP     = id.IDCMPFlagSet{id.gadgetUp};
+
+  textIDCMP       = id.IDCMPFlagSet{};
+
+
+TYPE
+(* NewGadsget.flags control certain aspects of the gadget.  The first five
+ * the placement of the descriptive text.  Each gadget kind has its default,
+ * which is usually PLACETEXT_LEFT.  Consult the autodocs for details.
+ *)
+NewGadgetFlags=(
+  placetextLeft,      (* Right-align text on left side *)
+  placetextRight,     (* Left-align text on right side *)
+  placetextAbove,     (* Center text above *)
+  placetextBelow,     (* Center text below *)
+  placetextIn,        (* Center text on *)                
+  ngHighlabel,        (* Highlight the label *)
+  
+  ng6,ng7,ng8,ng9,ng10,ng11,ng12,ng13,ng14,ng15,
+  ng16,ng17,ng18,ng19,ng20,ng21,ng22,ng23,
+  ng24,ng25,ng26,ng27,ng28,ng29,ng30,ng31
+ );
+ NewGadgetFlagSet=SET OF NewGadgetFlags;
+  
+(*  Generic NewGadget used by several of the gadget classes: *)
+
+ NewGadget=RECORD
+  leftEdge,topEdge:INTEGER;     (*  gadget position *)  
+  width,height:INTEGER;         (*  gadget size *)
+  gadgetText:ADDRESS;           (*  gadget label *)
+  textAttr:gd.TextAttrPtr;      (*  desired font for gadget label *)
+  gadgetID:CARDINAL;            (*  gadget ID *)
+  flags:NewGadgetFlagSet;       (*  see above *)
+  visualInfo:ADDRESS;           (*  Set to retval of GetVisualInfo() *)
+  userData:ADDRESS;             (*  gadget UserData *)                  
+ END;
+ NewGadgetPtr=POINTER TO NewGadget;
+
+(* Fill out an array of these and pass that to CreateMenus(): *)
+
+ NewMenu=RECORD
+  type:SHORTCARD;         (*  See below *)
+  label:StrPtr;           (*  Menu's label *)
+  commKey:StrPtr;         (*  MenuItem Command Key Equiv *)
+  flags:BITSET;           (*  Menu or MenuItem flags (see note) *)
+  mutualExclude:LONGSET;  (*  MenuItem MutualExclude word *)
+  userData:ADDRESS;       (*  For your own use, see note *)       
+ END;
+ NewMenuPtr=POINTER TO NewMenu;
+
+CONST
+(* Needed only by inside IM_ definitions below *)
+  menuImage = -128;
+
+(* nm_Type determines what each NewMenu structure corresponds to.
+ * for the NM_TITLE, NM_ITEM, and NM_SUB values, nm_Label should
+ * be a text string to use for that menu title, item, or sub-item.
+ * For IM_ITEM or IM_SUB, set nm_Label to point at the Image structure
+ * you wish to use for this item or sub-item.
+ * NOTE: At present, you may only use conventional images.
+ * Custom images created from Intuition image-classes do not work.
+ *)
+  nmTitle   = 1;          (* Menu header *)
+  nmItem    = 2;          (* Textual menu item *)
+  nmSub     = 3;          (* Textual menu sub-item *)
+
+  imItem    = nmItem + menuImage;  (* Graphical menu item *)
+  imSub     = nmSub  + menuImage;  (* Graphical menu sub-item *)
+
+(* The NewMenu array should be terminated with a NewMenu whose
+ * nm_Type equals NM_END.
+ *)
+  nmEnd       = 0;          (* End of NewMenu array *)
+
+(* Starting with V39, GadTools will skip any NewMenu entries whose
+ * nm_Type field has the NM_IGNORE bit set.
+ *)
+  nmIgnore  = 64;
+
+(* nm_Label should be a text string for textual items, a pointer
+ * to an Image structure for graphical menu items, or the special
+ * constant NM_BARLABEL, to get a separator bar.
+ *)
+  nmBarlabel  = CAST(StrPtr,-1);
+
+
+(* The nm_Flags field is used to fill out either the Menu->Flags or
+ * MenuItem->Flags field.  Note that the sense of the MENUENABLED or
+ * ITEMENABLED bit is inverted between this use and Intuition's use,
+ * in other words, NewMenus are enabled by default.  The following
+ * labels are provided to disable them:
+ *)
+
+ menuDisabled=id.menuEnabled;
+ itemDisabled=id.itemEnabled;
+
+(* New for V39:  NM_COMMANDSTRING.  For a textual MenuItem or SubItem,
+ * point nm_CommKey at an arbitrary string, and set the NM_COMMANDSTRING
+ * flag.
+ *)
+ commandString=id.commSeq;
+
+(* The following are pre-cleared (COMMSEQ, ITEMTEXT, and HIGHxxx are set
+ * later as appropriate):
+ * Under V39, the COMMSEQ flag bit is not cleared, since it now has
+ * meaning.
+ *)
+
+  flagMask    = -(id.MenuItemFlagSet{id.commSeq,id.itemText}+id.highFlags);
+  flagMaskV39 = -(id.MenuItemFlagSet{id.itemText}+id.highFlags);
+
+(* You may choose among CHECKIT, MENUTOGGLE, and CHECKED.
+ * Toggle-select menuitems are of type CHECKIT|MENUTOGGLE, along
+ * with CHECKED if currently selected.        Mutually exclusive ones
+ * are of type CHECKIT, and possibly CHECKED too.  The nm_MutualExclude
+ * is a bit-wise representation of the items excluded by this one,
+ * so in the simplest case (choose 1 among n), these flags would be
+ * ~1, ~2, ~4, ~8, ~16, etc.  See the Intuition Menus chapter.
+ *)
+
+(*  These return codes can be obtained through the GTMN_ErrorCode tag *)
+
+  gtMenuTrimmed   = 1;      (* Too many menus, items, or subitems,
+                             * menu has been trimmed down
+                             *)
+  gtMenuInvalide  = 2;      (* Invalid NewMenu array *)
+  gtMenuNoMem     = 3;      (* Out of memory *)
+
+(*------------------------------------------------------------------------*)
+
+(* Starting with V39, checkboxes and mx gadgets can be scaled to your
+ * specified gadget width/height.  Use the new GTCB_Scaled or GTMX_Scaled
+ * tags, respectively. Under V37, and by default in V39, the imagery
+ * is of the following fixed size:
+ *)
+
+(* MX gadget default dimensions: *)
+  mxWidth        = 17;
+  mxHeight       =  9;
+
+(* Checkbox default dimensions: *)
+  checkboxWidth  = 26;
+  checkboxHeight = 11;
+
+TYPE
+(*  Tags for toolkit functions: *)
+
+ GtTags=(gtTagBase:=tagUser+080000H,
+  gtviNewWindow,                    (* Unused *)
+  gtviNWTags,                       (* Unused *)
+  gtPrivate0,                       (* (private) *)
+  gtcbChecked,                      (* State of checkbox *)
+  gtlvTop,                          (* Top visible one in listview *)
+  gtlvLabels,                       (* List to display in listview *)
+  gtlvReadOnly,                     (* TRUE if listview is to be 
+                                     * read-only
+                                     *)    
+  gtlvScrollWidth,                  (* Width of scrollbar *)
+  gtmxLabels,                       (* NULL-terminated array of labels *)
+  gtmxActive,                       (* Active one in mx gadget *)        
+  gttxText,                         (* Text to display *)
+  gttxCopyText,                     (* Copy text label instead of referencing it *)
+  gtnmNumber,                       (* Number to display *)
+  gtcyLabels,                       (* NULL-terminated array of labels *)
+  gtcyActive,                       (* The active one in the cycle gad *)
+  gtpaDepth,                        (* Number of bitplanes in palette *)
+  gtpaColor,                        (* Palette color *)
+  gtpaColorOffset,                  (* First color to use in palette *)
+  gtpaIndicatorWidth,               (* Width of current-color indicator *)
+  gtpaIndicatorHeight,              (* Height of current-color indicator *)
+  gtscTop,                          (* Top visible in scroller *)
+  gtscTotal,                        (* Total in scroller area *)
+  gtscVisible,                      (* Number visible in scroller *)
+  gtscOverlap,                      (* Unused *)                 
+  gtres25,gtres26,gtres27,gtres28,gtres29,gtres30,
+  gtres31,gtres32,gtres33,gtres34,gtres35,gtres36,gtres37,
+  gtslMin,                          (* Slider min value *)
+  gtslMax,                          (* Slider max value *)
+  gtslLevel,                        (* Slider level *)
+  gtslMaxLevelLen,                  (* Max length of printed level *)
+  gtslLevelFormat,                  (* Format string for level *)
+  gtslLevelPlace,                   (* Where level should be placed *)
+  gtslDispFunc,                     (* Callback for number calculation
+                                     * before display
+                                     *)
+  gtstString,                       (* String gadget's displayed string *)
+  gtstMaxChars,                     (* Max length of string *)            
+  gtinNumber,                       (* Number in integer gadget *)
+  gtinMaxChars,                     (* Max number of digits *)     
+  gtmnTextAttr,                     (* MenuItem font TextAttr *)
+  gtmnFrontPen,                     (* MenuItem text pen color *)
+  gtbbRecessed,                     (* Make BevelBox recessed *)
+  gtVisualInfo,                     (* result of VisualInfo call *)
+  gtlvShowSelected,                 (* show selected entry beneath
+         * listview, set tag data = NULL for display-only, or pointer
+         * to a string gadget you've created
+         *)
+  gtlvSelected,                     (* Set ordinal number of selected
+                                     * entry in the list
+                                     *)
+  gtstEditHook,                     (* String EditHook *)
+  gtReserved1,                      
+  gttxBorder,                       (* Put a border around
+                                     * Text-display gadgets
+                                     *)
+  gtnmBorder,                       (* Put a border around
+                                     * Number-display gadgets
+                                     *)
+  gtscArrows,                       (* Specify size of arrows for
+                                     * scroller
+                                     *)
+  gtmnMenu,                         (* Pointer to Menu for use by
+                                     * LayoutMenuItems()
+                                     *)
+  gtmxSpacing,                      (* Added to font height to
+         * figure spacing between mx choices.  Use this instead
+         * of LAYOUTA_SPACING for mx gadgets.
+         *)
+
+(* New to V37 GadTools.  Ignored by GadTools V36 *)
+  gtmnFullMenu,            (* Asks CreateMenus() to validate that this
+                           * is a complete menu structure
+                           *)
+
+  gtmnSecondaryError,      (* ti_Data is a pointer to a ULONG to receive
+                            * error reports from CreateMenus()
+                            *)
+  gtUnderscore,            (* ti_Data points to the symbol that preceeds
+                            * the character you'd like to underline in a
+                            * gadget label
+                            *)
+(* New to V39 GadTools.  Ignored by GadTools V36 and V37 *)
+  gtmnCheckmark,                    (* ti_Data is checkmark img to use *)
+  gtmnAmigaKey,                     (* ti_Data is Amiga-key img to use *)
+  gtmnNewLookMenus,                 (* ti_Data is boolean *)              
+
+(* New to V39 GadTools.  Ignored by GadTools V36 and V37.
+ * Set to TRUE if you want the checkbox or mx image scaled to
+ * the gadget width/height you specify.  Defaults to FALSE,
+ * for compatibility.
+ *)
+
+  gtcbScaled,                       (* ti_Data is boolean *)
+  gtmxScaled,                       (* ti_Data is boolean *)
+  gtpaNumColors,                    (* Number of colors in palette *)
+  gtmxTitlePlace,                   (* Where to put the title *)
+  gttxFrontPen,                     (* Text color in TEXT_KIND gad *)
+  gttxBackPen,                      (* Bgrnd color in TEXT_KIND gad *)
+  gttxJustification,                (* See GTJ_#? constants *)        
+  gtnmFormat,                       (* Formatting string for number *)
+  gtnmMaxNumberLen,                 (* Maximum length of number *)    
+  gtbbFrameType,                    (* defines what kind of boxes
+                                     * DrawBevelBox() renders. See
+                                     * the BBFT_#? constants for
+                                     * possible values
+                                     *)
+  gtlvMakeVisible,                  (* Make this item visible *)
+  gtlvItemHeight,                   (* Height of an individual item *)
+  gtslMaxPixelLen,                  (* Max pixel size of level display *)
+  gtslJustification,                (* how should the level be displayed *)
+  gtpaColorTable,                   (* colors to use in palette *)
+  gtlvCallBack,                     (* general-purpose listview call back *)
+  gtlvMaxPen,                       (* maximum pen number used by call back *)
+  gttxClipped                       (* make a TEXT/NUMBER_KIND clip text *)
+  (* Until tagBase + 85 *)
+ );
+
+CONST
+(* Justification types for GTTX_Justification and GTNM_Justification tags *)
+  jLeft   = 0;
+  jRight  = 1;
+  jCenter = 2;
+
+(*------------------------------------------------------------------------*)
+
+(* Bevel box frame types for GTBB_FrameType tag *)
+  bbftButton      = 1;  (* Standard button gadget box *)
+  bbftRidge       = 2;  (* Standard string gadget box *)
+  bbftIconDropBox = 3;  (* Standard icon drop box     *)
+
+(*------------------------------------------------------------------------*)
+
+(* Typical suggested spacing between "elements": *)
+  interWidth  = 8;
+  interHeight = 4;
+
+(*------------------------------------------------------------------------*)
+
+(*  "nWay" is an old synonym for cycle gadgets *)
+  nWAYKind     = cycleKind;
+  nWAYIDCMP    = cycleIDCMP;
+  nwLabels     = gtcyLabels;
+  nwActive     = gtcyActive;
+
+(*------------------------------------------------------------------------*)
+
+(* These two definitions are obsolete, but are here for backwards
+ * compatibility.  You never need to worry about these:
+ *)
+  gadToolBit  = 08000H;
+
+(*------------------------------------------------------------------------*)
+
+(* These definitions are for the GTLV_CallBack tag *)
+
+(* The different types of messages that a listview callback hook can see *)
+  lvDraw      =  0202H;  (* draw yourself, with state *)
+
+(* Possible return values from a callback hook *)
+  lvcbOk      =  0;     (* callback understands this message type    *)
+  lvcbUnknown =  1;     (* callback does not understand this message *)
+
+(* states for LVDrawMsg.lvdm_State *)
+  lvrNormal           = 0; (* the usual                 *)
+  lvrSelected         = 1; (* for selected gadgets      *)
+  lvrNormalDisabled   = 2; (* for disabled gadgets      *)
+  lvrSelectedDisabled = 8; (* disabled and selected     *)
+
+TYPE
+(* structure of LV_DRAW messages, object is a (struct Node  *)
+
+   LVDrawMsg=RECORD
+     methodID:LONGCARD;
+     rastPort:gd.RastPortPtr;    (* where to render to        *)
+     drawInfo:id.DrawInfoPtr;    (* useful to have around     *)
+     bounds:gd.Rectangle;        (* limits of where to render *)
+     state:LONGCARD;             (* how to render             *)
+   END;
+   LVDrawMsgPtr=POINTER TO LVDrawMsg;
+
+END GadToolsD.

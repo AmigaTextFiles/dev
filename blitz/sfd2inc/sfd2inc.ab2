@@ -1,0 +1,268 @@
+
+; sfd2inc (C) 2010-2011  Lorence Lombardo
+
+optimize 5 : qt$=Chr$(34) : l$=Chr$(10) : np=NumPars : myver.l=0
+
+startfile.s="" : If np>0 Then startfile=Par$(1)
+
+If np<1 OR startfile="?"
+   NPrint l$+" Usage:"+l$+l$+" sfd2inc <sfd-file> [Version]"
+   NPrint " Converts an SFD lib file into a Blitz include."+l$
+   End
+EndIf
+
+tb$=Chr$(9) : If np>1 Then myver=Vallong(Par$(2))
+
+
+; string functions
+
+Function.s dos_FilePart {filename.s}
+   fptr.l = FilePart_(&filename.s)
+   If fptr
+     filepart.s = Peek.s(fptr)
+   Else
+     filepath.s = ""
+   EndIf
+   Function Return filepart.s
+End Function
+
+Function.s dos_RemExt {filename.s}
+   m.l = Len(filename.s)
+   While w$<>"."
+      w$=Mid$(filename.s,m,1) : m-1
+      If m=0 OR (Len(filename.s)-m)>8 Then w$="." : m=Len(filename.s)
+   Wend
+   filename.s = Left$(filename.s,m)
+   Function Return filename.s
+End Function
+
+Function.s dos_SetExt {filename.s,extention.s}
+   If extention.s<>""
+      filename.s = dos_RemExt {filename.s}
+      filename.s + "." + extention.s
+   EndIf
+   Function Return filename.s
+End Function
+
+; end of string functions
+
+
+NEWTYPE.sfdengine
+   bias.l
+   public.l
+   basename.s
+   funccount.l
+   libname.s
+   includename.s
+   prefix.s
+   inc.l
+   id.l
+   var.l
+   vers.l
+   basetype.l
+End NEWTYPE
+
+NEWTYPE.func
+   name.s
+   param.s[32]
+   reg.s[32]
+   lvo.l
+   public.l
+   paramcount.l
+   isret.l
+End NEWTYPE
+
+DEFTYPE .sfdengine sfd
+
+sfd\bias        = 30
+sfd\public      = True
+sfd\basename    = dos_FilePart{dos_RemExt{startfile}}
+sfd\libname     = dos_SetExt{Replace$(sfd\basename,"_lib",""),"library"}
+sfd\basename    = "_"+sfd\basename+"Base"
+sfd\funccount   = 0
+sfd\includename = dos_RemExt{sfd\libname} +".include"
+sfd\prefix      = dos_RemExt{sfd\libname}
+sfd\vers        = 0
+
+Dim List func.func(0) : prev$=""
+
+If ReadFile(0,startfile)
+  quitme.l = False : FileInput 0
+  While quitme = False AND Eof(0)=False
+    lin.s = Edit$(2000) : If lin.s = "" Then quitme = True
+    If Left$(lin.s,2)="=="
+      InitArgParse (lin) : wrd$=NextArg$ : wrd$=Mid$(wrd$,3)
+      wrd$=LCase$(wrd$) : arg2$=NextArg$
+      Select wrd$
+        Case "base"
+           sfd\basename = arg2$
+        Case "basetype"
+           sfd\basetype = True
+        Case "bias"
+          sfd\bias = Vallong(arg2$) : sfd\funccount=0
+        Case "public"
+          sfd\public = True
+        Case "private"
+          sfd\public = False
+        Case "include"
+          sfd\inc = True
+        Case "id"
+          sfd\id = True
+        Case "varargs"
+          sfd\var = True
+          Repeat
+             bla$=Edit$(2000) : bla$=StripTrail$(bla$,32) : com$=Right$(bla$,1)
+          Until com$<>"," OR Eof(0)
+        Case "version"
+          sfd\vers = Vallong(arg2$)
+        Case "libname"
+          sfd\libname = arg2$
+        Case "end"
+          quitme = True
+        Default
+          NPrint "; *********************************************"
+          NPrint "Unknown instruction: "+ wrd$
+          NPrint "; *********************************************"
+      End Select
+    Else
+      lin = Replace$(lin,tb$," ")
+
+      lin=StripLead$(lin,32) : If Left$(lin,1)="(" Then lin=prev$+lin
+
+      Repeat
+         lin=StripTrail$(lin,32) : com$=Right$(lin,1)
+         If com$="," Then lin=lin+Edit$(2000)
+      Until com$<>"," OR Eof(0)
+
+      pos1.l = Instr(lin,"(") : ver_ok.b=1
+
+      If myver>0 AND sfd\vers>0
+         If sfd\vers>myver Then ver_ok=0
+      EndIf
+
+      x.l=0 : pos3.l=0
+      Repeat
+         x=Instr(lin,"(",x) : If x>0 Then pos3=x : x+1
+      Until x=0
+
+      x.l=0 : pos4.l=0
+      Repeat
+         x=Instr(lin,")",x) : If x>0 Then pos4=x : x+1
+      Until x=0
+
+      x.l=0 : pos2.l=0
+      Repeat
+         x=Instr(lin,")",x)
+         If x>0
+            If x<pos4 Then pos2=x
+            x+1
+         EndIf
+      Until x=0
+
+      If pos1>0 AND pos2>0 AND ver_ok=1
+        InitArgParse lin : vt$=UCase$(NextArg$)
+        name1$=Left$(lin,pos1-1) : InitArgParse name1$ : name.s=""
+        Repeat
+           name2$=NextArg$ : If name2$<>"" Then name=name2$
+        Until name2$=""
+        param.s = Mid$(lin,pos1+1,pos2-pos1-1)
+        param=Replace$(param,"(","") : param=Replace$(param,")","")
+        param=Replace$(param,"*","") : param=Replace$(param,".","")
+        reg.s = Right$(lin,Len(lin)-pos2)
+        pos1.l = Instr(reg,"(")
+        pos2.l = Instr(reg,")")
+        reg = Right$(reg,Len(reg)-pos1)
+        reg = Left$(reg,Len(reg)-1)
+
+        If AddItem(func())
+          If vt$="VOID" Then func()\isret=0 Else func()\isret=1
+          If UCase$(Left$(name,Len(sfd\prefix))) <> UCase$(sfd\prefix)
+             func()\name = sfd\prefix+"_"+name
+          Else
+             func()\name = name
+          EndIf
+          While param<>""
+            pos.l = Instr(param,",")
+            If pos<=0
+               thisparam.s = param : param=""
+            Else
+               thisparam=Left$(param,pos-1) : param = Right$(param,Len(param)-pos)
+            EndIf
+            InitArgParse thisparam : arg2$=""
+            Repeat
+               arg$=NextArg$ : If arg$<>"" Then arg2$=arg$
+            Until arg$=""
+            If arg2$<>""
+               func()\param[func()\paramcount] = arg2$
+               func()\paramcount+1
+            Else
+               param = ""
+            EndIf
+          Wend
+          n.l=0
+          While reg<>""
+            pos.l = Instr(reg,",")
+            pos2.l = Instr(reg,"/")
+            If pos2>0 Then If pos=0 Then pos = pos2 Else pos = Min(pos,pos2)
+            If pos<=0
+              thisreg.s = reg : reg=""
+            Else
+              thisreg=Left$(reg,pos-1) : reg = Right$(reg,Len(reg)-pos)
+            EndIf
+            If thisreg<>""
+               func()\reg[n] = thisreg : n+1
+               If n>func()\paramcount Then func()\paramcount+1 : func()\param[n-1]="#?"
+            Else
+               reg = ""
+            EndIf
+          Wend
+          func()\lvo = sfd\bias + sfd\funccount*6
+          func()\public = sfd\public
+        EndIf
+      EndIf
+      sfd\funccount+1
+    EndIf
+    prev$=lin
+  Wend
+  ; print out ...
+  NPrint l$+"; "+sfd\includename+".bb2 generated by sfd2inc."+l$
+
+  NPrint l$+"DEFTYPE .Library *"+sfd\basename+l$
+  ResetList func()
+  While NextItem(func())
+    Print "Macro "+func()\name+" ; {"
+    If func()\isret=1 Then Print "ret" : If func()\paramcount>0 Then Print ","
+    For n.l=0 To func()\paramcount-1
+       Print func()\param[n] : If n<func()\paramcount-1 Then Print ","
+    Next n
+    NPrint "}" : c.w=0
+    For n.l=0 To func()\paramcount-1
+       If c=0 Then Print "   "
+       Print "Getreg "+func()\reg[n]+",`"
+       If func()\isret=1 Then n$=Str$(n+2) : If n>7 Then n$=Chr$(89+n)
+       If func()\isret=0 Then n$=Str$(n+1) : If n>8 Then n$=Chr$(88+n)
+       Print n$ : c+1 : If c<5 AND n<func()\paramcount-1 Then Print " : "
+       If c=5 OR n=func()\paramcount-1 Then c=0 : NPrint ""
+    Next n
+    Print "   Getreg a6,*"+sfd\basename+" : JSR -"+Str$(func()\lvo)+"(a6)"
+    If func()\isret=1 Then Print " : PutReg d0,`1"
+    NPrint l$+"End Macro"+l$
+  Wend
+  NPrint l$+"Function.l "+sfd\prefix+"_InitLib {minVersion.l}"
+  NPrint "   SHARED *"+sfd\basename
+  NPrint "   If *"+sfd\basename+" Then Function Return *"+sfd\basename
+  NPrint "   If minVersion<0 Then minVersion = 0"
+  NPrint "   *"+sfd\basename+" = OpenLibrary_ ("+qt$+sfd\libname+qt$+",minVersion)"
+  NPrint "   Function Return *"+sfd\basename
+  NPrint "End Function"+l$+l$
+  NPrint "Statement "+sfd\prefix+"_FreeLib {}"
+  NPrint "   SHARED *"+sfd\basename
+  NPrint "   If *"+sfd\basename+" Then CloseLibrary_ *"+sfd\basename+" : *"+sfd\basename+" = 0"
+  NPrint "End Statement"+l$+l$
+  CloseFile 0
+Else
+  NPrint l$+" File not found...!!!"+l$
+EndIf
+
+End
+

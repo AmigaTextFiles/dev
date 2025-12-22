@@ -1,0 +1,110 @@
+
+; soc07b.s
+
+; a) erklärt Bildung der Werte der Sprite Steuerwörter
+
+	SECTION yragael,CODE_C
+
+DISPLAY_X=$81
+DISPLAY_Y=$2C
+
+SPRITE_X=DISPLAY_X			; SPRITE_X-1 wird kodiert, da die Anzeige von Bitplanes durch
+							; die Hardware um ein Pixel gegenüber der Anzeige von Sprites
+							; verzögert wird (nicht dokumentiert).
+SPRITE_Y=DISPLAY_Y
+SPRITE_DX=16				; kann nicht verändert werden
+SPRITE_DY=16
+
+
+start:
+	move.w #0,d0
+
+	rts
+
+sprite:				
+	DC.W ((SPRITE_Y&$FF)<<8)!(((SPRITE_X-1)&$1FE)>>1)
+	DC.W (((SPRITE_Y+SPRITE_DY)&$FF)<<8)!((SPRITE_Y&$100)>>6)!(((SPRITE_Y+SPRITE_DY)&$100)>>7)!((SPRITE_X-1)&$1)
+	REPT 8
+	DC.W $00FF, $0000
+	ENDR
+	REPT 8
+	DC.W $00FF, $FFFF
+	ENDR
+	DC.W 0, 0
+	
+	end
+;------------------------------------------------------------------------------
+>r
+Filename:soc07b.s
+>a
+Pass1
+Pass2
+No Errors
+>j				
+>h.w sprite
+
+...
+
+;------------------------------------------------------------------------------
+	
+Erklärung:	
+	
+	dc.w	SV7-SV0,SH10-SH3											; SPRxPOS		Start vertical value, Sprite horizontal value
+	dc.w	EV7-EV0,ATT,SV9,EV9, (SH1,SH0),SV8-EV8-SH2					; SPRxCTL
+
+	dc.w	VSTART,HSTART
+	dc.w	VEND,SPCTL 
+
+
+DC.W ((SPRITE_Y&$FF)<<8)!(((SPRITE_X-1)&$1FE)>>1)
+
+; VSTART
+SPRITE_Y							$2C					= 00000000.00000000.00000000.00101100
+SPRITE_Y&$FF						$2C&$FF				= 00000000.00000000.00000000.00101100
+SPRITE_Y&$FF)<<8					($2C&$FF)<<8		= 00000000.00000000.00101100.00000000		; SV7-SV0
+
+; HSTART	
+SPRITE_X							$81					= 00000000.00000000.00000000.10000001
+SPRITE_X-1							$81-1				= 00000000.00000000.00000000.10000000								; (SPRITE_X-1)&$1FF wäre das gleiche, da die erste Stelle rausgeschoben wird
+(SPRITE_X-1)&$1FE					($81-1)&$1FE		= 00000000.00000000.00000000.10000000
+(((SPRITE_X-1)&$1FE)>>1)			(($81-1)&$1FE)>>1	= 00000000.00000000.00000000.01000000		; SH8-SH1				; $1FE = 00000001.11111110
+
+
+DC.W (((SPRITE_Y+SPRITE_DY)&$FF)<<8)!((SPRITE_Y&$100)>>6)!(((SPRITE_Y+SPRITE_DY)&$100)>>7)!((SPRITE_X-1)&$1)
+
+; VEND
+SPRITE_Y							$2C					= 00000000.00000000.00000000.00101100
+SPRITE_Y+SPRITE_DY					$2C+16				= 00000000.00000000.00000000.00111100
+(SPRITE_Y+SPRITE_DY)&$FF)			($2C+16)&$FF		= 00000000.00000000.00000000.00111100
+(SPRITE_Y+SPRITE_DY)&$FF)<<8		($2C+16)&$FF)<<8	= 00000000.00000000.00111100.00000000		; EV7-EV0
+
+; SPTCTL
+SPRITE_Y							$2C					= 00000000.00000000.00000000.00101100
+SPRITE_Y&$100						$2C&$100			= 00000000.00000000.00000000.00000000								; = 00000000.00000000.00000001.00000000
+(SPRITE_Y&$100)>>6)					($2C&$100)>>6		= 00000000.00000000.00000000.00000000		; SV8					; = 00000000.00000000.00000000.00000100
+
+SPRITE_Y							$2C					= 00000000.00000000.00000000.00101100		
+SPRITE_Y+SPRITE_DY					$2C+16				= 00000000.00000000.00000000.00111100
+(SPRITE_Y+SPRITE_DY)&$100)			($2C+16)&$100		= 00000000.00000000.00000000.00000000								; ($2C+220)&$100		= 00000000.00000000.00000001.00000000
+((SPRITE_Y+SPRITE_DY)&$100)>>7)		(($2C+16)&$100)>>7	= 00000000.00000000.00000000.00000000		; EV8					; ($2C+220)&$100		= 00000000.00000000.00000000.00000010
+
+SPRITE_X-1							$81-1				= 00000000.00000000.00000000.10000000								; ($81)					= 00000000.00000000.00000000.10000001
+((SPRITE_X-1)&$1)					($81-1)&$1			= 00000000.00000000.00000000.10000000		; SH0					; ($81)&$1				= 00000000.00000000.00000000.00000001
+
+;----------------------------------------------------------------
+
+VSTART=SPRITE_Y&$FF
+HSTART=((SPRITE_X-1)&$1FF)>>1
+VEND=(SPRITE_Y+SPRITE_DY)&$FF
+SPTCTL=((SPRITE_Y&$100)>>6)!(((SPRITE_Y+SPRITE_DY)&$100)>>7)!((SPRITE_X-1)&$1)
+
+sprite:				
+	DC.W (VSTART<<8)!(HSTART)
+	DC.W (VEND<<8)!(SPTCTL)
+	REPT 8
+	DC.W $00FF, $0000
+	ENDR
+	REPT 8
+	DC.W $00FF, $FFFF
+	ENDR
+	DC.W 0, 0

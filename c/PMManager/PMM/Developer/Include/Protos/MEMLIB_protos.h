@@ -1,0 +1,17 @@
+char *MWGetCWD (char *path, int size, char *file, long line);
+char *MWGetEnv (const char *name, char *file, long line);
+char *MWStrDup (const char *str, char *file, long line);
+int MWCheckA (struct MWAlc *mwa);
+int _STI_240_MWInit (void);
+void *MWAllocMem (long size, long flags, long internal, char *file, long line);
+void *MWrealloc (void *mem, long size, char *file, long line);
+void MWCheck (void);
+void MWFreeMem (void *mem, long size, long internal, char *file, long line);
+void MWHold (void);
+void MWInit (BPTR dbfh, LONG flags, char *dbnm);
+void MWLimit (LONG chiplim, LONG fastlim);
+void MWPrintf (char *ctl, ...);
+void MWPurge (void);
+void MWReport (char *title, long level);
+void MWTerm (void);
+void _STD_240_MWTerm (void);

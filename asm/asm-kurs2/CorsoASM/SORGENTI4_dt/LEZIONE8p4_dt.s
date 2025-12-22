@@ -1,0 +1,142 @@
+
+; Lezione8p4.s	Funktion der Condition Codes bei den Anweisungen
+;		logiche AND, NOT, OR, EOR
+
+	SECTION	CiriCop,CODE
+
+Inizio:
+	not.w	dato1
+	not.w	dato2
+	move.w	#$ff00,d0
+	and.w	dato1,d0
+	move.w	#$0003,d0
+	and.w	dato2,d0
+	move.w	#$8000,d0
+	or.w	dato1,d0
+	move.w	#$8000,d0
+	eor.w	d0,dato3
+stop:
+	rts
+
+dato1:
+	dc.w	$ff00
+dato2:
+	dc.w	$0f00
+dato3:
+	dc.w	$c000
+
+	end
+
+;	.----------.
+;	¦   \||/   ¦
+;	¦   (oo)   ¦
+;	`-oO-\/-Oo-'
+
+Die logischen Anweisungen ändern die CCs auf dieselbe Weise wie die MOVE-
+und TST-Anweisungen, nämlich:
+
+Die V- und C-Flags werden gelöscht
+Das X-Flag wird nicht geändert
+Das Z-Flag nimmt den Wert 1 an, wenn das Ergebnis der Operation 0 ist
+Das N-Flag nimmt den Wert 1 an, wenn das Ergebnis der Operation negativ ist.
+
+Wir überprüfen dies, indem wir unser Programm ausführen, in dem
+wir einige Beispiele präsentieren .
+
+D0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14 
+SSP=07CA304B USP=07CA1F14 SR=0000 -- -- PL=0 ----- PC=07CA4AF4
+PC=07CA4AF4 467907CA4B2A	 NOT.W   $07CA4B2A
+>
+
+Die erste auszuführende Anweisung ist ein NOT. Die Nummer $7CA4B2A ist die 
+Adresse von "dato1" (natürlich ergibt sich ein anderer Ort!).
+
+D0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000 
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14 
+SSP=07CA3047 USP=07CA1F14 SR=8000 T1 -- PL=0 ----- PC=07CA4AFA
+PC=07CA4AFA 467907CA4B2C	NOT.W   $07CA4B2C
+>
+
+Wir können das Ergebnis der Operation mit dem Befehl "M.W DATO1" sehen,
+welches $00ff ist. (Hinweis: Der Befehl "m" kann auch "m.w" oder "m.l" anzeigen
+ein Wort oder ein Langwort auf einmal).
+Wir haben eine positive Zahl ungleich Null, also sind das Z- und N-Flag
+zurückgesetzt. Jetzt führen wir das zweite NOT aus:
+
+D0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14
+SSP=07CA3047 USP=07CA1F14 SR=8008 T1 -- PL=0 -N--- PC=07CA4B00
+PC=07CA4B00 303CFF00		 MOVE.W  #$FF00,D0
+>
+
+Diesmal ist das Ergebnis negativ (siehe DATO2)
+und tatsächlich wird das Flag N gesetzt. Jetzt laden wir einen Wert in D0.
+
+D0: 0000FF00 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14
+SSP=07CA3047 USP=07CA1F14 SR=8000 T1 -- PL=0 ----- PC=07CA4B04
+PC=07CA4B04 C07907CA4B2A	 AND.W   $07CA4B2A,D0
+>
+
+Und wir machen das AND mit dem Wert "DATO1"
+
+D0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14
+SSP=07CA3047 USP=07CA1F14 SR=8004 T1 -- PL=0 --Z-- PC=07CA4B0A
+PC=07CA4B0A 303C0003		 MOVE.W  #$0003,D0
+>
+
+Das Ergebnis ist Null und daher nimmt das Flag Z den Wert 1 an.
+Jetzt laden wir einen neuen Wert in D0 und machen das AND mit DATO2.
+
+D0: 00000003 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14
+SSP=07CA3047 USP=07CA1F14 SR=8000 T1 -- PL=0 ----- PC=07CA4B0E
+PC=07CA4B0E C07907CA4B2C	 AND.W   $07CA4B2C,D0
+>
+
+Dieses Mal erhalten wir ein positives Ergebnis, das sich von Null unterscheidet.
+Gehen wir jetzt zum OR. Zuerst laden wir einen negativen Wert in D0.
+
+D0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14
+SSP=07CA3047 USP=07CA1F14 SR=8000 T1 -- PL=0 ----- PC=07CA4B14
+PC=07CA4B14 303C8000             MOVE.W  #$8000,D0
+>
+
+Und dann führen wir den OR mit "DATO1" durch
+
+D0: 00008000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14
+SSP=07CA3047 USP=07CA1F14 SR=8008 T1 -- PL=0 -N--- PC=07CA4B18
+PC=07CA4B18 807907CA4B2A	 OR.W    $07CA4B2A,D0
+>
+
+Wie Sie sehen, bekommen wir einen Wert, der wegen des Bits immer noch negativ ist
+Das MSB (Most Signifikant Bit) hat immer noch den Wert 1.
+
+D0: 000080FF 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14
+SSP=07CA3047 USP=07CA1F14 SR=8008 T1 -- PL=0 -N--- PC=07CA4B1E
+PC=07CA4B1E 303C8000		 MOVE.W  #$8000,D0
+>
+
+Nun ein letzter Test. Wir berechnen immer noch $8000 in D0:
+
+D0: 00008000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14
+SSP=07CA3047 USP=07CA1F14 SR=8008 T1 -- PL=0 -N--- PC=07CA4B22
+PC=07CA4B22 B17907CA4B2E	 EOR.W   D0,$07CA4B2E
+
+Und wir machen den EOR mit "DATO3":
+
+D0: 00008000 00000000 00000000 00000000 00000000 00000000 00000000 00000000
+A0: 00000000 00000000 00000000 00000000 00000000 00000000 00000000 07CA1F14
+SSP=07CA3047 USP=07CA1F14 SR=8000 T1 -- PL=0 ----- PC=07CA4B28
+PC=07CA4B28 4E75		 RTS
+>
+
+Dieses Mal erhalten wir ein positives Ergebnis ungleich Null, wie Sie 
+überprüfen können.
+

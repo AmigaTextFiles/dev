@@ -1,0 +1,64 @@
+MODULE	'exec/ports'
+
+OBJECT DosEnvEc
+	TableSize:ULONG,
+	SizeBlock:ULONG,
+	SecOrg:ULONG,
+	Surfaces:ULONG,
+	SectorPerBlock:ULONG,
+	BlocksPerTrack:ULONG,
+	Reserved:ULONG,
+	PreAlloc:ULONG,
+	Interleave:ULONG,
+	LowCyl:ULONG,
+	HighCyl:ULONG,
+	NumBuffers:ULONG,
+	BufMemType:ULONG,
+	MaxTransfer:ULONG,
+	Mask:ULONG,
+	BootPri:LONG,
+	DosType:ULONG,
+	Baud:ULONG,
+	Control:ULONG,
+	BootBlocks:ULONG
+
+CONST	DE_TABLESIZE=0,
+		DE_SIZEBLOCK=1,
+		DE_SECORG=2,
+		DE_NUMHEADS=3,
+		DE_SECSPERBLK=4,
+		DE_BLKSPERTRACK=5,
+		DE_RESERVEDBLKS=6,
+		DE_PREFAC=7,
+		DE_INTERLEAVE=8,
+		DE_LOWCYL=9,
+		DE_UPPERCYL=10,
+		DE_NUMBUFFERS=11,
+		DE_MEMBUFTYPE=12,
+		DE_BUFMEMTYPE=12,
+		DE_MAXTRANSFER=13,
+		DE_MASK=14,
+		DE_BOOTPRI=15,
+		DE_DOSTYPE=16,
+		DE_BAUD=17,
+		DE_CONTROL=18,
+		DE_BOOTBLOCKS=19
+
+OBJECT FileSysStartupMsg
+	Unit:ULONG,
+	Device:PTR TO CHAR,
+	Environ:BPTR,
+	Flags:ULONG
+
+OBJECT devicenode
+	Next:PTR TO CHAR,
+	Type:ULONG,
+	Task:PTR TO MP,
+	Lock:BPTR,
+	Handler:PTR TO CHAR,
+	StackSize:ULONG,
+	Priority:LONG,
+	Startup:BPTR,
+	SegList:BPTR,
+	GlobalVec:BPTR,
+	Name:PTR TO CHAR

@@ -1,0 +1,344 @@
+		PROCESSOR 68HC11
+*
+* "DOWNLOAD"
+*
+* DESCRIPTION:
+*
+*	DOWNLOAD is a monitor that resides within the EEPROM of the HC11.
+*	Its main task is to initialize the HC11 and download S record
+*	format files into external RAM for execution.  Among initialization
+*	tasks are the definition of the memory map and the chip selects.
+*	All external memory locations are also tested prior to
+*	proceeding with the monitor function.
+*
+*
+* INCLUDE FILES
+*
+REG_FILE EQU	$9000		*START LOCATION OF REGISTER FILE
+	INCLUDE ADev11:68HC11.INC
+*
+*
+*
+
+	XREF	SCI_JMP,SPI_JMP,PULSE_IN_JMP,PULSE_OVF_JMP,TIMER_OVF_JMP
+	XREF	TIMER_IC4_JMP,TIMER_OC4_JMP,TIMER_OC3_JMP,TIMER_OC2_JMP
+	XREF	TIMER_OC1_JMP,TIMER_IC3_JMP,TIMER_IC2_JMP,TIMER_IC1_JMP
+	XREF	RT_INTR_JMP,IRQ_JMP,XIRQ_JMP,SWI_JMP,OPC_JMP,COP_FAIL_JMP
+	XREF	MON_FAIL_JMP
+	XREF	EXT_TABLE
+	XREF	STACK,CHECKSUM,KEY1,KEY2,I_BUFFER
+
+ZPAGE_SIZE	EQU	$100
+USR_RAM_SIZE	EQU	$8000-ZPAGE_SIZE
+STACK_SIZE	EQU	$100
+*
+		SEG.U	EXT_RAM
+USR_RAM
+
+
+	SEG	EEPROM
+
+	jmp	GETC
+	jmp	GETS
+	jmp	PUTC
+	jmp	PUTS
+	jmp	PCRLF
+	jmp	RDBYTE
+	jmp	str_cmp
+
+START
+	LDS	#STACK+STACK_SIZE-1
+
+	LDAA	#$89		HC11 ram @ $8000, regs @ $9000
+	STAA	INIT
+
+	LDX	#REG_FILE
+	LDAA	#$90		enable A/D system, STOP delay on
+	STAA	OPTION-REG_FILE,X
+
+	LDAA	#$00
+	STAA	PORTG-REG_FILE,X
+	LDAA	#$7F
+	STAA	DDRG-REG_FILE,X
+
+*			SETUP CHIP SELECT OUTPUTS
+	LDAA	#$08		CSGEN has priority, others disabled
+	STAA	CSCTL-REG_FILE,X
+	LDAA	#$01		CSGEN accesses 32K,active low
+	STAA	CSGSIZ-REG_FILE,X
+	LDAA	#$00
+	STAA	CSGADR-REG_FILE,X
+
+	ldaa	#$21		divider = 19.2 Kbaud range, baud = 9600
+	staa	BAUD-REG_FILE,X
+	ldaa	#$0C
+	staa	SCCR2-REG_FILE,X
+
+
+*** MEMORY CHECKS ***
+mem_chk
+*** non-destructive read/write check
+	LDX	#USR_RAM	*SETUP POINTER TO RAM
+NEXT_ADDR_CHK
+	ldaa	0,X
+	coma
+	staa	0,X		*WRITE DATA TO EXTERNAL RAM
+	cmpa	0,X
+	bne	MEM_ERR2
+	coma
+	staa	0,X
+	cmpa	0,X
+	bne	MEM_ERR2
+	inx
+	CPX	#USR_RAM+USR_RAM_SIZE	*CHECK IF LAST LOCATION EXCEEDED
+	BNE	NEXT_ADDR_CHK	*NO, THEN CONTINUE RAM CHECK
+	bra	INIT_SYS
+MEM_ERR2
+	LDX	#MEM_FAULT
+	bsr	PUTS
+
+INIT_SYS
+*** CHECK FOR PREVIOUS PROGRAM (BEFORE BOOT)
+	LDD	KEY1
+	cpd	#REF_KEY1
+	bne	INIT_CLEAR
+	ldd	KEY2
+	cpd	#REF_KEY2
+	beq	INIT_WITH_PROGRAM
+INIT_CLEAR
+	ldd	#0		*INITIALIZE PROGRAM VECTOR TO FALSE
+	std	EXT_TABLE
+	bra	SYS_START
+INIT_WITH_PROGRAM
+	ldx	EXT_TABLE
+INIT_W0	ldaa	0,x		find and execute first command in program
+	beq	INIT_W1
+	inx
+	bra	INIT_W0
+INIT_W1	inx
+	ldx	0,x
+	jsr	0,x
+
+*
+*
+*
+SYS_START
+	bsr	PCRLF
+MONITOR
+	ldaa	#'>
+	bsr	PUTC
+	ldx	#I_BUFFER
+	bsr	GETS		*get a line of text, X -> line
+	ldy	#FUNC_TABLE
+	jsr	SCAN_FUNC_TABLE
+	bne	MONITOR		*a function match was found
+*
+	ldy	EXT_TABLE	*CHECK IF EXTERNAL TABLE SET
+	beq	MON_ERR
+	jsr	SCAN_FUNC_TABLE
+	bne	MONITOR
+MON_ERR	ldx	#NO_FUNC_STR
+	bsr	PUTS
+	bra	MONITOR
+*
+*
+*
+* GETS
+GETS	pshx
+gets1	bsr	GETC
+	bsr	PUTC
+	cmpa	#$D
+	beq	gets2
+	cmpa	#$A
+	beq	gets2
+	staa	0,x
+	inx
+	bra	gets1
+gets2	clr	0,x
+	bsr	PCRLF
+	pulx
+	rts
+*
+*
+*
+GETC	ldaa	SCSR
+	bita	#RDRF
+	beq	GETC
+	ldaa	SCDR
+	rts
+*
+PCRLF	LDX	#CRLF
+	bra	PUTS
+*
+*
+puts1	bsr	PUTC
+	inx
+PUTS	ldaa	0,x
+	bne	puts1
+	rts
+*
+*
+* char in A
+PUTC	ldab	SCSR
+	bitb	#TDRE
+	beq	PUTC
+	staa	SCDR
+	rts
+*
+*
+DO_S0
+	rts
+*
+DO_S1
+	bsr	RD_SREC
+	inc	CHECKSUM	$FF -> $00
+	beq	NO_ERR_S1
+ERR_S1	ldx	#CHK_FAIL_STR
+	bsr	PUTS
+NO_ERR_S1	rts
+*
+DO_S9
+	BSR	RD_SREC
+	inc	CHECKSUM	$FF -> $00
+	bne	ERR_S1
+
+	LDD	#REF_KEY1
+	STD	KEY1
+	LDD	#REF_KEY2
+	STD	KEY2
+
+	jmp	0,y
+
+*
+RD_SREC	clr	CHECKSUM
+	BSR	RDBYTE		*READ BYTE COUNT OF S1 RECORD INTO ACCB
+	TBA			*STORE IT IN ACCA
+	BSR	GETADR		*GET LOAD ADDRESS INTO Y REGISTER
+	SUBA	#3		*REMOVE LOAD ADDRESS & CHECKSUM BYTES FROM COUNT
+	beq	RDBYTE		if no data bytes read checksum
+NEXT_BYTE
+	BSR	RDBYTE
+	STAB	0,Y		STORE BYTE AT ADDRESS
+	INY			*ADVANCE TO NEXT LOAD ADDRESS
+	DECA			WHEN ALL BYTES read, read checksum
+	BNE	NEXT_BYTE
+
+* WARNING!!! - flows into RDBYTE
+
+*				*READ DATA BYTE
+RDBYTE	psha
+	LDAB	2,X		*1st READ MS NIBBLE
+	INX
+	BSR	HEXBIN		*CONVERT TO BINARY
+	LSLB			*AND MOVE TO UPPER NIBBLE
+	LSLB
+	LSLB
+	LSLB
+	tba
+	LDAB	2,X		*GET ASCII CHAR IN ACCB
+	INX
+	BSR	HEXBIN
+	aba
+	tab
+	adda	CHECKSUM
+	staa	CHECKSUM
+	pula
+	RTS			*RETURN WITH BYTE IN ACCB
+*
+GETADR
+	PSHA			*SAVE BYTE COUNTER
+	BSR	RDBYTE		*READ MS BYTE OF ADDRESS
+	TBA			*AND PUT IT IN MSBYTE OF ACCD
+	BSR	RDBYTE		*READ LS BYTE OF ADDRESS INTO LS BYTE OF ACCD
+	XGDY			*PUT LOAD ADDRESS IN Y
+	PULA			*RESTORE BYTE COUNTER
+	RTS			*AND RETURN
+*
+*				*CONVERT ASCII HEX TO BINARY
+HEXBIN
+	CMPB	#'9		*IF ACCB>9 THEN ASSUME ITS A-F
+	BLS	HEXNUM
+	ADDB	#9
+HEXNUM
+	ANDB	#$F
+	RTS
+
+*
+* X must not change, Y must move to char past null, terms on null of Y
+str_cmp	pshx
+str_cmp_1	ldaa	0,y
+	beq	str_cmp_pass
+	cmpa	0,x
+	bne	str_cmp_fail
+	inx
+	iny
+	bra	str_cmp_1
+str_cmp_fail	iny
+	ldaa	0,y
+	bne	str_cmp_fail
+	iny
+	ldaa	#1
+	pulx
+	rts
+str_cmp_pass	iny
+	clra
+	pulx
+	rts
+*
+*
+SCAN_FUNC_TABLE
+	bsr	str_cmp
+	beq	do_func
+	iny
+	iny
+	tst	0,y
+	bne	SCAN_FUNC_TABLE
+	rts
+do_func	ldy	0,y
+	jsr	0,y
+	ldaa	#1		clear Z flag
+	rts
+*
+*
+*
+FUNC_TABLE
+	DC.B	"S0",0
+	DC.W	DO_S0
+	DC.B	"S1",0
+	DC.W	DO_S1
+	DC.B	"S9",0
+	DC.W	DO_S9
+	DC.B	0
+*
+REF_KEY2	FDB $D709
+REF_KEY1	FDB $EB35	complement of inside nybbles
+
+NO_FUNC_STR	FCB "Command Not Found",$D,$A,0
+CHK_FAIL_STR	FCB "Checksum Error"	flows into next string
+CRLF		FCB $D,$A,0
+MEM_FAULT	FCB "Memory Fault",0
+
+	SEG	VECTORS
+	FDB	SCI_JMP
+	FDB	SPI_JMP
+	FDB	PULSE_IN_JMP
+	FDB	PULSE_OVF_JMP
+	FDB	TIMER_OVF_JMP
+	FDB	TIMER_IC4_JMP
+	FDB	TIMER_OC4_JMP
+	FDB	TIMER_OC3_JMP
+	FDB	TIMER_OC2_JMP
+	FDB	TIMER_OC1_JMP
+	FDB	TIMER_IC3_JMP
+	FDB	TIMER_IC2_JMP
+	FDB	TIMER_IC1_JMP
+	FDB	RT_INTR_JMP
+	FDB	IRQ_JMP
+	FDB	XIRQ_JMP
+	FDB	SWI_JMP
+	FDB	OPC_JMP
+	FDB	COP_FAIL_JMP
+	FDB	MON_FAIL_JMP
+	FDB	START
+
+	END

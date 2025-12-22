@@ -1,0 +1,488 @@
+DEFINITION MODULE Ahi; (*$ Implementation:=FALSE *)
+
+(*
+**	$VER: ahi.def 4.2 (27.4.97)
+**
+**	ahi.device definitions
+**
+**	(C) Copyright 1994-1997 Martin Blom
+**	All Rights Reserved.
+**
+**      Translated to Modula-2 (M2Amiga 4.3) by Nicky.
+*)
+
+(*****************************************************************************)
+
+ FROM SYSTEM IMPORT ADDRESS, CAST, LONGSET;
+ FROM ExecD IMPORT IOStdReq;
+ FROM UtilityD IMPORT Hook, HookPtr, tagUser, TagItem, TagItemPtr;
+ IMPORT R;
+
+(*****************************************************************************)
+
+CONST
+ ahiName = "ahi.device";
+
+TYPE
+ Fixed = LONGINT;				(* A fixed-point value, 16 bits
+						   to the left of the point and
+						   16 bits to the right *)
+TYPE
+ sposition = Fixed;
+
+TYPE
+(*** STRUCTURES *)
+
+ (* AHIAudioCtrl *)
+AHIAudioCtrlPtr = POINTER TO AHIAudioCtrl;
+AHIAudioCtrl = RECORD
+	ahiacUserData: ADDRESS;
+	(* Lots of private data follows! *)
+END;
+
+ (* AHISoundMessage *)
+AHISoundMessagePtr = POINTER TO AHISoundMessage;
+AHISoundMessage = RECORD
+	ahismChannel: CARDINAL;
+END;
+
+ (* AHIRecordMessage *)
+AHIRecordMessagePtr = POINTER TO AHIRecordMessage;
+AHIRecordMessage = RECORD
+	ahirmType: LONGCARD;			(* Format of buffer (object) *)
+	ahirmBuffer: ADDRESS;			(* Pointer to the sample array *)
+	ahirmLength: LONGCARD;			(* Number of sample frames in buffer *)
+END;
+
+ (* AHISampleInfo *)
+AHISampleInfoPtr = POINTER TO AHISampleInfo;
+AHISampleInfo = RECORD
+	ahisiType: LONGCARD;			(* Format of samples *)
+	ahisiAddress: ADDRESS;			(* Address to array of samples *)
+	ahisiLength: LONGCARD;			(* Number of samples in array *)
+END;
+
+
+ (* AHIAudioModeRequester *)
+AHIAudioModeRequesterPtr = POINTER TO AHIAudioModeRequester;
+AHIAudioModeRequester = RECORD
+	ahiamAudioID: LONGCARD;		(* Selected audio mode *)
+	ahiamMixFreq: LONGCARD;		(* Selected mixing/sampling frequency *)
+
+	ahiamLeftEdge: INTEGER;		(* Coordinates of requester on exit *)
+	ahiamTopEdge: INTEGER;
+	ahiamWidth: INTEGER;
+	ahiamHeight: INTEGER;
+
+	ahiamInfoOpened: BOOLEAN;	(* Info window opened on exit? *)
+	ahiamInfoLeftEdge: INTEGER;	(* Last coordinates of Info window *)
+	ahiamInfoTopEdge: INTEGER;
+	ahiamInfoWidth: INTEGER;
+	ahiamInfoHeight: INTEGER;
+
+	ahiamUserData: ADDRESS;		(* You can store your own data here *)
+	(* Lots of private data follows! *)
+END;
+
+ (* AHIEffMasterVolume *)
+AHIEffMasterVolumePtr = POINTER TO AHIEffMasterVolume;
+AHIEffMasterVolume = RECORD
+	ahieEffect: LONGCARD;		(* Set to AHIETMASTERVOLUME *)
+	ahiemvVolume: Fixed;		(* See autodocs for range! *)
+END;
+
+ (* AHIEffOutputBuffer *)
+AHIEffOutputBufferPtr = POINTER TO AHIEffOutputBuffer;
+AHIEffOutputBuffer = RECORD
+	 ahieEffect: LONGCARD;		(* Set to AHIETOUTPUTBUFFER *)
+	 ahieobFunc: HookPtr;
+ (* These fields are filled by AHI *)
+	 ahieobType: LONGCARD;		(* Format of buffer *)
+	 ahieobBuffer: ADDRESS;		(* Pointer to the sample array *)
+	 ahieobLength: LONGCARD;	(* Number of sample frames in buffer *)
+END;
+
+ (* AHIEffDSPMask (V4) *)
+AHIEffDSPMaskPtr = POINTER TO AHIEffDSPMask;
+AHIEffDSPMask = RECORD
+	ahieEffect: LONGCARD;		(* Set to AHIETDSPMASK *)
+	ahiedmChannels: CARDINAL;	(* Number of elements in array *)
+	ahiedmMask: ARRAY CARDINAL OF SHORTCARD;	(* Here follows the array *)
+END;
+
+CONST
+ AHIEDMWET =		0;
+ AHIEDMDRY =		1;
+
+TYPE
+ (* AHIEffDSPEcho (V4) *)
+AHIDSPEchoPtr = POINTER TO AHIDSPEcho;
+AHIDSPEcho = RECORD
+	ahieEffect: LONGCARD;		(* Set to AHIETDSPECHO *)
+	ahiedeDelay: LONGCARD;		(* In samples *)
+	ahiedeFeedback: Fixed;
+	ahiedeMix: Fixed;
+	ahiedeCross: Fixed;
+END;
+
+ (* AHIEffChannelInfo (V4) *)
+
+AHIEffChannelInfoPtr = POINTER TO AHIEffChannelInfo;
+AHIEffChannelInfo = RECORD
+	 ahieEffect: LONGCARD;		(* Set to AHIETCHANNELINFO *)
+	 ahieciFunc: HookPtr;
+	 ahieciChannels: CARDINAL;
+	 ahieciPad: CARDINAL;
+ (* The rest is filled by AHI *)
+	 ahieciOffset: ARRAY CARDINAL OF LONGCARD;	(* The array follows *)
+END;
+
+(*** TAGS *)
+
+CONST
+ AHITagBase =		tagUser;
+ AHITagBaseR =		AHITagBase + 08000H;
+
+ (* AHIAllocAudioA tags *)
+ AHIAAudioID =		AHITagBase+1;		(* Desired audio mode *)
+ AHIAMixFreq =		AHITagBase+2;		(* Suggested mixing frequency *)
+ AHIAChannels =		AHITagBase+3;		(* Suggested number of channels *)
+ AHIASounds =		AHITagBase+4;		(* Number of sounds to use *)
+ AHIASoundFunc =	AHITagBase+5;		(* End-of-Sound Hook *)
+ AHIAPlayerFunc =	AHITagBase+6;		(* Player Hook *)
+ AHIAPlayerFreq =	AHITagBase+7;		(* Frequency for player Hook (Fixed)*)
+ AHIAMinPlayerFreq =	AHITagBase+8;		(* Minimum Frequency for player Hook *)
+ AHIAMaxPlayerFreq =	AHITagBase+9;		(* Maximum Frequency for player Hook *)
+ AHIARecordFunc =	AHITagBase+10;		(* Sample recording Hook *)
+ AHIAUserData =		AHITagBase+11;		(* What to put in ahiacUserData *)
+
+  (* AHIPlayA tags (V4) *)
+ AHIPBeginChannel =	AHITagBase+40;	(* All command tags should be... *)
+ AHIPEndChannel =	AHITagBase+41;	(* ... enclosed by these tags. *)
+ AHIPFreq =		AHITagBase+50;
+ AHIPVol =		AHITagBase+51;
+ AHIPPan =		AHITagBase+52;
+ AHIPSound =		AHITagBase+53;
+ AHIPOffset =		AHITagBase+54;
+ AHIPLength =		AHITagBase+55;
+ AHIPLoopFreq =		AHITagBase+60;
+ AHIPLoopVol =		AHITagBase+61;
+ AHIPLoopPan =		AHITagBase+62;
+ AHIPLoopSound =	AHITagBase+63;
+ AHIPLoopOffset =	AHITagBase+64;
+ AHIPLoopLength =	AHITagBase+65;
+
+ (* AHIControlAudioA tags *)
+ AHICPlay =		AHITagBase+80;	(* Boolean *)
+ AHICRecord =		AHITagBase+81;	(* Boolean *)
+ AHICMonitorVolume =	AHITagBase+82;
+ AHICMonitorVolumeQuery = AHITagBase+83; (* tiData is pointer to Fixed (LONG) *)
+ AHICMixFreqQuery =	AHITagBase+84;	(* tiData is pointer to LONGCARD *)
+(* --- New for V2, they will be ignored by V1 --- *)
+ AHICInputGain =	AHITagBase+85;
+ AHICInputGainQuery =	AHITagBase+86;	(* tiData is pointer to Fixed (LONG) *)
+ AHICOutputVolume =	AHITagBase+87;
+ AHICOutputVolumeQuery =AHITagBase+88;	(* tiData is pointer to Fixed (LONG) *)
+ AHICInput =		AHITagBase+89;
+ AHICInputQuery =	AHITagBase+90;	(* tiData is pointer to LONGCARD *)
+ AHICOutput =		AHITagBase+91;
+ AHICOutputQuery =	AHITagBase+92;	(* tiData is pointer to LONGCARD *)
+
+ (* AHIGetAudioAttrsA tags *)
+ AHIDBAudioID =		AHITagBase+100;
+ AHIDBDriver =		AHITagBaseR+101;(* Pointer to name of driver *)
+ AHIDBFlags =		AHITagBase+102;	(* Private! *)
+ AHIDBVolume =		AHITagBase+103;	(* Boolean *)
+ AHIDBPanning =		AHITagBase+104;	(* Boolean *)
+ AHIDBStereo =		AHITagBase+105;	(* Boolean *)
+ AHIDBHiFi =		AHITagBase+106;	(* Boolean *)
+ AHIDBPingPong =	AHITagBase+107;	(* Boolean *)
+ AHIDBMultTable =	AHITagBase+108;	(* Private! *)
+ AHIDBName =		AHITagBaseR+109;(* Pointer to name of this mode *)
+ AHIDBBits =		AHITagBase+110;	(* Output bits *)
+ AHIDBMaxChannels =	AHITagBase+111;	(* Max supported channels *)
+ AHIDBMinMixFreq =	AHITagBase+112;	(* Min mixing freq. supported *)
+ AHIDBMaxMixFreq =	AHITagBase+113;	(* Max mixing freq. supported *)
+ AHIDBRecord =		AHITagBase+114;	(* Boolean *)
+ AHIDBFrequencies =	AHITagBase+115;
+ AHIDBFrequencyArg =	AHITagBase+116;	(* tiData is frequency index *)
+ AHIDBFrequency =	AHITagBase+117;
+ AHIDBAuthor =		AHITagBase+118;	(* Pointer to driver author name *)
+ AHIDBCopyright =	AHITagBase+119;	(* Pointer to driver copyright notice *)
+ AHIDBVersion =		AHITagBase+120;	(* Pointer to driver version string *)
+ AHIDBAnnotation =	AHITagBase+121;	(* Pointer to driver annotation text *)
+ AHIDBBufferLen =	AHITagBase+122;	(* Specifies the string buffer size *)
+ AHIDBIndexArg =	AHITagBase+123;	(* tiData is frequency! *)
+ AHIDBIndex =		AHITagBase+124;
+ AHIDBRealtime =	AHITagBase+125;	(* Boolean *)
+ AHIDBMaxPlaySamples =	AHITagBase+126;	(* It's sample *frames* *)
+ AHIDBMaxRecordSamples =AHITagBase+127;	(* It's sample *frames* *)
+ AHIDBFullDuplex =	AHITagBase+129;	(* Boolean *)
+(* --- New for V2, they will be ignored by V1 --- *)
+ AHIDBMinMonitorVolume =AHITagBase+130;
+ AHIDBMaxMonitorVolume =AHITagBase+131;
+ AHIDBMinInputGain =	AHITagBase+132;
+ AHIDBMaxInputGain =	AHITagBase+133;
+ AHIDBMinOutputVolume =	AHITagBase+134;
+ AHIDBMaxOutputVolume =	AHITagBase+135;
+ AHIDBInputs =		AHITagBase+136;
+ AHIDBInputArg =	AHITagBase+137;	(* tiData is input index *)
+ AHIDBInput =		AHITagBase+138;
+ AHIDBOutputs =		AHITagBase+139;
+ AHIDBOutputArg =	AHITagBase+140;	(* tiData is input index *)
+ AHIDBOutput =		AHITagBase+141;
+(* --- New for V4, they will be ignored by V2 and earlier --- *)
+ AHIDBData =		AHITagBaseR+142;	(* Private! *)
+
+ (* AHIBestAudioIDA tags *)
+(* --- New for V4, they will be ignored by V2 and earlier --- *)
+ AHIBDizzy =		AHITagBase+190;
+
+ (* AHIAudioRequestA tags *)
+	(* Window control *)
+ AHIRWindow =		AHITagBase+200;	(* Parent window *)
+ AHIRScreen =		AHITagBase+201;	(* Screen to open on if no window *)
+ AHIRPubScreenName =	AHITagBase+202;	(* Name of public screen *)
+ AHIRPrivateIDCMP =	AHITagBase+203;	(* Allocate private IDCMP? *)
+ AHIRIntuiMsgFunc =	AHITagBase+204;	(* Function to handle IntuiMessages *)
+ AHIRSleepWindow =	AHITagBase+205;	(* Block input in AHIRWindow? *)
+ AHIRUserData =		AHITagBase+206;	(* What to put in ahiamUserData *)
+	(* Text display *)
+ AHIRTextAttr =		AHITagBase+220;	(* Text font to use for gadget text *)
+ AHIRLocale =		AHITagBase+221;	(* Locale to use for text *)
+ AHIRTitleText =	AHITagBase+222;	(* Title of requester *)
+ AHIRPositiveText =	AHITagBase+223;	(* Positive gadget text *)
+ AHIRNegativeText =	AHITagBase+224;	(* Negative gadget text *)
+	(* Initial settings *)
+ AHIRInitialLeftEdge =	AHITagBase+240;	(* Initial requester coordinates *)
+ AHIRInitialTopEdge =	AHITagBase+241;
+ AHIRInitialWidth =	AHITagBase+242;	(* Initial requester dimensions *)
+ AHIRInitialHeight =	AHITagBase+243;
+ AHIRInitialAudioID =	AHITagBase+244;	(* Initial audio mode id *)
+ AHIRInitialMixFreq =	AHITagBase+245;	(* Initial mixing/sampling frequency *)
+ AHIRInitialInfoOpened =AHITagBase+246;	(* Info window initially opened? *)
+ AHIRInitialInfoLeftEdge = AHITagBase+247; (* Initial Info window coords. *)
+ AHIRInitialInfoTopEdge = AHITagBase+248;
+ AHIRInitialInfoWidth =	AHITagBase+249;	(* Not used! *)
+ AHIRInitialInfoHeight =AHITagBase+250;	(* Not used! *)
+	(* Options *)
+ AHIRDoMixFreq =	AHITagBase+260;	(* Allow selection of mixing frequency? *)
+ AHIRDoDefaultMode =	AHITagBase+261;	(* Allow selection of default mode? (V4) *)
+	(* Filtering *)
+ AHIRFilterTags =	AHITagBase+270;	(* Pointer to filter taglist *)
+ AHIRFilterFunc =	AHITagBase+271;	(* Function to filter mode id's *)
+
+(*** DEFS *)
+
+ AHINAME =		"ahi.device";
+ AHIINVALIDID =		-1;			(* Invalid Audio ID *)
+ AHIDEFAULTID =		00000000H;		(* Only for AHIAllocAudioA()! *)
+ AHILOOPBACKID =	00000001H;		(* Special sample render Audio ID *)
+ AHIDEFAULTFREQ =	0;			(* Only for AHIAllocAudioA()! *)
+ AHIMIXFREQ =		-1;			(* Special frequency for AHISetFreq() *)
+ AHINOSOUND =		0FFFFH;			(* Turns a channel off *)
+
+ (* Set#? Flags *)
+ AHISFIMM =		LONGSET{0};
+ AHISBIMM =		0;
+
+ (* Effect Types *)
+ AHIETCANCEL =		80000000H;		(* add with effect to disable *)
+ AHIETMASTERVOLUME =	1;
+ AHIETOUTPUTBUFFER =	2;
+(* --- New for V4 --- *)
+ AHIETDSPMASK =	3;
+ AHIETDSPECHO =	4;
+ AHIETCHANNELINFO =	5;
+
+ (* Sound Types *)
+ AHISTNOTYPE =		-1;			(* Private *)
+ AHISTSAMPLE =		0;			(* 8 or 16 bit sample *)
+ AHISTDYNAMICSAMPLE =	1;			(* Dynamic sample *)
+ AHISTINPUT =		20000000H;		(* The input from your sampler *)
+ AHISTBW =		40000000H;		(* Private *)
+
+ (* Sample types *)
+(* Note that only AHISTM8S, AHISTS8S, AHISTM16S and AHISTS16S
+   are supported by AHILoadSound(). *)
+ AHISTM8S =		0;			(* Mono, 8 bit signed (SHORTINT) *)
+ AHISTM16S =		1;			(* Mono, 16 bit signed (INTEGER) *)
+ AHISTS8S =		2;			(* Stereo, 8 bit signed (2×SHORTINT) *)
+ AHISTS16S =		3;			(* Stereo, 16 bit signed (2×INTEGER) *)
+ AHISTM32S =		8;			(* Mono, 32 bit signed (LONG) *)
+ AHISTS32S =		10;			(* Stereo, 32 bit signed (2×LONG) *)
+
+ AHISTM8U =		4;			(* OBSOLETE! *)
+
+ (* Error codes *)
+ AHIEOK =		0;			(* No error *)
+ AHIENOMEM =		1;			(* Out of memory *)
+ AHIEBADSOUNDTYPE =	2;			(* Unknown sound type *)
+ AHIEBADSAMPLETYPE =	3;			(* Unknown/unsupported sample type *)
+ AHIEABORTED =		4;			(* User-triggered abortion *)
+ AHIEUNKNOWN =		5;			(* Error, but unknown *)
+ AHIEHALFDUPLEX =	6;			(* CMDWRITE/CMDREAD failure *)
+
+
+
+(* DEVICE INTERFACE DEFINITIONS FOLLOWS ************************************)
+
+ (* Device units *)
+
+ AHIDEFAULTUNIT =	0;
+ AHINOUNIT =		255;
+
+
+ (* The preference file *)
+CONST
+ IDAHIU = CAST(LONGINT, "AHIU");
+ IDAHIG = CAST(LONGINT, "AHIG");
+
+TYPE
+AHIUnitPrefsPtr = POINTER TO AHIUnitPrefs;
+AHIUnitPrefs = RECORD
+	ahiupUnit: SHORTCARD;
+	ahiupPad: SHORTCARD;
+	ahiupChannels: CARDINAL;
+	ahiupAudioMode: LONGCARD;
+	ahiupFrequency: LONGCARD;
+	ahiupMonitorVolume: Fixed;
+	ahiupInputGain: Fixed;
+	ahiupOutputVolume: Fixed;
+	ahiupInput: LONGCARD;
+	ahiupOutput: LONGCARD;
+END;
+
+AHIGlobalPrefsPtr = POINTER TO AHIGlobalPrefs;
+AHIGlobalPrefs = RECORD
+	ahigpDebugLevel: CARDINAL;	(* Range: 0-3 (for None, Low,
+							   High and All) *)
+	ahigpDisableSurround: BOOLEAN;
+	ahigpDisableEcho: BOOLEAN;
+	ahigpFastEcho: BOOLEAN;
+	ahigpMaxCPU: Fixed;
+	ahigpClipMasterVolume: BOOLEAN;
+END;
+
+ (* Debug levels *)
+CONST
+ AHIDEBUGNONE =		0;
+ AHIDEBUGLOW =		1;
+ AHIDEBUGHIGH =		2;
+ AHIDEBUGALL =		3;
+
+ (* AHIRequest *)
+TYPE
+AHIRequestPtr = POINTER TO AHIRequest;
+AHIRequest = RECORD
+	 ahirStd: IOStdReq;		(* Standard IO request *)
+	 ahirVersion: CARDINAL;		(* Needed version *)
+(* --- New for V4, they will be ignored by V2 and earlier --- *)
+	 ahirPad1: CARDINAL;
+	 ahirPrivate: ARRAY[0..1] OF LONGCARD;	(* Hands off! *)
+	 ahirType: LONGCARD;		(* Sample format *)
+	 ahirFrequency: LONGCARD;	(* Sample/Record frequency *)
+	 ahirVolume: Fixed;		(* Sample volume *)
+	 ahirPosition: Fixed;		(* Stereo position *)
+	 ahirLink: AHIRequestPtr;	(* For double buffering *)
+END;
+
+ (* Flags for OpenDevice() *)
+CONST
+ AHIDFNOMODESCAN =	LONGSET{0};
+ AHIDBNOMODESCAN =	0;
+
+
+
+PROCEDURE AllocAudioA(ahi{R.A6}: ADDRESS;
+ tags{R.A1}: TagItemPtr): AHIAudioCtrlPtr;
+CODE -42;
+
+PROCEDURE FreeAudio(ahi{R.A6}: ADDRESS;
+ audioctrl{R.A2}: AHIAudioCtrlPtr);
+CODE -48;
+
+PROCEDURE KillAudio(ahi{R.A6}: ADDRESS);
+CODE -54;
+
+PROCEDURE ControlAudioA(ahi{R.A6}: ADDRESS;
+ audioctrl{R.A2}: AHIAudioCtrlPtr; tags{R.A1}: TagItemPtr): LONGCARD;
+CODE -60;
+
+PROCEDURE SetVol(ahi{R.A6}: ADDRESS;
+ channel{R.D0}: CARDINAL; volume{R.D1}: Fixed; pan{R.D2}: sposition;
+ audioctrl{R.A2}: AHIAudioCtrlPtr; flags{R.D3}: LONGSET);
+CODE -66;
+
+PROCEDURE SetFreq(ahi{R.A6}: ADDRESS;
+ channel{R.D0}: CARDINAL; freq{R.D1}: LONGCARD;
+ audioctrl{R.A2}: AHIAudioCtrlPtr; flags{R.D2}: LONGSET);
+CODE -72;
+
+PROCEDURE SetSound(ahi{R.A6}: ADDRESS;
+ channel{R.D0}: CARDINAL; sound{R.D1}: CARDINAL; offset{R.D2}: LONGCARD;
+ length{R.D3}: LONGINT; audioctrl{R.A2}: AHIAudioCtrlPtr; flags{R.D4}: LONGSET);
+CODE -78;
+
+PROCEDURE SetEffect(ahi{R.A6}: ADDRESS;
+ effect{R.A0}: ADDRESS; audioctrl{R.A2}: AHIAudioCtrlPtr): LONGCARD;
+CODE -84;
+
+PROCEDURE LoadSound(ahi{R.A6}: ADDRESS;
+ sound{R.D0}: CARDINAL; type{R.D1}: LONGCARD;
+ info{R.A0}: ADDRESS; audioctrl{R.A2}: AHIAudioCtrlPtr): LONGCARD;
+CODE -90;
+
+PROCEDURE UnloadSound(ahi{R.A6}: ADDRESS;
+ sound{R.D0}: CARDINAL; audioctrl{R.A2}: AHIAudioCtrlPtr);
+CODE -96;
+
+PROCEDURE NextAudioID(ahi{R.A6}: ADDRESS;
+ lastID{R.D0}: LONGCARD): LONGCARD;
+CODE -102;
+
+PROCEDURE GetAudioAttrsA(ahi{R.A6}: ADDRESS;
+ ID{R.D0}: LONGCARD;
+ audioctrl{R.A2}: AHIAudioCtrlPtr; tags{R.A1}: TagItemPtr): BOOLEAN;
+CODE -108;
+
+PROCEDURE BestAudioIDA(ahi{R.A6}: ADDRESS;
+ tags{R.A1}: TagItemPtr): LONGCARD;
+CODE -114;
+
+PROCEDURE AllocAudioRequestA(ahi{R.A6}: ADDRESS;
+ tags{R.A0}: TagItemPtr): AHIAudioModeRequesterPtr;
+CODE -120;
+
+PROCEDURE AudioRequestA(ahi{R.A6}: ADDRESS;
+ requester{R.A0}: AHIAudioModeRequesterPtr; tags{R.A1}: TagItemPtr): BOOLEAN;
+CODE -126;
+
+PROCEDURE FreeAudioRequest(ahi{R.A6}: ADDRESS;
+ requester{R.A0}: AHIAudioModeRequesterPtr);
+CODE -132;
+
+(* --- New for V4 --- *)
+PROCEDURE PlayA(ahi{R.A6}: ADDRESS;
+ audioctrl{R.A2}: AHIAudioCtrlPtr; tags{R.A1}: TagItemPtr);
+CODE -138;
+
+PROCEDURE SampleFrameSize(ahi{R.A6}: ADDRESS;
+ sampletype{R.D0}: LONGCARD): LONGCARD;
+CODE -144;
+
+(* Private: *)
+PROCEDURE AddAudioMode(ahi{R.A6}: ADDRESS;
+ tags{R.A0}: TagItemPtr): LONGCARD;
+CODE -150;
+
+PROCEDURE RemoveAudioMode(ahi{R.A6}: ADDRESS;
+ mode{R.D0}: LONGCARD): LONGCARD;
+CODE -156;
+
+PROCEDURE LoadModeFile(ahi{R.A6}: ADDRESS;
+ filename{R.A0}: ADDRESS): LONGCARD;
+CODE -162;
+
+
+END Ahi.

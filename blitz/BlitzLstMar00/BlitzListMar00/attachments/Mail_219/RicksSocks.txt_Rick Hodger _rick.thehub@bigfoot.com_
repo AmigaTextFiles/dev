@@ -1,0 +1,217 @@
+
+Unless stated otherwise, you should assume that all "fields" being sent to
+or received from the server are bytes.
+
+An example of the interaction goes like this (S=Server, C=Client).
+
+C: Connect to Server
+C: Sends protocol version identifier, and connection method required.
+S: Responds either good or bad, and which methods are okay.
+C: Sends connection request.
+S: Responds either good or bad for connection, if good it proceeds to relay data.
+
+It isn't paticularly complicated, but the RFC is very very nasty.
+
+--------------------------------------------------------------------------------------
+_Step 1, connection._
+This it is simple, connect as you normally would with a "ConnectTCP{}"
+except point it at the SOCKS server (whatever IP address it is, the port is
+usually 1080).
+
+--------------------------------------------------------------------------------------
+_Step 2, Send client header_
+This consists of a 2-258 character string.  The first byte is the version
+identifier, the second is the number of methods you are looking to use and
+the third is a list of the methods you want.
+
+VERSION
+METHOD
+METHODID
+
+An example of requesting a standard TCP (eg. telnet) connection would be to
+send the following:
+
+Chr$(5)+Chr$(1)+Chr$(0)
+  ^       ^       ^
+  |       |       +-- Method ID
+  |       +---------- Nos of Method IDs
+  +------------------ Version
+
+To which a standard SOCKS v5 server would respond with:
+
+Chr$(5)+Chr$(0)
+  ^       ^
+  |       +---------- Method to use
+  +------------------ Version
+
+If the server were to respond with a different version number, eg. 4, you
+need to stop right there.  SOCKS v4 is completely different to v5, and
+won't work.
+
+A list of methods follows:
+
+0   = No authentication required
+1   = GSSAPI
+2   = Username/Password required
+3   = IANA assigned
+4   = Reserved
+255 = No valid methods.
+
+The only ones you should really ever need are "0" and "2".  I won't go into
+username/password authentication as it has an RFC all to itself.  Also, you
+should note that if the server responds with a "255" as the method to use,
+you either haven't supplied a vaild method, or it doesn't consider the ones
+you've requested as being valid.
+
+--------------------------------------------------------------------------------------
+_Step 3, making a connection_
+We need to send another string now, identifying what server and port we want
+the SOCKS server to connect to for us.  It goes like this:
+
+VERSION COMMAND RESERVED ADDRESSTYPE ADDRESS PORT
+
+VERSION     = Again, should always be 5
+COMMAND     = One of three options, 1=TCP Connect, 2=TCP Bind, 3=UDP Associate
+RESERVED    = Always reserved, just send a 0
+ADDRESSTYPE = One of four options, 1=IP Address, 2=Domain name, 3=IP v6 Address
+ADDRESS     = Varies
+PORT        = Two bytes which make a word that is the port nos you want to connect                            to, more on this later.
+
+This changes depending on certain options, for example if you choose to send
+a standard IP address, the ADDRESS field will be just 4 bytes long and each
+byte will contain a single number from the IP address.  If you choose to
+send a domain name, the first byte of the ADDRESS field should be the
+length of the domain name. So, to connect to a telnet server on whatever.com,
+would be:
+
+Chr$(5)+Chr$(1)+Chr$(0)+Chr$(2)+Chr$(12)+"whatever.com"+Chr$(0)+Chr$(23)
+5 1 0 2 12 whatever.com 0 23
+VERSION     = 5
+COMMAND     = 1
+RESERVED    = 0
+ADDRESSTYPE = 2
+ADDRESS     = 12 followed by "whatever.com"
+PORT1       = 0
+PORT2       = 23
+
+If we're were given the same connection but an IP address of 90.0.0.1, it'd
+be:
+
+Chr$(5)+Chr$(1)+Chr$(0)+Chr$(1)+Chr$(90)+Chr$(0)+Chr$(0)+Chr$(1)+Chr$(0)+Chr$(23)
+5 1 0 1 90 0 0 1 0 23
+VERSION     = 5
+COMMAND     = 1
+RESERVED    = 0
+ADDRESSTYPE = 1
+ADDRESS1    = 90
+ADDRESS2    = 0
+ADDRESS3    = 0
+ADDRESS4    = 1 
+PORT1       = 0
+PORT2       = 23
+
+See how it works?  Simple, innit?
+
+Now, that port thing.  The SOCKS server expects a word (.w) as opposed to a
+byte (.b) for the port field.  This sounds complicated but it's not really.
+The way I use to do this is to put your port number into a word variable
+(eg. port.w) and then peek each byte from the word.  So normally then end
+of my SOCKS string would look like: Chr$(Peek.b(&port.w))+Chr$(Peek.b(&port.w+1))
+
+Similarly, if we wanted to recreate a port string (the server would send it back in the response in two bytes) we do so like this:
+
+Poke.b &port.w,one.b
+Poke.b &port.w+1,two.b
+
+--------------------------------------------------------------------------------------
+_Step 4, Servers response_
+Naturally, it can take a little while for the server to respond as it
+attempts to make the connection.  So be prepared to wait a little, but
+eventually it should respond in the following format:
+
+VERSION     = The version of SOCKS protocol the server is using
+REPLY       = A number of respones are possible:
+              0 = Succeeded
+              1 = SOCKS server failure
+              2 = Connection not allowed by settings
+              3 = Network unreachable
+              4 = Host unreachable
+              5 = Connection refused
+              6 = TTL expired
+              7 = Command not supported
+              8 = Address type not supported
+              9 to 255 = Not supported.
+RESERVED    = Just ignore it.
+ADDRESSTYPE = Only applies if you issued a "bind" command.  The following is the                              bound address and port, supplied in the same method to connect to                               another server in Step 3 above.
+BINDADDR    = See above.
+BINDPORT    = See above.
+
+So, for our telnet example, we're really only interested in the first 2
+bytes, which should hopefuly be Chr$(5)+Chr$(0).  Obviously if the second
+byte isn't 0 then we need to supply the user with an error code, and
+possibly try again.  We still need to parse the rest, as BINDADDR and
+BINDPORT will give you information about what address and port the SOCKS
+server is using on the internet side of things, but for us it isn't really
+that important.
+
+A full example of a response would be:
+
+Chr$(5)+Chr$(0)+Chr$(0)+Chr$(1)+Chr$(194)+Chr$(46)+Chr$(20)+Chr$(130)+Chr$(3)+Chr$(4)
+5 0 0 1 194 46 20 130 3 4
+VERSION     = 5
+REPLY       = 0
+RESERVED    = 0
+ADDRESSTYPE = 1
+ADDRESS1    = 194
+ADDRESS2    = 46
+ADDRESS3    = 20
+ADDRESS4    = 130
+PORT1       = 3
+PORT2       = 4
+
+If we have a successfull connection, then the server will start relaying
+data through the current connection, so you just need to use SendTCP{} and
+ReadTCP{} as normal. From this though, we can also see that the machine the SOCKS server is on is using an IP address of 194.46.20.130 and a port of 1024 for our connection to the rest of the world.  This really only applies though if we were trying to use a BIND connection.
+
+--------------------------------------------------------------------------------------
+_Username/password authentication_
+Should the server require username/password authentication, you need to send an
+extra string at the point, which has the following fields.
+
+VERSION = As always, just put 5 here.
+ULEN    = Should be the length of the username you're sending
+UNAME   = The actual username
+PLEN    = Should be the length of the password you're sending
+PASSWRD = The password itself.
+
+So an example of using the username "tuesday" with the password "manfriday"
+would look like:
+
+Chr$(5)+Chr$(7)+"tuesday"+Chr$(9)+"manfriday"
+5 7 tuesday 9 manfriday
+VERSION = 5
+ULEN    = 7
+UNAME   = tuesday
+PLEN    = 9
+PASSWD  = manfriday
+
+The server will respond to this with a simple 2 byte string. Like so:
+
+VERSION = Should just be 5, if not it's an instant failure.
+STATUS  = If successful, this will be 0, if otherwise consider it a failed login.
+
+So Chr$(5)+Chr$(0) would indicate success, anything else is failure.
+
+--------------------------------------------------------------------------------------
+(C) Copyright 2000, Rick Hodger.  All rights reserved.
+E-Mail: rick@thehub.u-net.com
+Web:    http://www.thehub.u-net.com/
+
+Permission is given to the BlitzList creator, Aminet and any Magazines placing
+such things on cover mounted media.
+
+Please ask for permission before recreating this document for any other method of
+distribution.
+
+Information on the SOCKS v5 protocol taken from RFC 1928
+Information on user authentication for SOCKS v4 taken from RFC 1929

@@ -1,0 +1,610 @@
+DEFINITION FOR AMIGALIB MODULE Resources ;
+
+FROM SYSTEM	IMPORT ADDRESS, BADDRESS, STRING, SHORTSET, LONGSET ;
+FROM Exec	IMPORT Node , Message, Library, LibraryPtr, List, Interrupt,
+		       InterruptPtr, ResidentPtr, TaskPtr, LIB_BASE,
+		       LIB_VECTSIZE ;
+
+FROM Dos	IMPORT BSTRING, FileLockPtr, FileSysStartupMsgPtr ;
+
+TYPE
+  CardHandlePtr			= POINTER TO CardHandle ;
+  DeviceTDataPtr 		= POINTER TO DeviceTData ;
+  CardMemoryMapPtr 		= POINTER TO CardMemoryMap ;
+  TP_AmigaXIPPtr 		= POINTER TO TP_AmigaXIPPtr ;
+  DiscResourceUnitPtr 		= POINTER TO DiscResourceUnit ;
+  DiscResourcePtr 		= POINTER TO DiscResource ;
+
+  FileSysResourcePtr 		= POINTER TO FileSysResource ;
+  FileSysEntryPtr 		= POINTER TO FileSysEntry ;
+  MathIEEEResourcePtr 		= POINTER TO MathIEEEResource ;
+
+CONST
+(* BattClock resource name strings. *)
+  BATTCLOCKNAME	= "battclock.resource" ;
+
+(* BattMem resource name strings *)
+  BATTMEMNAME	= "battmem.resource" ;
+
+(* BattMem Amiga specific bit definitions *)
+
+(* Amiga specific bits in the battery-backedup ram.	*)
+(* Bits 0 to 31, inclusive				*)
+
+
+(* AMIGA_AMNESIA						*)
+(*								*)
+(*	The battery-backedup memory has had a memory loss.	*)
+(*	This bit is used as a flag that the user should be	*)
+(*	notified that all battery-backed bit have been		*)
+(*	reset and that some attention is required. Zero		*)
+(*	indicates that a memory loss has occured.		*)
+
+
+CONST
+  BATTMEM_AMIGA_AMNESIA_ADDR	= 0 ;
+  BATTMEM_AMIGA_AMNESIA_LEN	= 1 ;
+
+
+(* SCSI_TIMEOUT							*)
+(*								*)
+(*	adjusts the timeout value for SCSI device selection. A  *)
+(*	value of 0 will produce short timeouts (128ms) while a  *)
+(*	value of 1 produces long timeouts (2 sec). This is used *)
+(*	for SeaCrate drives (and some Maxtors apparently) that	*)
+(*	don`t respond to selection until they are fully spun up *)
+(*	and intialised.						*)
+
+  BATTMEM_SCSI_TIMEOUT_ADDR	= 1 ;
+  BATTMEM_SCSI_TIMEOUT_LEN	= 1 ;
+
+
+(* SCSI_LUNS							*)
+(*								*)
+(*	Determines if the controller attempts to access logical *)
+(*	units above 0 at any given SCSI address.  This prevents *)
+(*	problems with drives that respond to ALL LUN addresses  *)
+(*	(instead of only 0 like they should).  Default value is *)
+(*	0 meaning don't support LUNs.				*)
+
+  BATTMEM_SCSI_LUNS_ADDR	= 2 ;
+  BATTMEM_SCSI_LUNS_LEN		= 1 ;
+
+(*	BattMem Amix specific bit definitions. *)
+
+(*	See Amix documentation for these bit definitions	*)
+(*	Bits 32 to 63, inclusive				*)
+
+(*	BattMem shared specific bit definitions. *)
+
+(* Shared bits in the battery-backedup ram.			*)
+(*	Bits 64 and above					*)
+
+(* SHARED_AMNESIA						*)
+(*								*)
+(*	The battery-backedup memory has had a memory loss.	*)
+(*	This bit is used as a flag that the user should be	*)
+(*	notified that all battery-backed bit have been		*)
+(*	reset and that some attention is required. Zero		*)
+(*	indicates that a memory loss has occured.		*)
+
+  BATTMEM_SHARED_AMNESIA_ADDR	= 64 ;
+  BATTMEM_SHARED_AMNESIA_LEN	= 1  ;
+
+
+(* SCSI_HOST_ID								  *)
+(*									  *)
+(*		a 3 bit field (0-7) that is stored in complemented form	  *)
+(*		(this is so that default value of 0 really means 7)	  *)
+(*		It's used to set the A3000 controllers SCSI ID (on reset) *)
+
+  BATTMEM_SCSI_HOST_ID_ADDR	= 65 ;
+  BATTMEM_SCSI_HOST_ID_LEN	=  3 ;
+
+
+(* SCSI_SYNC_XFER							*)
+(*									*)
+(*		determines if the driver should initiate synchronous	*)
+(*		transfer requests or leave it to the drive to send the	*)
+(*		first request.	This supports drives that crash or	*)
+(*		otherwise get confused when presented with a sync xfer	*)
+(*		message.  Default=0=sync xfer not initiated.		*)
+
+  BATTMEM_SCSI_SYNC_XFER_ADDR	= 68 ;
+  BATTMEM_SCSI_SYNC_XFER_LEN	=  1 ;
+
+(* SCSI_FAST_SYNC							      *)
+(*									      *)
+(*		determines if the driver should initiate fast synchronous     *)
+(*		transfer requests (>5MB/s) instead of older <=5MB/s requests. *)
+(*		Note that this has no effect if synchronous transfers are not *)
+(*		negotiated by either side.				      *)
+(*		Default=0=fast sync xfer used.				      *)
+
+  BATTMEM_SCSI_FAST_SYNC_ADDR	= 69 ;
+  BATTMEM_SCSI_FAST_SYNC_LEN 	=  1 ;
+
+(* SCSI_TAG_QUEUES							   *)
+(*									   *)
+(*		determines if the driver should use SCSI-2 tagged queuing  *)
+(*		which allows the drive to accept and reorder multiple read *)
+(*		and write requests.					   *)
+(*		Default=0=tagged queuing NOT enabled			   *)
+
+  BATTMEM_SCSI_TAG_QUEUES_ADDR	= 70 ;
+  BATTMEM_SCSI_TAG_QUEUES_LEN	=  1 ;
+
+(* card.resource include file *)
+
+CONST
+  CARDRESNAME = "card.resource" ;
+
+(* Structures used by the card.resource	*)
+
+TYPE
+  CardHandle = RECORD
+    cah_CardNode	: Node ;
+    cah_CardRemoved	: InterruptPtr ;
+    cah_CardInserted	: InterruptPtr ;
+    cah_CardStatus	: InterruptPtr ;
+    cah_CardFlags	: SHORTSET ;
+  END ;
+
+  DeviceTData = RECORD
+    dtd_DTsize  : LONGINT ;	(* Size in bytes		*)
+    dtd_DTspeed : LONGINT ;	(* Speed in nanoseconds		*)
+    dtd_DTtype  : SHORTCARD ;	(* Type of card			*)
+    dtd_DTflags : SHORTSET ;	(* Other flags			*)
+  END ;
+
+  CardMemoryMap = RECORD
+    cmm_CommonMemory	 : ADDRESS ;
+    cmm_AttributeMemory  : ADDRESS ;
+    cmm_IOMemory	 : ADDRESS ;
+
+(* Extended for V39 - These are the size of the memory spaces above *)
+
+    cmm_CommonMemSize	 : LONGINT ;
+    cmm_AttributeMemSize : LONGINT ;
+    cmm_IOMemSize	 : LONGINT ;
+  END ;
+
+(* CardHandle.cah_CardFlags for OwnCard() function *)
+
+CONST
+  CARDB_RESETREMOVE	= 0 ;
+  CARDF_RESETREMOVE	= {CARDB_RESETREMOVE} ;
+
+  CARDB_IFAVAILABLE	= 1 ;
+  CARDF_IFAVAILABLE	= {CARDB_IFAVAILABLE} ;
+
+  CARDB_DELAYOWNERSHIP	= 2 ;
+  CARDF_DELAYOWNERSHIP	= {CARDB_DELAYOWNERSHIP} ;
+
+  CARDB_POSTSTATUS	= 3 ;
+  CARDF_POSTSTATUS	= {CARDB_POSTSTATUS} ;
+
+(* ReleaseCreditCard() function flags *)
+
+  CARDB_REMOVEHANDLE	= 0 ;
+  CARDF_REMOVEHANDLE	= {CARDB_REMOVEHANDLE} ;
+
+(* ReadStatus() return flags *)
+
+  CARD_STATUSB_CCDET	= 6 ;
+  CARD_STATUSF_CCDET	= {CARD_STATUSB_CCDET} ;
+
+  CARD_STATUSB_BVD1	= 5 ;
+  CARD_STATUSF_BVD1	= {CARD_STATUSB_BVD1} ;
+
+  CARD_STATUSB_SC	= 5 ;
+  CARD_STATUSF_SC	= {CARD_STATUSB_SC} ;
+
+  CARD_STATUSB_BVD2	= 4 ;
+  CARD_STATUSF_BVD2	= {CARD_STATUSB_BVD2} ;
+
+  CARD_STATUSB_DA	= 4 ;
+  CARD_STATUSF_DA	= {CARD_STATUSB_DA} ;
+
+  CARD_STATUSB_WR	= 3 ;
+  CARD_STATUSF_WR	= {CARD_STATUSB_WR} ;
+
+  CARD_STATUSB_BSY	= 2 ;
+  CARD_STATUSF_BSY	= {CARD_STATUSB_BSY} ;
+
+  CARD_STATUSB_IRQ	= 2 ;
+  CARD_STATUSF_IRQ	= {CARD_STATUSB_IRQ} ;
+
+(* CardProgramVoltage() defines *)
+
+  CARD_VOLTAGE_0V	= 0 ;	(* Set to default; may be the same as 5V *)
+  CARD_VOLTAGE_5V	= 1 ;
+  CARD_VOLTAGE_12V	= 2 ;
+
+(* CardMiscControl() defines *)
+
+  CARD_ENABLEB_DIGAUDIO	= 1 ;
+  CARD_ENABLEF_DIGAUDIO	= {CARD_ENABLEB_DIGAUDIO} ;
+
+  CARD_DISABLEB_WP	= 3 ;
+  CARD_DISABLEF_WP	= {CARD_DISABLEB_WP} ;
+
+(* New CardMiscControl() bits for V39 card.resource.  Use these bits to set, *)
+(* or clear status change interrupts for BVD1/SC, BVD2/DA, and BSY/IRQ.	     *)
+(* Write-enable/protect change interrupts are always enabled.  The defaults  *)
+(* are unchanged (BVD1/SC is enabled, BVD2/DA is disabled, and BSY/IRQ is    *)
+(*  enabled).								     *)
+(*									     *)
+(* IMPORTANT -- Only set these bits for V39 card.resource or greater (check  *)
+(* resource base VERSION)						     *)
+
+CONST
+  CARD_INTB_SETCLR	= 7 ;
+  CARD_INTF_SETCLR	= {CARD_INTB_SETCLR} ;
+
+  CARD_INTB_BVD1	= 5 ;
+  CARD_INTF_BVD1	= {CARD_INTB_BVD1} ;
+
+  CARD_INTB_SC		= 5 ;
+  CARD_INTF_SC		= {CARD_INTB_SC} ;
+
+  CARD_INTB_BVD2	= 4 ;
+  CARD_INTF_BVD2	= {CARD_INTB_BVD2} ;
+
+  CARD_INTB_DA		= 4 ;
+  CARD_INTF_DA		= {CARD_INTB_DA} ;
+
+  CARD_INTB_BSY		= 2 ;
+  CARD_INTF_BSY		= {CARD_INTB_BSY} ;
+
+  CARD_INTB_IRQ		= 2 ;
+  CARD_INTF_IRQ		= {CARD_INTB_IRQ} ;
+
+
+(* CardInterface() defines *)
+
+  CARD_INTERFACE_AMIGA_0 = 0 ;
+
+(* Tuple for Amiga execute-in-place software (e.g., games, or other	*)
+(* such software which wants to use execute-in-place software stored	*)
+(* on a credit-card, such as a ROM card).				*)
+(*									*)
+(* See documentatin for IfAmigaXIP().					*)
+
+CONST
+  CISTPL_AMIGAXIP = 091H ;
+
+TYPE
+  TP_AmigaXIP = RECORD
+    TPL_CODE	: SHORTCARD ;
+    TPL_LINK	: SHORTCARD ;
+    TP_XIPLOC	: ARRAY [0..3] OF SHORTCARD ;
+    TP_XIPFLAGS : SHORTSET ;
+    TP_XIPRESRV	: SHORTCARD ;
+  END ;
+
+(*	; The XIPFLAGB_AUTORUN bit means that you want the machine	*)
+(*	; to perform a reset if the execute-in-place card is inserted	*)
+(*	; after DOS has been started.  The machine will then reset,	*)
+(*	; and execute your execute-in-place code the next time around.	*)
+(*	;								*)
+(*	; NOTE -- this flag may be ignored on some machines, in which	*)
+(*	; case the user will have to manually reset the machine in the	*)
+(*	; usual way.							*)
+
+CONST
+  XIPFLAGSB_AUTORUN = 0 ;
+  XIPFLAGSF_AUTORUN = {XIPFLAGSB_AUTORUN} ;
+
+(* Cia resource name strings. *)
+
+CONST
+  CIAANAME = "ciaa.resource" ;
+  CIABNAME = "ciab.resource" ;
+
+(* cia base definitions *)
+
+(* There is no public information in CiaBase *)
+
+(* disk.h -- external declarations for the disk resource *)
+
+(*============================================================================
+|
+| Resource structures
+|
+=============================================================================*)
+
+TYPE
+  DiscResourceUnit = RECORD
+    dru_Message		: Message   ;
+    dru_DiscBlock	: Interrupt ;
+    dru_DiscSync	: Interrupt ;
+    dru_Index		: Interrupt ;
+  END ;
+
+  DiscResource = RECORD
+    dr_Library 		: Library ;
+    dr_Current		: DiscResourceUnitPtr ;
+    dr_Flags		: SHORTSET ;
+    dr_pad		: SHORTCARD ;
+    dr_SysLib		: LibraryPtr ;
+    dr_CiaResource	: LibraryPtr ;
+    dr_UnitID		: ARRAY [0..3] OF LONGINT ;
+    dr_Waiting		: List ;
+    dr_DiscBlock	: Interrupt ;
+    dr_DiscSync		: Interrupt ;
+    dr_Index		: Interrupt ;
+    dr_CurrTask 	: TaskPtr ;
+  END ;
+
+CONST
+(* dr_Flags entries *)
+  DRB_ALLOC0	= 0 ;	(* unit zero is allocated	*)
+  DRB_ALLOC1	= 1 ;	(* unit one is allocated	*)
+  DRB_ALLOC2	= 2 ;	(* unit two is allocated	*)
+  DRB_ALLOC3	= 3 ;	(* unit three is allocated	*)
+  DRB_ACTIVE	= 7 ;	(* is the disc currently busy?	*)
+
+  DRF_ALLOC0	= {0} ;	(* unit zero is allocated	*)
+  DRF_ALLOC1	= {1} ;	(* unit one is allocated	*)
+  DRF_ALLOC2	= {2} ;	(* unit two is allocated	*)
+  DRF_ALLOC3	= {3} ;	(* unit three is allocated	*)
+  DRF_ACTIVE	= {7} ;	(* is the disc currently busy?	*)
+
+(*==========================================================================
+|
+| Hardware Magic
+|
+===========================================================================*)
+
+  DSKDMAOFF	= 04000H ;	(* idle command for dsklen register *)
+
+(*=========================================================================
+|
+| Resource specific commands
+|
+=========================================================================*)
+
+(*
+ * DISKNAME is a generic macro to get the name of the resource.
+ * This way if the name is ever changed you will pick up the
+ *  change automatically.
+ *)
+
+CONST
+  DISKNAME	= "disk.resource" ;
+
+  DR_ALLOCUNIT	= (LIB_BASE - 0*LIB_VECTSIZE) ;
+  DR_FREEUNIT	= (LIB_BASE - 1*LIB_VECTSIZE) ;
+  DR_GETUNIT	= (LIB_BASE - 2*LIB_VECTSIZE) ;
+  DR_GIVEUNIT	= (LIB_BASE - 3*LIB_VECTSIZE) ;
+  DR_GETUNITID	= (LIB_BASE - 4*LIB_VECTSIZE) ;
+  DR_READUNITID	= (LIB_BASE - 5*LIB_VECTSIZE) ;
+
+  DR_LASTCOMM	= (DR_READUNITID) ;
+
+(*=======================================================================
+|
+| drive types
+|
+========================================================================*)
+
+CONST
+  DRT_AMIGA	= 000000000H ;
+  DRT_37422D2S	= 055555555H ;
+  DRT_EMPTY	= 0FFFFFFFFH ;
+  DRT_150RPM	= 0AAAAAAAAH ;
+
+(* FileSystem.resource description *)
+
+CONST
+  FSRNAME = "FileSystem.resource" ;
+
+TYPE
+  FileSysResource = RECORD
+    fsr_Node		: Node ;   (* on resource list			*)
+    fsr_Creator		: STRING ; (* name of creator of this resource	*)
+    fsr_FileSysEntries	: List ;   (* list of FileSysEntry structs	*)
+  END ;
+
+  FileSysEntry = RECORD
+    fse_Node		: Node ;	(* on fsr_FileSysEntries list	      *)
+					(* ln_Name is of creator of this entry*)
+    fse_DosType		: LONGINT ;	(* DosType of this FileSys	      *)
+    fse_Version		: LONGINT ;	(* Version of this FileSys	      *)
+
+    fse_PatchFlags	: LONGSET ;	(* bits set for those of the following*)
+    					(* that need to be substituted into a *)
+    					(* standard device node for this file *)
+    					(* system: e.g. 0x180 for substitute  *)
+    					(* SegList & GlobalVec		      *)
+
+    fse_Type		: LONGINT ;	(* device node type: zero	      *)
+    fse_Task		: TaskPtr ;	(* standard dos "task" field	      *)
+    fse_Lock		: FileLockPtr ;	(* not used for devices: zero	      *)
+    fse_Handler		: BSTRING ;	(* filename to loadseg (if SegList=0) *)
+    fse_StackSize	: LONGINT ;	(* stacksize to use when starting task*)
+    fse_Priority	: LONGINT ;	(* task priority when starting task   *)
+    fse_Startup		: FileSysStartupMsgPtr ;
+    					(* startup msg for disks	      *)
+    fse_SegList		: BADDRESS ;	(* code to run to start new task      *)
+    fse_GlobalVec	: BADDRESS ;	(* BCPL global vec. when starting task*)
+    (* no more entries need exist than those implied by fse_PatchFlags *)
+  END ;
+
+(*	Data structure returned by OpenResource of:	*)
+(*	"MathIEEE.resource"				*)
+
+(*	The 'Init' entries are only used if the corresponding		*)
+(*	bit is set in the Flags field.					*)
+(*									*)
+(*	So if you are just a 68881, you do not need the Init stuff	*)
+(* 	just make sure you have cleared the Flags field.		*)
+(*									*)
+(*	This should allow us to add Extended Precision later.		*)
+(*									*)
+(*	For Init users, if you need to be called whenever a task	*)
+(*	opens this library for use, you need to change the appropriate	*)
+(*	entries in MathIEEELibrary.					*)
+
+TYPE
+  MathIEEEResource = RECORD
+    MathIEEEResource_Node		: Node ;
+    MathIEEEResource_Flags		: BITSET ;
+    MathIEEEResource_BaseAddr		: ADDRESS ; (* ptr to 881 if exists *)
+    MathIEEEResource_DblBasInit		: PROC ;
+    MathIEEEResource_DblTransInit	: PROC ;
+    MathIEEEResource_SglBasInit		: PROC ;
+    MathIEEEResource_SglTransInit	: PROC ;
+    MathIEEEResource_ExtBasInit		: PROC ;
+    MathIEEEResource_ExtTransInit	: PROC ;
+  END ;
+
+CONST
+  (* definations for MathIEEEResource_FLAGS *)
+   MATHIEEERESOURCEF_DBLBAS	= {0} ;
+   MATHIEEERESOURCEF_DBLTRANS	= {1} ;
+   MATHIEEERESOURCEF_SGLBAS	= {2} ;
+   MATHIEEERESOURCEF_SGLTRANS	= {3} ;
+   MATHIEEERESOURCEF_EXTBAS	= {4} ;
+   MATHIEEERESOURCEF_EXTTRANS	= {5} ;
+
+(* Unit number definitions for "misc.resource" *)
+
+(* Unit number definitions.  Ownership of a resource grants low-level	    *)
+(* bit access to the hardware registers.  You are still obligated to follow *)
+(* the rules for shared access of the interrupt system (see		    *)
+(* exec.library/SetIntVector or cia.resource as appropriate).		    *)
+
+CONST
+  MR_SERIALPORT	   = 0 ; (* Amiga custom chip serial port registers	    *)
+			 (* (SERDAT,SERDATR,SERPER,ADKCON, and interrupts)  *)
+
+  MR_SERIALBITS	   = 1 ; (* Serial control bits (DTR,CTS, etc.)  *)
+
+  MR_PARALLELPORT  = 2 ; (* The 8 bit parallel data port	 *)
+			 (* (CIAAPRA & CIAADDRA only!)		 *)
+
+  MR_PARALLELBITS  = 3 ; (* All other parallel bits & interrupts *)
+			 (* (BUSY,ACK,etc.)			 *)
+
+  (* Library vector offset definitions *)
+
+  MR_ALLOCMISCRESOURCE = LIB_BASE		; (* -6  *)
+  MR_FREEMISCRESOURCE  = LIB_BASE-LIB_VECTSIZE	; (* -12 *)
+
+CONST
+  MISCNAME = "misc.resource" ;
+
+  (* potgo resource name *)
+
+CONST
+  POTGONAME = "potgo.resource" ;
+
+(*===================== battclock =====================*)
+
+VAR
+  BattClockBase : ADDRESS ;
+
+PROCEDURE ResetBattClock( ) ;
+PROCEDURE ReadBattClock( ) : LONGINT ;
+PROCEDURE WriteBattClock( time : LONGINT ) ;
+
+(*====================== battmem ======================*)
+
+VAR
+  BattMemBase : ADDRESS ;
+
+PROCEDURE ObtainBattSemaphore( ) ;
+PROCEDURE ReleaseBattSemaphore( ) ;
+
+PROCEDURE ReadBattMem( buffer : ADDRESS ;
+		       offset : LONGINT ; length : LONGINT ) : LONGINT ;
+
+PROCEDURE WriteBattMem( buffer : ADDRESS ;
+			offset : LONGINT ;
+			length : LONGINT ) : LONGINT ;
+
+(*===================== cardres =======================*)
+
+VAR
+  CardResource : ADDRESS ;
+
+PROCEDURE OwnCard( handle : CardHandlePtr ) : CardHandlePtr ;
+PROCEDURE ReleaseCard( handle : CardHandlePtr ; flags : LONGSET ) ;
+PROCEDURE GetCardMap( ) : CardMemoryMapPtr ;
+PROCEDURE BeginCardAccess( handle : CardHandlePtr) : BOOLEAN ;
+PROCEDURE EndCardAccess( handle : CardHandlePtr ) : BOOLEAN ;
+PROCEDURE ReadCardStatus( ) : SHORTSET ;
+PROCEDURE CardResetRemove( handle : CardHandlePtr ; flag : LONGSET ) : BOOLEAN ;
+
+PROCEDURE CardMiscControl( handle : CardHandlePtr ;
+			   control_bits : LONGSET ) : SHORTCARD ;
+
+PROCEDURE CardAccessSpeed( handle : CardHandlePtr ;
+			   nanoseconds : LONGINT ) : LONGINT ;
+
+PROCEDURE CardProgramVoltage( handle  : CardHandlePtr ;
+			      voltage : LONGINT ) : LONGINT ;
+
+PROCEDURE CardResetCard( handle : CardHandlePtr ) : BOOLEAN ;
+
+PROCEDURE CopyTuple( handle    : CardHandlePtr ;
+		     buffer    : ADDRESS ;
+		     tuplecode : LONGINT ;
+		     size      : LONGINT ) : BOOLEAN ;
+
+PROCEDURE DeviceTuple( tuple_data : ADDRESS ;
+		       storage    : DeviceTDataPtr ) : LONGINT;
+
+PROCEDURE IfAmigaXIP( handle : CardHandlePtr ) : ResidentPtr ;
+PROCEDURE CardForceChange( ) : BOOLEAN ;
+PROCEDURE CardChangeCount( ) : LONGINT ;
+PROCEDURE CardInterface( ) : LONGINT ;
+
+(*========================= CIA ========================*)
+
+PROCEDURE AddICRVector( resource     : LibraryPtr ;
+			iCRBit	     : LONGINT ;
+			interruptPtr : InterruptPtr ) : InterruptPtr ;
+
+PROCEDURE RemICRVector( resource  : LibraryPtr ;
+			iCRBit	  : LONGINT ;
+			interrupt : InterruptPtr ) ;
+
+PROCEDURE AbleICR( resource : LibraryPtr ; mask : LONGSET ) : INTEGER ;
+PROCEDURE SetICR ( resource : LibraryPtr ; mask : LONGSET ) : INTEGER ;
+
+(*========================= disk ======================*)
+
+VAR
+  DiskBase : ADDRESS ;
+
+PROCEDURE AllocUnit( unitNum : LONGINT ) : BOOLEAN ;
+PROCEDURE FreeUnit( unitNum : LONGINT ) ;
+PROCEDURE GetUnit( unitPointer : DiscResourceUnitPtr ) : DiscResourceUnitPtr ;
+PROCEDURE GiveUnit( ) ;
+PROCEDURE GetUnitID( unitNum : LONGINT ) : LONGINT ;
+
+(*------ new for V37 ------*)
+
+PROCEDURE ReadUnitID( unitNum : LONGINT ) : LONGINT ;
+
+(*========================= misc ======================*)
+
+VAR
+  MiscBase : ADDRESS ;
+
+PROCEDURE AllocMiscResource( unitNum : LONGINT ; name : STRING ) : STRING ;
+PROCEDURE FreeMiscResource ( unitNum : LONGINT ) ;
+
+(*========================= potgo =====================*)
+
+VAR
+  PotgoBase : ADDRESS ;
+
+PROCEDURE AllocPotBits( bits : LONGSET ) : CARDINAL ;
+PROCEDURE FreePotBits ( bits : LONGSET ) ;
+PROCEDURE WritePotgo  ( word : LONGSET ; mask : LONGSET ) ;
+
+END Resources.

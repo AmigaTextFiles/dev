@@ -1,0 +1,332 @@
+/* Scheme In One Define.
+ 
+The garbage collector, the name and other parts of this program are
+
+ *                     COPYRIGHT (c) 1989 BY                              *
+ *      PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+
+Conversion  to  full scheme standard, characters, vectors, ports, complex &
+rational numbers, and other major enhancments by
+
+ *      Scaglione Ermanno, v. Pirinoli 16 IMPERIA P.M. 18100 ITALY        * 
+
+Permission  to use, copy, modify, distribute and sell this software and its
+documentation  for  any purpose and without fee is hereby granted, provided
+that  the  above  copyright  notice appear in all copies and that both that
+copyright   notice   and   this  permission  notice  appear  in  supporting
+documentation,  and that the name of Paradigm Associates Inc not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.
+
+PARADIGM  DISCLAIMS  ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL  IMPLIED  WARRANTIES  OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+PARADIGM  BE  LIABLE  FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <math.h>
+#include <limits.h>
+
+#include "siod.h"
+
+
+
+LISP leval_if(LISP *pform,LISP *penv)
+{LISP args,env;
+ args = cdr(*pform);
+ env = *penv;
+ if NNULLP(leval(car(args),env)) 
+    *pform = car(cdr(args)); 
+ else 
+    *pform = car(cdr(cdr(args)));
+ return(truth);}
+
+LISP leval_while(LISP *pform,LISP *penv)
+{LISP test,body,env,ans;
+ ans = NIL;
+ test = car(cdr(*pform));
+ body = cdr(cdr(*pform));
+ env = *penv;
+ while(NNULLP(leval(test,env)))
+    ans = leval(cons(sym_progn,body),env);
+ *pform = ans;
+ return(NIL);}
+
+LISP env_prep(LISP env)
+{LISP l,tmp;
+ LISP res = NIL;
+ for(l=env;CONSP(l);l=CDR(l))
+   {tmp = CAR(l);
+    res = cons(cons(car(tmp),cons(car(cdr(cdr(tmp))),cons(NIL,NIL))),res);}
+ return(res);}
+
+LISP leval_do(LISP *pform,LISP *penv)
+{LISP vars,test,exit,body,env,ans;
+ ans = NIL;
+ vars = car(cdr(*pform));
+ test = car(cdr(cdr(*pform)));
+ exit = cdr(test);
+ test = car(test);
+ body = cdr(cdr(cdr(*pform)));
+ if(NULLP(cdr(body)))
+    body = car(body);
+ else
+    body = cons(sym_progn,body);
+ env = *penv;
+ env_test(vars);
+ env = envcons(leval_let_env(vars,env),env);
+ *penv = env;
+ vars = env_prep(vars);
+ while(NULLP(ans = leval(test,env)))
+   {leval(body,env);
+   do_increment(vars,env);}
+ if(NULLP(exit))
+   {*pform = ans;
+    return NIL;}
+ else 
+   {if(NULLP(cdr(exit)))
+      *pform = car(exit);
+    else 
+      *pform = cons(sym_progn,exit);}
+ return(truth);}
+
+void do_increment(LISP vars,LISP env)
+{LISP l,tmp,inc;
+ for(l=vars;CONSP(l);l=CDR(l))
+   {tmp = CAR(l);
+    inc = CAR(CDR(tmp));
+    if(NNULLP(inc))
+       CAR(CDR(CDR(tmp))) = leval(inc,env);}
+ for(l=vars;CONSP(l);l=CDR(l))
+   {tmp = CAR(l);
+    inc = CAR(CDR(tmp));
+    if(NNULLP(inc))
+       setvar(CAR(tmp),CAR(CDR(CDR(tmp))),env);}}
+
+LISP leval_foreach(LISP args,LISP env)
+{LISP tmp,ptr;
+ tmp = leval(car(cdr(args)),env);
+ ptr = leval(car(args),env);
+ if (NULLP(tmp))
+   return(NIL);
+  if(!procp(ptr))
+   err("for-each",ptr,ERR_FIRST | ERR_NPRO);
+ if (NCONSP(tmp))
+   err("for-each",tmp,ERR_SECOND | ERR_NPAI);
+ while(CONSP(tmp))
+  {apply_proc(ptr,cons(CAR(tmp),NIL),env);
+   tmp = CDR(tmp);}
+ if (NNULLP(tmp))
+   err("improper list to for-each",tmp,ERR_GEN);
+ return(NIL);}
+
+LISP leval_map(LISP args,LISP env)
+{LISP tmp,ptr;
+ LISP y,*z;
+ tmp = leval(car(cdr(args)),env);
+ ptr = leval(car(args),env);
+ if (NULLP(tmp))
+   return(NIL);
+ if(!procp(ptr))
+   err("map",ptr,ERR_FIRST | ERR_NPRO);
+ if (NCONSP(tmp))
+   err("map",tmp,ERR_SECOND | ERR_NPAI);
+ y = NIL;
+ z = &y;
+ while(CONSP(tmp))
+  {*z = cons(apply_proc(ptr,cons(CAR(tmp),NIL),env),NIL);
+   tmp = CDR(tmp);
+   z = &CDR(*z);}
+ if (NNULLP(tmp))
+   err("improper list to map",tmp,ERR_GEN);
+ return(y);}
+
+LISP leval_when(LISP *pform,LISP *penv)
+{LISP args,env;
+ args = cdr(*pform);
+ env = *penv;
+ if NNULLP(leval(car(args),env)) 
+   {if(NULLP(cdr(cdr(args))))
+       args = car(cdr(args));
+    else
+       args = cons(sym_progn,cdr(args));
+    *pform = args;
+    return(truth);}
+ *pform = NIL; 
+ return(NIL);}
+
+LISP leval_case(LISP *pform,LISP *penv)
+{LISP args,env,exp,test,tmp;
+ args = cdr(*pform);
+ env = *penv;
+ exp = leval(car(args),env);
+ args = cdr(args);
+ while CONSP(args)
+  {tmp = car(CAR(args));
+   if(NCONSP(tmp))
+    test = EQ(tmp,sym_else) ? truth : eql(exp,tmp);
+   else
+    test = memv(exp,tmp);
+   if(NNULLP(test))
+    {tmp=cdr(CAR(args));
+     if(NULLP(cdr(tmp)))
+       args = car(tmp);
+    else
+       args = cons(sym_progn,tmp);
+    *pform = args; 
+    return(truth);}
+   args = CDR(args);}
+ *pform = NIL; 
+ return(NIL);}
+
+LISP leval_cond(LISP *pform,LISP *penv)
+{LISP args,env,tmp;
+ args = cdr(*pform);
+ env = *penv;
+ while CONSP(args)
+  {tmp = CAR(args);
+   if(EQ(car(tmp),sym_else) || NNULLP(leval(car(tmp),env)))
+    {if(NULLP(cdr(cdr(tmp))))
+       args = car(cdr(tmp));
+    else
+       args = cons(sym_progn,cdr(tmp));
+    *pform = args; 
+    return(truth);}
+   args = CDR(args);}
+ *pform = NIL; 
+ return(NIL);}
+                         
+LISP leval_progn(LISP *pform,LISP *penv)
+{LISP env,l,next;
+ env = *penv;
+ l = cdr(*pform);
+ next = cdr(l);
+ while(CONSP(next)) {leval(car(l),env);l=next;next=CDR(next);}
+ *pform = car(l); 
+ return(truth);}
+
+LISP leval_progn0(LISP *pform,LISP *penv)
+{LISP env,l,res;
+ env = *penv;
+ l = cdr(*pform);
+ res = leval(car(l),env); 
+ l = cdr(l);
+ while(CONSP(l)) {leval(CAR(l),env);l=CDR(l);}
+ *pform = res; 
+ return(truth);}
+
+LISP leval_or(LISP *pform,LISP *penv)
+{LISP env,l,next,val;
+ env = *penv;
+ l = cdr(*pform);
+ next = cdr(l);
+ while(CONSP(next))
+   {val = leval(car(l),env);
+    if NNULLP(val) {*pform = val; return(NIL);}
+    l=next;next=CDR(next);}
+ *pform = car(l); 
+ return(truth);}
+
+LISP leval_and(LISP *pform,LISP *penv)
+{LISP env,l,next;
+ env = *penv;
+ l = cdr(*pform);
+ if NULLP(l) {*pform = truth; return(NIL);}
+ next = cdr(l);
+ while(CONSP(next))
+   {if NULLP(leval(car(l),env)) {*pform = NIL; return(NIL);}
+    l=next;next=CDR(next);}
+ *pform = car(l); 
+ return(truth);}
+
+LISP leval_catch(LISP args,LISP env)
+{struct catch_frame frame;
+ int k;
+ LISP l,val;
+ val = NIL;
+ frame.tag = leval(car(args),env);
+ frame.next = catch_framep;
+ k = setjmp(frame.cframe);
+ catch_framep = &frame;
+ if (k == 2)
+   {catch_framep = frame.next;
+    return(frame.retval);}
+ for(l=cdr(args); CONSP(l); l = CDR(l))
+   val = leval(CAR(l),env);
+ catch_framep = frame.next;
+ return(val);}
+
+LISP lthrow(LISP tag,LISP value)
+{struct catch_frame *l;
+ for(l=catch_framep; l; l = (*l).next)
+   if EQ((*l).tag,tag)
+     {(*l).retval = value;
+      longjmp((*l).cframe,2);}
+ err("no *catch found with this tag",tag,ERR_GEN);
+ return(NIL);}
+
+LISP leval_quote(LISP args,LISP env)
+{return(car(args));}
+
+LISP quasiquote_rec(LISP arg,LISP env)
+{LISP res ,*z;
+ LISP tmp,tmp2;
+ if NCONSP(arg) return(arg);
+ res = NIL;
+ z = &res;
+ while(CONSP(arg))
+  {tmp=CAR(arg);
+   if(NCONSP(tmp))
+    {*z = cons(tmp,NIL);
+     z = &CDR(*z);}
+   else if(EQ(cintern("quasiquote"),car(tmp)))
+    {*z = cons(tmp,NIL);
+     z = &CDR(*z);}
+   else if(EQ(cintern("unquote"),car(tmp)))
+    {*z = cons(leval(car(cdr(tmp)),env),NIL);
+     z = &CDR(*z);}
+   else if(EQ(cintern("unquote-splicing"),car(tmp)))
+    {*z = copy_list(leval(car(cdr(tmp)),env));
+     if(NNULLP(*z))
+       {if(NCONSP(*z))
+          err("unquote-splicing",*z,ERR_GEN_ARG | ERR_NPAI);
+        for(tmp2=*z;CONSP(cdr(tmp2));tmp2=cdr(tmp2));
+        z=&tmp2;
+        z = &CDR(*z);}}
+   else if(EQ(cintern("+internal-comma-dot"),car(tmp)))
+    {*z = leval(car(cdr(tmp)),env);
+     if(NNULLP(*z))
+       {if(NCONSP(*z))
+          err("unquote-splicing",*z,ERR_GEN_ARG | ERR_NPAI);
+        for(tmp2=*z;CONSP(cdr(tmp2));tmp2=cdr(tmp2));
+        z=&tmp2;
+        z = &CDR(*z);}}
+   else
+    {*z = cons(quasiquote_rec(tmp,env),NIL);
+     z = &CDR(*z);}
+   arg = cdr(arg);}
+  *z = arg;
+  return(res);}
+
+LISP leval_quasiquote(LISP *pargs,LISP *penv)
+{LISP env,list;
+ env = *penv;
+ list = car(cdr(*pargs));
+ *pargs = cons(sym_quote,cons(quasiquote_rec(list,env),NIL));
+ return(truth);}
+
+LISP quit(void)
+{longjmp(errjmp,2);
+ return(NIL);}
+
+LISP reset(void)
+{longjmp(errjmp,1);
+ return(NIL);}

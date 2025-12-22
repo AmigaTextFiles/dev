@@ -1,0 +1,16 @@
+#define REQ_ENDE 0x1
+#define REQ_ABOUT 0x2
+#define ORDNER.IFF 0x1
+#define WINDOW_MAIN 0x1
+#define WINDOW_MAIN_GADGETS 0x3C
+#define BILD 0x5
+#define LB_UEBERSCHRIFT 0x1
+#define BESCHRIFTUNG 0x6
+#define BT_EASYREQUEST 0x3
+#define STI_VERZEICHNIS 0x39
+#define VB_VERZEICHNIS 0x3A
+#define STI_DATEI 0x27
+#define VB_DATEI 0x28
+#define MN_DATEI 0xFFE0
+#define MN_DATEI_SUB_ABOUT 0xF800
+#define MN_DATEI_SUB_END 0xF840

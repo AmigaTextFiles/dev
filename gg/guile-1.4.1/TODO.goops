@@ -1,0 +1,196 @@
+* Typed slots
+
+* Add downstream slot to <generic>
+
+* <extended-generic> with upstream slot
+
+* (define-extended-generic NAME #:extend GF1 | (list GF2 GF3))
+  <=> (define NAME (make-extended-generic GF1 | (list GF2 GF3)))
+
+* Change generic-function-methods to take upstream/downstream into account
+
+* Ditto for %invalidate-method-cache
+
+* Introduce slot option indicating whether to merge slots or not
+  default = don't merge
+
+* Remove slot-ref/set!
+
+* Generate accessor by default.
+
+* Option to prevent accessor
+
+* Implement apply generic protocol
+
+* New class extended-generic with list of generics slot so that we
+  refer to generics in other modules instead of copying methods
+
+* New special from for definingextending generics and adding methods?
+
+* Introduce new syntax (define-method (foo ...) ...)
+  Announce old syntax as deprecated.
+
+* Extend syntax for `define-generic' so that options can be passed,
+  especially the default and setter options.  Then don't let
+  define-generic automatically pick up default methods any longer.
+
+* Replace compute-get-n-set
+
+* Method compilation:
+
+  0. expand macros!
+  1. accessors --> @slot-ref|set! | proc call
+  2. gf --> code-entry | dispatcher
+  3. apply gf --> code-entry | dispatcher
+  4. next-method call --> code
+  5. next-method reference --> add next-method let
+
+  6. with-slots: slot reference --> @slot-ref|set! | proc call
+  7. with-accessord: accessor ref --> -- " --
+
+  The following would be necessary to remove overhead for matrix
+  setting in (math matrix):
+
+  8. (setter proc) --> proc
+  9. (proc exp1 ...) --> proc body if body uses formals once or
+exp1 ... are atomic
+
+  NOTE: Use slot types if present.
+
+  10. Mark values as newly created/input.  (A function is functional
+      also if it sets a newly created value.)  Mark procedures as
+      functional/imperative.  Call functional procedures at compile
+      time if their value is a constant.
+
+* scm_slot_SCM in C interfac (make sure that the right mark in the
+  layout is set)
+
+* Beware of the next-method dispatch problem!
+
+* with-slots, with-accessors
+
+* Update mop.text
+
+* Optimizations
+
+** Remove assumptions of single-symbol slot definitions from goops.c.
+
+** Implement top-sort and compute-std-cpl in C, use this during
+   bootstrapping and remove Scheme version of compute-std-cpl in
+   goops.scm.
+
+** Don't call intern repeatedly in goops.c (see e.g. CALL_GF).
+
+*** Don't forget to invalidate generic function caches
+when classes are redefined
+
+MDJ 990821 <djurfeldt@nada.kth.se> Why should we do this?
+
+** Strategy for optimization of the MOP
+
+Terminology: Let subprotocol F mean a series of generic function calls
+that starts with a call to generic function F in the MOP.
+
+Ex: The apply-generic is a subprotocol that includes
+compute-applicable-methods and sort-applicable-methods.
+
+It is possible to have a fairly extensive MOP and yet have an
+efficient implementation for the standard case.
+
+Currently, this is the case with the apply-generic protocol: The class
+<generic> has the flag SCM_CLASSF_PURE_GENERIC set.  Instances of this
+class follow an efficient C level implementation of the apply-generic
+protocol, but instances to subclasses of <generic> use the Scheme
+level protocol.
+
+Here is a proposal for a different strategy to achieve the same goal:
+
+Let generic functions belonging to a certain subprotocol be instances
+to a subclass <SUBPROTOCOL-generic> of <generic>.  The idea is that
+the optimized version of the MOP will be used on instances to all
+classes which are "pure" with respect the protocol.  The purity is an
+inherited property.
+
+But, if the user specializes a function M which is an instance of
+<SUBPROTOCOL-generic> to C, C will no longer be "pure".
+
+Example: Let C be a subclass to <generic>.  Normally a function F
+which is an instance of C will be applied using the optimized
+apply-generic protocol.  But, if the user specializes
+compute-applicable-methods to C, C will no longer be "pure" => F will
+be applied using the full MOP.
+
+More concretely, we could allocate an inherited class flag which tells
+that a GF belongs to SUBPROTOCOL.  There is also a class flag which
+tells that a CLASS is "pure" with respect to SUBPROTOCOL.
+
+When the user specializes a function F to a class C, add-method! will
+clear the purity flag of C if F has the SUBPROTOCOL flag set.
+
+This could for example be done by always calling a magic function
+
+  %touch F C
+
+when specializing F to C in the first argument.
+
+It is also necessary to pay attention to the positions of slots so
+that instances of "pure" classes have slots on the positions where the
+optimized protocols expect to find them.
+
+* MOP
+
+** Clean up the MOP with respect to recent changes
+
+** Make no-applicable-method CLOS-like (args)
+
+* Misc
+
+** add compile-method to MOP?
+
+** Class-specific slots: Name: (<class-name> <slot-name>)
+   (Maybe special metaclass?)
+
+I stepped down as GOOPS maintainer since I had the intention to quit
+working with Guile development.  But since I've changed my mind,
+Christian and I decided that I become GOOPS maintainer again.
+
+This means that it is ultimately I and Maciej (since there are plans
+to integrate GOOPS with Guile) who ultimately makes decisions about
+how to change GOOPS.
+
+I'm saying this with the current GOOPS-module system debate in mind,
+because I'd like to guarantee you that we won't make any rash
+decisions about GOOPS design in this respect.
+
+I see the current discussion as a useful play with ideas to elucidate
+problems in GOOPS and perhaps come up with useful new ideas.  But I
+won't include new ideas into GOOPS until I'm sure it is a good move,
+and I can tell you we're very far from that.
+
+
+Still, it is my view that GOOPS has to change further in order to be
+more adapted to the nature of Scheme.
+
+While LISP is "centered around" symbols, Scheme is centered around
+objects.  Because of this, the GOOPS MOP will change to also be
+centered around objects.  E. g., slots will no longer be identified by
+a name, but by a slot definition object.
+
+This means that slot-ref/set! *will* be outdated.  (They are going to
+be supported in the STklos compatibility module, however.)  I know
+that this is a bit controversial, but we have already had a long
+discussion about this in the past.  While that discussion didn't end
+in consensus, the support for this change was stronger.  After long
+consideration, the decision is now made to carry it through.
+
+The canonic way of accessing slots is through accessors.  An accessor
+is a generic function with setter with get and set methods for a
+particular slot specialized to the class carrying the slot.  (This is
+what accessors look like already now.)
+
+/mdj
+
+P.S. I know that several people are now waiting for me to do things.
+     Unfortunately this weekend didn't have as much time for Guile as
+     I had wished.  I promise to make efforts to get new Guile time as
+     soon as possible.

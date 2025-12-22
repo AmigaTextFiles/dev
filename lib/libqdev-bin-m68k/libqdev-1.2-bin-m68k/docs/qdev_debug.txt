@@ -1,0 +1,293 @@
+
+ qdev_debug.txt
+----------------
+
+WARNING! CURRENTLY THERE IS NO WAY TO MAKE THE DEBUGGING SAFE WITH RESIDENT
+OR RESIDENT32 BINARIES! IT WILL WORK THOUGH AS LONG AS THERE IS NO SUBTASK,
+PRIVATE EXCEPTION NOR INTERRUPT CREATION!
+
+
+                                 1. INTRO
+                          =======================
+
+This text file describes 'qdev' own debug facility. While 'QDEVDEBUG[_R]()'
+may look no different than  'kprintf()' from function call point of view it
+really  is  more  than  that.  Let  me  point  out  some  major features by
+commenting on control flags.
+
+   QDEVDBF_IRRELEVANT  -  By stuffing this flag in 'QDEVDEBUGIO()' you tell
+                          'QDEVDEBUG()'  that  its  output is irrelevant at
+                          this time(in this context), so it will store this
+                          very output in the buffer and when it is the time
+                          to show it 'QDEVDEBUG_R()' will trigger relevance
+                          and  so  what  was  unimportant back then will be 
+                          printed up to this point.
+
+   QDEVDBF_IRECURSIVE  -  With this flag it is possible to irrelevance-nest
+                          subroutines   who   would   normally  do  output.
+                          Specifying  this  flag does not necessarily imply
+                          that the output 'this' function generates will be
+                          QDEVDBF_IRRELEVANT . This  is because there  must
+                          be way of providing QDEVDBF_OUTPUTONCE !
+
+   QDEVDBF_OUTPUTONCE  -  When this flag is set then the output from 'this'
+                          function  will  appear  only  once, regardless of 
+                          times  it  was entered. Of course 'QDEVDEBUG_R()'
+                          is able to trigger relevance! Quite  useful thing
+                          when dealing  with callbacks  or interrupts. This
+                          flag   implies   QDEVDBF_IRRELEVANT   after  full
+                          subroutine execution.
+
+   QDEVDBF_NOVOIDTELL  -  Allows  to suppress printout of information about
+                          reaching bottom of the void function.
+
+   QDEVDBF_DONOTSTORE  -  If specified then whole irrelevant output  'this'
+                          function produces will go straight to nil.
+
+   QDEVDBF_STACKTRACE  -  Tells to dump few longs of stack to the output on
+                          function  entry.  Function  arguments  and return
+                          address  can  surely  be  found.  This  is really
+                          symbolic.
+
+   QDEVDBF_UPPERLEVEL  -  This  is  a  very special flag. By setting it you 
+                          tell 'QDEVDEBUG[_R]()'  that current flags should
+                          be applied  in  the subroutine too! This will not
+                          nest. Only first level routines will be affected!
+                          Quite  useful  when you want each  function to do
+                          the output just once, while in a loop.
+
+   QDEVDBF_HEAVYSTEPS  -  Heavy  steps  are  pauses  that will occurr right
+                          after each 'QDEVDEBUG[_R]()'. This is essentially
+                          useful if you need  to stretch the time(currently
+                          1/4th of a second)  a little bit so you can match
+                          wierd Enforcer hits.  Such as those who dont come
+                          with  offset. Please note that heavy stepping  is
+                          global, which  is  to say it will take precedence
+                          at 'this'  point  and will continue until program
+                          is  complete  or function with QDEVDBF_LIGHTSTEPS
+                          is  encountered.  Important!  Heavy stepping does
+                          not  use  timer  I/O  at  all(that  is  why it is
+                          called heavy)!
+                          ---
+                          Sometimes when trying  to cure arbitrated code it
+                          is almost impossible  to use the debugger and not
+                          to cause additional probs, hence this feature.
+
+   QDEVDBF_LIGHTSTEPS  -  The opposite of the above. This causes program to
+                          continue execution without pauses. It it possbile
+                          to specify this along with QDEVDBF_HEAVYSTEPS, so
+                          that  only  code  within  'this' function will be
+                          affected.
+
+   QDEVDBF_NORMALFILL  -  This  should   be  specified  at  the  top  level
+                          function  if  all  the  irrelevant output must be
+                          remembered. By  default each irrelevant output is
+                          being  discarded  on function exit, so that there
+                          is no need  for a huge buffer. If you need to see
+                          what  happened function  earlier as called on the
+                          same level then use  this flag. Currently size of
+                          the debug buffer per program is  8 * 1280 = 10240
+                          bytes.
+
+
+                                 2. USAGE
+                          =======================
+
+Now  when  you are familiar with  extras lets focus on how to apply them to
+your function so it gets affected. A macro called 'QDEVDEBUGIO([flags])' is
+not  only a way of passing flags,  it also carries file name of the object,
+function name,  line number this function ends,  flags(of course) and magic
+identifier.  This way there is no need to rely  on BFD, which requires file
+I/O  and  is rather slow and cannot be used safely from interrupts. At this
+point  you  should  know  that  this macro is not mandatory in order to use
+'QDEVDEBUG()'! Lack of it degrades the output to just output ;-) .
+
+Macro  'QDEVDEBUGIO()'  should always be put at the bottom of the function,
+since it is a 'static'  that must land in code section as near as the start
+of the function so that other statics are first. If that cannot be achieved
+then  you  will  not  be able to use extra features and eventually you will
+notice  that symbols  cannot  be resolved. Following code depicts the right
+usage:
+
+    1 #include <qdev.h>
+    2
+    3 int main(int argc, char **argv)
+    4 {
+    5   QDEVDEBUG(QDEVDBSPACE
+    6             "Turn 'sashimi' on to see the output at all!\n");
+    7
+    8   if (argc >= 2)
+    9   {
+   10     QDEVDEBUG_R(QDEVDBSPACE
+   11         "My predecessor is irrelevant. I decide in here!\n");
+   12   }
+   13
+   14   return 0;
+   15
+   16   QDEVDEBUGIO(QDEVDBF_IRRELEVANT | QDEVDBF_STACKTRACE);
+   17 }
+
+   gcc -O -Wall -fno-inline-functions -finstrument-functions        \
+   -D___QDEV_DEBUGINFO -I/gg/include/qdev myprog.c -o myprog -lqdev
+
+
+If you would compile the above program and run it with no command line args
+then  there  would be no output at all. This is because all the output this
+function is ought to produce is marked irrelevant. Things change when there
+are some command line arguments. Assuming 'sashimi' was started earlier and
+the following input at the prompt, this would appear:
+
+   ./myprog meaningless-argument
+
+"
+Sashimi installed ([Ctrl]+C or "Break 26" to remove)
+[18:18:21] 00 01 IMSG Warning! Output may not reflect current flow!
+[18:18:21] 00 01 ---> FP: 0x01e7bbd0 CA: 0x01e7ba92 LN:      16 FN: myprog.c/main()
+                      SR: 0x020763d4 SA: 0x020724f4 SF:   16104 TC: 0x0202d4c0
+[18:18:21] 00 01      ST: 0x00f9f5be 0x00000002 0x01cd7e20 0x01cd9920 0x01080ca8
+                      ST: 0x0202d4c0 0x020764a0 0x00458a11 0x00000002 0x01e7b7a0
+                      ST: 0x01dbef56 0x01cd9920 0x01cd7e20 0x00000002 0x014fa4c6
+                      ST: 0x02076468 0x01080ca8 0x01e7ba14 0x02057014 0x00000002
+                      ST: 0x01cd9920 0x01cd7e20 0x00000002 0x01e7ba92 0x0207642c
+[18:18:21] 00 01      Turn 'sashimi' on to see the output at all!
+[18:18:21] 00 01      My predecessor is irrelevant. I decide in here!
+[18:18:21] 00 01 <--- FP: 0x01e7bbd0 CA: 0x01e7ba92 LN:      16 FN: myprog.c/main()
+"
+
+
+I am sure you have noticed the warning message. It will appear whenever the
+function is QDEVDBF_IRRELEVANT and not QDEVDBF_NORMALFILL and some relevant
+output just happened.  This is because there could have been output earlier
+in this very function by calling another function that was either  relevant
+or irrelevant, thus program flow is no longer in sync with the output!
+
+Lets now focus on mysterious symbols in the output. This is quite easy once
+you know  their meaning. From left to right, each  line starts with current
+system time, context number(so it is easy to follow subtasks or interrupts)
+and the  depth of function call. In the example  above we have got just one
+function  that does not nest deeper  hence value of 1. Now  lets get to the
+abbreviations:
+
+   FP  -  Function pointer(start address  of the routine). In our case this
+          is 'main()'.
+
+   CA  -  Call site. Address from which function call was attempted. 
+
+   LN  -  Line in the source code at which this routine ends(this should be
+          line  at  which this  routine  starts but that is not possible to
+          implement at this time).
+
+   FN  -  Source code file name and function name.
+
+   SR  -  Stack position as provided by stack register.
+
+   SA  -  Stack address. An address of the beginning of stack.
+
+   SF  -  Amount of stack that is yet free(at this point).
+
+   TC  -  Address of a task that called this function. In case of interrupt
+          this may point at task that was interrupted.
+
+   ST  -  Stack dump. Currently 25 longs are being dumped. This is prior to
+          FP of course. Note, last-top entry is the beginning!
+
+
+Please  note  that compiler  options  such as  '-fno-inline-functions'  and
+'-finstrument-functions' are mandatory in order you want to preserve symbol
+information  while high  optimization  is turned  on and to trace entry and
+exit  of a function.  Besides  if you wont specify '-finstrument-functions'
+then  you  wont be able to use extras! Macro '-D___QDEV_DEBUGINFO' triggers
+debug compile.
+
+If you want  to  include symbol information in explicitly inlined functions
+then you will have to undefine 'inline'  or '__inline' and define it empty!
+Currently 'qdev.h' takes care of '__inline' only.
+
+If  you  were  studying  main  header  carefully then you probably did spot
+'QDEVDEBUG_RR()' macro. The  difference  between  'QDEVDEBUG_RR()'  and the
+'QDEVDEBUG_R()' is that that the former can trigger relevance once for all.
+This specifically means that   'QDEVDEBUG_RR()'  will trigger relevance and
+the output will never go irrelevant afterwards.
+
+There is a tool called  'sadctrl'  which allows to control SAD and on-board
+serial port output and its baud rate. Use it when you either need  terminal
+only output or to get rid of serial traffic completly.
+
+Thanks to 'qdbflags' tool you can also control debug flags externally. This
+is very  handy cus you do not need  to alter your program on a source level
+each time you need to take different debug path.
+
+
+                                 3. TECH
+                          =======================
+
+Below is a list of functions 'QDEVDEBUG[_R]()' is currently using to do the
+I/O:
+
+   nfo_getsystime()             |
+   txt_debugprintf()            |
+   txt_vdebugprintf()           |  Library calls
+   txt_vcbpsnprintf()           |
+
+   ___mem_dbfindsymspace()      |
+   ___mem_dbaccsymspace()       |
+   ___mem_calibrateheavy()      |
+   ___mem_pairaddress()         |  Static calls
+   ___mem_putirrevbuffer()      |
+   ___mem_cbpsnprintf()         |
+
+   __builtin_frame_address()    |  'gcc' related
+
+
+At present only  'nfo_getsystime()' and 'txt_[v]debugprintf()' contain code
+that  is  platform specific, but that is quite portable. One more important
+thing is  stack related stuff. You  must really know your platform in order
+to make  SR, SA, SF and ST show true values! As to  TC, it is most probably
+only the case on the Amiga and clones.
+
+
+If   you   want  to  know  how  does  the  symbol  space  get  resolved  in
+'QDEVDEBUG[_R]()'  or  in  profiler  hooks '__cyg_profile_func_enter()' and
+'__cyg_profile_func_exit()' then read on. As you know from previous section
+symbol  information  is  being inlined by using 'QDEVDEBUGIO()' just before
+the function has its start. Now, in case of  'QDEVDEBUG[_R]()' this is done
+by defining static NULL byte which appears in front of inlined symbol space
+and computing max search area by subtracting local label address:
+
+   <null byte 001> = nb1
+   <null byte 002> = nb2
+   <null byte ...> = ...
+   <symbol  space>
+   <function addr>
+     <function code>
+     <lab. addr 001> = la1
+     <debug  output>(nb1, la1 - nb1, <sw>, [fmt], [valist])
+     <function code>
+     <lab. addr 002> = la2
+     <debug  output>(nb2, la2 - nb2, <sw>, [fmt], [valist])
+     <function code>
+     <     ...     >
+   <function  end>
+
+
+This  way  we can search for the  symbol  space in narrow area. Each symbol
+space  container  carries  magic number  at the beginning and end, so it is
+really easy to find it.
+
+In  case of profiler hooks it is even easier and faster since they devliver
+us function address so we can look before that address and find the magic:
+
+   <symbol  space>
+   <function addr>
+     <entry    hook>(<function addr>, <call site>)
+     <function code>
+     <exit     hook>(<function addr>, <call site>)
+   <function  end>
+
+
+Currently a single instance(the parent process) can track up to 16 subtasks
+for  whom function call  depths are  being monitored. This  also works  for
+interrupts.
+
+---
+megacz

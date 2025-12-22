@@ -1,0 +1,17 @@
+OBJ=	main.o test.o
+
+.c.o:
+	lc -Hram:test.pre $*.c
+
+all:	ram:test.pre test
+
+ram:test.pre:	test.pre
+	copy test.pre ram:
+
+test.pre:	defs.h
+	lc -pH -o ram:test.pre defs.h
+	copy ram:test.pre test.pre
+
+test:	$(OBJ)
+	blink FROM lib:c.o+$(OBJ) TO test LIBRARY lib:lc.lib+lib:amiga.lib
+

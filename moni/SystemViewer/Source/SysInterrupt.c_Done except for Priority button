@@ -1,0 +1,716 @@
+/****h* SysViewer/SysInterrupt.c [1.0] *********************************
+*
+* NAME
+*    SysInterrupt.c
+*
+* DESCRIPTION
+*    Display the interrupts known in ExecBase->IntVects[].
+************************************************************************
+*
+*/
+
+#include <string.h>
+
+#include <exec/types.h>
+#include <exec/execbase.h>
+
+#include <AmigaDOSErrs.h>
+
+#include <intuition/intuition.h>
+#include <intuition/classes.h>
+#include <intuition/classusr.h>
+#include <intuition/gadgetclass.h>
+
+#include <libraries/gadtools.h>
+
+#include <graphics/displayinfo.h>
+#include <graphics/gfxbase.h>
+
+#include <clib/exec_protos.h>
+#include <clib/intuition_protos.h>
+#include <clib/gadtools_protos.h>
+#include <clib/graphics_protos.h>
+#include <clib/utility_protos.h>
+#include <clib/diskfont_protos.h>
+
+#include "CPGM:GlobalObjects/CommonFuncs.h"
+
+#include "SysLists.h"
+
+#define ILV       0
+#define Update    1
+#define Remove    2
+#define Priority  3
+#define Cancel    4
+#define SelectTxt 5
+
+#define SI_CNT    6
+
+#define INTLVGAD    SIGadgets[ ILV ]
+#define REMOVEGAD   SIGadgets[ Remove ]
+#define PRIORITYGAD SIGadgets[ Priority ]
+#define TEXTGAD     SIGadgets[ SelectTxt ]
+
+IMPORT struct ExecBase *SysBase;
+
+// --------------------------------------------------------------------
+
+PRIVATE char ver[] = "$VER: SysInterrupts 1.0 (23-Sep-2000) by J.T. Steichen";
+
+PRIVATE struct TextFont     *SIFont  = NULL;
+PRIVATE struct Window       *SIWnd   = NULL;
+PRIVATE struct Gadget       *SIGList = NULL;
+PRIVATE struct IntuiMessage  SIMsg;
+PRIVATE struct Gadget       *SIGadgets[ SI_CNT ];
+
+PRIVATE UWORD  SILeft   = 0;
+PRIVATE UWORD  SITop    = 16;
+PRIVATE UWORD  SIWidth  = 632;
+PRIVATE UWORD  SIHeight = 320;
+PRIVATE UBYTE *SIWdt    = (UBYTE *) "System Interrupts Info:";
+
+PRIVATE char ttl[] = "Address  Data     Code     Pri Type      State  Nr IntrName Name";
+PRIVATE char fmt[] = "%08LX %08LX %08LX %3d %9.9s %-6.6s %2d %-8.8s %-18.18s";
+
+PRIVATE UBYTE tb[256] = "", *Title = &tb[0];
+
+// --------------------------------------------------------------------
+
+#define MAXNODES   64
+#define NODELENGTH 80
+
+PRIVATE struct Node ILVNodes[ MAXNODES ] = { 0, };
+
+PRIVATE struct List ILVList              = { 0, };
+
+PRIVATE UBYTE       NodeStrs[ MAXNODES * NODELENGTH ] = "";
+
+// --------------------------------------------------------------------
+
+PRIVATE struct IntuiText SIIText[ 1 ] = {
+
+   2, 0, JAM1, 262, 10,  NULL, (UBYTE *) "AJunk:",    NULL
+};
+
+PRIVATE UWORD SIGTypes[] = {
+
+   LISTVIEW_KIND, BUTTON_KIND, BUTTON_KIND,
+   BUTTON_KIND,   BUTTON_KIND, TEXT_KIND
+};
+
+PRIVATE int ILVClicked(      int whichitem );
+PRIVATE int UpdateClicked(   int dummy     );
+PRIVATE int RemoveClicked(   int dummy     );
+PRIVATE int PriorityClicked( int dummy     );
+PRIVATE int CancelClicked(   int dummy     );
+
+PRIVATE struct NewGadget SINGad[] = {
+
+     2,  17, 627, 272,                 NULL, NULL, ILV, 0, 
+   NULL, (APTR) ILVClicked,
+   
+     4, 301,  71,  17, (UBYTE *) "_Update",  NULL, Update, PLACETEXT_IN, 
+   NULL, (APTR) UpdateClicked,
+   
+   317, 301,  72,  17, (UBYTE *) "Remove",   NULL, Remove, PLACETEXT_IN, 
+   NULL, (APTR) RemoveClicked,
+   
+   396, 301,  72,  17, (UBYTE *) "Priority", NULL, Priority, PLACETEXT_IN,
+   NULL, (APTR) PriorityClicked,
+   
+   554, 301,  72,  17, (UBYTE *) "_Cancel",  NULL, Cancel, PLACETEXT_IN,
+   NULL, (APTR) CancelClicked,
+
+     2, 283, 627,  16,                 NULL, NULL, SelectTxt, NULL, 
+   NULL, NULL  
+};
+
+PRIVATE ULONG SIGTags[] = {
+
+   GTLV_ShowSelected, NULL, LAYOUTA_Spacing, 2, TAG_DONE,
+
+   GT_Underscore, '_', TAG_DONE,
+
+   GA_Disabled,  TRUE, TAG_DONE,
+   GA_Disabled,  TRUE, TAG_DONE,
+
+   GT_Underscore, '_', TAG_DONE,
+   
+   GTTX_Border,  TRUE, TAG_DONE
+};
+
+// --------------------------------------------------------------------
+
+PRIVATE char mvn[80] = "";
+
+PRIVATE char *MakeValidName( char *name, int size )
+{
+   int len = strlen( name ), i = 0;
+
+   if (len > 80)
+      len = 79;
+      
+   if (len < 1)
+      {
+      strncpy( mvn, " ", size );
+
+      mvn[ size + 1 ] = '\0';
+
+      return( &mvn[0] );
+      }
+
+   while (i < len)
+      {
+      if ((*(name + i) > 0x7E) || (*(name + i) < 0x20))
+         mvn[i] = ' ';
+      else
+         mvn[i] = *(name + i);
+          
+      i++;
+      }   
+
+   mvn[i] = '\0';
+   
+   return( &mvn[0] );
+}
+
+
+PRIVATE ULONG IntrAddress = 0L;
+PRIVATE char  itype[12]   = "INTERRUPT";
+
+PRIVATE char *GetIntrType( struct Node *iptr )
+{
+   switch (iptr->ln_Type)
+      {
+      case NT_INTERRUPT:  
+         strcpy( itype, "INTERRUPT" );
+         break;
+      
+      case NT_SOFTINT:
+         strcpy( itype, "SOFTINTRT" );
+         break;
+      
+      default:
+         strcpy( itype, "UNKNOWN  " );
+         break; 
+      }
+
+   return( &itype[0] );
+}
+
+PRIVATE char *IntrName[] = {
+
+   "XMit Emt", "Disk Blk", "Soft Int", "I/O Port",
+   "Co-Proc ", "VertBeam", "Blitter ", "Aud Ch.1",
+   "Aud Ch.2", "Aud Ch.3", "Aud Ch.4", "ReadFull",   
+   "DiskSync", "External", "Mstr Enb", "NMI     "
+};
+
+
+PRIVATE char IntrPri[] = { 1,1,1,2,3,3,3,4,4,4,4,5,5,6,6,7 };
+
+PRIVATE char NName[32] = "";
+
+PRIVATE char *GetNodeName( struct Node *node )
+{
+   if (node == NULL)
+      strcpy( NName, "* NULL *" );
+
+   if (node->ln_Name == NULL) 
+      strcpy( NName, "NO Name!" );
+   else 
+      strncpy( NName, MakeValidName( node->ln_Name, 31 ), 31 );
+
+   return( &NName[0] );
+}
+
+
+PRIVATE int GetNodePri( struct Node *node )
+{
+   if (node == NULL) 
+      return( 0 );
+
+   return( node->ln_Pri );
+}
+
+PRIVATE int MakeIntStrings( void )
+{
+   struct Custom    *custom = (struct Custom *) 0xDFF000;
+   // Used only to tell if an Interrupt is enabled or not.    
+   
+   struct IntVector *iv     = NULL;
+   APTR              sc     = NULL;
+   char             *iname  = NULL;
+   int               i, j, rval = 0, dummy = 0;
+
+   Forbid();
+      
+      iv = &SysBase->IntVects[0];
+      sc = (APTR) SysBase->IntVects[3].iv_Code;
+         
+   Permit(); // Move this later!
+   
+   for (i = 0, j = 0; i < 16; i++, iv++)
+      {
+      if ((iv != NULL) && (iv->iv_Code != NULL))
+         {
+         if (iv->iv_Code == sc) // Software Interrupt list:
+            {
+            struct List      *slist = (struct List      *) iv->iv_Data;
+            struct Interrupt *s     = (struct Interrupt *) slist->lh_Head;
+
+            if (slist->lh_Head == slist->lh_Tail) // Empty list?
+               {
+               goto SkipSoftInts; // Probably will never get here.
+               }
+
+            while ((s != NULL) && (j <= MAXNODES))
+               {
+               iname = GetNodeName( &(s->is_Node) );
+
+               //"Address Data Code Pri Type State Nr IntrName Name"
+               sprintf( &NodeStrs[ NODELENGTH * j++ ], fmt,
+                        &s->is_Node,
+                        s->is_Data,
+                        s->is_Code,
+                        GetNodePri(  &(s->is_Node) ),
+                        "SOFTINTRT",
+                        (custom->intenar & (1 << i)) ? "Enb'd" : "Dis'd",
+                        IntrPri[i],
+                        IntrName[i],
+                        iname
+                      );
+
+               rval++; 
+               
+               s = (struct Interrupt *) s->is_Node.ln_Succ;
+               }
+            }
+         else
+            {
+            iname = GetNodeName( iv->iv_Node );
+
+            //"Address Data Code Pri Type State Nr IntrName Name"
+            sprintf( &NodeStrs[ NODELENGTH * j++ ], fmt,
+                     iv->iv_Node,
+                     iv->iv_Data,
+                     iv->iv_Code,
+                     GetNodePri(  iv->iv_Node ),
+                     GetIntrType( iv->iv_Node ),
+                     (custom->intenar & (1 << i)) ? "Enb'd" : "Dis'd",
+                     IntrPri[i],
+                     IntrName[i],
+                     iname
+                   );
+
+            rval++;
+            } 
+         }
+
+SkipSoftInts:
+      dummy = 0; // Hopefully, the optimizer will kill this.
+
+      }
+
+   return( rval );
+}
+
+PRIVATE int MakeIntrList( void )
+{
+   int i = 0;
+   
+   HideListFromView( INTLVGAD, SIWnd );
+   
+   // sprintf( &NodeStrs[0], "%s", &ttl[0] ); // Column headers.
+
+   i = MakeIntStrings();
+
+   GT_SetGadgetAttrs( INTLVGAD, SIWnd, NULL,
+                      GTLV_Labels,       &ILVList,
+                      GTLV_Selected,     1,
+                      TAG_END
+                    );
+
+   sprintf( Title, "%s  (# interrupts = %d):", SIWdt, i );
+
+   SetWindowTitles( SIWnd, Title, (UBYTE *) -1 );
+
+   return( i );
+}
+
+PRIVATE int ILVClicked( int whichitem )
+{
+/*
+   if (whichitem == 0)
+      {
+      GT_SetGadgetAttrs( REMOVEGAD, SIWnd, NULL, 
+                         GA_Disabled, TRUE, TAG_DONE
+                       );
+
+      GT_SetGadgetAttrs( PRIORITYGAD, SIWnd, NULL, 
+                         GA_Disabled, TRUE, TAG_DONE
+                       );
+
+      strncpy( Title, SIWdt, 80 );
+      SetWindowTitles( SIWnd, Title, (UBYTE *) -1 );
+      }
+   else
+      {
+*/
+      char bf[12];
+      
+      GT_SetGadgetAttrs( REMOVEGAD, SIWnd, NULL, 
+                         GA_Disabled, FALSE, TAG_DONE
+                       );
+
+      GT_SetGadgetAttrs( PRIORITYGAD, SIWnd, NULL, 
+                         GA_Disabled, FALSE, TAG_DONE
+                       );
+      
+      strncpy( &bf[0], &NodeStrs[ whichitem * NODELENGTH ], 11 );
+      
+      (void) stch_l( &bf[0], (long *) &IntrAddress );
+
+      sprintf( Title, "%s  You Selected:  0x%08LX", SIWdt, IntrAddress );
+
+      SetWindowTitles( SIWnd, Title, (UBYTE *) -1 );
+
+      GT_SetGadgetAttrs( TEXTGAD, SIWnd, NULL,
+                         GTTX_Text, &NodeStrs[ whichitem * NODELENGTH ], 
+                         TAG_END
+                       );
+//      }
+
+   return( TRUE );
+}
+
+PRIVATE int UpdateClicked( int dummy )
+{
+   int i;
+
+   strcpy( Title, "Updating list..." );
+
+   SetWindowTitles( SIWnd, Title, (UBYTE *) -1 );
+   
+   for (i = 0; i <= MAXNODES; i++)
+       NodeStrs[ i * NODELENGTH ] = '\0'; // Kill old ListView strings.
+
+   (void) MakeIntrList();    // Remake ListView strings.
+
+   GT_SetGadgetAttrs( TEXTGAD, SIWnd, NULL,
+                      GTTX_Text, (STRPTR) NULL, TAG_END
+                    );
+
+   GT_RefreshWindow( SIWnd, NULL );
+
+   return( (int) TRUE );
+}
+
+PRIVATE int RemoveClicked( int dummy )
+{
+   sprintf( ErrMsg, "You MUST be off your medication!\n"
+                    "This function NOT available!" 
+          );
+ 
+   SetReqButtons( "OKAY!" );
+   
+   (void) Handle_Problem( ErrMsg, "User Information:", NULL );
+      
+   SetReqButtons( "CONTINUE|ABORT!" );
+
+   strncpy( Title, SIWdt, 80 );
+   SetWindowTitles( SIWnd, Title, (UBYTE *) -1 ); // Just in case.
+
+   return( TRUE );
+}
+
+PRIVATE int PriorityClicked( int dummy )
+{
+   sprintf( ErrMsg, "NOT implemented yet!" );
+ 
+   SetReqButtons( "OKAY!" );
+
+   (void) Handle_Problem( ErrMsg, "User Information:", NULL );
+
+   SetReqButtons( "CONTINUE|ABORT!" );
+
+   strncpy( Title, SIWdt, 80 );
+   SetWindowTitles( SIWnd, Title, (UBYTE *) -1 ); // Just in case.
+
+   return( TRUE );
+}
+
+PRIVATE void CloseSIWindow( void )
+{
+   if (SIWnd != NULL) 
+      {
+      CloseWindow( SIWnd );
+      SIWnd = NULL;
+      }
+
+   if (SIGList != NULL) 
+      {
+      FreeGadgets( SIGList );
+      SIGList = NULL;
+      }
+
+   if (SIFont != NULL) 
+      {
+      CloseFont( SIFont );
+      SIFont = NULL;
+      }
+
+   return;
+}
+
+PRIVATE int SICloseWindow( void )
+{
+   CloseSIWindow();
+   return( FALSE );
+}
+
+PRIVATE int CancelClicked( int dummy )
+{
+   return( SICloseWindow() );
+}
+
+// ------------------------------------------------------------------
+
+PRIVATE void SIRender( void )
+{
+   struct IntuiText it;
+
+   ComputeFont( Scr, Font, &CFont, SIWidth, SIHeight );
+
+   CopyMem( (char *) &SIIText[0], (char *) &it, 
+            (long) sizeof( struct IntuiText )
+          );
+
+   it.IText     = (UBYTE *) &ttl[0];
+   
+   it.ITextFont = Font;
+
+   it.LeftEdge  = CFont.OffX + ComputeX( CFont.FontX, it.LeftEdge ) 
+                             - (IntuiTextLength( &it ) >> 1);
+
+   it.TopEdge   = CFont.OffY + ComputeY( CFont.FontY, it.TopEdge ) 
+                             - (Font->ta_YSize >> 1);
+
+   PrintIText( SIWnd->RPort, &it, 0, 0 );
+
+   return;
+}
+
+PRIVATE int OpenSIWindow( void )
+{
+   struct NewGadget	ng;
+   struct Gadget	*g;
+   UWORD		lc, tc;
+   UWORD		wleft = SILeft, wtop = SITop, ww, wh;
+
+   ComputeFont( Scr, Font, &CFont, SIWidth, SIHeight );
+
+   ww = ComputeX( CFont.FontX, SIWidth );
+   wh = ComputeY( CFont.FontY, SIHeight );
+
+   if (( wleft + ww + CFont.OffX + Scr->WBorRight ) > Scr->Width ) 
+      wleft = Scr->Width - ww;
+   
+   if (( wtop + wh + CFont.OffY + Scr->WBorBottom ) > Scr->Height ) 
+      wtop = Scr->Height - wh;
+
+   if ((SIFont = OpenDiskFont( Font )) == NULL)
+   	return( -5 );
+
+   if ((g = CreateContext( &SIGList )) == NULL)
+   	return( -1 );
+
+   for (lc = 0, tc = 0; lc < SI_CNT; lc++) 
+      {
+      CopyMem( (char *) &SINGad[ lc ], (char *) &ng, 
+               (long) sizeof( struct NewGadget )
+             );
+
+      ng.ng_VisualInfo = VisualInfo;
+      ng.ng_TextAttr   = Font;
+
+      ng.ng_LeftEdge   = CFont.OffX + ComputeX( CFont.FontX, 
+                                                ng.ng_LeftEdge
+                                              );
+
+      ng.ng_TopEdge    = CFont.OffY + ComputeY( CFont.FontY, 
+                                                ng.ng_TopEdge
+                                              );
+
+      ng.ng_Width      = ComputeX( CFont.FontX, ng.ng_Width );
+      ng.ng_Height     = ComputeY( CFont.FontY, ng.ng_Height);
+
+      SIGadgets[ lc ] = g 
+                      = CreateGadgetA( (ULONG) SIGTypes[ lc ], 
+                                       g, 
+                                       &ng, 
+                                       (struct TagItem *) &SIGTags[ tc ]
+                                     );
+
+      while (SIGTags[ tc ] != TAG_DONE) 
+         tc += 2;
+
+      tc++;
+
+      if (g == NULL)
+         return( -2 );
+      }
+
+   if ((SIWnd = OpenWindowTags( NULL,
+
+                  WA_Left,    wleft,
+                  WA_Top,     wtop,
+                  WA_Width,   ww + CFont.OffX + Scr->WBorRight,
+                  WA_Height,  wh + CFont.OffY + Scr->WBorBottom,
+      
+                  WA_IDCMP,   LISTVIEWIDCMP | BUTTONIDCMP 
+                    | IDCMP_CLOSEWINDOW | IDCMP_REFRESHWINDOW 
+                    | IDCMP_VANILLAKEY,
+      
+                  WA_Flags,   WFLG_DRAGBAR | WFLG_DEPTHGADGET 
+                    | WFLG_CLOSEGADGET | WFLG_SMART_REFRESH
+                    | WFLG_ACTIVATE | WFLG_RMBTRAP,
+      
+                  WA_Gadgets, SIGList,
+                  WA_Title,   SIWdt,
+                  TAG_DONE )
+      ) == NULL)
+      return( -4 );
+
+   GT_RefreshWindow( SIWnd, NULL );
+
+   SIRender();
+   
+   return( 0 );
+}
+
+PRIVATE int SIVanillaKey( int whichkey )
+{
+   int rval = TRUE;
+   
+   switch (whichkey)
+      {
+      case 'u':
+      case 'U':
+         rval = UpdateClicked( 0 );
+         break;   
+      
+      case 'c':
+      case 'C':
+      case 'q':
+      case 'Q':
+         rval = CancelClicked( 0 );
+         break;
+      }
+      
+   return( rval );
+}
+
+PRIVATE int HandleSIIDCMP( void )
+{
+   struct IntuiMessage *m;
+   int                (*func)( int );
+   BOOL                 running = TRUE;
+
+   while (running == TRUE)
+      {
+      if ((m = GT_GetIMsg( SIWnd->UserPort )) == NULL) 
+         {
+         (void) Wait( 1L << SIWnd->UserPort->mp_SigBit );
+         continue;
+         }
+
+      CopyMem( (char *) m, (char *) &SIMsg, 
+               (long) sizeof( struct IntuiMessage )
+             );
+
+      GT_ReplyIMsg( m );
+
+      switch (SIMsg.Class) 
+         {
+         case IDCMP_REFRESHWINDOW:
+            GT_BeginRefresh( SIWnd );
+            GT_EndRefresh( SIWnd, TRUE );
+            break;
+
+         case IDCMP_CLOSEWINDOW:
+            running = SICloseWindow();
+            break;
+
+         case IDCMP_VANILLAKEY:
+            running = SIVanillaKey( SIMsg.Code );
+            break;
+            
+         case IDCMP_GADGETUP:
+         case IDCMP_GADGETDOWN:
+            func = (void *) ((struct Gadget *) SIMsg.IAddress)->UserData;
+            
+            if (func != NULL)
+               running = func( SIMsg.Code );
+
+            break;
+         }
+      }
+
+   return( running );
+}
+
+// ------------------------------------------------------------------
+
+PUBLIC int main( void )
+{
+   int i = 0;
+   
+   if (SetupSystemList( &OpenSIWindow ) < 0)
+      {
+      fprintf( stderr, "Couldn't open a System ListViewer!\n" );
+      return( RETURN_FAIL );
+      }
+   
+   SetNotifyWindow( SIWnd );
+
+   DisplayTitle( SIWnd, "Making Interrupt List..." );
+
+   ILVNodes[0].ln_Succ = (struct Node *) ILVList.lh_Tail;
+   ILVNodes[0].ln_Pred = (struct Node *) ILVList.lh_Head;
+   ILVNodes[0].ln_Type = 0;
+   ILVNodes[0].ln_Pri  = MAXNODES - 129;
+//   ILVNodes[0].ln_Name = ttl;
+
+
+   for (i = 0; i <= MAXNODES; i++)
+      {
+      ILVNodes[i].ln_Name = &NodeStrs[ i * NODELENGTH ];
+      ILVNodes[i].ln_Pri  = MAXNODES - i - 129;
+      }
+
+   NewList( (struct List *) &ILVList );      
+
+   for (i = 0; i < MAXNODES; i++)
+      Enqueue( (struct List *) &ILVList, &ILVNodes[ i ] );
+
+   (void) MakeIntrList(); // Make the list.
+
+   ModifyListView( INTLVGAD, SIWnd, &ILVList, NULL );
+
+   GT_SetGadgetAttrs( TEXTGAD, SIWnd, NULL,
+                      GTTX_Text, (STRPTR) NULL, TAG_END
+                    );
+
+   GT_RefreshWindow( SIWnd, NULL );
+
+   (void) HandleSIIDCMP();
+
+   CloseSIWindow();         // Just in case.   
+
+   ShutdownSystemList();
+
+   return( RETURN_OK );
+}
+
+/* ------------------ END of SysInterrupt.c file! ----------------- */

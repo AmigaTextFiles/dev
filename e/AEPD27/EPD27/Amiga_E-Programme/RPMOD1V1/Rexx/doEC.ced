@@ -1,0 +1,297 @@
+/* */
+/*
+	CygnusEd Pro 2.11 Rexx script to:
+		1.	fix some common mistakes
+		2.	drive Amiga E compiler
+		3.	indicate if source compiler, where and what
+			errors occured.
+
+*/
+OPTIONS RESULTS
+
+flush=' Work:c2/flushlibs'
+compiler='AMIGAE:BIN/ecdemo30e'
+options=' IGNORECACHE SYM'
+log='t:ec_errors'
+log2='t:ec_rc'
+
+LF='0A'x
+CR='0D'x
+TAB='09'x
+IF ~show('l', "rexxsupport.library") THEN DO
+   CALL addlib('rexxsupport.library',0,-30,0)
+END
+
+ih=NULL()
+oh=NULL()
+
+STATUS 19
+fullpath=RESULT
+
+IF UPPER(RIGHT(fullpath,2))='.E' THEN
+  fullpath=LEFT(fullpath,LENGTH(fullpath)-2)
+ELSE DO
+  OKAY1 'This is not an E sourcefile'
+  EXIT 0
+END
+
+'SPLIT VIEW'
+/* fix common mistakes */
+'BEG OF FILE'
+REPLACE "'END IF'" "'ENDIF'" 1 0 1 0 T
+'BEG OF FILE'
+REPLACE "'END PROC'" "'ENDPROC'" 1 0 1 0 T
+'BEG OF FILE'
+REPLACE "'PNT TO '" "'PTR TO '" 1 0 1 0 T
+'BEG OF FILE'
+REPLACE "' '" "' '" 1 0 1 0 T
+
+SAVE
+token='$VER:'
+newfile=0
+verprefix=''
+versuffix=''
+'BEG OF FILE'
+SEARCH FOR token 1 0 1 0
+IF (RESULT~=0) THEN DO
+  verprefix=''
+  versuffix=''
+  verfound=1
+  STATUS
+  'MARK LOCATION 1'
+  MARK BLOCK
+  IF (RESULT=0) THEN MARK BLOCK
+  SEARCH FOR "'''" 1 0 1 0
+  'CUT BLOCK'
+  STATUS 60
+  line=STRIP(SUBSTR(RESULT,6))
+  PARSE VAR line ft vt date
+  PARSE VAR ft file'.'dummy
+  PARSE VAR vt version'.'revision
+  revision=('0'revision)+1
+END
+ELSE DO
+  'END OF FILE'
+  'MARK LOCATION 1'
+  newfile=1
+  verprefix=LF || 'progver:' || LF || TAB || 'CHAR' || TAB || "'"
+  versuffix="',0" || LF
+  verfound=0
+  STATUS 21
+  t=RESULT
+  file=LEFT(t,LENGTH(t)-2)
+  version=1
+  revision=0
+END
+
+'BEG OF FILE'
+TEXT LF
+'BEG OF FILE'
+SEARCH FOR "'OPT MODULE'" 1 0 1 0
+IF (RESULT~=0) THEN DO
+  'JUMP TO MARK 1'
+  IF verfound=1 THEN DO
+    UP
+    'DELETE LINE'
+    'DELETE LINE'
+  END
+  verprefix=LF || '/* ' || "'"
+  file=file || '.m'
+  versuffix= "',0" || ' */' || LF
+END
+'BEG OF FILE'
+'DELETE LINE'
+
+'JUMP TO MARK 1'
+TEXT 
+date='(' || TIME() '|' DATE('W') DATE() || ')\n'
+TEXT verprefix || token file version || '.' || revision date || versuffix
+STATUS 18
+changes=RESULT
+SAVE
+
+LIBS.dos = '00 00 00 00'x
+LIBS.dos.OPENCOUNT = 0
+LIBS.dos.Open='FFE2'x||SI||'200203'x
+LIBS.dos.Close='FFDC'x||A||'2002'x
+LIBS.dos.Execute='FF22'x||SAA||'20020304'x
+LIBS.dos.SystemTagList='FDA2'x||SS||'200203'x
+
+SYS_Dummy='80000020'x
+SYS_Input='80000021'x
+SYS_Output='80000022'x
+SYS_Asynch='80000023'x
+SYS_UserShell='80000024'x
+SYS_CustomShell='80000025'x
+
+IF ~SHOW('L','rexxsupport.library') THEN CALL ADDLIB('rexxsupport.library',0,-30,0)
+IF ~SHOW('L','rxgen.library')       THEN CALL ADDLIB('rxgen.library',0,-30,0)
+
+call GenOpenLib("dos",0)
+
+ih=GenACall("dos","Open","NULL:",1005)
+IF ih=NULL() THEN GOTO finish
+oh=GenACall("dos","Open","NULL:",1006)
+IF oh=NULL() THEN GOTO finish
+
+com1='ram:flushlibs'
+com2='ram:ec'
+IF LENGTH(flush)>0 THEN DO
+  IF EXISTS(com1)=0 THEN CLI('copy' flush com1)
+  CALL		CLI(com1)
+END
+IF EXISTS(com2)=0 THEN CLI('copy' compiler com2)
+bytenum=	CLI(com2 '>'log' 'fullpath' ERRBYTE 'options)
+
+t=OPEN(INFILE,log,'R')
+IF t=0 THEN EXIT
+
+message=''
+err=0
+line=''
+redo=0
+DO WHILE EOF(INFILE)=0
+  IF redo=0 THEN DO
+    p=1
+    DO WHILE EOF(INFILE)=0
+        b=GetLine()
+        t=LEFT(b,1)
+        IF t<'0' | t>'9' THEN LEAVE
+    END
+  END
+  ELSE
+    redo=0
+  SELECT
+    WHEN test('ERROR:')~=0 THEN DO
+      err=1
+      ecerror=SUBSTR(b,posn+7)
+      b=GetLine()
+      SELECT
+        WHEN test('LINE ')~=0 THEN DO
+          t=test(':')
+          linetext=DeTab(SUBSTR(b,t+2))
+          linenum=SUBSTR(b,6,t-6)
+          IF bytenum=0 THEN DO
+            message=message||LF||'LINE ERROR : 'ecerror||LF||linetext||LF
+            'JUMP TO LINE' linenum
+          END
+          ELSE DO
+            message=message||LF||'BYTE ERROR: 'ecerror||LF||linetext||LF
+            'JUMP TO LINE' linenum
+            'MARK LOCATION 2'
+            'JUMP TO BYTE' bytenum
+          END
+          'MARK LOCATION 1'
+        END
+        OTHERWISE DO
+          message=message||LF||'GENERAL ERROR: 'ecerror||LF
+          redo=1
+        END
+      END
+    END
+    WHEN test('UNREFERENCED:')~=0 THEN DO
+      l=0
+      p=test(',')
+      DO WHILE p~=0
+        t=LEFT(b,p)
+        b=SUBSTR(b,p+1)
+        l=l+p
+        IF l>70 THEN DO
+          message=message||LF
+          l=0
+        END /* IF l */
+        message=message||t
+        p=test(',')
+      END /* WHILE p */
+      IF LENGTH(b)~=0 THEN message=message||b||LF
+    END
+    WHEN test('WITH:')~=0 THEN DO
+        badtext=SUBSTR(b,posn+6)
+        'BEG OF LINE'
+        SEARCH FOR "'"||badtext||"'"
+        'MARK LOCATION 2'
+        message=message||LF||'»'SUBSTR(b,posn+6)'«'||LF
+    END
+    OTHERWISE
+  END /* is UNREFERENCED */
+END
+t=CLOSE(INFILE)
+IF err=0 THEN DO
+  message=message||LF||'compiled OK'
+  QUIT
+END
+ELSE DO
+  DO WHILE changes>0
+    UNDO
+    changes=changes-1
+  END
+  'JUMP TO MARK 1'
+SAVE
+END
+OKAY1 message
+
+finish:
+IF ih~=NULL() THEN call GenACall("dos","Close",ih)
+IF oh~=NULL() THEN call GenACall("dos","Close",oh)
+call GenCloseLib("dos")
+
+EXIT
+
+test:
+  PARSE ARG find
+  posn=POS(find,b)
+RETURN posn
+
+CLI:
+  PARSE ARG clicmd
+  r=GenACall("dos","SystemTagList",clicmd||NULL(),SYS_Input||ih||SYS_Output||oh||NULL())
+RETURN C2D(r)
+
+NoANSI: PROCEDURE
+  PARSE ARG t
+  b=''
+  DO FOREVER
+    p=POS('1B5B'x,t)
+    IF p=0 THEN LEAVE
+    b=b||LEFT(t,p-1)
+    t=SUBSTR(t,p+2)
+    SELECT
+      WHEN LEFT(t,2)='0m'	THEN p=3
+      WHEN LEFT(t,6)='43;32m'	THEN p=7
+      OTHERWISE p=0
+    END
+    IF p=0 THEN LEAVE
+    t=SUBSTR(t,p)
+  END
+RETURN b||t
+
+/* converts tabs to spaces */
+DeTab: PROCEDURE
+  PARSE ARG b
+  c=POS('09'x,b)
+  DO WHILE c~=0
+    t=c-1
+    b=LEFT(b,t)LEFT('',8-(t//8),' ')SUBSTR(b,c+1)
+    c=POS('09'x,b)
+  END
+RETURN b
+
+/* skip empty lines and split CR'ed lines */
+GetLine: PROCEDURE EXPOSE CR line
+  b=''
+  DO WHILE b=''
+    DO WHILE EOF(INFILE)=0 & line=''
+      line=NoANSI(READLN(INFILE))
+    END
+    IF line='' THEN RETURN line
+    p=POS(CR,line)
+    IF p=0 THEN DO
+      b=line
+      line=''
+    END
+    ELSE DO
+      b=LEFT(line,p-1)
+      line=SUBSTR(line,p+1)
+    END
+  END
+RETURN b

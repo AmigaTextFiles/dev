@@ -1,0 +1,216 @@
+
+ qdev_cooperate.txt
+--------------------
+
+
+                                 1. INTRO
+                          =======================
+
+This file is totally devoted to  'mem_cooperate()'  function, so that those
+of  you who would like to know how it works and thus when it is  OK  to use
+it  can  now get  some  knowledge. First  of, let  me expain  what does the 
+-cooperation- mean in the context of this magic routine. To cooperate is to
+share  your  CPU time, so others can grab it. Analog to Prometheus who gave
+fire to the people ;-) . By calling this function you  basically give  away
+CPU time you would utilise in some other way, in a loop possibly.
+
+Suppose that  you desperately need to check for data on an external device,
+but that device does not generate any interrupts, nor notifies using signal
+and you cannot help it. What would you do  to keep the OS reponsive and yet
+the device I/O  as fast as possible? Here is the  example that depicts some
+fictious memory mapped device communication and how to deal with checks:
+
+/*
+ * Fictious Memory Mapped Device I/O example using 'mem_cooperate()'.
+*/
+#include <qdev.h>
+
+#define CDI_DEVCTRLREG   0xFA001000         /* Device control register   */
+#define CDI_DEVDATAREG   0xFA002000         /* Device data register      */
+#define CDI_DEVSIZEREG   0xFA003000         /* Device length register    */
+
+#define CDI_FDATAREADY   0x80000000         /* Data received flag        */
+#define CDI_FDATASAVED   0x00000008         /* Data request saved flag   */
+
+LONG checkdevio(void)
+{
+  LONG *addr = (LONG *)CDI_DEVCTRLREG;
+
+
+  if (*addr & CDI_DATAREADY)
+  {
+    *addr &= ~CDI_DATAREADY;                /* We have to clear this     */
+
+    addr = (LONG *)CDI_DEVSIZEREG;
+
+    return *addr;
+  }
+
+  return 0;
+}
+
+LONG senddevio(LONG ptr, LONG size)
+{
+  LONG *addr = (LONG *)CDI_DEVCTRLREG;
+
+
+  if (!(*addr & CDI_FDATASAVED))
+  {
+    addr = (LONG *)CDI_DEVDATAREG;
+
+    *addr = ptr;
+
+    addr = (LONG *)CDI_DEVSIZEREG;
+
+    *addr = size;
+
+    addr = (LONG *)CDI_DEVCTRLREG;
+
+    *addr |= CDI_FDATASAVED;                /* Device will clear this    */
+
+    return 1;
+  }
+
+  return 0;
+}
+
+int main(void)
+{
+  UBYTE buf[32]
+  LONG fill;
+
+
+  if (senddevio((LONG)buf, sizeof(buf)))    /* Try to obtain some data   */
+  {
+    while (!(fill = checkdevio()))          /* Busy-loop reply check     */
+    {
+      mem_cooperate(0, SIGF_SINGLE);        /* Lets go to quick sleep    */
+    }
+
+    //...                                   /* Request was satisfied     */
+  }
+
+  return 0;
+}
+
+
+OK. So what is actually happening in this example? We want to get some data
+off  the device, so we send device request that takes address of the buffer
+and  its size. We  then enter busy-loop  in which we  check if the data did
+appear in the buffer. Now,  if that would  be just the loop  the  OS  would
+become  rather sluggish cus we would hog the  CPU  in order for that check.
+But of course there is that 'mem_cooperate()' hero that grants the CPU time
+to the rest of  0 prioritised tasks(happens to be most of the OS tasks), so
+that  it does  not feel like  we check for  the data that often, but  we do
+since  context switches  and tasks that  mostly wait  do not take  too much
+time. The check interval will vary yes, but that is still like  1000 micros
+in the worst case. If the device lags due to some unpredictible events then
+still the OS is responsive and at the same time device check is atomic.
+
+Concerns. I  think I know what you  may think. The priority. What about the
+tasks who are negative on priority? Well, they are  locked out temporarily,
+but that is what they will do anyway. They were given negative priority for
+a good reason. The positively prioritised tasks  will continue  to function
+normally though. You may always stuff -128 instead 0 then your process will
+be totally OS friendly, but keep in mind that others may then lock you out!
+I can hear: "I can replace this with 'usleep()', 'Delay()', etc and it will
+still give me good results.". Of course you can,  but you cannot get rid of
+the  timer  overhead ;-) . As to  signal it may be any signal you like, but
+SIGF_SINGLE  is just perfect for this kind  of ops because it is considered
+temporary.
+
+
+                                 2. TIPS
+                          =======================
+
+You may  use 'mem_cooperate(127, SIGF_SINGLE);' to validate  'tc_SPReg'  at
+any  point in your program, so  that the  PC  will be pointing at this very
+function, which makes stack hacking easy.
+
+You should always 'mem_cooperate(0, SIGF_SINGLE);' in case of time critical
+checks. This  is the  safest call. Never  go negative  nor positive  on the
+priority  in this  particular case,  because either they will lock you out,
+or you will lock them out.
+
+You may  use 'mem_cooperate(-128, SIGF_SINGLE);' to forward the control  to
+someone  else at any time. Just  keep in mind  that you may  not be able to
+regain it quick if the OS is under heavy load.
+
+
+                                 3. TECH
+                          =======================
+
+Many of you may have some theories on how it works after reading the intro,
+so lets get into details to smash these theories to pieces. Briefing: Allow
+a task  levelised context switch. One very  simple method  would be  to use
+'timer.device',  but there is a question of excess overhead,  thus there is
+no  way to control level  of that context switch. Uh, oh... Wait  a minute!
+Maybe  private 'exec.library'  functions such  as 'Switch()', 'Dispatch()',
+'Reschedule(), and company would do it? Yeah possibly but there is just one
+minor problem, they are all priviledged  and calling them would  Guru right
+away. Damn it... Oh, i know! Lets just play with 'TaskWait' and 'TaskReady'
+lists. Quite an idea, but that  would lead to double task sortage and would
+easily ruin the correct task switch order. No... Seems like all simple ways
+are no-go. However, surprise! There is even a simplier way, check this out:
+
+  1. Set desired cooperation priority with 'SetTaskPri()', so that schedule
+     will be fixed.
+  2. Disable task switches with 'Forbid()', so we can safely poke the task.
+  3. Wrap  'Signal()' and old  'tc_Switch()'  in itself and/or activate it.
+  4. Clear the signal and  'Wait()' for it to arrive from kernel. This will
+     happen almost in no time.
+  5. Fix  'tc_Switch()'  to original and/or disable it. Forbidden  state is
+     active again!
+  6. Allow  task switches with  'Permit()'. Can now  run  normally  though.
+  7. Revert the  original priority with  'SetTaskPri()' , fix  the schedule
+     again.
+
+
+At first it may look all unrelated and fuzzy, so it will not work. Funnily,
+it does and the  OS  takes care of everything! But  let's get to the point.
+As soon as we loose the CPU  'tc_Switch()' gets called where the 'Signal()'
+call is being placed,  which in  turn sends what we  do expect. But  before
+that is to happen, we give away the CPU with 'Wait()' thus we loose the CPU
+and  get it  immediately after  full task switch  circle on this very level
+(priority). It looks more or less like this:
+
+/---------------+ +--------------------------------------+ +--------------/
+/               | | TASK = 5 / SIGF_SINGLE = s           | | TASK = n     /
+/---------------+ +--------------------------------------+ +--------------/
+/| tc_Switch()  | | tc_Launch() |   ...   | tc_Switch()  | | tc_Launch() |/
+/|              | |             |         |              | |             |/
+/|      -       | |      -      | Wait(s) | Signal(5, s) | |      -      |/
+/|              | |             |         |              | |             |/
+/---------------+ +--------------------------------------+ +--------------/
+       :                   :      :                   : :           :
+       :  +-------------+  :      :  +-------------+  : :           :
+       1  | KERNEL      |  2      3  | KERNEL      |  4 5           6
+       :  +-------------+  :      :  +-------------+  : :           :
+       -->|             |-->      -->|             |--> :           :
+          |  Interrupt  |            |   Control   |<----           :
+          |  happened   |            |   granted   |---------------->
+          |             |            |             |
+          +-------------+            +-------------+
+
+       -- Context switch -->      -- Context switch -->
+
+                                                             <-- Recycle --
+
+
+To better understand what is going on when  'mem_cooperate()' is in action,
+follow the numbers:
+
+  1. Task number  4 was executing its code while the interrupt has happened
+     and the kernel taken away the control.
+  2. Kernel  has granted  the control to task number 5. The task called the
+     'mem_cooperate()', where 'Wait()' was called.
+  3. Task no. 5 has granted the control back to the kernel due to 'Wait()'.
+  4. Kernel went to examine  'tc_Switch()' and spotted code to be executed,
+     so it jumped in and the ' Signal()'  was called, thus  'Wait()' is now
+     satisfied.
+  5. Kernel regained the control, the 'tc_Switch()' did return.
+  6. Kernel decided to grant the control to task no.  n. The cycle repeats.
+
+
+---
+megacz

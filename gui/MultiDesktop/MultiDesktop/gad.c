@@ -1,0 +1,967 @@
+/* Gadgets */
+#include "multiwindows.h"
+
+extern struct ExecBase         *SysBase;
+extern struct MultiWindowsBase *MultiWindowsBase;
+
+struct MultiMessage *CheckMultiMessageSignals();
+void CallAction();
+void CallItem();
+void RawKey();
+
+/* ---- AmigaGuide-Message behandeln */
+void HandleGuideMessage()
+{
+ struct MultiWindowsUser *mw;
+ struct AmigaGuideMsg    *agm;
+ ULONG                    type;
+
+
+ USER;
+ agm=GetAmigaGuideMsg(mw->Guide);
+ if(agm)
+  {
+   type=agm->agm_Type;
+   ReplyAmigaGuideMsg(agm);
+  }
+
+ if(mw->GuideCommand)
+  {
+   if(type==ActiveToolID)
+    {
+     SendAmigaGuideContext(mw->Guide,NULL);
+     mw->GuideCommand=FALSE;
+     mw->GuideReady=TRUE;
+    }
+  }
+}
+
+/* ---- Message vom Timer-Device holen */
+struct MultiMessage *GetTimerMessage(wait)
+ BOOL wait;
+{
+ struct MultiWindowsUser *mw;
+ struct MultiMessage     *mm;
+ BOOL                     bool;
+ int                      i;
+
+ USER;
+ if(wait) WaitAlarm();
+ bool=CheckAlarm();
+ if(bool)
+  {
+   mm=&mw->MultiMessage;
+   mm->Class=MULTI_TIMERALARM;
+   mm->ObjectID=0;
+   mm->WindowID=0;
+   mm->ObjectCode=0;
+   for(i=0;i<4;i++)
+     mm->ObjectData[i]=0;
+   mm->ObjectAddress=NULL;
+   return(mm);
+  }
+ return(NULL);
+}
+
+/* ---- System-Message holen */
+struct MultiMessage *GetSystemMessage(wait)
+ BOOL wait;
+{
+ struct MultiWindowsUser *mw;
+ struct MultiMessage     *mm;
+ ULONG                    Signals;
+ int                      i;
+
+ USER;
+ if(wait) Signals=Wait(SIGBREAK); else Signals=SetSignal(0,0);
+ if(Signals & SIGBREAK)
+  {
+   mm=&mw->MultiMessage;
+   mm->Class=MULTI_SYSTEM;
+   i=0;
+   if(Signals & SIGBREAKF_CTRL_C) i=MSYS_BREAK_CTRL_C;
+   if(Signals & SIGBREAKF_CTRL_D) i+=MSYS_BREAK_CTRL_D;
+   if(Signals & SIGBREAKF_CTRL_E) i+=MSYS_BREAK_CTRL_E;
+   if(Signals & SIGBREAKF_CTRL_F) i+=MSYS_BREAK_CTRL_F;
+   mm->ObjectID=i;
+   mm->WindowID=0;
+   mm->ObjectCode=0;
+   for(i=0;i<4;i++)
+     mm->ObjectData[i]=0;
+   mm->ObjectAddress=NULL;
+   return(mm);
+  }
+ return(NULL);
+}
+
+/* ---- Error-Message holen */
+struct MultiMessage *GetErrorMessage()
+{
+ struct MultiWindowsUser *mw;
+ struct MultiMessage     *mm;
+ BOOL                     guru;
+ ULONG                    error;
+ int                      i;
+
+ USER;
+ guru=TRUE;
+ error=GetGuru();
+ if(error==0) { error=GetError(); guru=FALSE; }
+ if(error!=0)
+  {
+   mm=&mw->MultiMessage;
+   if(guru) mm->Class=MULTI_GURU; else mm->Class=MULTI_ERROR;
+   mm->ObjectID=error;
+   mm->WindowID=0;
+   mm->ObjectCode=0;
+   for(i=0;i<4;i++)
+     mm->ObjectData[i]=0;
+   mm->ObjectAddress=NULL;
+   return(mm);
+  }
+ return(NULL);
+}
+
+/* ---- Message vom AppPort holen */
+struct MultiMessage *GetAppMessage(wait)
+ BOOL wait;
+{
+ struct MultiWindowsUser *mw;
+ struct MultiMessage     *mm;
+ struct AppMessage       *app;
+ struct AppObject        *ao;
+ struct ScreenEntry      *se;
+ struct WindowEntry      *we;
+ int                      i;
+
+ USER;
+ if(wait) WaitPort(mw->AppPort);
+ app=GetMsg(mw->AppPort);
+ if(app)
+  {
+   CopyMemQuick(app,&mw->AppMessage,sizeof(struct AppMessage));
+   ReplyMsg(app);
+
+   app=&mw->AppMessage;
+   mm=&mw->MultiMessage;
+   ao=app->am_UserData;
+
+   mm->Class=MULTI_RAWAPPMESSAGE;
+   mm->AppMessage=&mw->AppMessage;
+   mm->ObjectID=0;
+   mm->WindowID=0;
+   mm->ObjectCode=0;
+   for(i=0;i<4;i++)
+     mm->ObjectData[i]=0;
+   mm->ObjectAddress=NULL;
+
+   if(ao!=NULL)
+    {
+     mm->ObjectAddress=ao->Owner;
+     switch(ao->OwnerType)
+      {
+       case OT_SCREENENTRY:
+         se=ao->Owner;
+         mm->ObjectCode=APPCODE_SCREEN;
+         mm->ObjectID=se->ScreenID;
+        break;
+       case OT_WINDOWENTRY:
+         we=ao->Owner;
+         mm->ObjectCode=APPCODE_WINDOW;
+         mm->ObjectID=we->WindowID;
+         mm->WindowID=we->WindowID;
+        break;
+       default:
+         mm->ObjectCode=APPCODE_USER;
+        break;
+      }
+
+     switch(app->am_Type)
+      {
+       case MTYPE_APPICON:
+         mm->Class=MULTI_APPICON;
+        break;
+       case MTYPE_APPMENUITEM:
+         mm->Class=MULTI_APPMENUITEM;
+        break;
+       case MTYPE_APPWINDOW:
+         mm->Class=MULTI_APPWINDOW;
+        break;
+      }
+    }
+
+   return(mm);
+  }
+ return(NULL);
+}
+
+
+/* ---- IDCMP-Verwaltung */
+struct MultiMessage *GetWindowMessage(windowID,wait)
+ UBYTE windowID;
+ BOOL  wait;
+{
+ struct MultiWindowsUser *mw;
+ struct WindowEntry      *we;
+ struct IntuiMessage     *msg;
+ struct MultiMessage     *mm;
+ struct ActionMessage    *am;
+ int                      i;
+
+ USER;
+ we=FindWindowEntry(windowID);
+ if(we)
+  {
+   mm=&mw->MultiMessage;
+   mm->Class=MULTI_RAWINTUIMESSAGE;
+   mm->IntuiMessage=&mw->IntuiMessage;
+   mm->ObjectID=0;
+   mm->WindowID=we->WindowID;
+   mm->ObjectCode=0;
+   for(i=0;i<4;i++)
+     mm->ObjectData[i]=0;
+   mm->ObjectAddress=NULL;
+
+   if(!we->Iconify)
+    {
+     if(we->ActionMessage)
+      {
+       am=we->ActionMessage;
+
+       mm->Class=am->Class;
+       mm->ObjectID=am->ObjectID;
+       mm->ObjectCode=am->ObjectCode;
+       mm->ObjectAddress=am->ObjectAddress;
+       mm->IntuiMessage=NULL;
+       we->ActionMessage=am->NextMessage;
+       if(we->ActionMessage) Signal(SysBase->ThisTask,(1L<<we->UserPort->mp_SigBit));
+
+       FreeMemoryBlock(&we->Remember,am);
+       return(mm);
+      }
+
+     if(wait) WaitPort(we->UserPort);
+     msg=GTGetIMsg(we->UserPort);
+     if(msg)
+      {
+       if(msg->Class==MENUVERIFY)
+        {
+       /*  if(msg->IAddress==we->Window) */
+           MenuVerify(we);
+        }
+       CopyMemQuick(msg,&mw->IntuiMessage,sizeof(struct IntuiMessage));
+       GTReplyIMsg(msg);
+       msg=&mw->IntuiMessage;
+
+       switch(msg->Class)
+        {
+         case REFRESHWINDOW:
+           mm->Class=MULTI_REFRESHWINDOW;
+           mm->ObjectID=we->Window->WindowID;
+           mm->ObjectAddress=we;
+           GTBeginRefresh(we->Window);
+           RefreshSGadgets(we);
+           GTEndRefresh(we->Window,TRUE);
+          break;
+         case MOUSEMOVE:
+           MouseMove(we,msg,mm);
+          break;
+         case INTUITICKS:
+           IntuiTicks(we,msg,mm);
+          break;
+         case NEWSIZE:
+           mm->Class=MULTI_NEWSIZE;
+           mm->ObjectID=we->Window->WindowID;
+           mm->ObjectAddress=we;
+           NewSize(we);
+          break;
+         case CLOSEWINDOW:
+           mm->Class=MULTI_CLOSEWINDOW;
+           mm->ObjectID=we->Window->WindowID;
+           mm->ObjectAddress=we;
+          break;
+         case VANILLAKEY:
+           VanillaKey(we,msg,mm);
+          break;
+         case MENUPICK:
+           MenuPick(we,msg,mm);
+          break;
+         case RAWKEY:
+           RawKey(we,msg,mm);
+          break;
+         case GADGETUP:
+           GadgetUp(we,msg,mm);
+          break;
+         case GADGETDOWN:
+           GadgetDown(we,msg,mm);
+          break;
+         case INACTIVEWINDOW:
+           InactiveWindow(we,msg,mm);
+          break;
+         case ACTIVEWINDOW:
+           ActiveWindow(we,msg,mm);
+          break;
+         case NEWPREFS:
+           NewPrefs(we,msg,mm);
+          break;
+        }
+       return(mm);
+      }
+    }
+  }
+ return(NULL);
+}
+
+/* ---- ActionList erstellen */
+BOOL MakeAction(targetID,sourceCode,targetCode)
+ ULONG targetID;
+ UBYTE sourceCode,targetCode;
+{
+ struct WindowEntry *we;
+ struct MWGadget    *gad;
+ struct Action      *action;
+
+ WE;
+ if(we==NULL) return(FALSE);
+ gad=we->LastGadget;
+ if(gad==NULL)
+  {
+   ErrorL(1017,"MakeAction():\nThere's no valid gadget!");
+   return(FALSE);
+  }
+
+ action=AllocMemory(&gad->Remember,sizeof(struct Action),MEMF_PUBLIC);
+ if(action==NULL)
+  {
+   NoMemory();
+   return(FALSE);
+  }
+
+ action->TargetID=targetID;
+ action->SourceCode=sourceCode;
+ action->TargetCode=targetCode;
+ action->NextAction=gad->Action;
+ gad->Action=action;
+}
+
+/* ---- Action-Liste entfernen */
+void UnMakeAction(gadgetID)
+ ULONG gadgetID;
+{
+ struct MWGadget *gad;
+
+ gad=FindGadget(gadgetID);
+ if(gad!=NULL)
+  {
+   gad->Action=NULL;
+   FreeMemory(&gad->Remember);
+  }
+}
+
+/* ---- ActionList ausführen */
+void CallAction(gad)
+ struct MWGadget *gad;
+{
+ struct ActionMessage *am;
+ struct Action        *action;
+ struct WindowEntry   *we;
+ ULONG                 code,code2,class;
+ BYTE                  windowID;
+
+ we=gad->WindowEntry;
+ windowID=ActWin(we->WindowID);
+
+ action=gad->Action;
+ while(action!=NULL)
+  {
+   switch(action->SourceCode)
+    {
+     case AGC_SLIDER:
+       code=AskSlider(gad->GadgetID);
+      break;
+     case AGC_SCROLLER:
+       code=AskScroller(gad->GadgetID);
+      break;
+     case AGC_WHEEL:
+       code=AskWheel(gad->GadgetID);
+      break;
+     case AGC_INTEGER:
+       code=AskInteger(gad->GadgetID);
+      break;
+     case AGC_STRING:
+       code=AskString(gad->GadgetID);
+      break;
+     case AGC_HEX:
+       code=AskHex(gad->GadgetID);
+      break;
+     case AGC_FLOAT:
+       code=AskFloat(gad->GadgetID);
+      break;
+     case AGC_CYCLE:
+       code=AskCycle(gad->GadgetID);
+      break;
+     case AGC_MX:
+       code=AskMX(gad->GadgetID);
+      break;
+     case AGC_SELECTBOX:
+       code=AskSelectBox(gad->GadgetID);
+      break;
+     case AGC_LISTVIEW_SELECTION:
+       code=AskListviewSelection(gad->GadgetID);
+      break;
+     case AGC_LISTVIEW_LABEL:
+       code=AskListviewSelectionLabel(gad->GadgetID);
+      break;
+     case AGC_LISTVIEW_REMTEXT:
+       code=AskListviewSelectionLabel(gad->GadgetID);
+       code2=AskListviewSelection(gad->GadgetID);
+      break;
+     case AGC_PALETTE:
+       code=AskPalette(gad->GadgetID);
+      break;
+     default:
+       GadErr(1020,"ActionList:\nInvalid SourceCode",gad);
+       ActWin(windowID);
+       return;
+      break;
+    }
+
+   class=MULTI_GADGETUP;
+   switch(action->TargetCode)
+    {
+     case AGC_SLIDER:
+       class=MULTI_GADGETDOWN;
+       UpdateSlider(action->TargetID,code);
+      break;
+     case AGC_SCROLLER:
+       class=MULTI_GADGETDOWN;
+       UpdateScroller(action->TargetID,code,-1L,-1L);
+      break;
+     case AGC_WHEEL:
+       class=MULTI_GADGETDOWN;
+       UpdateWheel(action->TargetID,code);
+      break;
+     case AGC_MX:
+       class=MULTI_GADGETDOWN;
+       UpdateMX(action->TargetID,code);
+      break;
+     case AGC_SELECTBOX:
+       UpdateSelectBox(action->TargetID,code);
+      break;
+     case AGC_CYCLE:
+       UpdateCycle(action->TargetID,code);
+      break;
+     case AGC_LISTVIEW_SELECTION:
+       UpdateListviewSelection(action->TargetID,code);
+      break;
+     case AGC_LISTVIEW_ADDHEAD:
+       AddListviewEntrySort(action->TargetID,code,ULP_HEAD);
+       if(action->SourceCode==AGC_LISTVIEW_REMTEXT)
+         RemListviewEntryNumber(gad->GadgetID,code2);
+      break;
+     case AGC_LISTVIEW_ADDTAIL:
+       AddListviewEntrySort(action->TargetID,code,ULP_TAIL);
+       if(action->SourceCode==AGC_LISTVIEW_REMTEXT)
+         RemListviewEntryNumber(gad->GadgetID,code2);
+      break;
+     case AGC_LISTVIEW_ADDSORTD:
+       AddListviewEntrySort(action->TargetID,code,ULP_SORTD);
+       if(action->SourceCode==AGC_LISTVIEW_REMTEXT)
+         RemListviewEntryNumber(gad->GadgetID,code2);
+      break;
+     case AGC_LISTVIEW_ADDSORTA:
+       AddListviewEntrySort(action->TargetID,code,ULP_SORTA);
+       if(action->SourceCode==AGC_LISTVIEW_REMTEXT)
+         RemListviewEntryNumber(gad->GadgetID,code2);
+      break;
+     case AGC_LISTVIEW_CHANGESELECTEDLABEL:
+       ChangeListviewEntrySelected(action->TargetID,code);
+      break;
+     case AGC_NM:
+       UpdateNM(action->TargetID,code);
+      break;
+     case AGC_NUMBER:
+       UpdateNumber(action->TargetID,code);
+      break;
+     case AGC_TEXT:
+       UpdateText(action->TargetID,code);
+      break;
+     case AGC_TX:
+       UpdateText(action->TargetID,code);
+      break;
+     case AGC_STRING:
+       UpdateString(action->TargetID,code);
+      break;
+     case AGC_HEX:
+       UpdateHex(action->TargetID,code);
+      break;
+     case AGC_FLOAT:
+       UpdateFloat(action->TargetID,code);
+      break;
+     case AGC_INTEGER:
+       UpdateInteger(action->TargetID,code);
+      break;
+     case AGC_PALETTE:
+       UpdatePalette(action->TargetID,code);
+      break;
+     case AGC_STATUS:
+       UpdateStatus(action->TargetID,code);
+      break;
+     default:
+       GadErr(1019,"ActionList:\nInvalid TargetCode!",gad);
+       ActWin(windowID);
+       return;
+      break;
+    }
+
+   am=AllocMemory(&we->Remember,sizeof(struct ActionMessage),MEMF_ANY);
+   if(am!=NULL)
+    {
+     am->NextMessage=we->ActionMessage;
+     am->Class=class;
+     am->ObjectID=action->TargetID;
+     am->ObjectCode=code;
+     am->ObjectAddress=FindGadget(action->TargetID);
+     we->ActionMessage=am;
+    }
+   else NoMemory();
+
+   action=action->NextAction;
+  }
+
+ Signal(SysBase->ThisTask,(1L<<we->UserPort->mp_SigBit));
+ ActWin(windowID);
+}
+
+/* ---- Gadget-Klick durch Tastendruck simulieren */
+void CallGadget(we,gad,mm,shifted)
+ struct WindowEntry  *we;
+ struct MWGadget     *gad;
+ struct MultiMessage *mm;
+ BOOL                 shifted;
+{
+ BYTE               windowID;
+ ULONG              j;
+ struct CycleData *cd;
+ long              i;
+
+ windowID=ActWin(we->WindowID);
+ mm->IntuiMessage=NULL;
+ mm->ObjectID=gad->GadgetID;
+ switch(gad->Type)
+  {
+   case MWGAD_GADTOOLS:
+     switch(gad->Kind)
+      {
+       case MX_KIND:      /* ---- MX-Gadget ---------------- */
+         UpdateMX(gad->GadgetID,gad->CommandKey);
+         mm->Class=MULTI_GADGETDOWN;
+         mm->ObjectCode=gad->CommandKey;
+         gad->CommandKey=0x00;
+        break;
+       case CYCLE_KIND:   /* ---- Cycle-Gadget ------------- */
+         cd=gad->ExtData;
+         i=gad->TagList[CYCLE_ACTIVE].ti_Data;
+         if(shifted==FALSE)
+          { i++; if(i>=cd->LabelCount) i=0; }
+         else
+          { i--; if(i<0) i=cd->LabelCount-1; }
+         UpdateCycle(gad->GadgetID,i);
+         mm->Class=MULTI_GADGETUP;
+         mm->ObjectCode=i;
+        break;
+       case BUTTON_KIND:   /* ---- Boolean-Gadget ---------- */
+         mm->Class=MULTI_GADGETUP;
+        break;
+       case CHECKBOX_KIND: /* ---- Checkbox-Gadget --------- */
+         UpdateCheckbox(gad->GadgetID,!gad->TagList[CHECKBOX_CHECKED].ti_Data);
+         mm->Class=MULTI_GADGETDOWN;
+         mm->ObjectCode=gad->TagList[CHECKBOX_CHECKED].ti_Data;
+        break;
+       case STRING_KIND:   /* ---- String- oder Integer-     */
+       case INTEGER_KIND:  /*        Gadget ---------------- */
+         ActivateGadget(gad->Update,we->Window,NULL);
+        break;
+       case SLIDER_KIND:   /* ---- Slider-Gadget ----------- */
+         i=gad->TagList[SLIDER_LEVEL].ti_Data;
+         if(shifted==FALSE)
+           { if(i<gad->TagList[SLIDER_MAX].ti_Data) i++; }
+         else
+           { if(i>gad->TagList[SLIDER_MIN].ti_Data) i--; }
+         UpdateSlider(gad->GadgetID,i);
+         mm->Class=MULTI_GADGETDOWN;
+         mm->ObjectCode=i;
+        break;
+       case SCROLLER_KIND:   /* ---- Scroller-Gadget ------- */
+         i=gad->TagList[SCROLLER_TOP].ti_Data;
+         if(shifted==FALSE)
+           { if(i<gad->TagList[SCROLLER_VISIBLE].ti_Data) i++; }
+         else
+           { if(i>0) i--; }
+         UpdateScroller(gad->GadgetID,-1L,-1L,i);
+         mm->Class=MULTI_GADGETDOWN;
+         mm->ObjectCode=i;
+        break;
+       case LISTVIEW_KIND:     /* ---- Listview-Gadget ------ */
+         i=gad->TagList[LISTVIEW_SELECTED].ti_Data;
+         if(shifted==FALSE)
+           i++;
+         else
+           { if(i>0) i--; }
+         UpdateListviewSelection(gad->GadgetID,i);
+         mm->Class=MULTI_GADGETDOWN;
+         mm->ObjectCode=i;
+        break;
+       case PALETTE_KIND:     /* ---- Palette-Gadget ------- */
+         i=gad->TagList[PALETTE_COLOR].ti_Data;
+         if(shifted==FALSE)
+           { if(i<2^(gad->TagList[PALETTE_DEPTH].ti_Data)) i++; }
+         else
+           { if(i>gad->TagList[PALETTE_OFFSET].ti_Data) i--; }
+         UpdatePalette(gad->GadgetID,i);
+         mm->Class=MULTI_GADGETDOWN;
+         mm->ObjectCode=i;
+        break;
+      }
+    break;
+   case MWGAD_SPECIAL:
+     switch(gad->Kind)
+      {
+       case WHEEL_KIND:
+         j=AskWheel(gad->GadgetID);
+         if(shifted==FALSE)
+           UpdateWheel(gad->GadgetID,j+1);
+         else
+           UpdateWheel(gad->GadgetID,j-1);
+         mm->Class=MULTI_GADGETUP;
+         mm->ObjectCode=AskWheel(gad->GadgetID);
+        break;
+       case SELECTBOX_KIND:
+         SelectBoxHandler(gad,mm);
+        break;
+       case CLICKBOX_KIND:
+         mm->Class=MULTI_GADGETUP;
+         if(gad->TagList[CLICKBOX_STATUS].ti_Data)
+           mm->ObjectCode=FALSE;
+         else
+           mm->ObjectCode=TRUE;
+         UpdateClickBox(gad->GadgetID,mm->ObjectCode);
+        break;
+      }
+    break;
+  }
+ if(gad->Action) CallAction(gad);
+ ActWin(windowID);
+}
+
+/* ---- Gadget erneuern */
+void UpdateGadget(gad)
+ struct MWGadget *gad;
+{
+ struct MultiWindowsUser *mw;
+ struct WindowEntry      *we;
+ struct StringInfo       *si;
+ struct StringData       *sd;
+ struct IconData         *id;
+
+ USER;
+ we=gad->WindowEntry;
+ if(gad->Gadget) RemoveGList(we->Window,gad->Gadget,gad->GadgetCount);
+ switch(gad->Type)
+  {
+   case MWGAD_GADTOOLS:
+     if(gad->Update)
+      {
+       switch(gad->Kind)
+        {
+         case STRING_KIND:
+           si=gad->Update->SpecialInfo;
+           sd=gad->ExtData;
+           strcpy(sd->Buffer,si->Buffer);
+          break;
+         case INTEGER_KIND:
+           si=gad->Update->SpecialInfo;
+           gad->TagList[INTEGER_INTEGER].ti_Data=atol(si->Buffer);
+          break;
+        }
+      }
+
+     if(gad->Gadget) FreeGList(gad->Gadget,gad->GadgetCount);
+     gad->Gadget=NULL;
+     gad->Gadget=CreateContext(&gad->Gadget);
+     if(gad->Gadget==NULL)
+      NoMemory();
+     else
+      {
+       gad->Update=CreateGadgetA(gad->Kind,gad->Gadget,&gad->NewGadget,&gad->TagList);
+       if(gad->Update==NULL)
+        {
+         FreeGList(gad->Gadget,gad->GadgetCount);
+         gad->Gadget=NULL;
+         NoMemory();
+        }
+       else
+        {
+         if(gad->Type==MWGAD_GADTOOLS)
+          {
+           switch(gad->Kind)
+            {
+              case BUTTON_KIND:
+                if(gad->ExtData==TOGGLE_MAGIC) {
+                  gad->Update->Activation |= TOGGLESELECT;
+                  if(gad->TagList[TOGGLE_STATUS].ti_Data==TRUE)
+                    gad->Update->Flags |= SELECTED; }
+              break;
+             case MX_KIND:
+               if(gad->TagList[GADGET_DISABLE].ti_Data==TRUE)
+                 DisableGad(gad->Gadget);
+               MXResize(we,gad);
+              break;
+             case LISTVIEW_KIND:
+               LVResize(we,gad);
+              break;
+             case STRING_KIND:
+               AddHook(gad);
+               if(gad->Update->GadgetText)
+                 gad->Update->GadgetText->ITextFont=mw->TextAttr;
+              break;
+             case INTEGER_KIND:
+               if(gad->Update->GadgetText)
+                 gad->Update->GadgetText->ITextFont=mw->TextAttr;
+              break;
+            }
+          }
+
+         ClearGad(we,gad);
+
+         gad->Update->UserData=gad;
+         gad->GadgetCount=CountGadgets(gad->Gadget);
+         AddGList(we->Window,gad->Gadget,0,gad->GadgetCount,NULL);
+        }
+      }
+    break;
+   case MWGAD_SPECIAL:
+     if(gad->Gadget)
+      {
+       InitGadget(gad,gad->Gadget,FALSE);
+       switch(gad->Kind)
+        {
+         case ICON_KIND:
+           id=gad->ExtData;
+           if(id->Icon)
+            {
+             id->Gadget.GadgetRender=CenterImage(id->Icon->do_Gadget.GadgetRender,
+                                                gad->NewGadget.ng_Width,
+                                                gad->NewGadget.ng_Height);
+             id->Gadget.SelectRender=CenterImage(id->Icon->do_Gadget.SelectRender,
+                                                 gad->NewGadget.ng_Width,
+                                                 gad->NewGadget.ng_Height);
+            }
+          break;
+         case IMAGE_KIND:
+           gad->Gadget->GadgetRender=CenterImage(gad->Gadget->GadgetRender,
+                                                 gad->NewGadget.ng_Width,
+                                                 gad->NewGadget.ng_Height);
+           gad->Gadget->SelectRender=CenterImage(gad->Gadget->SelectRender,
+                                                 gad->NewGadget.ng_Width,
+                                                 gad->NewGadget.ng_Height);
+          break;
+        }
+       AddGList(we->Window,gad->Gadget,0,gad->GadgetCount,NULL);
+      }
+    break;
+  }
+}
+
+/* ---- Taste wurde gedrückt (RawKey) */
+void RawKey(we,msg,mm)
+ struct WindowEntry  *we;
+ struct IntuiMessage *msg;
+ struct MultiMessage *mm;
+{
+ struct MWMenuItem *item;
+
+ item=FindKeyItem(we,msg->Code,msg->Qualifier,TRUE);
+ if(item!=NULL)
+  {
+   CallItem(we,item);
+
+   mm->Class=MULTI_MENUPICK;
+   mm->ObjectID=item->ItemID;
+   mm->ObjectAddress=item;
+   if(item->MenuItem.Flags & CHECKED) mm->ObjectCode=TRUE;
+
+   SysItemHandler(item);
+  }
+ else
+  {
+   mm->Class=MULTI_RAWKEY;
+   mm->ObjectID=(ULONG)msg->Code;
+   mm->ObjectCode=msg->Qualifier;
+   mm->ObjectAddress=we;
+  }
+}
+
+/* ---- Window-Signalliste erstellen */
+struct SignalList *GetSignalList()
+{
+ struct SignalList       *sl;
+ struct MultiWindowsUser *mw;
+ struct MultiDesktopUser *mu;
+ struct WindowEntry      *we;
+ int                      i;
+
+ USER;
+ mu=SysBase->ThisTask->tc_UserData;
+
+ sl=&mw->SignalList;
+ sl->Count=0;
+ sl->WaitMask=0L;
+ sl->MenuInUse=FALSE;
+
+ for(i=0;i<MAXWINDOWS;i++)
+  {
+   we=mw->WindowList[i];
+   if((we!=NULL)&&(we->UserPort!=NULL))
+    {
+     sl->WindowID[sl->Count]=we->WindowID;
+     if(we->MenuInUse) sl->MenuInUse=TRUE;
+     sl->SignalMask[sl->Count]=(1L<<we->UserPort->mp_SigBit);
+     sl->WaitMask+=sl->SignalMask[sl->Count];
+     sl->Count++;
+    }
+  }
+
+ sl->TimerSignalMask=(1L<<mu->TimerPort->mp_SigBit);
+ sl->AppSignalMask=(1L<<mw->AppPort->mp_SigBit);
+ sl->GuideSignalMask=mw->GuideSignalMask;
+ sl->BreakSignalMask=SIGBREAK;
+
+ sl->WaitMask=sl->WaitMask |
+               sl->TimerSignalMask |
+               sl->AppSignalMask |
+               sl->GuideSignalMask |
+               sl->BreakSignalMask;
+ return(sl);
+}
+
+/* ---- Signalmaske ermitteln */
+ULONG GetSignalMask()
+{
+ struct SignalList *sl;
+
+ sl=GetSignalList();
+ return(sl->WaitMask);
+}
+
+/* ---- Alle Windows und App-Port abfragen */
+struct MultiMessage *GetMultiMessage(wait)
+ BOOL wait;
+{
+ ULONG                    Signals;
+ struct MultiDesktopUser *mu;
+ struct MultiWindowsUser *mw;
+ struct MultiMessage     *mm;
+ struct SignalList       *sl;
+ int                      i;
+
+ mm=GetErrorMessage();
+ if(mm) return(mm);
+
+ USER;
+ mu=SysBase->ThisTask->tc_UserData;
+
+ sl=GetSignalList();
+
+ if(wait)
+   Signals=Wait(sl->WaitMask);
+ else
+   Signals=SetSignal(0L,0L);
+
+ return(CheckMultiMessageSignals(Signals));
+}
+
+/* ---- Signale verarbeiten */
+struct MultiMessage *CheckMultiMessageSignals(Signals)
+ ULONG Signals;
+{
+ struct MultiDesktopUser *mu;
+ struct MultiWindowsUser *mw;
+ struct MultiMessage     *mm;
+ struct SignalList       *sl;
+ int                      i;
+
+ mm=GetErrorMessage();
+ if(mm) return(mm);
+
+ USER;
+ mu=SysBase->ThisTask->tc_UserData;
+
+ sl=GetSignalList();
+ if(Signals & sl->BreakSignalMask)
+  {
+   mm=&mw->MultiMessage;
+   mm->Class=MULTI_SYSTEM;
+   i=0;
+   if(Signals & SIGBREAKF_CTRL_C) i=MSYS_BREAK_CTRL_C;
+   if(Signals & SIGBREAKF_CTRL_D) i+=MSYS_BREAK_CTRL_D;
+   if(Signals & SIGBREAKF_CTRL_E) i+=MSYS_BREAK_CTRL_E;
+   if(Signals & SIGBREAKF_CTRL_F) i+=MSYS_BREAK_CTRL_F;
+   mm->ObjectID=i;
+   mm->WindowID=0;
+   mm->ObjectCode=0;
+   for(i=0;i<4;i++)
+     mm->ObjectData[i]=0;
+   mm->ObjectAddress=NULL;
+   return(mm);
+  }
+
+ if((sl->GuideSignalMask!=0L) && (Signals & sl->GuideSignalMask))
+   HandleGuideMessage();
+
+ if(Signals & sl->AppSignalMask)
+  {
+   mm=GetAppMessage(FALSE);
+   if(mm!=NULL)
+    {
+     Signals &= ~sl->AppSignalMask;
+     Signal(SysBase->ThisTask,Signals);
+     return(mm);
+    }
+  }
+
+ if(Signals & sl->TimerSignalMask)
+  {
+   if(!sl->MenuInUse)
+    {
+     mm=GetTimerMessage(FALSE);
+     if(mm!=NULL)
+      {
+       Signals &= ~sl->TimerSignalMask;
+       Signal(SysBase->ThisTask,Signals);
+       return(mm);
+      }
+    }
+   else
+    Signal(SysBase->ThisTask,sl->TimerSignalMask);
+  }
+
+ for(i=0;i<sl->Count;i++)
+  {
+   if(Signals & sl->SignalMask[i])
+    {
+     mm=GetWindowMessage(sl->WindowID[i],FALSE);
+     if(mm!=NULL)
+      {
+       for( ;i<sl->Count;i++)
+        {
+         if(Signals & sl->SignalMask[i])
+           Signal(SysBase->ThisTask,sl->SignalMask[i]);
+        }
+       return(mm);
+      }
+    }
+  }
+ return(NULL);
+}
+

@@ -1,0 +1,2 @@
+-> dd_debugon.e - © 1994-1995 by Digital Disturbance. Freeware.
+-> Porgrammed by Leon Woestenberg (Email: leon@stack.urc.tue.nl)

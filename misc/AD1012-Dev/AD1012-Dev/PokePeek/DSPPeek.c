@@ -1,0 +1,175 @@
+/**********************************************************************
+Copyright (C) 1992 SunRize Industries
+	Written by Todd Modjeski
+**********************************************************************/
+#include "exec/types.h"
+#include "exec/exec.h"
+#include "libraries/configvars.h"
+
+#define STATUS	0
+#define DATA	1
+
+#define RDOK68 0x0200
+#define WROK68 0x0100
+/********************************************************************/
+struct ExpansionBase *ExpansionBase=NULL;
+/********************************************************************/
+USHORT *AllocAD1012();
+void FreeAD1012();
+void peek();
+void SendW();
+USHORT GetW();
+int Hex2int();
+/********************************************************************/
+USHORT *port;  /* This will point to the AD1012 */
+/********************************************************************/
+
+
+/********************************************************************/
+/********************************************************************/
+void main(argc,argv)
+int argc;
+char *argv[];
+{
+if (argc!=2) {printf("USAGE:%s address\n",argv[0]);exit();}
+
+if (!(ExpansionBase = (struct ExpansionBase *)OpenLibrary("expansion.library",0)))
+	{printf("Cant open Expansion Lib!");exit(10);}
+
+port=AllocAD1012();
+
+if (port) peek(argv[1]);
+
+if (port) FreeAD1012(port);
+
+if (ExpansionBase)	CloseLibrary(ExpansionBase);
+}
+/********************************************************************/
+/********************************************************************/
+void peek(AddrStr)
+char *AddrStr;
+{
+int value;
+int address=Hex2int(AddrStr);
+
+if (address==-1) return; /* Error in Conversion */
+
+SendW(0x0041);
+SendW(address);
+value=GetW();
+printf("0x%0x = Peek(0x%0x)\n",value,address);
+}
+/********************************************************************/
+/********************************************************************/
+int Hex2int(string)
+char *string;
+{
+int x;
+int y=0;
+
+for (x=0;x<stclen(string);x++)
+	{
+	y=y*16;
+	switch (string[x])
+		{
+		case '0': 
+		case '1': 
+		case '2': 
+		case '3': 
+		case '4': 
+		case '5': 
+		case '6': 
+		case '7': 
+		case '8': 
+		case '9': 
+			y=y+(string[x]-'0');
+			break;
+		case 'a':
+		case 'b':
+		case 'c':
+		case 'd':
+		case 'e':
+		case 'f':
+			y=y+(string[x]-'a')+10;
+			break;
+	
+		case 'A':
+		case 'B':
+		case 'C':
+		case 'D':
+		case 'E':
+		case 'F':
+			y=y+(string[x]-'A')+10;
+			break;
+		default:
+			printf("Invalid Parameter Error.\n");
+			return(-1); /* INVALID VALUE */
+			break;
+		}
+	}
+
+return(y);
+}
+/********************************************************************/
+/********************************************************************/
+void SendW(z)
+USHORT z;
+{
+long x=0;
+
+while (*(port+STATUS)&WROK68 && x<300000) x++;
+if (x>=300000) printf("Card Comunications Error #1 - Write Not Recognized\n");
+*(port+DATA)=z;
+}
+/********************************************************************/
+/********************************************************************/
+USHORT GetW()
+{
+USHORT y;
+ULONG x=0;
+while(*(port+STATUS)&RDOK68 && x<300000) x++;
+if (x>=300000) printf("Card Comunications Error #2 - Read Not Recognized\n");
+y=*(port+DATA);
+
+return(y);
+}
+/********************************************************************/
+/********************************************************************/
+USHORT *AllocAD1012()
+{
+USHORT *cport=NULL;
+struct ConfigDev *ConfigDev=NULL;
+struct ConfigDev *FindConfigDev();
+
+Disable();
+while ((ConfigDev = FindConfigDev( ConfigDev, 2127, 1 )) && cport==NULL)
+	{
+	if (ConfigDev->cd_Driver==NULL) /* Is card in use? */
+		{
+		ConfigDev->cd_Driver=(APTR)1; /* Gain Exclusive Access to card */
+		cport=(USHORT *)ConfigDev->cd_BoardAddr;
+		}
+	}
+Enable();
+
+if (cport==NULL) {printf("Can't find free AD1012 Card\n");return(NULL);}
+return(cport);
+}
+/********************************************************************/
+/********************************************************************/
+/********************************************************************/
+/********************************************************************/
+void FreeAD1012(fport)
+USHORT *fport;
+{
+struct ConfigDev *ConfigDev=NULL;
+struct ConfigDev *FindConfigDev();
+
+while ((ConfigDev = FindConfigDev( ConfigDev, 2127, 1 ))) 
+	{
+	if (fport==(USHORT *)ConfigDev->cd_BoardAddr)
+		ConfigDev->cd_Driver=NULL; /* Release Exclusive Access to card */
+	}
+}
+/********************************************************************/
+/********************************************************************/

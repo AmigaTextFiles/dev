@@ -1,0 +1,434 @@
+/****************************************************************
+**                                                             **
+** Name:        VideoPlayer                                    **
+** Author:      Andreas Falkenhahn                             **
+** Version:     1.1                                            **
+** Date:        28.04.14                                       **
+** Interpreter: Hollywood 5.2                                  **
+** Licence:     Sample program                                 **
+** Function:    Demonstrates how to use MUI from Hollywood     **
+**                                                             **
+** History:                                                    **
+**                                                             **
+** 1.1: (28.04.14)                                             **
+**                                                             **
+** - added support For antialiased filtering                   **
+**                                                             **
+** 1.0: (10.08.12)                                             **
+**                                                             **
+** - initial release                                           **
+**                                                             **
+****************************************************************/
+
+/*
+** Make sure we have at least Hollywood 5.2!
+*/
+@VERSION 5,2
+
+
+/*
+** This script requires the MUI Royale plugin
+*/
+@REQUIRE "MUIRoyale"
+
+
+/*
+** MUI apps require this information
+*/
+@APPTITLE "VideoPlayer"
+@APPVERSION "$VER: VideoPlayer 1.1 (28.04.14)"
+@APPCOPYRIGHT "(C) Copyright 2012-2014 by Andreas Falkenhahn"
+@APPAUTHOR "Andreas Falkenhahn"
+@APPDESCRIPTION "A simple video player done in Hollywood"
+
+
+/*
+** Button and list view images
+*/
+@BRUSH 1, "VideoPlayer/tapestart.png", {LoadAlpha = True}
+@BRUSH 2, "VideoPlayer/tapeplay.png", {LoadAlpha = True}
+@BRUSH 3, "VideoPlayer/tapepause.png", {LoadAlpha = True}
+@BRUSH 4, "VideoPlayer/tapestop.png", {LoadAlpha = True}
+@BRUSH 5, "VideoPlayer/tapeend.png", {LoadAlpha = True}
+@BRUSH 6, "VideoPlayer/add.png", {LoadAlpha = True}
+@BRUSH 7, "VideoPlayer/remove.png", {LoadAlpha = True}
+@BRUSH 8, "VideoPlayer/moveup.png", {LoadAlpha = True}
+@BRUSH 9, "VideoPlayer/movedown.png", {LoadAlpha = True}
+@BRUSH 10, "VideoPlayer/video.png", {LoadAlpha = True}
+
+
+/*
+** Our BGPic
+*/
+@BRUSH 11, "VideoPlayer/cover.png"
+
+
+/*
+** We don't need our Hollywood display because we have a MUI window
+*/
+@DISPLAY {Hidden = True, Color = #BLACK}
+
+
+/*
+** Enable/disable buttons depending on current list selection
+*/
+Function p_SetStates(p$, ac, num)
+
+	mui.Set(p$ .. "rem", "disabled", (ac = -1))
+	mui.Set(p$ .. "mvdn", "disabled", (ac = num - 1) Or (ac = -1))
+	mui.Set(p$ .. "mvup", "disabled", (ac = 0) Or (ac = -1))
+	mui.Set(p$ .. "play", "disabled", (ac = -1))
+
+	If musstate$ <> "stopped"
+		mui.Set(p$ .. "last", "disabled", (ac = 0))
+		mui.Set(p$ .. "next", "disabled", (ac = num - 1))
+	EndIf
+
+EndFunction
+
+
+/*
+** Disable buttons that only work while playback is active
+*/
+Function p_SetStopStates(p$)
+
+	mui.Set(p$ .. "last", "disabled", True)
+	mui.Set(p$ .. "next", "disabled", True)
+	mui.Set(p$ .. "pause", "disabled", True)
+	mui.Set(p$ .. "stop", "disabled", True)
+
+EndFunction
+
+
+/*
+** Enable/disable buttons depending on current list selection
+*/
+Function p_RefreshActive()
+
+	Local ac = mui.Get("lv", "active")
+	Local num = mui.Get("lv", "entries")
+
+	If GetType(ac) = #STRING
+		If ac = "Off" Then ac = -1
+	EndIF
+
+	p_SetStates("", ac, num)
+	p_SetStates("mn_", ac, num)
+
+EndFunction
+
+
+/*
+** Convert milliseconds into a hh:mm:ss time string
+*/
+Function p_Milliseconds2Time(msg)
+
+	Local ms = msg.value
+	Local hrs = ms / (1000 * 60 * 60)
+	Local Min = (ms % (1000 * 60 * 60)) / (1000 * 60)
+	Local sec = ((ms % (1000 * 60 * 60)) % (1000 * 60)) / 1000
+
+	Return(FormatStr("%.2d:%.2d:%.2d", hrs, Min, sec))
+
+EndFunction
+
+
+/*
+** Skip to previous track
+*/
+Function p_Last()
+
+	Local ac = mui.Get("lv", "active")
+	Local num = mui.Get("lv", "entries")
+
+	If ac - 1 >= 0
+		mui.Set("lv", "active", ac - 1)
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Skip to next track
+*/
+Function p_Next()
+
+	Local ac = mui.Get("lv", "active")
+	Local num = mui.Get("lv", "entries")
+
+	If ac + 1 < num
+		mui.Set("lv", "active", ac + 1)
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Return file name of currently selected video
+*/
+Function p_GetVideoSelection()
+
+	Local t$ = mui.DoMethod("lv", "getentry", "active")
+
+	; remove list image if there is one!
+	If MidStr(t$, 0, 1) = "\27"
+		Return(UnrightStr(t$, FindStr(t$, "]") + 2))
+	; for MUI 3.8
+	ElseIf MidStr(t$, 0, 1) = " "
+		Return(UnrightStr(t$, 1))
+	Else
+		Return(t$)
+	EndIf
+
+EndFunction
+
+
+/*
+** Start/resume playback
+*/
+Function p_Play()
+
+	If musstate$ = "paused"
+
+		ResumeVideo(1)
+		musstate$ = "playing"
+
+	Else
+
+		Local f$ = p_GetVideoSelection()
+		Local ac = mui.Get("lv", "active")
+		Local num = mui.Get("lv", "entries")
+
+		; do not fail if unknown error format
+		ExitOnError(False)
+		OpenVideo(1, f$)
+		Local err = GetLastError()
+		ExitOnError(True)
+
+		If err <> #ERR_NONE
+			mui.Request("VideoPlayer", "Unrecognized video format!", "OK")
+			Return
+		EndIf
+
+		Local w = GetAttribute(#VIDEO, 1, #ATTRWIDTH)
+		Local h = GetAttribute(#VIDEO, 1, #ATTRHEIGHT)
+		
+		ChangeDisplaySize(w, h)
+		
+		; enable buttons that can be used now
+		mui.Set("pause", "disabled", False)
+		mui.Set("stop", "disabled", False)
+		mui.Set("last", "disabled", (ac = 0))
+		mui.Set("next", "disabled", (ac = num - 1))
+
+		mui.Set("mn_pause", "disabled", False)
+		mui.Set("mn_stop", "disabled", False)
+		mui.Set("mn_last", "disabled", (ac = 0))
+		mui.Set("mn_next", "disabled", (ac = num - 1))
+
+		; prepare time slider
+		mui.Set("time", "min", 0, "max", GetAttribute(#VIDEO, 1, #ATTRDURATION), "disabled", False)
+		mui.Set("vol", "disabled", False)
+
+		; and go!
+		SetVideoVolume(1, curvol)
+						
+		PlayVideo(1, 0, 0)
+
+		musstate$ = "playing"
+		lastlevel$ = ""
+
+		curvideo$ = f$
+		curwidth = w
+		curheight = h
+	EndIf
+
+EndFunction
+
+
+/*
+** Stop playback
+*/
+Function p_Stop(callstop)
+
+	If callstop = True
+		If musstate$ = "paused" Then ResumeVideo(1)
+		StopVideo(1)
+	EndIf
+
+	musstate$ = "stopped"
+	curvideo$ = ""
+
+	mui.Set("time", "nonotify", True, "level", 0, "disabled", True)
+	mui.Set("vol", "disabled", True)
+
+	p_SetStopStates("")
+	p_SetStopStates("mn_")
+
+EndFunction
+
+
+/*
+** Pause playback
+*/
+Function p_Pause()
+
+	If musstate$ = "playing"
+		PauseVideo(1)
+		musstate$ = "paused"
+	Else
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Joint event handler for MUI buttons and menus
+*/
+Function p_MUIEvent(id)
+
+	Switch id
+	Case "add":
+		Local f$ = FileRequest("Select video", "mpg|ogg|m2v|avi|flv|mp4|cdxl|xl|mov", #REQ_NORMAL, "Video:")
+		If f$ <> "" Then mui.DoMethod("lv", "insert", "active", "\27A[10] " .. f$)
+	Case "mvup"
+		Local ac = mui.Get("lv", "active")
+		mui.DoMethod("lv", "move", "active", "previous")
+		mui.Set("lv", "active", ac - 1)
+	Case "mvdn"
+		Local ac = mui.Get("lv", "active")
+		mui.DoMethod("lv", "move", "active", "next")
+		mui.Set("lv", "active", ac + 1)
+	Case "play":
+		p_Play()
+	Case "stop":
+		p_Stop(True)
+	Case "pause":
+		p_Pause()
+	Case "last"
+		p_Last()
+	Case "next"
+		p_Next()
+	Case "rem":
+		If p_GetVideoSelection() = curvideo$ Then p_Stop(True)
+		mui.DoMethod("lv", "remove", "active")
+	Case "quit":
+		End
+	Case "about":
+		mui.Request("VideoPlayer", "VideoPlayer\n© 2012 by Andreas Falkenhahn", "OK")
+	Case "aboutmui":
+		mui.DoMethod("app", "aboutmui")
+	Case "aboutmuiroyale":
+		mui.DoMethod("app", "aboutmuiroyale")
+	Case "muisettings":
+		mui.DoMethod("app", "openconfigwindow")
+	Case "pl":
+		mui.Set("playlist", "open", mui.Get("mn_pl", "selected"))
+	Case "aa":
+		enableaa = mui.Get("mn_aa", "selected")
+		If HaveObject(#VIDEO, 1) = True Then SetVideoSize(1, curwidth, curheight, enableaa)
+	EndSwitch
+
+EndFunction
+
+
+/*
+** Handles all incoming events
+*/
+Function p_EventFunc(msg)
+
+	Switch msg.action
+	Case "MUIRoyale":
+		;
+		; all events from MUI are passed as type "MUIRoyale"!
+		;
+		Switch msg.attribute
+		Case "CloseRequest":
+			If msg.id = "main" Then End
+			mui.Set(msg.id, "open", False)
+			mui.Set("mn_pl", "selected", False)
+		Case "Pressed":
+			p_MUIEvent(msg.id)
+		Case "Selected":
+			p_MUIEvent(UnrightStr(msg.id, 3))
+		Case "DoubleClick":
+			p_Play()
+		Case "Active":
+			p_RefreshActive()
+		Case "Level":
+			Switch msg.id
+			Case "time":
+				Local seekms = mui.Get("time", "level")
+				If seekms < GetAttribute(#VIDEO, 1, #ATTRDURATION) - 100
+					SeekVideo(1, seekms)
+				Else
+					p_Stop(True)
+				EndIf
+			Case "vol":
+				curvol = msg.triggervalue
+				If HaveObject(#VIDEO, 1) = True Then SetVideoVolume(1, curvol)
+			EndSwitch
+		EndSwitch
+
+	Case "HideWindow":
+		mui.Set("app", "iconified", True)
+
+	Case "ShowWindow":
+		mui.Set("app", "iconified", False)
+
+	Case "SizeWindow":
+		If HaveObject(#VIDEO, 1) = True
+			curwidth = msg.width
+			curheight = msg.height
+			SetVideoSize(1, msg.width, msg.height, enableaa)
+		Else
+			DisplayBrush(11, #CENTER, #CENTER)
+		EndIf
+
+	Case "Interval":
+		; update time slider
+		If musstate$ = "playing"
+			Local ms = GetAttribute(#VIDEO, 1, #ATTRPOSITION)
+			Local level$ = p_Milliseconds2Time({value = ms})
+			If level$ <> lastlevel$
+				; must use "nonotify" here because otherwise the event handler that calls SeekVideo()
+				; would be triggered
+				mui.Set("time", "nonotify", True, "level", ms)
+				lastlevel$ = level$
+			EndIf
+		EndIf
+
+	Case "OnVideoEnd":
+		p_Stop(False)
+		p_Next()
+	EndSwitch
+
+EndFunction
+
+DisplayBrush(11, #CENTER, #CENTER)
+
+SetFont(#SANS, 32)
+SetFontStyle(#ANTIALIAS)
+SetFillStyle(#FILLCOLOR)
+
+curvol = 64
+
+; dynamically create MUI GUI from an external *.xml file definition
+mui.CreateGui(FileToString("VideoPlayer.xml"))
+
+; listen to these events!
+InstallEventHandler({MUIRoyale = p_EventFunc, HideWindow = p_EventFunc, ShowWindow = p_EventFunc, SizeWindow = p_EventFunc, OnVideoEnd = p_EventFunc})
+
+; create an interval function that updates the time slider
+SetInterval(1, p_EventFunc, 1000\10)
+
+musstate$ = "stopped"
+
+; main loop!
+Repeat
+	WaitEvent
+Forever
+

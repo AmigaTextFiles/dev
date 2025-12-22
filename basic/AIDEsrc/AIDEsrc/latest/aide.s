@@ -1,0 +1,155 @@
+*   AIDE 2.13, an environment for ACE
+*   Copyright (C) 1995/97 by Herbert Breuer
+*		  1997/99 by Daniel Seifert
+*
+*                 contact me at: dseifert@gmx.net
+*
+*                                Daniel Seifert
+*                                Elsenborner Weg 25
+*                                12621 Berlin
+*                                GERMANY
+*
+*   This program is free software; you can redistribute it and/or modify
+*   it under the terms of the GNU General Public License as published by
+*   the Free Software Foundation; either version 2 of the License, or
+*   (at your option) any later version.
+*
+*   This program is distributed in the hope that it will be useful,
+*   but WITHOUT ANY WARRANTY; without even the implied warranty of
+*   MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+*   GNU General Public License for more details.
+*
+*   You should have received a copy of the GNU General Public License
+*   along with this program; if not, write to the
+*          Free Software Foundation, Inc., 59 Temple Place, 
+*          Suite 330, Boston, MA  02111-1307  USA
+
+*--------------------------------------
+* AIDE.s
+*--------------------------------------
+* begonnen              : 18. 12. 1995
+* beendet               : Version 2.01 am 16.05.1996 veroeffentlicht.
+* Programmierer         : Herbert Breuer
+* Programmiersprache    : Assembler
+*--------------------------------------
+* begonnen              : 17. 04. 1997
+* beendet               : Version 2.12 am 20.05.1997 veröffentlicht
+*                         Version 2.13 am 17.08.1997 veröffentlicht
+* Programmierer         : Daniel Seifert <dseifert@gmx.de>
+*--------------------------------------
+        Incdir  ASM_INC:
+
+        Include exec/exec.i
+        Include exec/exec_lib.i
+
+        Include dos/datetime.i
+        Include dos/dos.i
+        Include dos/dosasl.i
+        Include dos/dosextens.i
+        Include dos/dostags.i
+        Include dos/exall.i
+        Include dos/dos_lib.i
+
+        Include graphics/graphics_lib.i
+
+        Include intuition/gadgetclass.i
+        Include intuition/intuition.i
+        Include intuition/intuition_lib.i
+
+        Include libraries/asl.i
+        Include libraries/asl_lib.i
+
+        Include libraries/gadtools.i
+        Include libraries/gadtools_lib.i
+
+        Include libraries/mrt_lib.i
+        Include libraries/locale_lib.i
+
+        Include utility/utility.i
+        Include utility/utility_lib.i
+        Include utility/tagitem.i
+
+        Include diskfont/diskfont_lib.i
+
+        Include rexx/RexxSysLib_Lib.i
+        Include rexx/Storage.i
+
+        Include workbench/icon_lib.i
+        Include workbench/startup.i
+        Include workbench/workbench.i
+        Include workbench/wb_lib.i
+*--------------------------------------
+        Incdir ASM_MAC:
+
+        Include AideMacros.mac
+        Include Locale.mac
+*--------------------------------------
+        Include ASM_INC:workbench/easystart.i
+
+        Incdir  asm:aide/main/
+
+        Include start.i
+        Include ende.i
+        Include layout.i
+        Include create_gadgets.i
+        Include create_gadgets_superopt.i
+        Include steuerung.i
+        Include sperr_frei.i
+        Include menu.i
+        Include msg_win.i
+        Include requester.i
+        Include setup_win.i
+        INCLUDE superoptlevel.i
+        INCLUDE iconify.i
+*--------------------------------------
+        Incdir  asm:aide/inc/
+
+        Include compile.i
+        Include module_list.i
+        Include general.i
+        Include wbargs.i
+        Include gadget.i
+        Include gadget_rout.i
+        Include source.i
+        Include program.i
+        Include locale.i
+        Include strings.i
+        Include rexx.i
+*--------------------------------------
+        Incdir  asm:aide/sys/
+
+        Include sys_asl.i
+        Include sys_dos.i
+        Include sys_exec.i
+        Include sys_gadtools.i
+        Include sys_gfx.i
+        Include sys_intuition.i
+        Include sys_mrt.i
+        Include sys_utility.i
+        Include sys_rexxsyslib.i
+*--------------------------------------
+        Incdir  asm:aide/disk/
+
+        Include asl_req_laden.i
+        Include asl_req_sichern.i
+        Include datei_laden.i
+        Include datei_sichern.i
+        Include dateiname.i
+        Include fileinfo.i
+        Include fi_block.i
+        Include io_error.i
+        Include new_buffer.i
+        Include pruefe_datei.i
+        Include config_file.i
+*--------------------------------------
+        Incdir  asm:aide/daten/
+
+        Include locale_data.i
+        Include intui_str.i
+        Include menu_str.i
+        Include texte.i
+        Include texte2.i
+        Include daten.i
+*--------------------------------------
+END
+

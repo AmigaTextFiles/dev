@@ -1,0 +1,17 @@
+#!/bin/sh
+
+# system:     "'ascii2ps' pretty-printer"
+# compiler:   "SmallEiffel -0.76"
+# author:     "Eric Bezault <ericb@gobosoft.com>"
+# copyright:  "Copyright (c) 1997-2000, Eric Bezault and others"
+# license:    "Eiffel Forum Freeware License v1 (see forum.txt)"
+# date:       "$Date: 2000/08/20 17:55:29 $"
+# revision:   "$Revision: 1.4 $"
+
+
+echo ${GOBO}/example/lexical/ascii2ps/>		loadpath.se
+echo ${GOBO}/library/lexical/skeleton/>>	loadpath.se
+echo ${GOBO}/library/kernel/loadpath.se>>	loadpath.se
+
+export geoptions="-boost -no_split -no_style_warning -no_gc"
+compile $geoptions ASCII2PS make

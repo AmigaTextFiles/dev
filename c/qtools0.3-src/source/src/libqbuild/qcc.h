@@ -1,0 +1,483 @@
+/*
+ * <one line to give the program's name and a brief idea of what it does.>
+ * Copyright (C) 1998  Niels Froehling <Niels.Froehling@Informatik.Uni-Oldenburg.de>
+ *
+ * This program is free software; you can redistribute it and/or modify
+ * it under the terms of the GNU General Public License as published by
+ * the Free Software Foundation; either version 2 of the License, or
+ * (at your option) any later version.
+ *
+ * This program is distributed in the hope that it will be useful,
+ * but WITHOUT ANY WARRANTY; without even the implied warranty of
+ * MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ * GNU General Public License for more details.
+ *
+ * You should have received a copy of the GNU General Public License
+ * along with this program; if not, write to the Free Software
+ * Foundation, Inc., 675 Mass Ave, Cambridge, MA 02139, USA.
+ */
+
+#ifndef	QCC_H
+#define	QCC_H
+
+/*
+ * ============================================================================
+ * 
+ * TODO:
+ * "stopped at 10 errors"
+ * other pointer types for models and clients?
+ * compact string heap?
+ * allways initialize all variables to something safe
+ * the def->type->type arrangement is really silly.
+ * return type checking
+ * parm count type checking
+ * immediate overflow checking
+ * pass the first two parms in call->b and call->c
+ * 
+ * ============================================================================
+ */
+
+/*
+ * ============================================================================
+ * 
+ * comments
+ * --------
+ * // comments discard text until the end of line
+ * / *  * / comments discard all enclosed text (spaced out on this line because this documentation is in a regular C comment block, and typing them in normally causes a parse error)
+ * 
+ * code structure
+ * --------------
+ * A definition is:
+ * <type> <name> [ = <immediate>] {, <name> [ = <immediate>] };
+ * 
+ * 
+ * types
+ * -----
+ * simple types: void, float, vector, string, or entity
+ * float                width, height;
+ * string               name;
+ * entity               self, other;
+ * 
+ * vector types:
+ * vector               org;    // also creates org_x, org_y, and org_z float defs
+ * 
+ * 
+ * A function type is specified as:     simpletype ( type name {,type name} )
+ * The names are ignored except when the function is initialized.       
+ * void()               think;
+ * entity()     FindTarget;
+ * void(vector destination, float speed, void() callback)       SUB_CalcMove;
+ * void(...)    dprint;         // variable argument builtin
+ * 
+ * A field type is specified as:  .type
+ * .vector              origin;
+ * .string              netname;
+ * .void()              think, touch, use;
+ * 
+ * 
+ * names
+ * -----
+ * Names are a maximum of 64 characters, must begin with A-Z,a-z, or _, and can continue with those characters or 0-9.
+ * 
+ * There are two levels of scoping: global, and function.  The parameter list of a function and any vars declared inside a function with the "local" statement are only visible within that function, 
+ * 
+ * 
+ * immediates
+ * ----------
+ * Float immediates must begin with 0-9 or minus sign.  .5 is illegal.
+ * 
+ * A parsing ambiguity is present with negative constants. "a-5" will be parsed as "a", then "-5", causing an error.  Seperate the - from the digits with a space "a - 5" to get the proper behavior.
+ * 12
+ * 1.6
+ * 0.5
+ * -100
+ * 
+ * Vector immediates are three float immediates enclosed in single quotes.
+ * '0 0 0'
+ * '20.5 -10 0.00001'
+ * 
+ * String immediates are characters enclosed in double quotes.  The string cannot contain explicit newlines, but the escape character \n can embed one.  The \" escape can be used to include a quote in the string.
+ * "maps/jrwiz1.bsp"
+ * "sound/nin/pain.wav"
+ * "ouch!\n"
+ * 
+ * Code immediates are statements enclosed in {} braces.
+ * statement:
+ * { <multiple statements> }
+ * <expression>;
+ * local <type> <name> [ = <immediate>] {, <name> [ = <immediate>] };
+ * return <expression>;
+ * if ( <expression> ) <statement> [ else <statement> ];
+ * while ( <expression> ) <statement>;
+ * do <statement> while ( <expression> );
+ * <function name> ( <function parms> );
+ * 
+ * expression:
+ * combiations of names and these operators with standard C precedence:
+ * "&&", "||", "<=", ">=","==", "!=", "!", "*", "/", "-", "+", "=", ".", "<", ">", "&", "|"
+ * Parenthesis can be used to alter order of operation.
+ * The & and | operations perform integral bit ops on floats
+ * 
+ * A built in function immediate is a number sign followed by an integer.
+ * #1
+ * #12
+ * 
+ * 
+ * compilation
+ * -----------
+ * Source files are processed sequentially without dumping any state, so if a defs file is the first one processed, the definitions will be available to all other files.
+ * The language is strongly typed and there are no casts.
+ * Anything that is initialized is assumed to be constant, and will have immediates folded into it.  If you change the value, your program will malfunction.  All uninitialized globals will be saved to savegame files.
+ * Functions cannot have more than eight parameters.
+ * Error recovery during compilation is minimal.  It will skip to the next global definition, so you will never see more than one error at a time in a given function.  All compilation aborts after ten error messages.
+ * Names can be defined multiple times until they are defined with an initialization, allowing functions to be prototyped before their definition.
+ * 
+ * void()       MyFunction;                     // the prototype
+ * 
+ * void()       MyFunction =            // the initialization
+ * {
+ * dprint ("we're here\n");
+ * };
+ * 
+ * 
+ * entities and fields
+ * -------------------
+ * 
+ * 
+ * execution
+ * ---------
+ * Code execution is initiated by C code in quake from two main places:  the timed think routines for periodic control, and the touch function when two objects impact each other.
+ * 
+ * There are three global variables that are set before beginning code execution:
+ * entity       world;          // the server's world object, which holds all global
+ * // state for the server, like the deathmatch flags
+ * // and the body ques.
+ * entity       self;           // the entity the function is executing for
+ * entity       other;          // the other object in an impact, not used for thinks
+ * float        time;           // the current game time.  Note that because the
+ * // entities in the world are simulated sequentially,
+ * // time is NOT strictly increasing.  An impact late
+ * // in one entity's time slice may set time higher
+ * // than the think function of the next entity. 
+ * // The difference is limited to 0.1 seconds.
+ * Execution is also caused by a few uncommon events, like the addition of a new client to an existing server.
+ * There is a runnaway counter that stops a program if 100000 statements are executed, assuming it is in an infinite loop.
+ * It is acceptable to change the system set global variables.  This is usually done to pose as another entity by changing self and calling a function.
+ * The interpretation is fairly efficient, but it is still over an order of magnitude slower than compiled C code.  All time consuming operations should be made into built in functions.
+ * A profile counter is kept for each function, and incremented for each interpreted instruction inside that function.  The "profile" console command in Quake will dump out the top 10 functions, then clear all the counters.  The "profile all" command will dump sorted stats for every function that has been executed.
+ * 
+ * afunc ( 4, bfunc(1,2,3));
+ * will fail because there is a shared parameter marshaling area, which will cause the 1 from bfunc to overwrite the 4 allready placed in parm0.  When a function is called, it copies the parms from the globals into it's privately scoped variables, so there is no collision when calling another function.
+ * 
+ * total = factorial(3) + factorial(4);
+ * Will fail because the return value from functions is held in a single global area.  If this really gets on your nerves, tell me and I can work around it at a slight performance and space penalty by allocating a new register for the function call and copying it out.
+ * 
+ * 
+ * built in functions
+ * ------------------
+ * void(string text)    dprint;
+ * Prints the string to the server console.
+ * 
+ * void(entity client, string text)     cprint;
+ * Prints a message to a specific client.
+ * 
+ * void(string text)    bprint;
+ * Broadcast prints a message to all clients on the current server.
+ * 
+ * entity()     spawn;
+ * Returns a totally empty entity.  You can manually set everything up, or just set the origin and call one of the existing entity setup functions.
+ * 
+ * entity(entity start, .string field, string match) find;
+ * Searches the server entity list beginning at start, looking for an entity that has entity.field = match.  To start at the beginning of the list, pass world.  World is returned when the end of the list is reached.
+ * 
+ * <FIXME: define all the other functions...>
+ * 
+ * 
+ * gotchas
+ * -------
+ * 
+ * The && and || operators DO NOT EARLY OUT like C!
+ * Don't confuse single quoted vectors with double quoted strings
+ * The function declaration syntax takes a little getting used to.
+ * Don't forget the ; after the trailing brace of a function initialization.
+ * Don't forget the "local" before defining local variables.
+ * There are no ++ / -- operators, or operate/assign operators.
+ * 
+ * ============================================================================
+ */
+
+#define	MAX_ERRORS	10
+#define	MAX_NAME	64				/* chars long */
+#define	MAX_REGS	16384
+
+#define	MAX_FRAMES	256
+
+#define	MAX_STRINGS	500000
+#define	MAX_GLOBALS	16384
+#define	MAX_FIELDS	1024
+#define	MAX_STATEMENTS	65536
+#define	MAX_FUNCTIONS	8192
+
+#define	MAX_SOUNDS	1024
+#define	MAX_MODELS	1024
+#define	MAX_FILES	1024
+#define	MAX_DATA_PATH	64
+
+#define	MAX_PARMS	8
+
+#define	TOP_PRIORITY	6
+#define	NOT_PRIORITY	4
+
+/*============================================================================ */
+
+typedef int func_t;
+typedef int string_t;
+
+typedef enum {
+  ev_void, ev_string, ev_float, ev_vector, ev_entity, ev_field, ev_function, ev_pointer
+} __packed etype_t;
+
+#define	OFS_NULL		0
+#define	OFS_RETURN		1
+#define	OFS_PARM0		4				/* leave 3 ofs for each parm to hold vectors */
+#define	OFS_PARM1		7
+#define	OFS_PARM2		10
+#define	OFS_PARM3		13
+#define	OFS_PARM4		16
+#define	OFS_PARM5		19
+#define	OFS_PARM6		22
+#define	OFS_PARM7		25
+#define	RESERVED_OFS		28
+
+enum {
+  OP_DONE,
+  OP_MUL_F,
+  OP_MUL_V,
+  OP_MUL_FV,
+  OP_MUL_VF,
+  OP_DIV_F,
+  OP_ADD_F,
+  OP_ADD_V,
+  OP_SUB_F,
+  OP_SUB_V,
+
+  OP_EQ_F,
+  OP_EQ_V,
+  OP_EQ_S,
+  OP_EQ_E,
+  OP_EQ_FNC,
+
+  OP_NE_F,
+  OP_NE_V,
+  OP_NE_S,
+  OP_NE_E,
+  OP_NE_FNC,
+
+  OP_LE,
+  OP_GE,
+  OP_LT,
+  OP_GT,
+
+  OP_LOAD_F,
+  OP_LOAD_V,
+  OP_LOAD_S,
+  OP_LOAD_ENT,
+  OP_LOAD_FLD,
+  OP_LOAD_FNC,
+
+  OP_ADDRESS,
+
+  OP_STORE_F,
+  OP_STORE_V,
+  OP_STORE_S,
+  OP_STORE_ENT,
+  OP_STORE_FLD,
+  OP_STORE_FNC,
+
+  OP_STOREP_F,
+  OP_STOREP_V,
+  OP_STOREP_S,
+  OP_STOREP_ENT,
+  OP_STOREP_FLD,
+  OP_STOREP_FNC,
+
+  OP_RETURN,
+  OP_NOT_F,
+  OP_NOT_V,
+  OP_NOT_S,
+  OP_NOT_ENT,
+  OP_NOT_FNC,
+  OP_IF,
+  OP_IFNOT,
+  OP_CALL0,
+  OP_CALL1,
+  OP_CALL2,
+  OP_CALL3,
+  OP_CALL4,
+  OP_CALL5,
+  OP_CALL6,
+  OP_CALL7,
+  OP_CALL8,
+  OP_STATE,
+  OP_GOTO,
+  OP_AND,
+  OP_OR,
+
+  OP_BITAND,
+  OP_BITOR
+} __packed;
+
+typedef struct statement_s {
+  unsigned short int op;
+  short int a, b, c;
+} __packed dstatement_t;	/* 8 */
+
+typedef struct {
+  unsigned short int type;					/* if DEF_SAVEGLOBGAL bit is set */
+  /* the variable needs to be saved in savegames */
+
+  unsigned short int ofs;
+  int s_name;
+} __packed ddef_t;		/* 8 */
+
+#define	DEF_SAVEGLOBGAL	(1<<15)
+
+typedef struct {
+  int first_statement;						/* negative numbers are builtins */
+
+  int parm_start;
+  int locals;							/* total ints of parms + locals */
+
+  int profile;							/* runtime */
+
+  int s_name;
+  int s_file;							/* source file defined in */
+
+  int numparms;
+  unsigned char parm_size[MAX_PARMS];
+} __packed dfunction_t;		/* 36 */
+
+#define	PROG_VERSION	6
+typedef struct {
+  int version;
+  int crc;							/* check of header file */
+
+  int ofs_statements;
+  int numstatements;						/* statement 0 is an error */
+
+  int ofs_globaldefs;
+  int numglobaldefs;
+
+  int ofs_fielddefs;
+  int numfielddefs;
+
+  int ofs_functions;
+  int numfunctions;						/* function 0 is an empty */
+
+  int ofs_strings;
+  int numstrings;						/* first string is a null string */
+
+  int ofs_globals;
+  int numglobals;
+
+  int entityfields;
+} __packed dprograms_t;	/* 60 */
+
+/*============================================================================= */
+
+/* offsets are allways multiplied by 4 before using */
+typedef int gofs_t;						/* offset in global data block */
+
+typedef struct function_s function_t;
+
+typedef struct type_s {
+  etype_t type;
+  struct def_s *def;						/* a def that points to this type */
+
+  struct type_s *next;
+  /* function types are more complex */
+  struct type_s *aux_type;					/* return type or field type */
+
+  int num_parms;						/* -1 = variable args */
+  struct type_s *parm_types[MAX_PARMS];				/* only [num_parms] allocated */
+} __packed type_t;	/* 52 */
+
+typedef struct def_s {
+  type_t *type;
+  char *name;
+  struct def_s *next, *prev;
+
+  struct def_s *search_next;					/* for finding faster */
+
+  gofs_t ofs;
+  struct def_s *scope;						/* function the var was defined in, or NULL */
+
+  int initialized;						/* 1 when a declaration included "= immediate" */
+
+} __packed def_t;	/* 32 */
+
+/*============================================================================= */
+
+typedef union eval_s {
+  string_t string;
+  vec1D _float;
+  vec1D vector[3];
+  func_t function;
+  int _int;
+  union eval_s *ptr;
+} __packed eval_t;
+
+struct function_s {
+  int builtin;							/* if non 0, call an internal function */
+
+  int code;							/* first statement */
+
+  char *file;							/* source file with definition */
+
+  int file_line;
+  struct def_s *def;
+  int parm_ofs[MAX_PARMS];					/* allways contiguous, right? */
+
+} __packed;
+
+/* output generated by prog parsing */
+typedef struct {
+#if 0
+  char *memory;
+  int max_memory;
+  int current_memory;
+#endif
+  type_t *types;
+
+  def_t *def_head;						/* unused head of linked list */
+  def_t *def_tail;						/* add new defs after this and move it */
+  def_t *search;						/* search chain through defs */
+
+  int size_fields;
+} __packed pr_info_t;
+
+typedef struct {
+  char *name;
+  char *opname;
+  vec1D priority;
+  bool right_associative;
+  def_t *type_a, *type_b, *type_c;
+} __packed opcode_t;
+
+/*============================================================================ */
+
+typedef enum {
+  tt_eof,							/* end of file reached */
+  tt_name,							/* an alphanumeric name token */
+  tt_punct,							/* code punctuation */
+  tt_immediate							/* string, float, vector */
+} __packed token_type_t;
+
+#define	G_FLOAT(o)	(pr_globals[o])
+#define	G_INT(o)	(*(int *)&pr_globals[o])
+#define	G_VECTOR(o)	(&pr_globals[o])
+#define	G_STRING(o)	(strings + *(string_t *)&pr_globals[o])
+#define	G_FUNCTION(o)	(*(func_t *)&pr_globals[o])
+
+/*============================================================================= */
+#endif

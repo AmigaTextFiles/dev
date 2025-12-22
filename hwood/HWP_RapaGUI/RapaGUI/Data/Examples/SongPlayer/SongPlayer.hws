@@ -1,0 +1,447 @@
+/****************************************************************
+**                                                             **
+** Name:        SongPlayer                                     **
+** Author:      Andreas Falkenhahn                             **
+** Version:     1.1                                            **
+** Date:        08.09.18                                       **
+** Interpreter: Hollywood 9.0                                  **
+** Licence:     Sample program for RapaGUI                     **
+** Function:    An audio player written in Hollywood           **
+**                                                             **
+** History:                                                    **
+**                                                             **
+** 1.1: (08.09.18)                                             **
+**                                                             **
+** - added high dpi support                                    **
+**                                                             **
+** 1.0: (24.04.16)                                             **
+**                                                             **
+** - initial release                                           **
+**                                                             **
+****************************************************************/
+
+/*
+** Make sure we have at least Hollywood 9.0!
+*/
+@VERSION 9,0
+
+
+/*
+** Enable DPI-awareness so that our GUI looks sharp even on high DPI monitors
+*/
+@OPTIONS {DPIAware = True}
+
+
+/*
+** This script requires the RapaGUI plugin
+*/
+@REQUIRE "RapaGUI", {ScaleHollywood = False}
+
+
+/*
+** Information about this app
+*/
+@APPTITLE "SongPlayer"
+@APPVERSION "$VER: SongPlayer 1.1 (08.09.18)"
+@APPCOPYRIGHT "(C) Copyright 2012-2018 by Andreas Falkenhahn"
+@APPAUTHOR "Andreas Falkenhahn"
+@APPDESCRIPTION "A simple music player done in Hollywood"
+
+
+/*
+** Button and list view images
+*/
+@ICON 1, {{Image = "data/tapestart.png"}, {Image = "data/large_tapestart.png"}}
+@ICON 2, {{Image = "data/tapeplay.png"}, {Image = "data/large_tapeplay.png"}}
+@ICON 3, {{Image = "data/tapepause.png"}, {Image = "data/large_tapepause.png"}}
+@ICON 4, {{Image = "data/tapestop.png"}, {Image = "data/large_tapestop.png"}}
+@ICON 5, {{Image = "data/tapeend.png"}, {Image = "data/large_tapeend.png"}}
+@ICON 6, {{Image = "data/add.png"}, {Image = "data/large_add.png"}}
+@ICON 7, {{Image = "data/remove.png"}, {Image = "data/large_remove.png"}}
+@ICON 8, {{Image = "data/moveup.png"}, {Image = "data/large_moveup.png"}}
+@ICON 9, {{Image = "data/movedown.png"}, {Image = "data/large_movedown.png"}}
+@ICON 10, {{Image = "data/cd.png"}, {Image = "data/large_cd.png"}}
+
+
+/*
+** Our XML GUI definition
+*/
+@FILE 1, "SongPlayer.xml"
+
+
+/*
+** This display is used for the scrolling text
+*/
+@DISPLAY {Width = 12, Height = 32}
+
+/*
+** Change scroll text
+*/
+Function p_SetScrollText(t$)
+
+	Local w = TextWidth(t$) + 128
+
+	CreateBrush(100, w, 32 * globalscale)
+	SelectBrush(100)
+	TextOut(0, 0, t$, {Color = #WHITE})
+	EndSelect
+
+	sx = GetAttribute(#DISPLAY, 0, #ATTRWIDTH)
+	Cls
+
+EndFunction
+
+
+/*
+** Enable/disable buttons depending on current list selection
+*/
+Function p_SetStates(p$, ac, num)
+
+	moai.Set(p$ .. "rem", "disabled", (ac = -1))
+	moai.Set(p$ .. "mvdn", "disabled", (ac = num - 1) Or (ac = -1))
+	moai.Set(p$ .. "mvup", "disabled", (ac = 0) Or (ac = -1))
+	moai.Set(p$ .. "play", "disabled", (ac = -1))
+
+	If musstate$ <> "stopped"
+		moai.Set(p$ .. "last", "disabled", (ac = 0))
+		moai.Set(p$ .. "next", "disabled", (ac = num - 1))
+	EndIf
+
+EndFunction
+
+
+/*
+** Disable buttons that only work while playback is active
+*/
+Function p_SetStopStates(p$)
+
+	moai.Set(p$ .. "last", "disabled", True)
+	moai.Set(p$ .. "next", "disabled", True)
+	moai.Set(p$ .. "pause", "disabled", True)
+	moai.Set(p$ .. "stop", "disabled", True)
+
+EndFunction
+
+
+/*
+** Enable/disable buttons depending on current list selection
+*/
+Function p_RefreshActive()
+
+	Local ac = moai.Get("lv", "active")
+	Local num = moai.Get("lv", "entries")
+
+	If GetType(ac) = #STRING
+		If ac = "Off" Then ac = -1
+	EndIF
+
+	p_SetStates("", ac, num)
+	p_SetStates("mn_", ac, num)
+
+EndFunction
+
+
+/*
+** Convert milliseconds into a hh:mm:ss time string
+*/
+Function p_Milliseconds2Time(msg)
+
+	Local ms = msg.value
+	Local hrs = ms / (1000 * 60 * 60)
+	Local Min = (ms % (1000 * 60 * 60)) / (1000 * 60)
+	Local sec = ((ms % (1000 * 60 * 60)) % (1000 * 60)) / 1000
+
+	Return(FormatStr("%.2d:%.2d:%.2d", hrs, Min, sec))
+
+EndFunction
+
+
+/*
+** Skip to previous track
+*/
+Function p_Last()
+
+	Local ac = moai.Get("lv", "active")
+	Local num = moai.Get("lv", "entries")
+
+	If ac - 1 >= 0
+		moai.Set("lv", "active", ac - 1)
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Skip to next track
+*/
+Function p_Next()
+
+	Local ac = moai.Get("lv", "active")
+	Local num = moai.Get("lv", "entries")
+
+	If ac + 1 < num
+		moai.Set("lv", "active", ac + 1)
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Return file name of currently selected song
+*/
+Function p_GetSongSelection()
+
+	Return(moai.DoMethod("lv", "getentry", "active"))
+
+EndFunction
+
+
+/*
+** Start/resume playback
+*/
+Function p_Play()
+
+	If musstate$ = "paused"
+
+		ResumeMusic(1)
+		musstate$ = "playing"
+
+		p_SetScrollText("Resuming playback of " .. cursong$ .. "...........")
+
+	Else
+
+		Local f$ = p_GetSongSelection()
+		Local ac = moai.Get("lv", "active")
+		Local num = moai.Get("lv", "entries")
+
+		; do not fail if unknown error format
+		ExitOnError(False)
+		OpenMusic(1, f$)
+		Local err = GetLastError()
+		ExitOnError(True)
+
+		If err <> #ERR_NONE
+			moai.Request("SongPlayer", "Unrecognized song format!", "OK")
+			Return
+		EndIf
+
+		; enable buttons that can be used now
+		moai.Set("pause", "disabled", False)
+		moai.Set("stop", "disabled", False)
+		moai.Set("last", "disabled", (ac = 0))
+		moai.Set("next", "disabled", (ac = num - 1))
+
+		moai.Set("mn_pause", "disabled", False)
+		moai.Set("mn_stop", "disabled", False)
+		moai.Set("mn_last", "disabled", (ac = 0))
+		moai.Set("mn_next", "disabled", (ac = num - 1))
+
+		; prepare time slider
+		moai.Set("time", "min", 0, "max", GetAttribute(#MUSIC, 1, #ATTRDURATION), "disabled", False)
+		moai.Set("vol", "disabled", False)
+
+		; and go!
+		SetMusicVolume(1, curvol)
+		PlayMusic(1)
+
+		musstate$ = "playing"
+		lastlevel$ = ""
+
+		cursong$ = f$
+
+		p_SetScrollText("Now playing " .. f$ .. ".............")
+
+	EndIf
+
+EndFunction
+
+
+/*
+** Stop playback
+*/
+Function p_Stop(callstop)
+
+	If callstop = True
+		If musstate$ = "paused" Then ResumeMusic(1)
+		StopMusic(1)
+	EndIf
+
+	musstate$ = "stopped"
+	cursong$ = ""
+
+	moai.Set("time", "nonotify", True, "level", 0, "disabled", True)
+	moai.Set("vol", "disabled", True)
+	
+	moai.Set("timelab", "text", "00:00:00")
+
+	p_SetStopStates("")
+	p_SetStopStates("mn_")
+
+	p_SetScrollText("Playback is now stopped..........")
+
+EndFunction
+
+
+/*
+** Pause playback
+*/
+Function p_Pause()
+
+	If musstate$ = "playing"
+		PauseMusic(1)
+		musstate$ = "paused"
+		p_SetScrollText("Playback is now paused...........")
+	Else
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Event handler for the GUI
+*/
+Function p_GUIEvent(id)
+
+	Switch id
+	Case "add":
+		Local f$ = FileRequest("Select song", "mp3|m4a|ogg|wav|8svx|16sv")
+		If f$ <> "" Then moai.DoMethod("lv", "insert", "active", 10, f$)			
+	Case "mvup"
+		Local ac = moai.Get("lv", "active")
+		moai.DoMethod("lv", "move", "active", "previous")
+		moai.Set("lv", "active", ac - 1)
+	Case "mvdn"
+		Local ac = moai.Get("lv", "active")
+		moai.DoMethod("lv", "move", "active", "next")
+		moai.Set("lv", "active", ac + 1)
+	Case "play":
+		p_Play()
+	Case "stop":
+		p_Stop(True)
+	Case "pause":
+		p_Pause()
+	Case "last"
+		p_Last()
+	Case "next"
+		p_Next()
+	Case "rem":
+		If p_GetSongSelection() = cursong$ Then p_Stop(True)
+		moai.DoMethod("lv", "remove", "active")
+	Case "quit":
+		End
+	Case "about":
+		moai.Request("SongPlayer", "SongPlayer\n(C) 2012-2018 by Andreas Falkenhahn\n\nVisit the official Hollywood portal at:\nhttp://www.hollywood-mal.com", "OK")
+	Case "aboutrapagui":
+		moai.DoMethod("app", "aboutrapagui")
+	Case "pl":
+		moai.Set("playlist", "open", moai.Get("mn_pl", "selected"))
+	EndSwitch
+
+EndFunction
+
+
+/*
+** Handles all incoming events
+*/
+Function p_EventFunc(msg)
+
+	Switch msg.action
+	Case "RapaGUI":
+		;
+		; all events from RapaGUI are passed as type "RapaGUI"!
+		;
+		Switch msg.attribute
+		Case "CloseRequest":
+			moai.Set(msg.id, "open", False)
+			moai.Set("mn_pl", "selected", False)
+		Case "Pressed":
+			p_GUIEvent(msg.id)
+		Case "Selected":
+			p_GUIEvent(UnrightStr(msg.id, 3))
+		Case "DoubleClick":
+			p_Play()
+		Case "Active":
+			p_RefreshActive()
+		Case "Level":
+			Switch msg.id
+			Case "time":
+				seekms = moai.Get("time", "level")
+				moai.Set("timelab", "text", p_Milliseconds2Time({value = seekms}))
+			Case "vol":
+				curvol = msg.triggervalue
+				If HaveObject(#MUSIC, 1) = True Then SetMusicVolume(1, curvol)
+				moai.Set("vollab", "text", curvol)	
+			EndSwitch
+		Case "Release":
+			If seekms < GetAttribute(#MUSIC, 1, #ATTRDURATION) - 100
+				SeekMusic(1, seekms)					
+			Else
+				p_Stop(True)
+			EndIf				
+			seekms = -1
+		EndSwitch
+
+	Case "SizeWindow":
+		sx = GetAttribute(#DISPLAY, 0, #ATTRWIDTH)
+		Cls
+
+	Case "Interval":
+		; update time slider but not if the user is currently dragging the time slider
+		If (musstate$ = "playing") And (seekms = -1)
+			Local ms = GetAttribute(#MUSIC, 1, #ATTRPOSITION)
+			Local level$ = p_Milliseconds2Time({value = ms})
+			If level$ <> lastlevel$ 
+				; must use "nonotify" here because otherwise the event handler that calls SeekVideo()
+				; would be triggered				
+				moai.Set("time", "nonotify", True, "level", ms)
+				moai.Set("timelab", "text", level$)
+				lastlevel$ = level$
+			EndIf
+		EndIf
+
+		; update scroll text
+		DisplayBrush(100, sx, 0)
+		sx = sx - 1 * globalscale
+
+		; wrap scroll text
+		If sx <= -GetAttribute(#BRUSH, 100, #ATTRWIDTH) Then sx = GetAttribute(#DISPLAY, 0, #ATTRWIDTH)
+
+	Case "OnMusicEnd":
+		p_Stop(False)
+		p_Next()
+	EndSwitch
+
+EndFunction
+
+globalscale = GetAttribute(#DISPLAY, 0, #ATTRHOSTSCALE)
+
+ChangeDisplaySize(12, 32 * globalscale)
+
+SetFont(#SANS, 32 * globalscale)
+SetFontStyle(#ANTIALIAS)
+SetFillStyle(#FILLCOLOR)
+
+p_SetScrollText("Hello and welcome to SongPlayer written by Andreas Falkenhahn! This script demonstrates how to write a GUI application and use the audio stream playback capabilities of Hollywood in that app!")
+
+curvol = 64
+seekms = -1
+
+; dynamically create GUI from an external *.xml file definition
+moai.CreateApp(ReadString(1))
+
+; listen to these events!
+InstallEventHandler({RapaGUI = p_EventFunc, SizeWindow = p_EventFunc, OnMusicEnd = p_EventFunc})
+
+; create an interval function that updates the time slider and the scroll text
+SetInterval(1, p_EventFunc, 1000\25)
+
+musstate$ = "stopped"
+
+; main loop!
+Repeat
+	WaitEvent
+Forever
+

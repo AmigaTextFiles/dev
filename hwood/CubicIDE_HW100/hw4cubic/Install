@@ -1,0 +1,178 @@
+(complete 0)
+
+(onerror
+	(if (> @ioerr 0) (
+	    	(message "An error has occurred. Please contact support.")
+	))
+)
+
+; initialize return code
+
+(textfile (dest "env:componentinstall") (append "INCOMPLETE"))
+
+; initialize strings
+(set #locale-msg (cat "Select a language to use\nWählen Sie eine Sprache aus"))
+
+(set locale
+	(askchoice
+		(prompt #locale-msg)
+		(help @askoptions-help)
+		(choices "English" "Deutsch")
+	)
+)
+
+(if (= locale 1) (
+	(set #string_installer       "Diese Installation benötigt Installer-Version 43 oder besser in \"sys:c/\". Der auf diesem System installierte Installer ist zu alt.")
+	(set #string_uninstalling    "Die Hollywood-Erweiterung wird entfernt ...")
+	(set #string_badversion      "Diese Software benötigt GoldED 8 SP 10!")
+	(set #string_welcome         "\nWillkommen beim Setup für die Hollywood-Erweiterung!\n\nFalls dies ein Update ist, werden Sie von Cubic IDE aufgefordert zu bestätigen, dass bestehende Dateien überschrieben werden dürfen. Dies müssen Sie gestatten, damit das Update installiert werden kann.")
+	(set #string_install         "Installieren")
+	(set #string_uninstall       "Entfernen")
+	(set #string_golded          "Bitte installieren Sie GoldED, bevor Sie diese Installation ausführen!")
+	(set #string_registry        "Konfiguration wird aktualisiert ...")
+	(set #hollywood              "\nDie Hollywood-Erweiterung benötigt die Hollywood Multimedia-Software. Hollywood ist auf diesem Rechner aber NICHT installiert.")
+	(set #hollywood_done         "\nDie Hollywood-Erweiterung wurde installiert. Bitte starten Sie nun das System neu bevor Sie Cubic IDE starten.")
+) (
+	(set #string_installer       "This installation requires Installer version 43 or better in \"sys:c/\". The Installer on this system is too old.")
+	(set #string_uninstalling    "Uninstalling Hollywood add-on ...")
+	(set #string_badversion      "This software requires GoldED 8 SP 10!")
+	(set #string_welcome         "\nWelcome to the setup for the Hollywood add-on!\n\nIn case this is an update from an older version, Cubic IDE will ask you to confirm that existing files can be overwritten. You have to confirm these requesters in order to install this update.")
+	(set #string_install         "Install")
+	(set #string_uninstall       "Uninstall")
+	(set #string_golded          "Please install GoldED before you install this add-on!")
+	(set #string_registry        "Updating configuration ...")
+	(set #hollywood              "\nThe Hollywood add-on requires the Hollywood multimedia software but Hollywood is NOT installed on your computer.")
+	(set #hollywood_done         "\nThe Hollywood add-on has been installed successfully. Please reboot your system before you start using the add-on!")
+))
+
+; check if we have correct installer
+
+(if (< (/ @installer-version 65536) 43)
+	(abort #string_installer)
+)
+
+(if (= 0 (exists "golded:" (noreq))) (abort #string_golded))
+
+(if (= 0 (run "golded:add-ons/regedit/regedit version")) (
+
+	; check compatibility with installed software
+
+	(set vernum (getversion "golded:golded"))
+	(set ver (/ vernum 65536))
+	(set rev (- vernum (* ver 65536)))
+	(set version (+ (* 1000 ver) rev))
+
+	(if (< version 8010) (abort #string_badversion))
+
+	(if
+		(askbool
+			(prompt #string_welcome)
+			(choices #string_install #string_uninstall)
+			(help @askbool_help)
+		)
+
+		(set #installmode "INSTALL")
+		(set #installmode "UNINSTALL")
+	)
+
+	; verify directory structure
+	(makedir "golded:etc")
+	(makedir "golded:etc/plugins")
+	(makedir "golded:etc/syntax")
+	(makedir "golded:etc/uninstall")
+	(makedir "golded:add-ons")
+
+	(if (= #installmode "UNINSTALL") (
+
+		; uninstall
+
+		; update registry
+		(working #string_registry)
+
+		(if (exists ("golded:etc/uninstall/envHWD.bat")) (
+			(run "golded:add-ons/regedit/regedit script=golded:etc/uninstall/envHWD.bat label=uninstall")
+			(delete "golded:etc/uninstall/envHWD.bat")
+		) (
+			(run "golded:add-ons/regedit/regedit script=install.bat label=uninstall")
+		))
+
+		(exit (quiet))
+	
+	) (
+
+		; install
+
+		; check for hollywood
+		(if (= 0 (exists "hollywood:" (quiet))) (abort #hollywood))
+
+		; delete complete old installation so that we don't leave files behind which were
+		; used by previous versions but are obsolete now
+		(if (exists ("golded:add-ons/hollywood")) (
+			(run "C:Protect >NIL: golded:add-ons/hollywood/#? RWED ALL")		
+			(delete "golded:add-ons/hollywood" (optional "force") (all))				
+		))
+		
+		; install basic files
+		(makedir "golded:add-ons/hollywood")
+		(makedir "golded:add-ons/hollywood/tools")
+		
+		(copyfiles
+			(source "hollywood")
+			(dest "golded:add-ons/hollywood")
+			(all)
+			(nogauge)
+			(optional "nofail" "force" "askuser")
+		)
+
+		; install os independent applet files
+		(copyfiles
+			(source "tools")
+			(dest "golded:add-ons/hollywood/tools")
+			(all)
+			(nogauge)
+			(optional "nofail" "force" "askuser")
+		)
+			
+		; update registry
+		(working #string_registry)
+		
+		(if (= locale 1)
+			(run "golded:add-ons/regedit/regedit script=install.bat d")
+			(run "golded:add-ons/regedit/regedit script=install.bat e")
+		)
+
+		; install autorun macro
+		(copyfiles
+			(source "autorun/hollywood.rexx")
+			(dest "golded:etc/autorun")
+			(nogauge)
+			(optional "nofail" "force" "askuser")
+		)
+
+		(run (cat "golded:add-ons/regedit/regedit autorunrexx golded:etc/autorun/hollywood.rexx autodelete"))
+
+		; prepare uninstallation
+		(copyfiles
+			(source "install.bat")
+			(dest "golded:etc/uninstall")
+			(newname "envHWD.bat")
+			(nogauge)
+			(optional "nofail" "force" "askuser")
+		)
+
+		; installation completed
+		(textfile (dest "env:componentinstall") (append "OK"))
+
+		(complete 100)
+
+		(set @default-dest "golded:add-ons/hollywood")
+
+		(message #hollywood_done)
+		
+		(exit)
+	))
+))
+
+(exit (quiet))
+
+(welcome)

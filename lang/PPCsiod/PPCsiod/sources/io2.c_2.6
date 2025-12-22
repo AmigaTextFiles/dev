@@ -1,0 +1,285 @@
+/* Scheme In One Define.
+ 
+The garbage collector, the name and other parts of this program are
+
+ *                     COPYRIGHT (c) 1989 BY                              *
+ *      PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+
+Conversion  to  full scheme standard, characters, vectors, ports, complex &
+rational numbers, and other major enhancments by
+
+ *      Scaglione Ermanno, v. Pirinoli 16 IMPERIA P.M. 18100 ITALY        * 
+
+Permission  to use, copy, modify, distribute and sell this software and its
+documentation  for  any purpose and without fee is hereby granted, provided
+that  the  above  copyright  notice appear in all copies and that both that
+copyright   notice   and   this  permission  notice  appear  in  supporting
+documentation,  and that the name of Paradigm Associates Inc not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.
+
+PARADIGM  DISCLAIMS  ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL  IMPLIED  WARRANTIES  OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+PARADIGM  BE  LIABLE  FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <math.h>
+#include <errno.h>
+#include <limits.h>
+
+#include "siod.h"
+
+LISP lread(LISP port)
+{FILE *f;
+ if(NULLP(port))
+  {f = get_cur_in();
+   return(lreadf(f));}
+ else
+  {if(NPORTP(port)) err("read",port,ERR_FIRST | ERR_NPOR);
+   f = PORTPTR(port);
+   return(lreadf(f));}}
+
+static int ung_flag = 1;
+
+int f_getc(FILE *f)
+{long iflag;
+ int c;
+ iflag = no_interrupt(1);
+ c = getc(f);
+ if(transfile)
+  {if(ung_flag) 
+     putc(c,transfile);
+   else
+     ung_flag=1;}
+ no_interrupt(iflag);
+ return(c);}
+
+void f_ungetc(int c, FILE *f)
+{long flag;
+ flag = no_interrupt(1);
+ ungetc(c,f);
+ ung_flag=0;
+ no_interrupt(flag);}
+
+int flush_ws(FILE *f,char *eoferr)
+{int c,commentp;
+ commentp = 0;
+ while(1)
+   {c = GETC_FCN(f);
+    if (c == EOF) if (eoferr) err(eoferr,NIL,ERR_GEN); else return(c);
+    if (commentp) {if (c == '\n') commentp = 0;}
+    else if (c == ';') commentp = 1;
+    else if (!isspace(c)) return(c);}}
+
+LISP lreadchar(LISP port)
+{FILE *f;
+ int ch;
+ if(NULLP(port))
+  {f = get_cur_in();
+   ch = f_getc(f);}
+ else
+  {if(NPORTP(port)) err("read-char",port,ERR_FIRST | ERR_NPOR);
+   f = PORTPTR(port);
+   ch = f_getc(f);}
+ return((ch == EOF) ? eof_val : charcons(ch));}
+
+LISP lflushinput(LISP port)
+{FILE *f;
+ int ch;
+ if(NULLP(port))
+  {f = get_cur_in();
+   while(((ch=f_getc(f))!='\n')&&(ch!=EOF));}
+ else
+  {if(NPORTP(port)) err("flush-input",port,ERR_FIRST | ERR_NPOR);
+   f = PORTPTR(port);
+   while(((ch=f_getc(f))!='\n')&&(ch!=EOF));}
+ return(NIL);}
+
+LISP f_getstr(FILE *f)
+{char c,*p;
+ LISP s;
+ int j;
+ c = f_getc(f);
+ if (c == EOF) return(eof_val);
+ p = tkbuffer;
+ *p++ = c;
+ for(j = 1; j<TKBUFFERN; ++j)
+   {c = f_getc(f);
+    if ((c == EOF) || (c == '\n'))
+      {*p = '\0';
+       s=strcons(j+1);
+       strcpy(SNAME(s),tkbuffer);
+       return(s);}
+    *p++ = c;}
+ err("line larger than TKBUFFERN",NIL,ERR_GEN);}
+
+LISP lreadline(LISP port)
+{FILE *f;
+ if(NULLP(port))
+  {f = get_cur_in();
+   return(f_getstr(f));}
+ else
+  {if(NPORTP(port)) err("read-line",port,ERR_FIRST | ERR_NPOR);
+   f = PORTPTR(port);
+   return(f_getstr(f));}}
+
+LISP lreadf(FILE *f)
+{int c;
+ c = flush_ws(f,(char *)NULL);
+ if (c == EOF) return(eof_val);
+ UNGETC_FCN(c,f);
+ return(lreadr(f));}
+
+LISP lreadr(FILE *f)
+{int c,j,d;
+ char *p,*u;
+ LISP s;
+ p = tkbuffer;
+ c = flush_ws(f,"end of file inside read");
+ switch (c)
+   {case '(':
+      return(lreadparen(f));
+    case ')':
+      err("unexpected close paren",NIL,ERR_GEN);
+    case '\'':
+      return(cons(sym_quote,cons(lreadr(f),NIL)));
+    case '\\':
+      *p++ = GETC_FCN(f);
+      *p='\0';
+      return(rintern(tkbuffer));
+    case '#':
+      {*p++ = c;
+       c = GETC_FCN(f);
+       if(c=='(')
+         return(listtovector(lreadparen(f)));
+       if(c=='\\')
+        {*p++= c;
+         *p =  GETC_FCN(f);
+         c =  GETC_FCN(f);
+         if (c == EOF) return(charcons(*p));
+         if ((isspace(c)) || (strchr("()'`,;\"",c)))
+            {UNGETC_FCN(c,f);return(charcons(*p));}
+         p++;}
+       break;}
+     case '`':
+      return(cons(cintern("quasiquote"),cons(lreadr(f),NIL)));
+    case '\"':
+    case '|':
+      {j = 0;
+       while(((d = GETC_FCN(f)) != c) && (d != EOF))
+         {if ((j + 2) > TKBUFFERN) err("string or slashed symbol larger than token buffer",NIL,ERR_GEN);
+          if(d=='\\')
+            d = GETC_FCN(f);
+          *(tkbuffer+j) = d;
+          ++j;}
+       *(tkbuffer+j) = 0;
+       if(c == '\"')
+         {s = strcons(j+1);
+          strcpy(SNAME(s),tkbuffer);
+          return(s);}
+       return(rintern(tkbuffer));}
+    case ',':
+      c = GETC_FCN(f);
+      switch(c)
+	{case '@':
+	   u = "unquote-splicing";
+	   break;
+	 case '.':
+	   u = "+internal-comma-dot";
+	   break;
+	 default:
+	   u = "unquote";
+	   UNGETC_FCN(c,f);}
+      return(cons(cintern(u),cons(lreadr(f),NIL)));}
+ *p++ = c;
+ for(j = 1; j<TKBUFFERN; ++j)
+   {c = GETC_FCN(f);
+    if (c == EOF) {*p='\0';return(lreadtk(1));}
+    if ((isspace(c)) || (strchr("()'`,;\"",c)))
+      {UNGETC_FCN(c,f);*p='\0';return(lreadtk(1));}
+    *p++ = c;}
+ err("token larger than token buffer",NIL,ERR_GEN);}
+
+LISP lreadparen(FILE *f)
+{int c;
+ LISP tmp;
+ c = flush_ws(f,"end of file inside list");
+ if (c == ')') return(NIL);
+ UNGETC_FCN(c,f);
+ tmp = lreadr(f);
+ if EQ(tmp,sym_dot)
+   {tmp = lreadr(f);
+    c = flush_ws(f,"end of file inside list");
+    if (c != ')') err("missing close paren",NIL,ERR_GEN);
+    return(tmp);}
+ return(cons(tmp,lreadparen(f)));}
+
+LISP lreadtk(long flag)
+{char *p,*r,*t;
+ int adigit;
+ double res1,res2,tst;
+ p = tkbuffer;
+ if(*p=='\#')
+  {p++;
+   if(tolower(*p)=='t')
+     {p++;
+      if(*p=='\0')
+        return(flag?truth:NIL);}         
+   if(tolower(*p)=='f')
+      {p++;
+       if(*p=='\0')
+          return(NIL);}
+   goto a_symbol;}         
+ res1=strtod(p,&r);
+ if(*r=='\0')
+   {if(isdigit(*(r-1)))
+       return(flag?flocons(res1):NIL);
+   else
+       r--;}  
+ if((tolower(*r)=='i')&&(*(r+1)=='\0')&&(r!=p))
+   return(flag?compcons((float)0,(float)res1):NIL);
+ if((*r=='+')||(*r=='-'))
+   {res2=strtod(r,&t);
+    if((tolower(*t)=='i')&&(*(t+1)=='\0'))
+        return(flag?compcons((float)res1,(float)res2):NIL);
+    if((tolower(*(r+1))=='i')&&(*(r+2)=='\0'))
+        if(*r=='+')
+           return(flag?compcons((float)res1,(float)1):NIL);
+        else
+           return(flag?compcons((float)res1,(float)-1):NIL);}
+ if((*r=='/')&&(r!=p))
+   {res2=strtod(r+1,&t);
+    if((*t=='\0')&&(res2>=0))
+      if((modf(res1,&tst) == 0.) && (modf(res2,&tst) == 0.))
+         return(flag?ratcons(res1,res2):NIL);}
+ a_symbol:
+ if(flag)
+  {p=tkbuffer;
+   while(*p)
+     {*p=tolower(*p);
+      p++;}
+   return(rintern(tkbuffer));}
+  else
+   return(truth);}
+
+LISP transon(LISP name)
+{if NSTRINGP(name) err("transcript-on",name,ERR_GEN_ARG | ERR_NSTR);
+ transfile=fopen(SNAME(name),"a");
+ if(transfile==NULL) err("could not open transcript file",name,ERR_GEN);
+ return(truth);}
+
+LISP transoff(void)
+{if(transfile) 
+  {if(fclose(transfile)==EOF) err("could not close transcript file",NIL,ERR_GEN);
+   transfile=NULL;
+   return(truth);}
+ return(NIL);}

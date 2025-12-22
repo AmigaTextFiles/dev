@@ -1,0 +1,295 @@
+; inthandler.asm.  Fills our output buffer with delicious audio bytes
+
+	INCLUDE "exec/types.i"
+	INCLUDE "hardware/custom.i"
+	INCLUDE "hardware/intbits.i"
+	INCLUDE "hardware/cia.i"
+	INCLUDE "utility/hooks.i"
+	
+	XREF    _ciaa
+	XREF    _ciab
+		
+	XDEF    _AHIhookEntry
+	XDEF	_Idle
+	XDEF	_InvertIdle
+	XDEF	_PerfectIdle
+	XDEF	_Record
+	XDEF	_PerfectRecord
+	
+	rsset	0
+
+; IntInfo structure definition
+pubIndex 	rs.l 1	; 0  - pointer to next byte to sample to
+pubArray	rs.l 1	; 4  - pointer to beginning of array 
+pubSampleAt     rs.l 1	; 8  - byte-address to sample from
+pubHalfIndex	rs.l 1	; 12 - pointer to halfway point in array 
+pubEndIndex	rs.l 1	; 16 - pointer to end of array 
+stTask		rs.l 1	; 20 - pointer to main task 
+ulHalfSignal	rs.l 1	; 24 - signal for halfway-through-buffer 
+ulFullSignal	rs.l 1	; 28 - signal for end-of-buffer  
+ulShiftLeft	rs.l 1	; 32 - number of bits to shift left for amplify 
+ulByteSum	rs.l 1	; 36 - tally of byte values sampled 
+ulSaveByteSum	rs.l 1	; 40 - save of tally (updated when a signal is set) 
+ulThreshhold	rs.l 1  ; 44 - samples above this value trigger higher sampling rate
+pubCiahi	rs.l 1  ; 52 - address of high CIA countdown byte
+pubCialo	rs.l 1  ; 56 - address of low CIA countdown byte
+uwCiavals	rs.l 1  ; 60 - value to put in lo CIA for full rate
+uwClearCode	rs.l 1	; 64 - value to put in intreq() indicate interrupt handled
+BIdle		rs.l 1  ; 68 - Boolean (are we idle?)
+ulDebug1	rs.l 1  ; 72 - debug output field 1
+ulDebug2	rs.l 1  ; 76 - debug output field 2
+
+JSRLIB MACRO
+	XREF _LVO\1
+	JSR  _LVO\1(A6)
+	ENDM
+
+RECORDBRANCH MACRO
+; checks to see if we're idle, and if we're not, GOTO's the correct 
+	MOVE.L	BIdle(A1),D0		; check BIdle
+	CMP.L	#0,D0
+	BEQ	_Record			; If we're not idle, goto Record
+	ENDM
+
+PERFECTRECORDBRANCH MACRO
+; checks to see if we're idle, and if we're not, GOTO's the correct 
+	MOVE.L	BIdle(A1),D0		; check BIdle
+	CMP.L	#0,D0
+	BEQ	_PerfectRecord		; If we're not idle, goto Record
+	ENDM
+
+; puts the current sample on the parallel port into D0
+GETSAMPLE MACRO
+	MOVE.L	pubSampleAt(A1),A5	; get place to sample from	
+	MOVE.B  (A5),D0			; put the sample in D0
+	ADDI.B  #128,D0			; make it a signed sample
+	ENDM
+
+
+; Gets a whole sample from the Perfect Sound digitizer
+; returns it in D0, munges D1
+GETPERFECTSAMPLE MACRO
+	MOVE.B	#$80,_ciaa+ciaprb	; latch the value (PB6 low)
+	MOVE.B  (_ciaa+ciaprb),D0	; put the sample in D0
+        LSL.L   #2,D0                   ; Shift 6 data bits into high part of byte.
+        MOVE.B  (_ciab+ciapra),D1       ; Get miscellaneous bits from CIABPA, contains 2 LSB of sample.
+        ANDI.B  #3,D1 	                ; Get only the lower 2 bits we want
+        OR.B    D1,D0			; Mix the values together.
+	ENDM
+	
+	
+; expects the sample to be in D0 already
+; returns the amplified sample in D0 
+; also returns the sample in D1 with the other upper 3 bytes of D1 cleared
+AMPSAMPLE MACRO
+	MOVE.L  ulShiftLeft(A1),D1	;
+	LSL.B	D1,D0			; shift/amplify
+	MOVEQ.L #0,D1			; make sure upper bytes of D1 are 0
+	MOVE.B	D0,D1			; put sample value into D1
+	ENDM
+
+
+; Expects AMPSAMPLE to have been called before, setting up D1
+; with the amplified sample and clear upper 3 bytes
+; Adds the sample to the total and puts the address of the current 
+; output point in the array into A5
+ADDVOLUME MACRO
+	ADD.L	D1,ulByteSum(A1)	; add this value to our volume total	
+	MOVE.L	pubIndex(A1),A5		; pubIndex in A5
+	MOVE.B	D1,(A5)			; store the new byte
+	ADDQ.L	#1,pubIndex(A1)		; move pointer to the next entry in the buffer
+	ENDM
+
+	
+; sets bit PB6 in ciaa.  This tells PerfectSound to resume digitizing
+PERFECTDIGITIZE MACRO
+	MOVE.B	#$80+$40,_ciaa+ciaprb	; release the latch (PB6 high)
+	ENDM
+
+
+; snapshots the current volume into ulSaveByeNum */
+SAVEVOLUME MACRO
+	MOVE.L	ulByteSum(A1),ulSaveByteSum(A1)	; get current volume sum
+	MOVE.L	#0,ulByteSum(A1)		; reset running total
+	ENDM
+
+
+; Check the sample in D1 against ulThreshhold.  If it's above
+; the threshhold value, kick up our sampling rate to ulFullRate, and turn BIdle off.
+IDLECHECK MACRO
+	CMP.L	ulThreshhold(A1),D1	; compare current sample with threshhold (.L is NECESSARY else sign problems)
+	BLT	ExitHandler		; if not loud enough, we're done!
+	
+	; Time to take us out of idle mode! 
+	MOVE.L	#0,BIdle(A1)		; get location of is_Code field
+	MOVE.L	#0,ulByteSum(A1)	; restart counting now
+	MOVE.L  pubArray(A1),pubIndex(A1) ; start over at beginning of buffer
+	MOVE.L  pubCiahi(A1),A5		; get address of CIA hi byte
+	MOVE.B  uwCiavals+2(A1),(A5)	; set CIA hi byte
+	MOVE.L  pubCialo(A1),A5		; get address of CIA lo byte
+	MOVE.B  uwCiavals+3(A1),(A5)	; set CIA lo byte
+	BRA.S	ExitHandler
+	ENDM
+
+
+	
+; Enter with:
+;
+; d0 = scratch
+; d1 = INTENAT & INTREQR (scratch)
+; a0 = custom chips (scratch)
+; a1 = is_Data which is our passed in arg, kinda (scratch)
+; a5 = vector to our code (scratch)
+; a6 = pointer to ExecBase (scratch)
+;
+;   section code
+
+
+
+
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; This entry point is for the 8 bit idling routine, without inversion.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+_Idle:
+	RECORDBRANCH			; go to record if we're not idle
+	GETSAMPLE			; put sample value into D0
+	AMPSAMPLE			; amplify it as necessary
+	IDLECHECK			; if idle, check sample to see if we should trigger higher sampling rate on it
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; This entry point is for the 8 bit idling routine, with inversion.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+_InvertIdle:
+	RECORDBRANCH			; go to record if we're not idle
+	GETSAMPLE			; put sample value into D0
+	NOT.B	D0			; Make it so that 0 = softest, 255 = loudest
+	AMPSAMPLE			; amplify it as necessary
+	IDLECHECK			; if idle, check sample to see if we should trigger higher sampling rate on it
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; This entry point is for the 8 bit idling routine, for the
+;;; PerfectSound, without inversion.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+_PerfectIdle:
+	PERFECTRECORDBRANCH		; go to record if we're not idle
+	GETPERFECTSAMPLE		; put sample value into D0
+	AMPSAMPLE			; amplify sample as necessary
+	PERFECTDIGITIZE			; tell PS to continue digitizing
+	IDLECHECK			; if idle, check sample to see if we should trigger higher sampling rate on it
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; This entry point is for the 8 bit recording routine for the
+;;; PerfectSound digitizer.  The difference is that in the perfect
+;;; sound, only the low 6 bits (PB5-PB0 in CIAA) are used for sample
+;;; data--they are the high six bits of the sample.  PB6 and PB7 are
+;;; used for controlling the sampler, and the low two bits of the
+;;; sample are in POUT and BUSY.  
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+_PerfectRecord:	
+	GETPERFECTSAMPLE		; put sample value into D0
+	AMPSAMPLE			; amplify sample as necessary
+	ADDVOLUME			; and record it
+	PERFECTDIGITIZE			; tell PS to continue digitizing
+	BRA.S		DoSignals	; Standard recording stuff
+
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;; This entry point is for the 8 bit recording routine.
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+_Record:	
+	GETSAMPLE			; put sample value into D0
+	AMPSAMPLE			; amplify it as necessary (sample now in D1)
+	ADDVOLUME			; tally its volume & put output address in A5
+	BRA.S		DoSignals	; And do the standard recording stuff
+	
+	
+	
+	
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;
+;;; This code is common to both the recording functions.  It should be
+;;; branched to when the array updating is complete.
+;;;
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;	
+DoSignals:
+	MOVE.L  pubIndex(A1),D0		; current index
+	CMP.L	pubHalfIndex(A1),D0	; are we at the half-buffer point?	
+	BNE	PastSignalMiddle	; 
+	
+	; signal middle-of-buffer here 
+	SAVEVOLUME			; for autodetect handling
+	MOVE.L	A0,A5			; save A0 
+	MOVE.L	ulHalfSignal(A1),D0	; get half-buffer signal from main
+	MOVE.L	stTask(A1),A1		; get pointer to main task
+	JSRLIB	Signal			; call Exec.library/Signal()
+	MOVE.L	A5,A0			; retrieve A0
+	BRA.S	ExitHandler		; bye bye
+					; note: D0-D1,A0-A1 trashed by system call
+PastSignalMiddle:
+	CMP.L	pubEndIndex(A1),D0	; are we past the end of the buffer?
+	BLT	ExitHandler		;
+
+	; reset next-byte pointer to beginning of array
+	MOVE.L	pubArray(A1),pubIndex(A1) ; reset counter 
+
+	; signal end-of-buffer here 
+	SAVEVOLUME			; for autodetect handling
+	MOVE.L	A0,A5			; save A0 
+	MOVE.L	ulFullSignal(A1),D0	; get full-buffer signal from main
+	MOVE.L	stTask(A1),A1		; get pointer to main task
+	JSRLIB	Signal			; call Exec.library/Signal()
+	MOVE.L	A5,A0			; retrieve A0
+
+ExitHandler:
+	MOVE.W	uwClearCode+2(A1),intreq(A0) ; clear the interrupt (+2=lower WORD of ULONG)
+	RTS
+	
+
+
+
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;
+;;;
+;;; This is an assembly language stub to help AHI's hook routines
+;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+_AHIhookEntry:
+	move.l	a1,-(sp)		; push message packet pointer
+	move.l	a2,-(sp)		; push object pointer
+	move.l	a0,-(sp)		; push hook pointer
+	move.l	h_SubEntry(a0),a0	; fetch actual Hook entry point...
+	jsr	(a0)			; and call it
+	lea	12(sp),sp		; fix the stack
+	rts
+	
+		
+	END
+	
+	

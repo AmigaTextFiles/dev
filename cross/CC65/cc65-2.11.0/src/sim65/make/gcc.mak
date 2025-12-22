@@ -1,0 +1,68 @@
+#
+# gcc Makefile for sim65
+#
+
+# Library dir
+COMMON	= ../common
+
+CFLAGS 	= -g -O2 -Wall -W -I$(COMMON) -newlib
+CC	= gcc
+EBIND	= emxbind
+LDFLAGS	= -newlib
+
+OBJS = 	addrspace.o     \
+        callback.o      \
+        cfgdata.o       \
+        chip.o          \
+        chippath.o      \
+        config.o        \
+        cpucore.o     	\
+	cputype.o     	\
+        error.o         \
+	global.o      	\
+        location.o      \
+	main.o          \
+        memory.o        \
+        scanner.o       \
+        system.o
+
+LIBS = $(COMMON)/common.a
+
+EXECS = sim65
+
+.PHONY: all
+ifeq (.depend,$(wildcard .depend))
+all:	$(EXECS) chips
+include .depend
+else
+all:	depend
+	@$(MAKE) -f make/gcc.mak all
+endif
+
+
+sim65:	$(OBJS) $(LIBS)
+	$(CC) $(CFLAGS) -o $@ $(OBJS) $(LIBS) -ldl
+	@if [ $(OS2_SHELL) ] ;	then $(EBIND) $@ ; fi
+
+.PHONY:	chips
+chips:
+	@$(MAKE) -C chips -f make/gcc.mak
+
+
+clean:
+	@$(MAKE) -C chips -f make/gcc.mak clean
+	$(RM) *~ core *.lst
+
+zap:  	clean
+	@$(MAKE) -C chips -f make/gcc.mak zap
+	$(RM) *.o $(EXECS) .depend
+
+# ------------------------------------------------------------------------------
+# Make the dependencies
+
+.PHONY: depend dep
+depend dep:	$(OBJS:.o=.c)
+	@echo "Creating dependency information"
+	$(CC) -I$(COMMON) -MM $^ > .depend
+
+

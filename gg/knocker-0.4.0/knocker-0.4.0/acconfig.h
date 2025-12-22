@@ -1,0 +1,3 @@
+#undef HAVE_PTHREAD_CANCEL
+#undef PACKAGE
+#undef VERSION

@@ -1,0 +1,158 @@
+DEFINITION FOR C MODULE PrtBase ;
+
+FROM SYSTEM	IMPORT ADDRESS, BADDRESS, STRING, SHORTSET ;
+FROM Exec	IMPORT Library, ExecBasePtr, MsgPort, Task ;
+FROM Serial	IMPORT IOExtSer ;
+FROM Parallel	IMPORT IOExtPar ;
+FROM Intuition	IMPORT Preferences ;
+FROM Timer	IMPORT TimeRequest ;
+
+TYPE
+  DeviceDataPtr		= POINTER TO DeviceData ;
+  PrinterExtendedDataPtr= POINTER TO PrinterExtendedData ;
+  PrinterDataPtr	= POINTER TO PrinterData ;
+  PrinterSegmentPtr	= POINTER TO PrinterSegment ;
+
+  DeviceData = RECORD
+    dd_Device	  : Library  ;    (* standard library node		  *)
+    dd_Segment	  : BADDRESS ;	  (* A0 when initialized		  *)
+    dd_ExecBase	  : ExecBasePtr ; (* A6 for exec			  *)
+    dd_CmdVectors : ADDRESS  ;    (* command table for device commands	  *)
+    dd_CmdBytes	  : ADDRESS  ;	  (* bytes describing which command queue *)
+    dd_NumCommands: CARDINAL ;    (* the number of commands supported	  *)
+  END ;
+
+CONST
+  P_OLDSTKSIZE	= 00800H ;	(* stack size for child task (OBSOLETE)	 *)
+  P_STKSIZE	= 01000H ;	(* stack size for child task		 *)
+  P_BUFSIZE	= 256 ;		(* size of internal buffers for text i/o *)
+  P_SAFESIZE	= 128 ;		(* safety margin for text output buffer	 *)
+
+TYPE
+  LIntProc = PROCEDURE( ) : LONGINT ;
+  PrinterData = RECORD
+    pd_Device : DeviceData ;
+    pd_Unit : MsgPort ;	(* the one and only unit *)
+    pd_PrinterSegment : BADDRESS ;	(* the printer specific segment *)
+    pd_PrinterType   : CARDINAL ;	(* the segment printer type	*)
+					(* the segment data structure	*)
+    pd_SegmentData : PrinterSegmentPtr ;
+    pd_PrintBuf : ADDRESS ;		(* the raster print buffer	*)
+    pd_PWrite : LIntProc ;		(* the write function		*)
+    pd_PBothReady : LIntProc ;		(* write function's done	*)
+    CASE :BOOLEAN OF
+    |TRUE: pd_ior0 :
+      RECORD
+        CASE :BOOLEAN OF
+        |TRUE: pd_p0 : IOExtPar ;
+        |FALSE:pd_s0 : IOExtSer ;
+        END ;
+      END ;
+    |FALSE:
+       CASE :BOOLEAN OF
+       |TRUE  : pd_PIOR0 : IOExtPar ;
+       |FALSE : pd_SIOR0 : IOExtSer ;
+       END ;
+    END ;
+    CASE :BOOLEAN OF
+    |TRUE: pd_ior1 :
+      RECORD
+        CASE :BOOLEAN OF
+        |TRUE: pd_p1 : IOExtPar ;
+        |FALSE:pd_s1 : IOExtSer ;
+        END ;
+      END ;
+    |FALSE:
+      CASE :BOOLEAN OF
+      |TRUE  : pd_PIOR1 : IOExtPar ;
+      |FALSE : pd_SIOR1 : IOExtSer ;
+      END ;
+    END ;
+    pd_TIOR : TimeRequest ;	(* timer I/O request		*)
+    pd_IORPort : MsgPort ;	(* and message reply port	*)
+    pd_TC : Task ;		(* write task			*)
+    pd_OldStk : ARRAY [0..P_OLDSTKSIZE-1] OF SHORTCARD ;
+    				(* and stack space (OBSOLETE)	*)
+    pd_Flags : SHORTSET ;	(* device flags			*)
+    pd_pad : SHORTCARD ;	(* padding			*)
+    pd_Preferences : Preferences ;
+    				(* the latest preferences	*)
+    pd_PWaitEnabled : SHORTCARD ;
+    				(* wait function switch		*)
+	(* new fields for V2.0 *)
+    pd_Flags1 : SHORTSET ;
+    pd_Stk : ARRAY [0..P_STKSIZE-1] OF SHORTCARD ;
+    				(* stack space			*)
+  END ;
+
+(* Printer Class *)
+CONST
+  PPCB_GFX	= 0;	(* graphics (bit position)	*)
+  PPCF_GFX	= {0};	(* graphics (and/or flag)	*)
+  PPCB_COLOR	= 1;	(* color (bit position)		*)
+  PPCF_COLOR	= {1};	(* color (and/or flag)		*)
+
+  PPC_BWALPHA	= {};	(* black&white alphanumerics	*)
+  PPC_BWGFX	= {0};	(* black&white graphics		*)
+  PPC_COLORALPHA= {1};	(* color alphanumerics		*)
+  PPC_COLORGFX	= {0,1};(* color graphics		*)
+
+(* Color Class *)
+CONST
+  PCC_BW	= 001H ; (* black&white only			*)
+  PCC_YMC	= 002H ; (* yellow/magenta/cyan only		*)
+  PCC_YMC_BW	= 003H ; (* yellow/magenta/cyan or black&white	*)
+  PCC_YMCB	= 004H ; (* yellow/magenta/cyan/black		*)
+  PCC_4COLOR	= 004H ; (* a flag for YMCB and BGRW		*)
+  PCC_ADDITIVE	= 008H ; (* not ymcb but blue/green/red/white	*)
+  PCC_WB	= 009H ; (* black&white only, 0 == BLACK	*)
+  PCC_BGR	= 00AH ; (* blue/green/red			*)
+  PCC_BGR_WB	= 00BH ; (* blue/green/red or black&white	*)
+  PCC_BGRW	= 00CH ; (* blue/green/red/white		*)
+
+(* The picture must be scanned once for each color component, as the	*)
+(* printer can only define one color at a time.  ie. If 'PCC_YMC' then	*)
+(* first pass sends all 'Y' info to printer, second pass sends all 'M'	*)
+(* info, and third pass sends all C info to printer.  The CalComp	*)
+(* PlotMaster is an example of this type of printer.			*)
+
+  PCC_MULTI_PASS= 010H ;  (* see explanation above *)
+
+TYPE
+  PrinterExtendedData = RECORD
+    ped_PrinterName	: STRING ;	(* printer name, null terminated *)
+    ped_Init		: PROC ;	(* called after LoadSeg		 *)
+    ped_Expunge		: PROC ;	(* called before UnLoadSeg	 *)
+    ped_Open		: LIntProc ;	(* called at OpenDevice		 *)
+    ped_Close		: PROC ;	(* called at CloseDevice	 *)
+    ped_PrinterClass	: SHORTSET ;    (* printer class		 *)
+    ped_ColorClass	: SHORTSET ;	(* color class			 *)
+    ped_MaxColumns	: SHORTCARD ;	(* number of print columns available  *)
+    ped_NumCharSets	: SHORTCARD ;	(* number of character sets	      *)
+    ped_NumRows		: CARDINAL ;	(* number of 'pins' in print head     *)
+    ped_MaxXDots	: LONGINT ;	(* number of dots max in a raster dump*)
+    ped_MaxYDots	: LONGINT ;	(* number of dots max in a raster dump*)
+    ped_XDotsInch	: CARDINAL ;	(* horizontal dot density	      *)
+    ped_YDotsInch	: CARDINAL ;	(* vertical dot density		      *)
+    ped_Commands	: ADDRESS ;     (* printer text command table	      *)
+    ped_DoSpecial	: LIntProc ;	(* special command handler	      *)
+    ped_Render		: LIntProc ;    (* raster render function	      *)
+    ped_TimeoutSecs 	: LONGINT ;     (* good write timeout		      *)
+	(* the following only exists if the segment version is >= 33 *)
+    ped_8BitChars	: ADDRESS ;     (* conv. strings for the extended font*)
+    ped_PrintMode	: LONGINT ;	(* set if text printed, otherwise 0   *)
+	(* the following only exists if the segment version is >= 34 *)
+	(* ptr to conversion function for all chars *)
+    ped_ConvFunc	: LIntProc ;
+  END ;
+
+  PrinterSegment = RECORD
+    ps_NextSegment : BADDRESS ;	 (* (actually a BPTR)	  *)
+    ps_runAlert	   : LONGINT  ;	 (* MOVEQ #0,D0 : RTS	  *)
+    ps_Version	   : CARDINAL ;	 (* segment version	  *)
+    ps_Revision	   : CARDINAL ;	 (* segment revision	  *)
+    ps_PED	   : PrinterExtendedData ;
+    				 (* printer extended data *)
+  END ;
+
+END PrtBase.

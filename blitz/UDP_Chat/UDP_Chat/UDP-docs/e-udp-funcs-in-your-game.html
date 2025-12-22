@@ -1,0 +1,160 @@
+<HTML>
+<BODY BGCOLOR="#000000" TEXT="#ffff00" LINK="#00ff00" VLINK="#ff0000" ALINK="#0000ff">
+
+<PRE>
+
+  To put the UDP Functions in your game, you could either use the UDP_Chat
+code as a base for your game, as you've already got the basic login window
+there- the GUI just needs some tidying up. You could have the window open
+on Workbench as it does already, and just leave it open while your game is
+running, or have it open on your game screen, from a user selecting a menu
+item etc. Note: You'd want to put all the UDP Functions together in one
+include as below.
+  Or you could cut the UDP Funcs out of UDP_Chat and put them all in the 
+UDPFuncs.bb2 include, along with the UDPHeader.bb2, and the
+Net_protocol_header.bb2, so all you have is one include (which has to be
+included before your own functions) in your code. The reason I've left
+them in UDP_Chat, is for debugging purposes.
+  Note: You have to insert the includes where they're included in the 
+UDP_Chat code ie: Net_Protocol_Header.bb2 and UDPHeader.bb2 under .Dims,
+and UDPFuncs.bb2 above .Dim_Message_Arrays. Then cut out the entire code
+from where it's labeled at the top of UDP_Chat down to the bottom of 
+Comms_Housekeeping, then put this into an include called UDP_Funcs.bb2
+or something. You may want to keep some of the constants and variables at 
+the top of your code (ie: not in the include), if you want to tweak them.
+ 
+   As for implementing multi-player ability into your game, read everything
+in these docs from top to bottom, especially <A HREF="theory.html">the Theory section</A> and
+the link web sites on the subject. These Funcs provide the basic
+communication and login routines, and time sync, but you'll have to do the
+multi-player game strategies yourself, as you can't write universal code
+for that, as each game is different. For example, if you're sending out any
+speed and direction changes for a player, then working out where the player
+should be on another machine, is going to depend entirely on how the game
+is set up (how big the player is, what walls they could collide into, wether
+it's 2D/3D, etc, etc).   
+
+  There's a player information array `player_info.info', which you can load
+your player preferences into ie: player's colour(s), player's name (nick),
+etc. This info will be sent to all other players on login.
+  Here's the Newtype for the player info. To load it, just use each element
+in the array, with first the info_type (the constants are below), and then
+fill in appropriate variable.
+  ie:   player_info(0)\info_type=#NUMBERW   ; this element is a word
+        player_info(0)\numberw=6            ; whose value is 6
+Or the element could be a byte, long, string, or a memory block (fill in the
+start of the block and the length of the block). Also it could be a disk file
+(fill in the path and name of file, and it's type so your program knows what
+to do with it). I haven't implemented the sending of a disk file yet.
+  Finish the array with player_info(0)\info_type=0, or #END_OF_CRITICAL_DATA
+with player_info(0)\info_type=0 at end. Everything up to
+#END_OF_CRITICAL_DATA will be sent in the player data packet (later I'll
+allow bigger files/data to be sent before the game starts, so you could send
+data critical to the game, like Player Skins etc. Anything after (say sound
+samples, other files or large memory blocks), can be trickle fed after the
+game has started, so as not to delay the game start. Again I haven't
+implemented the trickle feed yet either. 
+
+NEWTYPE .info        ; player info newtype
+ info_type.w
+ numberb.b
+ numberw.w
+ numberl.l
+ string.s
+ file_type.w
+ filename.s
+ memory_start.l
+ memory_length.l
+End NEWTYPE
+  
+#NUMBERB        ; - byte   player info type constants
+#NUMBERW        ; - word
+#NUMBERL        ; - long
+#STRING         ; - string
+#FILENAME       ; - disk file
+#MEMORY_BLOCK   ; - memory block
+#END_OF_CRITICAL_DATA  ; end of data essential for the game to start
+
+  For examples on how to load up the array, see the bottom of .Init_Gui and
+to then read other player's info see `Case #NEW_PLAYER' in the Case-Select
+in .Main, as the info is stored in a memory block.
+
+  To send information to another computer you can do it Reliably or
+Unreliably. Reliably, the computer at the other end sends a message 
+acknowledging that it has received the message. If the sending computer 
+hasn't received the acknowledgment in a certain time it will resend the
+packet; if it takes more than a defined number of resends it assumes the
+link has been lost, and disconnects that machine from the game. This is 
+necessary for important messages, like control messages (new player info,
+game end etc), and power-up messages etc, and any message that is a once
+off message. 
+
+  If it gets sent Unreliably, it just gets sent out once to the other
+machine, and no checks are made if it gets there or not. This is good for
+changes in player speed/direction messages, as you'll be sending out a min
+of two per second anyway (as a heartbeat in case of a lag spike, so you
+stop the player's movement if no packet is received for half a second-
+to prevent the player going into lava, traps etc accidentally), so it
+doesn't matter if you lose the odd packet anyway. This has the benefit of
+halving the bandwidth needed, because you don't need to send the
+acknowledgements.
+  
+  Also it can be sent Ordered or Unordered; Ordered is if you want the
+packet to arrive in order or not (with other ordered packets). Ordered,
+is important if you are sending keyboard presses instead of player
+speeds/directions for example (or large files that have to be split over
+several packets (packets usually hold about 1.5k each)). Unordered is
+faster, as your packets aren't delayed if an earlier packet is delayed or
+lost.
+
+  To send messages Reliably you just call the function: 
+Send_Reliable_Message(address.l,data_length.w,player.w,protocol,ordering) 
+
+The address is the starting address of your data, data_length is the length
+of your data, player is which player number you want to send it to. The
+protocol is either #PEER_TO_PEER or #CLIENT_SERVER (only #PEER_TO_PEER is
+supported at the moment). Ordered is either #UNORDERED OR #ORDERED, only
+#UNORDERED is supported at the moment. 
+
+ To send messages unreliably call the function:
+Send_Unreliable_Message(address.l,data_length.w,player,protocol)
+
+ The parameters are the same as above, but packets are only sent as
+unordered, as there's no point sending ordered unreliable packets.
+
+ For examples see the `Send string to other players' (Case 64 in the
+gadgets Case-Select) Case, in the Window_Events Function. It shows how
+to send a string, but any block of memory can be sent.
+
+ To get data sent by another program, check out `Get Incoming Game Data'
+in Main:. The Function Get_Game_Data{} returns a pointer to a buffer which
+contains the data from the incoming packet. The first word (.w) contains
+the size of the data, and the second word contains wether the packet was
+Reliable or Unreliable. The actual data starts on the next byte (5th
+byte).
+
+  Also the Security_Warning statement allows you to have security
+messages printed out in your game- you can chose none (0), all (#LOW),
+medium (#MEDIUM), or only serious security warnings (#HIGH), also you can
+have just system messages printed out (like player online, game has been
+shut down etc)- use #SYSTEM_MESSAGE for this. To change it from the default
+of #LOW, set the variable `security_level', to any of the above. This allows
+people to keep an eye out for attempted cheating. This routine is GUI
+independant- it stores the messages in an array, and these messages can be
+called by calling the Read_Security_Warning Function-  which returns either
+a message or empty string "" if there's no more messages left to print out
+(note: the array is not a looping buffer so you will have to regularly
+clear the messages fully!). A similar system is set up for Debug messages
+(Comms_Debug and Read_Comms_Debug_Messages), but #SYSTEM_MESSAGE isn't
+availiable obviously.
+
+  To have Debug information printed out you have to have the constant
+#COMMS_DEBUG=1 (at the top of the UDP stuff, at the top of the page). To
+test the time sync routines set #TEST_TIME_SYNC=1, just below it- note, it
+only works if #COMMS_DEBUG=1. If you don't want them, set them to 0. 
+
+</PRE>
+<HEAD><TITLE>Putting-the-UDP-Funcs-in-your-game</TITLE></HEAD><HR>
+<I>Converted with <B>g2h</B>, &copy 24.06.1998 <A HREF="http://dept-info.labri.u-bordeaux.fr/~darnis/">N. DARNIS</A></I>
+</BODY>
+</HTML>

@@ -1,0 +1,36 @@
+#ifndef INTUITION_POINTERCLASS_H
+#define INTUITION_POINTERCLASS_H
+
+#ifndef EXEC_TYPES_H
+MODULE  'exec/types'
+#endif
+#ifndef INTUITION_INTUITION_H
+MODULE  'intuition/intuition'
+#endif
+#ifndef UTILITY_TAGITEM_H
+MODULE  'utility/tagitem'
+#endif
+
+#define POINTERA_Dummy	TAG_USER + $39000
+#define POINTERA_BitMap		POINTERA_Dummy + $01
+#define POINTERA_XOffset	POINTERA_Dummy + $02
+#define POINTERA_YOffset	POINTERA_Dummy + $03
+#define POINTERA_WordWidth	POINTERA_Dummy + $04
+#define POINTERA_XResolution	POINTERA_Dummy + $05
+#define POINTERA_YResolution	POINTERA_Dummy + $06
+
+#define POINTERXRESN_DEFAULT	0
+#define POINTERXRESN_140NS	1
+#define POINTERXRESN_70NS	2
+#define POINTERXRESN_35NS	3
+#define POINTERXRESN_SCREENRES	4
+#define POINTERXRESN_LORES	5
+#define POINTERXRESN_HIRES	6
+
+#define POINTERYRESN_DEFAULT		0
+#define POINTERYRESN_HIGH		2
+#define POINTERYRESN_HIGHASPECT		3
+#define POINTERYRESN_SCREENRES		4
+#define POINTERYRESN_SCREENRESASPECT	5
+
+#endif

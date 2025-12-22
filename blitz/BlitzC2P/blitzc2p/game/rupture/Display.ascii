@@ -1,0 +1,1105 @@
+
+;Display
+
+Statement Permit{}
+;Permit multitasking, only if it is globally intended
+  SHARED Multitasking.b
+  If Multitasking Then Permit_
+End Statement
+
+Statement Forbid{}
+;Disable multitasking, if it isn't globally intended
+  SHARED Multitasking.b
+  If Multitasking Then Forbid_
+End Statement
+
+Statement Multitasking{State.b}
+;Toggle global multitasking on or off.
+  SHARED Multitasking.b
+  If State
+    If Multitasking=False Then Permit_
+  Else
+    If Multitasking Then Forbid_
+  EndIf
+  Multitasking=State
+End Statement
+
+Statement InitC2P{A.l,B.l,C.l,D.b}
+;Initialises chunky-to-planar
+;A.l=d0=Chunky Width
+;B.l=d1=Chunky Height
+;C.l=d2=Chunky Yoffset (Top)
+;D.b=d3=Processor (blitz instruction, will be 0/1/2/3/4)
+  LEA     c2p_Data(pc),a0
+  ANDI.l  #$ffff,d0
+  MULU.w  d0,d2
+  LSR.l   #3,d2 ; bytes
+  MOVE.l  d2,c2p_ScrOffs-c2p_Data(a0) ; Planar Y offset
+  MULU.w  d0,d1
+  MOVE.l  d1,c2p_Pixels-c2p_Data(a0)
+  CMP.b   #4,d3 ; 040+?
+  BNE     c2pIlowCPU
+  MOVE.b  #1,c2pCPUmode
+  BRA     c2pIskip
+c2pIlowCPU
+  MOVE.b  #0,c2pCPUmode
+c2pIskip
+AsmExit
+End Statement
+
+Statement ChunkyClearscreen4{ChunkyBuf.l,BufHeight.w,OpWidth.w,DestWidth.w,Value.l}
+;Clears the rightmost 4-pixel-width column in the chunky buffer to Value.l
+;Covers up the longword clip/wrap buffer. Column is rightmost to OpWidth, DestWidth supplies modulo
+  MOVE.l  d0,a0 ; Chunky output
+  AND.l   #$FFFF,d1 ; Only word
+  SUBQ.l  #1,d1 ; Loopcounter
+  AND.l   #$FFFF,d3 ; Modulo
+  SUBQ.l  #4,d3 ; Modulo-4 to accomodate move.l
+  AND.l   #$FFFF,d2 ; Only word
+  SUBQ.l  #4,d2 ; OpWidth-4, x start position
+  ADD.l   d2,a0 ; Source position
+ChunkyClear4
+  MOVE.l  d4,(a0)+ ; Clear 4 pixels
+  ADD.l   d3,a0 ; Dest Modulo
+  DBRA    d1,ChunkyClear4
+  AsmExit
+End Statement
+
+Statement ChunkyClearscreen32{ChunkyBuf.l,BufHeight.w,Value.l,Width.w}
+;Clears chunky screen, Width*BufHeight pixels (Width multiples of 32!)
+  MOVE.l  a3,-(a7)
+  MOVE.l  d0,a0 ; Chunky output
+  MOVE.l  d2,d0 ; Get value
+  AND.l   #$FFFF,d3 ; Only word
+  MOVE.l  d3,d2 ; Width
+  AND.l   #$FFFF,d1 ; Only word
+  MULU    d1,d2 ; Size in bytes
+  ADD.l   d2,a0 ; To end of buffer
+  SUBQ.l  #1,d1 ; Init YLoop
+  EXG.l   d0,d3 ; 1
+  MOVE.l  d3,d4 ; 2
+  MOVE.l  d3,d5 ; 3
+  MOVE.l  d3,d6 ; 4
+  MOVE.l  d3,d7 ; 5
+  MOVE.l  d3,a1 ; 6
+  MOVE.l  d3,a2 ; 7
+  MOVE.l  d3,a3 ; 8 longwords = 32 pixels
+  LSR.w   #2+3,d0 ; Width in longwords (2=2^2=4=longwords, 3=2^3=8=groups of 8 longwords)
+  SUBQ.l  #1,d0 ; Xloopcounter
+ChunkyClrLoopY
+    MOVE.l  d0,d2 ; Init XLoop
+ChunkyClrLoopX
+      MOVEM.l d3-d7/a1-a3,-(a0) ; Clear 32 pixels
+      DBRA    d2,ChunkyClrLoopX
+    DBRA    d1,ChunkyClrLoopY
+  MOVE.l  (a7)+,a3
+  AsmExit
+End Statement
+
+Statement ChunkyCopy16{ChunkyBufA.l,ChunkyBufB.l,BufHeight.w,CPU.b,OpWidth.w,DestWidth.w}
+;Copies one chunky screen to another, Width*BufHeight pixels (Width multiples of 16!)
+;Seperate routines for 040+ (move16) and 030- (movem)
+;Width of source buffer and dest buffer will be the same and use the same modulo but OpWidth can be narrower
+  MOVE.l  d0,a0   ; Chunky source
+  MOVE.l  d1,a1   ; Chunky destination
+  MOVE.w  d2,d0   ; Height
+  AND.l   #$FFFF,d0 ; Only word
+  SUBQ.l  #1,d0   ; d0=YLoop
+  AND.l   #$FFFF,d4 ; Only word
+  AND.l   #$FFFF,d5 ; Only word
+  SUB.l   d4,d5   ; Dest modulo
+  LSR.w   #2+2,d4   ; Longwords (2=2^2=4=longwords, 2=2^2=4=groups of 4 longwords
+  SUBQ.l  #1,d4   ; loop
+  MOVE.l  d4,d1   ; d1=XLoop
+  MOVE.l  d5,d2   ; d2=Dest Modulo
+  CMP.b   #4,d3   ; 040+?
+  BEQ     ChunkyCopy040 ; Yes, do move16's
+  ADD.l   #16,a1
+ChunkyCopy030
+ChunkyCopy030y
+    MOVE.l  d1,d3 ; d3=Xloop
+ChunkyCopy030x
+      MOVEM.l (a0)+,d4-d7
+      MOVEM.l d4-d7,-(a1) ; 16 pixels
+      ADD.l   #32,a1
+      DBRA    d3,ChunkyCopy030x
+    ADD.l   d2,a0   ; Source modulo
+    ADD.l   d2,a1   ; Dest modulo
+    DBRA    d0,ChunkyCopy030y
+  AsmExit
+ChunkyCopy040
+ChunkyCopy040y
+    MOVE.l  d1,d3 ; d3=Xloop
+ChunkyCopy040x
+      Dc.l    $F6209000 ; move16 (a0)+,(a1)+ ; 16 bytes
+      DBRA    d3,ChunkyCopy040x
+    ADD.l   d2,a0   ; Source modulo
+    ADD.l   d2,a1   ; Dest modulo
+    DBRA    d0,ChunkyCopy040y
+  AsmExit
+End Statement
+
+Function.b InitDisplay{Title$}
+;Creates a display
+;Title$=The screen title (not displayed)
+  SHARED PrefDisplayHeight.w,PrefDisplayID.l,PrefDisplayBuffering.b,ChunkyHeight.w,*ScrVP.ViewPort,IsAGA.b
+  SHARED ChunkyBase.l,ChunkyBuffer.l,LandBuffer.l,GameHeight.w,PrefDisplayLeft.w,PrefDisplayTop.w
+  SHARED PrefDisplayDepth.w,ChunkyWidth.w,PrefDisplayWidth.w,DisplaySplit.w,GameWidth.w
+  SHARED GameChunkyWidth.w,GameChunkyHeight.w
+  ;Open a test screen first to a) test for AGA or GFX-Card, and b) because the dimensions might be
+  ;too large to open a chipram screen, and the dimensions for AGA have not yet been reduced to within limits
+  Dim ScrTags.TagItem(13)
+  Rect.Rectangle\MinX=0,0,320,240 ; For test
+  ScrTags(0)\ti_Tag=#SA_Width,320 ; For test
+  ScrTags(1)\ti_Tag=#SA_Height,240; For test
+  ScrTags(2)\ti_Tag=#SA_Depth,PrefDisplayDepth
+  ScrTags(3)\ti_Tag=#SA_DisplayID,PrefDisplayID
+  ScrTags(4)\ti_Tag=#SA_Type,$F
+  ScrTags(5)\ti_Tag=#SA_Quiet,True
+  ScrTags(6)\ti_Tag=#SA_ShowTitle,False
+  ScrTags(7)\ti_Tag=#SA_Behind,True
+  ScrTags(8)\ti_Tag=#SA_DClip,&Rect ; For test
+  ScrTags(9)\ti_Tag=#SA_Exclusive,True
+  ScrTags(10)\ti_Tag=#SA_Draggable,False
+  ScrTags(11)\ti_Tag=#SA_AutoScroll,True
+  ScrTags(12)\ti_Tag=#TAG_DONE,0
+  ScrTags(13)\ti_Tag=#TAG_DONE,0
+  InitShape 0,16,1,2 ; Mouse pointer 16x1 (transparent)
+  UsedChip.l=(320 LSR 3)*PrefDisplayDepth*240 ; With test params
+  FreeChip.l=AvailMem_(#MEMF_CHIP)
+  Forbid{}
+  If ScreenTags(0,Title$,&ScrTags(0))<>0 ; Test for GFX-Card or AGA
+    NowChip.l=AvailMem_(#MEMF_CHIP)
+    Permit{}
+    If FreeChip-NowChip<UsedChip
+      ; Graphics card screen
+      IsAGA=False
+      ScrTags(0)\ti_Tag=#SA_Width,PrefDisplayWidth
+      Rect.Rectangle\MinX=0,0,PrefDisplayWidth,PrefDisplayHeight
+      ScrTags(1)\ti_Tag=#SA_Height,PrefDisplayHeight*PrefDisplayBuffering
+      ScrTags(8)\ti_Tag=#SA_DClip,&Rect
+      VWait 25 ; seems to be necessary (safer)
+      Free Screen 0
+      VWait 10 ; just to be on the safe side
+      If ScreenTags(0,Title$,&ScrTags(0))<>0
+        For Loop.w=0 To PrefDisplayBuffering-1
+          If Loop=0 Then WFlags.l=$1900 Else WFlags.l=$800
+If Window(Loop,0,PrefDisplayHeight*Loop,PrefDisplayWidth,PrefDisplayHeight,WFlags,"",0,0)=0 Then Function Return False
+          WPointer 0
+          Menus Off
+          ScreensBitMap 0,Loop
+          *TmpBmp.bitmap=Addr BitMap(Loop)
+          Offset.l=*TmpBmp\_ebwidth*(PrefDisplayHeight*Loop)
+          For DLoop.w=0 To PrefDisplayDepth-1
+            *TmpBmp\_data[DLoop]=*TmpBmp\_data[DLoop]+Offset
+          Next DLoop
+        Next Loop
+      Else
+        Function Return False
+      EndIf
+    Else
+      ; AGA screen
+      IsAGA=True
+      PrefDisplayWidth AND $FFC0 ; For AGA, width to nearest 64
+      If (PrefDisplayWidth*PrefDisplayHeight) LSR 3>#PlaneSize
+        PrefDisplayHeight=Int(#PlaneSize/(PrefDisplayWidth LSR 3))
+      EndIf
+      ScrTags(0)\ti_Tag=#SA_Width,PrefDisplayWidth
+      Rect.Rectangle\MinX=0,0,PrefDisplayWidth,PrefDisplayHeight
+      ScrTags(1)\ti_Tag=#SA_Height,PrefDisplayHeight ; Seperate buffers
+      ScrTags(8)\ti_Tag=#SA_DClip,&Rect
+      Forbid{}
+      VWait 25 ; seems to be necessary (safer)
+      Free Screen 0
+      For Loop.w=0 To PrefDisplayBuffering-1
+        If Loop=0 Then WFlags.l=$1900 Else WFlags.l=$800
+        If AvailMem_(#MEMF_CHIP)>=(#PlanarWidth*#PlanarHeight)+16
+          Memory.l=AllocMem((#PlanarWidth*#PlanarHeight)+16,$10002) ; Chip bitmap
+          Memory=(Memory+16) AND $FFFFFFF0 ; Align for move16's
+          If Memory<>0
+            CludgeBitMap Loop,#PlanarWidth,#PlanarHeight,PrefDisplayDepth,Memory
+            *TmpBmp.bitmap=Addr BitMap(Loop)
+            *TmpBmp\_height=PrefDisplayHeight ; Force display height
+            *TmpBmp\_ebwidth=PrefDisplayWidth LSR 3 ; Force display width
+            *TmpBmp\_bitplanemod=((#PlanarWidth*#PlanarHeight)-(PrefDisplayWidth*PrefDisplayHeight)) LSR 3 ; Force plane modulo
+            If Loop=0
+              ScrTags(12)\ti_Tag=#SA_BitMap,Addr BitMap(0)
+              If ScreenTags(0,Title$,&ScrTags(0))=0
+                Permit{}
+                Function Return False
+              EndIf
+            EndIf
+            If Window(Loop,0,0,PrefDisplayWidth,PrefDisplayHeight,WFlags,"",0,0)=0 Then Function Return False
+            WPointer 0
+            Menus Off
+          Else
+            Permit{}
+            Function Return False
+          EndIf
+        Else
+          Permit{}
+          Function Return False
+        EndIf
+      Next Loop
+      Permit{}
+    EndIf
+    DisplaySplit.w=((PrefDisplayWidth/4)*3) AND $FFF0 ; Horizontal coord at which splitscreen starts (mult of 16)
+    DEFTYPE.DimensionInfo DimInfoBuf
+    GetDisplayInfoData_ FindDisplayInfo_(PrefDisplayID) AND $FFFFFFFF,&DimInfoBuf,SizeOf.DimensionInfo,#DTAG_DIMS,0
+    PrefDisplayLeft.w=((DimInfoBuf\TxtOScan\MaxX)-PrefDisplayWidth)/2
+    PrefDisplayTop.w=((DimInfoBuf\TxtOScan\MaxY)-PrefDisplayHeight)/2
+    GameWidth.w=PrefDisplayWidth
+    GameHeight.w=PrefDisplayHeight-#LandHeight
+    GameChunkyWidth.w=PrefDisplayWidth
+    GameChunkyHeight.w=GameHeight
+    ChunkyWidth.w=PrefDisplayWidth
+    ChunkyHeight.w=GameHeight
+    *Scr.Screen=NPeekL(Addr Screen(0))
+    *ScrVP=ViewPort(0)
+    *ScrVP\DxOffset=PrefDisplayLeft,PrefDisplayTop
+    ScrollVPort_ *ScrVP
+    RethinkDisplay_
+    Use Palette 0
+    Menus Off
+    If *ScrVP\DHeight<>PrefDisplayHeight
+      Forbid{}
+      *Scr\Height=PrefDisplayHeight ; Enforce y clipping
+      Permit{}
+    EndIf
+    ScreenToFront_ *Scr
+    ; Make chunky buffer
+    NowFast.l=AvailMem_(#MEMF_FAST)
+    If NowFast<ChunkyWidth*(ChunkyHeight+#ChunkyClipTop+#ChunkyClipBottom)+16 Then Function Return False
+    ChunkyBase.l=AllocMem(ChunkyWidth*(ChunkyHeight+#ChunkyClipTop+#ChunkyClipBottom)+16,$10000)
+    If ChunkyBase=0 Then Function Return False
+    ChunkyBase=(ChunkyBase+16) AND $FFFFFFF0 ; Align for move16's
+    ChunkyBuffer.l=ChunkyBase+(#ChunkyClipTop*ChunkyWidth)
+    InitC2P{ChunkyWidth,ChunkyHeight,0,CPUminimum}
+    LandBuffer.l=ChunkyBuffer+(PrefDisplayWidth*GameHeight)
+    Function Return True
+  Else
+    Permit{}
+    Function Return False
+  EndIf
+End Function
+
+Statement FreeAGA{}
+;If IsAGA=True then restore AGA bitmap specifications to original size so that they
+;can be safely freed from the system.
+  SHARED PrefDisplayBuffering.b
+  For Loop.w=0 To PrefDisplayBuffering-1
+    *TmpBmp.bitmap=Addr BitMap(Loop)
+    *TmpBmp\_height=#PlanarHeight ; UnForce display height
+    *TmpBmp\_ebwidth=#PlanarWidth ; UnForce display width
+    *TmpBmp\_bitplanemod=0 ; UnForce new plane modulo
+  Next Loop
+End Statement
+
+Function.b InitBackground{BG$}
+;Load in a new background bitmap and initialise stars
+  SHARED BackgroundBase.l,BGPos(),PrefBackdrop.b,StarsBase.l,GameHeight.w,ChunkyBuffer.l,PrefDisplayWidth.w
+  SHARED BGHeight.w,BGWidth.w
+  If PrefBackdrop
+    If BackgroundBase=0
+      NowFast.l=AvailMem_(#MEMF_FAST)
+      If NowFast<PrefDisplayWidth*(BGHeight+GameHeight)+16 Then Function Return False
+      BackgroundBase.l=AllocMem(PrefDisplayWidth*(BGHeight+GameHeight)+16,$10000)
+      If BackgroundBase=0 Then Function Return False
+      BackgroundBase=(BackgroundBase+16) AND $FFFFFFF0 ; Align for move16's
+    EndIf
+    If Exists("Backgrounds/"+BG$+".Chunky")
+      If OpenFile(0,"Backgrounds/"+BG$+".Chunky")
+        Where.l=BackgroundBase
+        For Y=0 To BGHeight-1
+          ReadMem 0,Where,BGWidth
+          Where+PrefDisplayWidth
+        Next Y
+        CloseFile 0
+        If PrefDisplayWidth>BGWidth ; Not enough room to do this all on one line!
+ChunkyCopy16{BackgroundBase,BackgroundBase+BGWidth,BGHeight,CPUminimum,PrefDisplayWidth-BGWidth,PrefDisplayWidth}
+        EndIf
+        If Exists("Backgrounds/"+BG$+".Palette")
+          LoadPalette 0,"Backgrounds/"+BG$+".Palette",0
+          BGPos(1)=0
+          BGPos(2)=BGHeight/2 ; Start player two equal distance in both directions
+          Where.l=BackgroundBase+(PrefDisplayWidth*BGHeight)
+          ChunkyCopy16{BackgroundBase,Where,GameHeight,CPUminimum,PrefDisplayWidth,PrefDisplayWidth}
+          Use Palette 0
+          Function Return True ; Exit point
+        Else
+          Function Return False
+        EndIf
+      Else
+        Function Return False
+      EndIf
+    Else
+      Function Return False
+    EndIf
+  Else
+    Function Return True
+  EndIf
+End Function
+
+Statement LandCopy16{Land.l,Dest.l,XPos.w,OpWidth.w,DestWidth.w}
+;Copies a portion of the land to the chunky buffer (Width multiples of 16)
+;Destination and source widths are different so have different modulos
+  MOVE.l  a3,-(a7)
+  MOVE.l  d0,a0 ; Land source
+  MOVE.l  d1,a1 ; Chunky dest
+  AND.l   #$FFFF,d2 ; Only word
+  MOVE.l  d2,d0 ; XOffset
+  AND.l   #$FFFF,d3 ; Only word
+  MOVE.l  #LandWidth,d1
+  AND.l   #$FFFF,d4 ; Only word
+  ADD.l   d4,d1 ; Make #LandWidthTotal
+  SUB.l   d3,d1 ; d1=Land modulo
+  AND.w   #$FFFC,d2 ; Round down to nearest longword
+  ADD.l   d2,a0 ; Add XOffset to Source
+  SUB.l   d0,d2 ; Find difference
+  ADD.l   d2,a1 ; Add difference to dest address (longword aligned read, unaligned writes)
+  MOVEQ.l #LandHeight-1,d0 ; Y loop
+  SUB.l   d3,d4 ; d4=Dest modulo
+  LSR.w   #2+2,d3 ; Longwords (2=2^2=4=longwords, 2=2^2=4=groups of 4 longwords)
+  SUBQ.l  #1,d3 ; XLoop
+  ADD.l   #16,a1 ; For first movem
+LandCopyLoopY
+    MOVE.l  d3,d5 ; X loop
+LandCopyLoopX
+      MOVEM.l (a0)+,d6/d7/a2/a3
+      MOVEM.l d6/d7/a2/a3,-(a1)
+      ADD.l   #32,a1
+      DBRA    d5,LandCopyLoopX
+    ADD.l   d1,a0 ; Source line modulo
+    ADD.l   d4,a1 ; Dest line modulo
+    DBRA    d0,LandCopyLoopY
+  MOVE.l  (a7)+,a3
+  AsmExit
+End Statement
+
+Function.b InitLand{Land$}
+;Load in a new land bitmap
+  SHARED LandBase.l,LandPos(),CPUminimum.b,PrefDisplayWidth.w
+  If LandBase=0
+    NowFast.l=AvailMem_(#MEMF_FAST)
+    If NowFast<((#LandWidth+PrefDisplayWidth)*#LandHeight)+16 Then Function Return False
+    LandBase.l=AllocMem(((#LandWidth+PrefDisplayWidth)*#LandHeight)+16,$10000)
+    LandBase=(LandBase+16) AND $FFFFFFF0 ; for move16 compatibility (in the init copy, not the land copy)
+    If LandBase=0 Then Function Return False
+  EndIf
+  If Exists("Land/"+Land$+".Chunky")
+    If OpenFile(0,"Land/"+Land$+".Chunky")
+      Where.l=LandBase
+      For Y=0 To #LandHeight-1
+        ReadMem 0,Where,#LandWidth
+        Where+#LandWidth+PrefDisplayWidth
+      Next Y
+      CloseFile 0
+      ChunkyCopy16{LandBase,LandBase+#LandWidth,#LandHeight,CPUminimum,PrefDisplayWidth,#LandWidth+PrefDisplayWidth}
+      If Exists("Land/"+Land$+".Palette")
+        LoadPalette 0,"Land/"+Land$+".Palette",64
+        LandPos(1)=0
+        LandPos(2)=#LandWidth/2 ; Start player two equal distance away in both directions
+        Use Palette 0
+        Function Return True
+      Else
+        Function Return False
+      EndIf
+    Else
+      Function Return False
+    EndIf
+  Else
+    Function Return False
+  EndIf
+End Function
+
+Statement C2P{A.l,B.l}
+;AGA ChunkyToPlanar conversion.
+;Different routines for 000-030 and 040-060.
+
+  MOVE.l  d0,a0 ; Chunky
+  MOVE.l  d1,a1 ; Planar
+
+  MOVEM.l a3-a6,-(a7)
+  LEA     c2p_Data(pc),a2
+
+  TST.b   c2pCPUmode ; 030 routine?
+  BEQ     c2p030
+
+;Routine for 68040 and 68060.
+;Used to be c2p040only.
+c2p040
+
+  MOVE.l  c2p_Pixels-c2p_Data(a2),a3
+  ADD.l   a0,a3
+
+  ADD.l   #PlaneSize,a1
+  ADD.l   c2p_ScrOffs-c2p_Data(a2),a1 ; Planar Y offset
+  MOVE.l  a1,a2
+  ADD.l   #PlaneSize*4,a2
+
+  MOVE.l  (a0)+,d0
+  MOVE.l  (a0)+,d1
+  MOVE.l  (a0)+,d2
+  MOVE.l  (a0)+,d3
+  MOVE.l  (a0)+,d4
+  MOVE.l  (a0)+,d5
+
+  MOVE.l  d4,d7     ; Swap 16x4, part 1
+  MOVE.w  d0,d4
+  SWAP    d4
+  MOVE.w  d4,d0
+  MOVE.w  d7,d4
+  MOVE.l  d5,d7
+  MOVE.w  d1,d5
+  SWAP    d5
+  MOVE.w  d5,d1
+  MOVE.w  d7,d5
+
+  MOVE.l  d4,d7     ; Swap 2x4, part 1
+  LSR.l   #2,d7
+  EOR.l   d0,d7
+  AND.l   #$33333333,d7
+  EOR.l   d7,d0
+  LSL.l   #2,d7
+  EOR.l   d7,d4
+  MOVE.l  d5,d7
+  LSR.l   #2,d7
+  EOR.l   d1,d7
+  AND.l   #$33333333,d7
+  EOR.l   d7,d1
+  LSL.l   #2,d7
+  EOR.l   d7,d5
+
+  MOVE.l  (a0)+,a5
+  MOVE.l  (a0)+,a6
+
+  EXG     d4,a5
+  EXG     d5,a6
+
+  MOVE.l  d4,d7     ; Swap 16x4, part 2
+  MOVE.w  d2,d4
+  SWAP    d4
+  MOVE.w  d4,d2
+  MOVE.w  d7,d4
+  MOVE.l  d5,d7
+  MOVE.w  d3,d5
+  SWAP    d5
+  MOVE.w  d5,d3
+  MOVE.w  d7,d5
+
+  MOVE.l  d4,d7     ; Swap 2x4, part 2
+  LSR.l   #2,d7
+  EOR.l   d2,d7
+  AND.l   #$33333333,d7
+  EOR.l   d7,d2
+  LSL.l   #2,d7
+  EOR.l   d7,d4
+  MOVE.l  d5,d7
+  LSR.l   #2,d7
+  EOR.l   d3,d7
+  AND.l   #$33333333,d7
+  EOR.l   d7,d3
+  LSL.l   #2,d7
+  EOR.l   d7,d5
+
+  MOVE.l  d1,d7     ; Swap 4x1
+  LSR.l   #4,d7
+  EOR.l   d0,d7
+  AND.l   #$0f0f0f0f,d7
+  EOR.l   d7,d0
+  LSL.l   #4,d7
+  EOR.l   d7,d1
+  MOVE.l  d3,d7
+  LSR.l   #4,d7
+  EOR.l   d2,d7
+  AND.l   #$0f0f0f0f,d7
+  EOR.l   d7,d2
+  LSL.l   #4,d7
+  EOR.l   d7,d3
+
+  BRA c2pStart040a
+c2pX040a
+  MOVE.l  (a0)+,d0
+  MOVE.l  (a0)+,d1
+  MOVE.l  (a0)+,d2
+  MOVE.l  (a0)+,d3
+  MOVE.l  (a0)+,d4
+  MOVE.l  (a0)+,d5
+
+  MOVE.l  a6,-PlaneSize(a1)
+
+  MOVE.l  d4,d7     ; Swap 16x4, part 1
+  MOVE.w  d0,d4
+  SWAP    d4
+  MOVE.w  d4,d0
+  MOVE.w  d7,d4
+  MOVE.l  d5,d7
+  MOVE.w  d1,d5
+  SWAP    d5
+  MOVE.w  d5,d1
+  MOVE.w  d7,d5
+
+  MOVE.l  d4,d7     ; Swap 2x4, part 1
+  LSR.l   #2,d7
+  EOR.l   d0,d7
+  AND.l   #$33333333,d7
+  EOR.l   d7,d0
+  LSL.l   #2,d7
+  EOR.l   d7,d4
+  MOVE.l  d5,d7
+  LSR.l   #2,d7
+  EOR.l   d1,d7
+  AND.l   #$33333333,d7
+  EOR.l   d7,d1
+  LSL.l   #2,d7
+  EOR.l   d7,d5
+
+  MOVE.l  (a0)+,d7
+  MOVE.l  (a0)+,a6
+
+  MOVE.l  a5,-PlaneSize(a2)
+
+  MOVE.l  d7,a5
+  EXG     d4,a5
+  EXG     d5,a6
+
+  MOVE.l  d4,d7     ; Swap 16x4, part 2
+  MOVE.w  d2,d4
+  SWAP    d4
+  MOVE.w  d4,d2
+  MOVE.w  d7,d4
+  MOVE.l  d5,d7
+  MOVE.w  d3,d5
+  SWAP    d5
+  MOVE.w  d5,d3
+  MOVE.w  d7,d5
+
+  MOVE.l  d4,d7     ; Swap 2x4, part 2
+  MOVE.l  d6,(a2)+
+  LSR.l   #2,d7
+  EOR.l   d2,d7
+  AND.l   #$33333333,d7
+  EOR.l   d7,d2
+  LSL.l   #2,d7
+  EOR.l   d7,d4
+  MOVE.l  d5,d7
+  LSR.l   #2,d7
+  EOR.l   d3,d7
+  AND.l   #$33333333,d7
+  EOR.l   d7,d3
+  LSL.l   #2,d7
+  EOR.l   d7,d5
+
+  MOVE.l  d1,d7     ; Swap 4x1
+  LSR.l   #4,d7
+  EOR.l   d0,d7
+  MOVE.l  a4,(a1)+
+  AND.l   #$0f0f0f0f,d7
+  EOR.l   d7,d0
+  LSL.l   #4,d7
+  EOR.l   d7,d1
+  MOVE.l  d3,d7
+  LSR.l   #4,d7
+  EOR.l   d2,d7
+  AND.l #$0f0f0f0f,d7
+  EOR.l   d7,d2
+  LSL.l   #4,d7
+  EOR.l   d7,d3
+c2pStart040a
+
+  MOVE.l  d2,d7     ; Swap 8x2, part 1
+  LSR.l   #8,d7
+  EOR.l   d0,d7
+  AND.l   #$00ff00ff,d7
+  EOR.l   d7,d0
+  LSL.l   #8,d7
+  EOR.l   d7,d2
+  MOVE.l  d2,d7
+  LSR.l   #1,d7     ; Swap 1x2, part 1
+  EOR.l   d0,d7
+  AND.l   #$55555555,d7
+  EOR.l   d7,d0
+;  MOVE.l  d0,PlaneSize*2(a2)
+ADD.l #PlaneSize*2,a2
+MOVE.l d0,(a2)
+SUB.l #PlaneSize*2,a2
+  ADD.l   d7,d7
+  EOR.l   d7,d2
+  MOVE.l  d3,d7     ; Swap 8x2, part 2
+  LSR.l   #8,d7
+  EOR.l   d1,d7
+  AND.l   #$00ff00ff,d7
+  EOR.l   d7,d1
+  LSL.l   #8,d7
+  EOR.l   d7,d3
+  MOVE.l  d3,d7
+  LSR.l   #1,d7     ; Swap 1x2, part 2
+  EOR.l   d1,d7
+  AND.l   #$55555555,d7
+  EOR.l   d7,d1
+;  MOVE.l  d1,PlaneSize*2(a1)
+ADD.l #PlaneSize*2,a1
+MOVE.l d1,(a1)
+SUB.l #PlaneSize*2,a1
+  ADD.l   d7,d7
+  EOR.l   d7,d3
+
+  MOVE.l  d5,d7
+  LSR.l   #4,d7
+  EOR.l   d4,d7
+  AND.l   #$0f0f0f0f,d7
+  EOR.l   d7,d4
+  LSL.l   #4,d7
+  EOR.l   d7,d5
+
+  EXG     d4,a5
+  EXG     d5,a6
+
+  MOVE.l  d5,d7
+  LSR.l   #4,d7
+  EOR.l   d4,d7
+  AND.l   #$0f0f0f0f,d7
+  EOR.l   d7,d4
+  LSL.l   #4,d7
+  EOR.l   d7,d5
+
+  MOVE.l  a5,d0
+  MOVE.l  a6,d1
+  MOVE.l  d2,PlaneSize(a2)
+
+  MOVE.l  d0,d7     ; Swap 8x2, part 3
+  LSR.l   #8,d7
+  EOR.l   d4,d7
+  AND.l   #$00ff00ff,d7
+  EOR.l   d7,d4
+  LSL.l   #8,d7
+  EOR.l   d7,d0
+  MOVE.l  d0,d7
+  LSR.l   #1,d7     ; Swap 1x2, part 3
+  EOR.l   d4,d7
+  AND.l   #$55555555,d7
+  EOR.l   d7,d4
+  ADD.l   d7,d7
+  EOR.l   d7,d0
+  MOVE.l  d1,d7     ; Swap 8x2, part 4
+  LSR.l   #8,d7
+  MOVE.l  d3,PlaneSize(a1)
+  EOR.l   d5,d7
+  AND.l   #$00ff00ff,d7
+  EOR.l   d7,d5
+  LSL.l   #8,d7
+  EOR.l   d7,d1
+  MOVE.l  d1,d7
+  LSR.l   #1,d7     ; Swap 1x2, part 4
+  EOR.l   d5,d7
+  AND.l   #$55555555,d7
+  EOR.l   d7,d5
+  ADD.l   d7,d7
+  EOR.l   d7,d1
+
+  MOVE.l  d0,a5
+  MOVE.l  d1,a6
+
+  MOVE.l  d4,d6
+  MOVE.l  d5,a4
+
+  CMP.l   a0,a3
+  BNE     c2pX040a
+
+  MOVE.l  a6,-PlaneSize(a1)
+  MOVE.l  a5,-PlaneSize(a2)
+  MOVE.l  d6,(a2)+
+  MOVE.l  a4,(a1)+
+
+  MOVEM.l (a7)+,a3-a6
+
+  AsmExit
+
+;Routine for 68000, 68010, 68020 and 68030.
+;Used to be c2p68030only.
+c2p030
+
+  MOVE.l  #$33333333,d5
+  MOVE.l  #$55555555,d6
+  MOVE.l  #$00ff00ff,a6
+
+  ADD.l   #PlaneSize,a1
+  ADD.l   c2p_ScrOffs-c2p_Data(a2),a1 ; Planar Y offset
+
+  MOVE.l  c2p_Pixels-c2p_Data(a2),a2
+  ADD.l   a0,a2
+  CMP.l   a0,a2
+  BEQ     c2pNone030a
+
+  MOVEM.l a0-a1,-(a7)
+
+  MOVE.l  (a0)+,d0
+  MOVE.l  (a0)+,d2
+  MOVE.l  (a0)+,d1
+  MOVE.l  (a0)+,d3
+
+  MOVE.l  #$0f0f0f0f,d4   ; Merge 4x1, part 1
+  AND.l   d4,d0
+  AND.l   d4,d2
+  LSL.l   #4,d0
+  OR.l    d2,d0
+
+  AND.l   d4,d1
+  AND.l   d4,d3
+  LSL.l   #4,d1
+  OR.l    d3,d1
+
+  MOVE.l  d1,a3
+
+  MOVE.l  (a0)+,d2
+  MOVE.l  (a0)+,d1
+  MOVE.l  (a0)+,d3
+  MOVE.l  (a0)+,d7
+
+  AND.l   d4,d2     ; Merge 4x1, part 2
+  AND.l   d4,d1
+  LSL.l   #4,d2
+  OR.l    d1,d2
+
+  AND.l   d4,d3
+  AND.l   d4,d7
+  LSL.l   #4,d3
+  OR.l    d7,d3
+
+  MOVE.l  a3,d1
+
+  MOVE.w  d2,d7     ; Swap 16x2
+  MOVE.w  d0,d2
+  SWAP    d2
+  MOVE.w  d2,d0
+  MOVE.w  d7,d2
+
+  MOVE.w  d3,d7
+  MOVE.w  d1,d3
+  SWAP    d3
+  MOVE.w  d3,d1
+  MOVE.w  d7,d3
+
+  BRA     c2pStart030a
+c2pX030a
+  MOVE.l  (a0)+,d0
+  MOVE.l  (a0)+,d2
+  MOVE.l  (a0)+,d1
+  MOVE.l  (a0)+,d3
+
+  MOVE.l  d7,PlaneSize(a1)
+
+  MOVE.l  #$0f0f0f0f,d4   ; Merge 4x1, part 1
+  AND.l   d4,d0
+  AND.l   d4,d2
+  LSL.l   #4,d0
+  OR.l    d2,d0
+
+  AND.l   d4,d1
+  AND.l   d4,d3
+  LSL.l   #4,d1
+  OR.l    d3,d1
+
+  MOVE.l  d1,a3
+
+  MOVE.l  (a0)+,d2
+  MOVE.l  (a0)+,d1
+  MOVE.l  (a0)+,d3
+  MOVE.l  (a0)+,d7
+
+  MOVE.l  a4,(a1)+
+
+  AND.l   d4,d2     ; Merge 4x1, part 2
+  AND.l   d4,d1
+  LSL.l   #4,d2
+  OR.l    d1,d2
+
+  AND.l   d4,d3
+  AND.l   d4,d7
+  LSL.l   #4,d3
+  OR.l    d7,d3
+
+  MOVE.l  a3,d1
+
+  MOVE.w  d2,d7     ; Swap 16x2
+  MOVE.w  d0,d2
+  SWAP    d2
+  MOVE.w  d2,d0
+  MOVE.w  d7,d2
+
+  MOVE.w  d3,d7
+  MOVE.w  d1,d3
+  SWAP    d3
+  MOVE.w  d3,d1
+  MOVE.w  d7,d3
+
+  MOVE.l  a5,-PlaneSize-4(a1)
+c2pStart030a
+  MOVE.l  a6,d4
+
+  MOVE.l  d2,d7     ; Swap 2x2
+  LSR.l   #2,d7
+  EOR.l   d0,d7
+  AND.l   d5,d7
+  EOR.l   d7,d0
+  LSL.l   #2,d7
+  EOR.l   d7,d2
+
+  MOVE.l  d3,d7
+  LSR.l   #2,d7
+  EOR.l   d1,d7
+  AND.l   d5,d7
+  EOR.l   d7,d1
+  LSL.l   #2,d7
+  EOR.l   d7,d3
+
+  MOVE.l  d1,d7
+  LSR.l   #8,d7
+  EOR.l   d0,d7
+  AND.l   d4,d7
+  EOR.l   d7,d0
+  LSL.l   #8,d7
+  EOR.l   d7,d1
+
+  MOVE.l  d1,d7
+  LSR.l   #1,d7
+  EOR.l   d0,d7
+  AND.l   d6,d7
+  EOR.l   d7,d0
+;  MOVE.l  d0,PlaneSize*2(a1)
+ADD.l #PlaneSize*2,a1
+MOVE.l d0,(a1)
+SUB.l #PlaneSize*2,a1
+  ADD.l   d7,d7
+  EOR.l   d1,d7
+
+  MOVE.l  d3,d1
+  LSR.l   #8,d1
+  EOR.l   d2,d1
+  AND.l   d4,d1
+  EOR.l   d1,d2
+  LSL.l   #8,d1
+  EOR.l   d1,d3
+
+  MOVE.l  d3,d1
+  LSR.l   #1,d1
+  EOR.l   d2,d1
+  AND.l   d6,d1
+  EOR.l   d1,d2
+  ADD.l   d1,d1
+  EOR.l   d1,d3
+
+  MOVE.l  d2,a4
+  MOVE.l  d3,a5
+
+  CMPA.l  a0,a2
+  BNE     c2pX030a
+
+  MOVE.l  d7,PlaneSize(a1)
+  MOVE.l  a4,(a1)+
+  MOVE.l  a5,-PlaneSize-4(a1)
+
+  MOVEM.l (a7)+,a0-a1
+  ADD.l   #PlaneSize*4,a1
+
+  MOVE.l  (a0)+,d0
+  MOVE.l  (a0)+,d2
+  MOVE.l  (a0)+,d1
+  MOVE.l  (a0)+,d3
+
+  MOVE.l  #$f0f0f0f0,d4   ; Merge 4x1, part 1
+  AND.l   d4,d0
+  AND.l   d4,d2
+  LSR.l   #4,d2
+  OR.l    d2,d0
+
+  AND.l   d4,d1
+  AND.l   d4,d3
+  LSR.l   #4,d3
+  OR.l    d3,d1
+
+  MOVE.l  d1,a3
+
+  MOVE.l  (a0)+,d2
+  MOVE.l  (a0)+,d1
+  MOVE.l  (a0)+,d3
+  MOVE.l  (a0)+,d7
+
+  AND.l   d4,d2     ; Merge 4x1, part 2
+  AND.l   d4,d1
+  LSR.l   #4,d1
+  OR.l    d1,d2
+
+  AND.l   d4,d3
+  AND.l   d4,d7
+  LSR.l   #4,d7
+  OR.l    d7,d3
+
+  MOVE.l  a3,d1
+
+  MOVE.w  d2,d7     ; Swap 16x2
+  MOVE.w  d0,d2
+  SWAP    d2
+  MOVE.w  d2,d0
+  MOVE.w  d7,d2
+
+  MOVE.w  d3,d7
+  MOVE.w  d1,d3
+  SWAP    d3
+  MOVE.w  d3,d1
+  MOVE.w  d7,d3
+
+  BRA     c2pStart030b
+c2pX030b
+  MOVE.l  (a0)+,d0
+  MOVE.l  (a0)+,d2
+  MOVE.l  (a0)+,d1
+  MOVE.l  (a0)+,d3
+
+  MOVE.l  d7,PlaneSize(a1)
+
+  MOVE.l  #$f0f0f0f0,d4   ; Merge 4x1, part 1
+  AND.l   d4,d0
+  AND.l   d4,d2
+  LSR.l   #4,d2
+  OR.l    d2,d0
+
+  AND.l   d4,d1
+  AND.l   d4,d3
+  LSR.l   #4,d3
+  OR.l    d3,d1
+
+  MOVE.l  d1,a3
+
+  MOVE.l  (a0)+,d2
+  MOVE.l  (a0)+,d1
+  MOVE.l  (a0)+,d3
+  MOVE.l  (a0)+,d7
+
+  MOVE.l  a4,(a1)+
+
+  AND.l   d4,d2     ; Merge 4x1, part 2
+  AND.l   d4,d1
+  LSR.l   #4,d1
+  OR.l    d1,d2
+
+  AND.l   d4,d3
+  AND.l   d4,d7
+  LSR.l   #4,d7
+  OR.l    d7,d3
+
+  MOVE.l  a3,d1
+
+  MOVE.w  d2,d7     ; Swap 16x2
+  MOVE.w  d0,d2
+  SWAP    d2
+  MOVE.w  d2,d0
+  MOVE.w  d7,d2
+
+  MOVE.w  d3,d7
+  MOVE.w  d1,d3
+  SWAP    d3
+  MOVE.w  d3,d1
+  MOVE.w  d7,d3
+
+  MOVE.l  a5,-PlaneSize-4(a1)
+c2pStart030b
+  MOVE.l  a6,d4
+
+  MOVE.l  d2,d7     ; Swap 2x2
+  LSR.l   #2,d7
+  EOR.l   d0,d7
+  AND.l   d5,d7
+  EOR.l   d7,d0
+  LSL.l   #2,d7
+  EOR.l   d7,d2
+
+  MOVE.l  d3,d7
+  LSR.l   #2,d7
+  EOR.l   d1,d7
+  AND.l   d5,d7
+  EOR.l   d7,d1
+  LSL.l   #2,d7
+  EOR.l   d7,d3
+
+  MOVE.l  d1,d7
+  LSR.l   #8,d7
+  EOR.l   d0,d7
+  AND.l   d4,d7
+  EOR.l   d7,d0
+  LSL.l   #8,d7
+  EOR.l   d7,d1
+
+  MOVE.l  d1,d7
+  LSR.l   #1,d7
+  EOR.l   d0,d7
+  AND.l   d6,d7
+  EOR.l   d7,d0
+;  MOVE.l  d0,PlaneSize*2(a1)
+ADD.l #PlaneSize*2,a1
+MOVE.l d0,(a1)
+SUB.l #PlaneSize*2,a1
+  ADD.l   d7,d7
+  EOR.l   d1,d7
+
+  MOVE.l  d3,d1
+  LSR.l   #8,d1
+  EOR.l   d2,d1
+  AND.l   d4,d1
+  EOR.l   d1,d2
+  LSL.l   #8,d1
+  EOR.l   d1,d3
+
+  MOVE.l  d3,d1
+  LSR.l   #1,d1
+  EOR.l   d2,d1
+  AND.l   d6,d1
+  EOR.l   d1,d2
+  ADD.l   d1,d1
+  EOR.l   d1,d3
+
+  MOVE.l  d2,a4
+  MOVE.l  d3,a5
+
+  CMPA.l  a0,a2
+  BNE     c2pX030b
+
+  MOVE.l  d7,PlaneSize(a1)
+  MOVE.l  a4,(a1)+
+  MOVE.l  a5,-PlaneSize-4(a1)
+
+c2pNone030a
+  MOVEM.l (a7)+,a3-a6
+
+  AsmExit
+
+  Even4
+c2pCPUmode:     Dc.b 1 ; 0=000-030, 1=040-060 c2p routine to use
+  Even4
+c2p_Data
+c2p_ScrOffs:    Dc.l 0
+c2p_Pixels:     Dc.l 0
+  Ds.l  16
+  Even4
+End Statement
+
+Statement Display{BufNum.w}
+;Displays the game-area chunky buffer to whatever kind of output there is
+  SHARED *ScrVP.ViewPort,IsAGA.b,ChunkyBuffer.l,PrefDisplayHeight.w,GameHeight.w,LandBuffer.l
+  SHARED GameChunkyHeight.w,CPUminimum.b,GameChunkyWidth.w,PrefDisplayWidth.w
+  Forbid{}
+  If IsAGA
+    Dest.l=NPeekL(Addr BitMap(BufNum)+8)
+    InitC2P{GameChunkyWidth,GameChunkyHeight,0,CPUminimum}
+    C2P{ChunkyBuffer,Dest}
+    InitC2P{GameChunkyWidth,#LandHeight,GameHeight,CPUminimum}
+    C2P{LandBuffer,Dest}
+    ShowBitMap BufNum
+  Else
+    WritePixelArray8_ RastPort(BufNum),0,0,PrefDisplayWidth-1,PrefDisplayHeight-1,ChunkyBuffer,0
+    *ScrVP\DyOffset=BufNum*PrefDisplayHeight
+    ScrollVPort_ *ScrVP
+  EndIf
+  Permit{}
+End Statement
+

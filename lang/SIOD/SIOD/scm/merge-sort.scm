@@ -1,0 +1,10 @@
+(define (merge x y test)
+        (cond ((null? x) y)
+              ((null? y) x)
+              ((test (car x) (car y)) (cons (car x) (merge (cdr x) y test)))
+              (else (cons (car y) (merge x (cdr y) test)))))
+
+(define (merge-sort x test)
+        (cond ((null? (cdr x)) x)
+              (else (merge (list (car x) (cadr x)) 
+                           (merge-sort (cddr x) test) test))))

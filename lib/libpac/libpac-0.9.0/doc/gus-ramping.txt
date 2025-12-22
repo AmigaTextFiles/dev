@@ -1,0 +1,157 @@
+(Excerpts from GUS-HPC.TXT, Gravis UltraSound HelpPC-HelpKit version 0.85).
+
+ Every 1.6  microseconds, the GF1 performs a  series of operations on a
+ particular voice.  The more active voices there are, the longer it takes
+ between each time  a particular voice  is serviced.   This puts a limit on
+ the rate at which  playback can occur.   14 active  voices will allow a
+ maximum of 44.1  kHz playback.  28  voices will allow 22  kHz.
+
+ knowing that 14 active voices will give exactly
+ 44.1 kHz  playback.    Therefore,  the voice  servicing  rate  'X'  can  be
+ calculated from:
+
+                       1,000,000 / (X * 14) = 44100 Hz
+                        X = 1.619695497 microseconds
+
+ Once X is known, the frequency 'divisor' is calculated by:
+
+           divisor = 1,000,000 / (1.619695497 * # of active voices)
+
+  A  frequency 'counter'  is used  to calculate how often  a voice is  updated
+ by the  GF1.  To  calculate an  FC (frequency counter) for any given frequency
+ with a particular # of  active voices, run it through this formula:
+
+%C:
+    fc = (unsigned int)(((speed_khz<<9L)+(divisor>>1L)) / divisor);
+    fc = fc << 1;
+
+ The left  shift  is  needed since  the  FC  is in  bits  15-1. This value
+ is  then  put  in  the  frequency  control  register  for  that particular
+ voice.
+
+ Remember that the GF1 works on a voice every 1.6 microseconds.  This  means
+ that the fewer voices, the faster  each voice gets updated.  The  frequency
+ control register setting for the voice MUST take this into account.  The FC
+ must get smaller if the  number of active voices  gets smaller.  This  will
+ increase the number of points created between the actual data points so the
+ perceived playback speed remains the same.
+
+
+
+^Volume Ramp Rate - Voice Registers(6,86)
+
+ Bits 5-0   is the amount added to (or subtracted from) the  current volume
+            to get the next volume. The  range is from 1 to 63.  The larger
+            the number, the greater the volume step.
+ Bits 7-6   defines the rate at which the increment is applied.
+
+^Volume Ramp Start - Voice Registers(7,87)
+
+ Bits 7-4   Exponent
+ Bits 3-0   Mantissa
+
+ This register specifies  the starting position  of a volume  ramp. See  the
+ special section on volume  ramping for a more  complete explanation of  how
+ this register works.
+
+^Volume Ramp End - Voice Registers(8,88)
+
+ Bits 7-4   Exponent
+ Bits 3-0   Mantissa
+
+ This register specifies  the ending  position of a  volume ramp.   See  the
+ special section on volume  ramping for a more  complete explanation of  how
+ this register works.
+
+ Note:   The starting volume must always be less than the ending volume. If
+         you want the volume  to ramp down, turn  on the decreasing  volume
+         bit in the Volume Control Register.
+
+ For more information about volume ramping, please read ~Volume Ramping~
+
+    See also: ~Voice Registers~
+
+:Current Volume
+
+^Current Volume - Voice Registers(9,89)
+
+ * Bits 15-12   Exponent
+ * Bits 11-4    Mantissa
+   Bits 3-0     Reserved (Set to 0)
+
+ Note:   This register has 4 extra bits of precision that is  necessary for
+         finer granularity of volume  placement.  The  extra bits are  used
+         during a volume ramp.
+
+ Note:   This is a self-modifying value. The GF1 will update  this register
+         as it ramps.
+
+ Note:   You should always  set this  register equal  to the  value of  the
+         beginning of the volume ramp (start OR end).
+
+
+:Volume ramping
+
+^Volume ramping description
+
+ The UltraSound has built-in volume ramping to facilitate the implementation
+ of the attack decay sustain release envelopes.  This ramping uses the  same
+ principle as the voices for updating the  volume values.  A section of  the
+ envelope can be programmed such  that the PC does  not need to be  burdened
+ with the task of changing each volume  at specified intervals.  At the  end
+ of that  particular section,  an IRQ  can  be generated  so that  the  next
+ section can be programmed in.
+
+ This continues until the entire envelope has been completed.  The start and
+ end points as well as the increment rate are fully programmable.
+
+%The hardware volume registers and bit definitions are:
+
+       Current Volume (9,89)    EEEEMMMMMMMM    (Bits 15-4)
+
+       Volume Start   (7,87)    EEEEMMMM        (Bits 7-0)
+
+       Volume End     (8,88)    EEEEMMMM        (Bits 7-0)
+
+       Volume Incr    (6,86)    RRMMMMMM        (Bits 7-0)
+
+ Once the current  volume, start and  end volumes are  programmed, the  only
+ thing left  is to  set up  the volume  increment register.   This  register
+ determines how fast the  ramp takes place and  with what granularity.   The
+ finer the granularity, the smoother (but  slower) the ramp.  The  increment
+ register has 2 fields.   The first  is the amount  added to (or  subtracted
+ from) the current volume to get to the next one.  These are the low 6  bits
+ and can range from 1 to  63.  A 1  is a long, slow  ramp compared to a  63.
+ The upper  2 bits  determine how  often  the increment  is applied  to  the
+ current volume.  The rate bits are defined as:
+
+% Rate Bits       Volume Update Rate
+      00                FUR    (FUR = 1/(1.6*#active voices))
+      01                FUR/8
+      10                FUR/64
+      11                FUR/512
+
+ Each rate increment is 8 times longer  than the preceding one.  This  means
+ that the value to store for the fastest possible ramp is 1Fh (63), and  the
+ value for the slowest  possible ramp is 1Ch  (193).  The approximate  times
+ for a full scale volume ramp (0-4095) are:
+
+%                Rate    Vol Inc    14 Voices     32 Voices
+                 ----    -------    ---------     ---------
+                   0       63         1.4 ms        3.3 ms
+                   0        1        91.7 ms      209.7 ms
+                   1       63        11.5 ms       26.2 ms
+                   1        1       733.8 ms        1.7 sec
+                   2       63        91.8 ms      209.7 ms
+                   2        1         5.9 sec      13.4 sec
+                   3       63       734.0 ms        1.7 sec
+                   3        1        47.0 sec     107.3 sec
+
+ Note that these  times are for  full sweep ramping.   Since  a volume  ramp
+ usually goes between points  in between the limits,  the actual ramp  times
+ will be much smaller.
+
+ Allowing to let the volume ramps to go  to the extremes can cause a  random
+ oscillation of the volume when it reaches the limits.  This is caused by an
+ overshoot past  the limit  due to  a large  step size.   The  SDK  routines
+ protect against this by limiting how close to the rails you can get.

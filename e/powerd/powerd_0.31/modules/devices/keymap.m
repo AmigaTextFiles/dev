@@ -1,0 +1,43 @@
+MODULE	'exec/lists',
+			'exec/nodes'
+
+OBJECT KeyMap
+	LoKeyMapTypes:PTR TO UBYTE,
+	LoKeyMap:PTR TO ULONG,
+	LoCapsable:PTR TO UBYTE,
+	LoRepeatable:PTR TO UBYTE,
+	HiKeyMapTypes:PTR TO UBYTE,
+	HiKeyMap:PTR TO ULONG,
+	HiCapsable:PTR TO UBYTE,
+	HiRepeatable:PTR TO UBYTE
+
+OBJECT KeyMapNode
+	Node:LN,
+	Keymap:KeyMap
+
+OBJECT KeyMapResource
+	Node:LN,
+	List:LH
+
+CONST	KCB_NOP=7,
+		KCF_NOP=$80,
+		KC_NOQUAL=0,
+		KC_VANILLA=7,
+		KCB_SHIFT=0,
+		KCF_SHIFT=1,
+		KCB_ALT=1,
+		KCF_ALT=2,
+		KCB_CONTROL=2,
+		KCF_CONTROL=4,
+		KCB_DOWNUP=3,
+		KCF_DOWNUP=8,
+		KCB_DEAD=5,
+		KCF_DEAD=$20,
+		KCB_STRING=6,
+		KCF_STRING=$40,
+		DPB_MOD=0,
+		DPF_MOD=1,
+		DPB_DEAD=3,
+		DPF_DEAD=8,
+		DP_2DINDEXMASK=15,
+		DP_2DFACSHIFT=4

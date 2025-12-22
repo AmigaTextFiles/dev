@@ -1,0 +1,368 @@
+TABLE OF CONTENTS
+
+vmem.library/General_Information
+vmem.library/VMAllocMem
+vmem.library/VMAllocVec
+vmem.library/VMAvailMem
+vmem.library/VMFreeMem
+vmem.library/VMFreeVec
+vmem.library/VMGetPageSize
+vmem.library/VMTypeOfMem
+
+vmem.library/General_Information             vmem.library/General_Information
+
+                      *** GENERAL INFORMATION ***
+
+The General Purpose of vmem.library is to make a virtual memory handler
+available to any application writer while keeping things as transparent
+and easy as possible. Any application using vmem.library will work with
+or without actually having installed virtual memory. No need for huge
+checks all over the code.
+
+As soon as GigaMem is installed, all applications using vmem.library will
+take advantage of it. If other virtual memory systems will appear on the
+market (e.g. from Commodore), vmem.library will be updated to support it.
+Your application will take advantage immediately without a change.
+
+RESTRICTIONS:
+  There are a few restrictions due to the nature of virtual memory
+itself, not this specific implementation of virtual memory.
+
+1) You must not call any of the library functions while Disable(), Forbid()
+   or from interrupts.
+2) Memory allocated via any call of vmem.library MUST NOT be accessed
+   while Disable(), Forbid() or made available to any task other than
+   the one which did the allocation. This includes message ports,
+   semaphores, public lists or list entries, IO requests, interrupt
+   structures etc.
+   This also includes ANY IO from or to this memory especially DOS.LIBRARY.
+   You MUST do buffered IO from and to this memory..
+   It is possible though to use VMTypeOfMem(memoryblock) to see if this
+   restrictions apply to the memory you got: If VMTypeOfMem returns TRUE
+   (non-zero) you MUST CONSIDER these restrictions.
+3) Only DATA may be stored in virtual memory, no CODE. Therefore you
+   should not LoadSeg() (which is a DOS call and therefore illegal anyway)
+   to this memory or copy/decrunch any piece of code to it.
+
+EFFICIENCY:
+  Some points (especially the data structres) have to be considered
+to get maximum performance out of virtual memory.
+Let's take an editor or word processor as example:
+
+1) Do not go through the entire buffer unless you absolutely have to.
+   For example, if the user adds some lines to the beginning of a long
+   text, it is unacceptable that each time he (or she) presses the return
+   key (or even worse: any key.), the application moves up the entire
+   document in memory, thereby causing the entire memory space to get
+   transferred to and from disk. Use a scheme with buffers of a medium
+   size, say 16K. To add some text at the beginning, simply add a new
+   buffer. The buffers need not be full, not even most of them - we have
+   enough memory now. If two consecutive buffers are less than half
+   occupied, you may very well melt them into one and throw away the other.
+2) Same subject: If you keep an array of pointers to lines (editors) or
+   paragraphs (word processors), keep it in a seperate array. DO NOT
+   SCATTER THESE POINTERS OVER THE LARGE BUFFER. The pointers should scan
+   through without causing multiple pagefaults.
+3) Set the MEMF_CLEAR for Virtual Memory only when this is a must. You
+   should be able to never use MEMF_CLEAR for Virtual Memory.
+   Reason: The usage of MEMF_CLEAR may result in a speed penalty due to
+   the time needed for clearing a large memory block.
+4) When you go through large parts of the buffer (typically by searching for
+   some item), try to avoid any write access wherever possible.
+   Reason: Going through large memory space is always time consuming. If
+   you do both read- and write access, then all the pages have to be both
+   read from disk and written back, thereby more than doubling the amount
+   of time spent waiting for disk.
+
+
+vmem.library/VMAllocMem                               vmem.library/VMAllocMem
+
+   NAME
+	VMAllocMem -- allocate (virtual) memory given certain requirements
+
+   SYNOPSIS
+	memoryBlock = VMAllocMem(byteSize, attributes, flags)
+	D0			 D0	   D1	       D2
+
+	void *VMAllocMem(ULONG, ULONG, ULONG);
+
+   FUNCTION
+	This is the memory allocator for virtual memory aware
+	applications.
+
+	Memory is allocated based on requirements and options.	Any
+	"requirement" must be met by a memory allocation, any "option" will
+	be applied to the block regardless.  VMAllocMem will try all memory
+	spaces until one is found with the proper requirements and room for
+	the memory request.
+
+   INPUTS
+	byteSize - the size of the desired block in bytes. (The vmem.library
+		will automatically round this number to a multiple of
+		the system memory chunk size)
+
+	attributes -
+	    requirements
+
+		If no flags are set, the system will return the best
+		available memory block (either virtual memory or not).
+
+		Setting any atrribute (e.g. MEMF_CHIP) will result in a
+		normal AllocMem(). Do not use VMAllocMem() when you
+		need one of these attributes since it doesn't make much
+		sense with virtual memory. This is only supported for
+		compatibility reasons.
+
+	    options
+
+		MEMF_CLEAR:	The memory will be initialized to all zeros.
+				Avoid MEMF_CLEAR for performance reasons.
+
+	flags - Special virtual memory flags.
+
+		VMEMF_VIRTUAL:	Return ONLY virtual memory.
+				DO NOT SPECIFY VMEMF_VIRTUAL unless you know
+				exactly what you are doing. If VMEMF_VIRTUAL
+				is set, VMAllocMem() will fail on machines
+				that do not have virtual memory.
+
+		VMEMF_VIRTPRI:	Return preferably virtual memory. Return
+				physical memory only if no virtual memory
+				is left. You should not set this flag
+				since this overrides the user's setting.
+
+		VMEMF_PHYSPRI:	Return preferably physical memory. Return
+				virtual memory only if no physical memory
+				is left. You should not set this flag
+				since this overrides the user's setting.
+
+		VMEMF_ALIGN:	Try to return a memory block aligned to
+				a page start. There is normally no need
+				for this. Alignement is done automatically
+				for allocations requesting for a multiple
+				of the page size (SEE ALSO VMGetPageSize()).
+				You must not depend on the alignment as it
+				may fail on low memory conditions which
+				will result in a misaligned allocation.
+				Note: VMAllocVec will add 4 to your request
+				to track the size.
+
+   RESULT
+	memoryBlock - a pointer to the newly allocated memory block.
+		If there are no free memory regions large enough to satisfy
+		the request, zero will be returned.  The pointer must be
+		checked for zero before the memory block may be used.
+
+   WARNING
+	The result of any memory allocation MUST be checked, and a viable
+	error handling path taken.  ANY allocation may fail if memory has
+	been filled.
+
+   EXAMPLES
+	VMAllocMem(0xA000000, NULL, NULL)  - Allocate 10 Mb of the best
+					   available memory
+
+   NOTE
+	This function MUST NOT be called while Forbid(), Disable() or
+	from interrupts.
+
+   SEE ALSO
+	VMFreeMem(), VMGetPageSize(), AllocMem
+
+vmem.library/VMAllocVec                               vmem.library/VMAllocVec
+
+   NAME
+	VMAllocVec -- allocate (virtual) memory and keep track of the size
+
+   SYNOPSIS
+	memoryBlock = VMAllocVec(byteSize, attributes, flags)
+	D0			 D0	   D1	       D2
+
+	void *VMAllocVec(ULONG, ULONG, ULONG);
+
+   FUNCTION
+	This function works identically to VMAllocMem(), but tracks the size
+	of the allocation.
+
+	See the VMAllocMem() documentation for details.
+
+   WARNING
+	The result of any memory allocation MUST be checked, and a viable
+	error handling path taken.  ANY allocation may fail if memory has
+	been filled.
+
+   SEE ALSO
+	VMFreeVec(), VMAllocMem(), AllocVec
+
+vmem.library/VMAvailMem                               vmem.library/VMAvailMem
+
+   NAME
+	VMAvailMem -- (virtual) memory available given certain requirements
+
+   SYNOPSIS
+	size = VMAvailMem(flags, attributes)
+	D0		  D0	 D1
+
+	ULONG VMAvailMem(ULONG, ULONG);
+
+   FUNCTION
+	This function returns the amount of free memory given certain
+	attributes.
+
+	To find out what the largest block of a particular type is, add
+	MEMF_LARGEST into the requirements argument.  Returning the largest
+	block is a slow operation (since this may include disk operation).
+
+   WARNING
+	Due to the effect of multitasking, the value returned may not
+	actually be the amount of free memory available at that instant.
+
+   INPUTS
+
+	requirements - A requirements mask as specified in AllocMem.  Any
+		       of the AllocMem bits are valid, as is MEMF_LARGEST
+		       which returns the size of the largest block matching
+		       the requirements.
+
+	currently supported options
+
+		MEMF_LARGEST:	Return largest continous block
+
+		MEMF_TOTAL:	Return total amount (used and free)
+				Note: For any other memory type than
+				virtual memory, this will require
+				Exec V36 or higher.
+
+	flags - Special virtual memory flags.
+
+		VMEMF_VIRTUAL:	Consider ONLY virtual memory.
+
+
+   RESULT
+	size - total free space remaining (or the largest free block).
+
+   NOTE
+	This function MUST NOT be called while Forbid(), Disable() or
+	from interrupts.
+
+   EXAMPLE
+	VMAvailMem(NULL, VMEMF_VIRTUAL); /* return available virtual memory */
+
+   SEE ALSO
+	VMAllocMem(), AvailMem
+
+vmem.library/VMFreeMem                                 vmem.library/VMFreeMem
+
+   NAME
+	VMFreeMem -- deallocate (virtual) memory with knowledge
+
+   SYNOPSIS
+	VMFreeMem(memoryBlock, byteSize)
+		  A1	       D0
+
+	void VMFreeMem(void *,ULONG);
+
+   FUNCTION
+	Free a region of memory, returning it to the system pool from which
+	it came.  Freeing partial blocks back into the system pool is
+	unwise.
+
+   NOTE
+	If a block of memory is freed twice, the system will Guru. The
+	Alert is AN_FreeTwice ($01000009).   If you pass the wrong pointer,
+	you will probably see AN_MemCorrupt $01000005.  Future versions may
+	add more sanity checks to the memory lists.
+
+   INPUTS
+	memoryBlock - pointer to the memory block to free
+	byteSize - the size of the desired block in bytes.  (The operating
+		system will automatically round this number to a multiple of
+		the system memory chunk size)
+
+   SEE ALSO
+	VMAllocMem(), FreeMem
+
+vmem.library/VMFreeVec                                 vmem.library/VMFreeVec
+
+   NAME
+	VMFreeVec -- return VMAllocVec() memory to the system
+
+   SYNOPSIS
+	VMFreeVec(memoryBlock)
+		  A1
+
+	void VMFreeVec(void *);
+
+   FUNCTION
+	Free an allocation made by the VMAllocVec() call. The memory will
+	be returned to the system pool from which it came.
+
+   NOTE
+	If a block of memory is freed twice, the system will Guru. The
+	Alert is AN_FreeTwice ($01000009).   If you pass the wrong pointer,
+	you will probably see AN_MemCorrupt $01000005.  Future versions may
+	add more sanity checks to the memory lists.
+
+   INPUTS
+	memoryBlock - pointer to the memory block to free, or NULL.
+
+   SEE ALSO
+	VMAllocVec(), FreeVec
+
+vmem.library/VMGetPageSize                         vmem.library/VMGetPageSize
+
+   NAME
+	VMGetPageSize -- returns current page size
+
+   SYNOPSIS
+	pagesize = VMGetPageSize()
+	D0
+
+	ULONG VMFreeMem(void);
+
+   FUNCTION
+	Returns current page size or default value if no virtual memory is
+	installed. This allows applications to consider the current
+	page size for efficiency reasons. The page size is a power
+	of 2 larger than 256 bytes. (Currently, default page size is 8k)
+
+   NOTE
+	If no virtual memory handler is installed, returns default value.
+
+   RESULT
+	pagesize - size in bytes of pages or default page size.
+
+   SEE ALSO
+
+vmem.library/VMTypeOfMem                             vmem.library/VMTypeOfMem
+
+   NAME
+	VMTypeOfMem -- determine attribute (virtual or not) of a given
+		       memory address.
+
+   SYNOPSIS
+	attribute = VMTypeOfMem(address)
+	D0		        A1
+
+	BOOL VMTypeOfMem(void *);
+
+   FUNCTION
+	Given a RAM memory address, returns TRUE if the memory address
+	is in virtual memory. Otherwise returns FALSE (zero) and you
+	may the check with exec/TypeOfMem for the ordinary memory
+	attributes (e.g. MEMF_CHIP).
+
+	If the address is not in known-space, FALSE will be returned.
+	(Anything that is not RAM, like the ROM or expansion area, will
+	return FALSE.)
+
+   INPUT
+	address - a memory address
+
+   RESULT
+	attributes - Boolean: TRUE if virtual memory. Otherwise FALSE.
+
+   SEE ALSO
+	VMAllocMem(), TypeOfMem
+
+

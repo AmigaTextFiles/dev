@@ -1,0 +1,276 @@
+			Technical Note #8
+	  All about keymaps and getting input from the keyboard
+
+SUMMARY
+
+$ 8/0 All about keymaps and getting input from the keyboard
+$ release
+$ 29-Jan-88 Bryce Nesbitt / TVD
+$ RAWKEY, VANILLAKEY, setmap, keymap, international, DeadKeyConvert()
+$ See Also: AmigaMail July/August 1987, AmigaLine #9
+
+    There are at least 16 different keyboard configurations for the Amiga.
+    If your application expects to work on all of these, it must handle the
+    keyboard properly.  Complete, working examples are included.
+
+----------------------------------------------------------------------------
+
+RAWKEY
+
+    If your program processes Intuition RAWKEY messages, it is only half
+    baked!  Raw key codes give physical positions; they do not imply
+    *anything* about what might be marked on the top of the key.  There are
+    a *least* 16 different keyboard configurations available for the Amiga.
+
+    RAWKEY messages are ok to use directly for positional control (say, up,
+    down, left, and right controls for a game).  They are not acceptable
+    for entering *any* sort of text.
+
+    RAWKEY messages must be converted with the DeadKeyConvert() function. A
+    tutorial is provided.
+
+
+VANILLAKEY
+
+    If you don't want the hassle of RAWKEYS, just change "RAWKEY" to
+    "VANILLAKEY" in your program.  The keys will come through already
+    cooked.
+
+    The disadvantage is you only get the keys that map to a single
+    character.	This eliminates the function, help, and cursor keys.
+
+
+CONSOLE DEVICE, CON:, RAW:, CLI, String Gadgets
+
+    The console device, CON:, RAW:, CLI, and String Gadgets all provide
+    automatic keymap conversion.  Nothing else needed.
+
+
+DEAD KEYS
+
+    Dead keys are a feature of V.2 Kickstart.  They are used to add accents
+    to letters.  To try this out, click into a CLI.  Press and release "ALT
+    K".  Now press a letter key such as "a".  It should come out with an
+    umlaut.  This is an automatic feature of the keymap conversion process.
+
+    Be sure to test to see if accented characters work in your application.
+
+
+CUSTOM KEYMAPS
+
+    If you wish to build a custom keymap, example source code is provided
+    In AmigaLine #9.  This must be put in the "devs:keymaps" drawer, and
+    activated with "SetMap".
+
+    If your program needs to change a keymap during execution, it must copy
+    the current map, modifiy it, then use the modification.
+
+
+THE NEW MACHINES
+
+    The A500 and A2000 machines add 5 extra keys to the keyboard.  What's
+    on top of these keys depends on what country the machine is sold in.
+    For the United States the "usa1" keymap knows about the extra keys.
+    "usa2" provides the same features with a DVORAK layout.
+
+    As of V1.2, Kickstart itself had not been updated to know about the
+    keys, or to return the "NUMERICPAD" quailifer when they are pressed.
+
+
+DISTRIBUTION DISKS
+
+    If you distribute a bootable Workbench disk, it should contain the
+    "SetMap" program and the "devs:keymaps" drawer.  This allows a person
+    to set up the keymaps to match their keyboard.
+
+    Better yet, allow the user to boot up with their normal Workbench, and
+    click on your icon to start.
+
+    Some of the old international A1000 keyboards do not have the same
+    stuff on the tops of the keys as the new international A500/A2000
+    keyboards.	Owners of these machines will need to copy their keymap
+    over to your disk.
+
+
+
+-------Setup needed to use DeadKeyConvert--------
+/* Manx users must remove the "ConsoleDevice" line from functions.h */
+struct Device	*ConsoleDevice;
+struct IOStdReq console_IO;	/* empty, zeroed IOStdReq */
+....
+    if ( OpenDevice("console.device",-1L,(struct IORequest *)&console_IO,0L) )
+	cleanexit(21);
+    ConsoleDevice=(struct Device *)console_IO.io_Device;
+....
+    if (ConsoleDevice)  CloseDevice  ((struct IORequest *)&console_IO);
+....
+
+----------------DeadKeyConvert.c----------------
+#include "exec/types.h"
+#include "devices/inputevent.h"
+#include "intuition/intuition.h"
+
+/*
+ * DeadKeyConvert().  Adapted from the Amiga Enhancer Manual
+ * by Bryce Nesbitt.
+ *
+ * Takes an Intuition RAWKEY message and processes it.
+ * The result will be "cooked" keys and key conversions in
+ * your buffer.
+ *
+ * The console.device must be open to use this function.
+ *
+ * The message passed to this must be of Class RAWKEY.
+ * Returns -1 if the buffer overflowed, or the
+ * number of characters converted if all was ok.
+ *
+ */
+long DeadKeyConvert(msg,kbuffer,kbsize,kmap)
+struct IntuiMessage *msg;	/* Message to be converted  */
+UBYTE		    *kbuffer;	/* Pointer to your buffer   */
+long		    kbsize;	/* Size of your buffer	    */
+struct KeyMap	    *kmap;	/* Custom keymap, or Zero   */
+{
+struct InputEvent ievent;
+
+    /* if (msg->Class != RAWKEY) return(-2); */
+    if (msg->Code & IECODE_UP_PREFIX)
+	return(0);  /* Nothing to do for key up messages */
+
+    /* pack message into an input event */
+    ievent.ie_NextEvent =0;
+    ievent.ie_SubClass	=0;
+    ievent.ie_Class	=IECLASS_RAWKEY;
+    ievent.ie_Code	=msg->Code;
+    ievent.ie_Qualifier =msg->Qualifier;
+
+    /* get previous codes from location pointed to by IAddress
+     * this "magic" pointer is valid intil the IntuiMessage is
+     * replied */
+    ievent.ie_position.ie_addr =*((APTR*)msg->IAddress);
+
+    return(RawKeyConvert(&ievent,kbuffer,kbsize,kmap));
+}
+
+
+----------------Complete example-----------------
+
+/*
+ * 29-Jan-88 Bryce Nesbitt
+ *
+ * WARNING: In order to compile this program, Manx Aztec C needs to have the
+ * line in functions.h that declares "ConsoleDevice();" removed.
+ *
+ */
+#undef LATTICE_4   /* Change to #undef for Manx */
+#ifdef LATTICE_4
+#include "proto/exec.h"
+#include "proto/intuition.h"
+#else
+#include "functions.h"
+extern int Enable_Abort;
+#endif
+#include "exec/types.h"
+#include "intuition/intuition.h"
+
+
+struct IntuitionBase *IntuitionBase;
+struct GfxBase	     *GfxBase;
+struct Device	     *ConsoleDevice;
+
+static char buffer[16]; 		/* buffer to convert into */
+struct IOStdReq     console_IO; 	/* empty, zeroed IOStdReq */
+struct NewWindow    MyNewWindow=
+    {
+    0,11,200,32,
+    1,3,
+    RAWKEY|CLOSEWINDOW,
+    WINDOWCLOSE|WINDOWDEPTH|WINDOWDRAG|
+    SIMPLE_REFRESH|NOCAREREFRESH|ACTIVATE,
+    0,0,
+    (UBYTE *)"Keymapper",
+    0,0,
+    64,64,
+    -1,-1,  /* No need to limit window growth */
+    WBENCHSCREEN,
+    };
+struct Window	    *MyWindow;
+struct IntuiMessage *message;
+
+
+
+#ifdef LATTICE_4
+CXBREAK()       /* Disable break for Lattice C */
+{
+    return(0);
+}
+#endif
+
+
+
+void cleanexit(value)
+int value;
+{
+    if (MyWindow)       CloseWindow  (MyWindow);
+    if (IntuitionBase)  CloseLibrary ((struct Library *)IntuitionBase);
+    if (GfxBase)        CloseLibrary ((struct Library *)GfxBase);
+    if (ConsoleDevice)  CloseDevice  ((struct IORequest *)&console_IO);
+
+    exit(value);
+}
+
+
+
+void main()
+{
+long temp;
+
+#ifndef LATTICE_4
+    Enable_Abort=0;
+#endif
+
+    if (!( IntuitionBase=(struct IntuitionBase *)OpenLibrary("intuition.library",33L) ))
+	cleanexit(20);
+    if (!( GfxBase=(struct GfxBase *)OpenLibrary("graphics.library",33L) ))
+	cleanexit(20);
+    if (!( MyWindow=OpenWindow(&MyNewWindow) ))
+	cleanexit(20);
+
+    /*
+     *
+     * It is not mentioned in the manuals, but the console.device may be
+     * opened without attaching it to a window.   To do this, open the device
+     * with a unit of -1 and zeroed IOStdReq block.  The console.device
+     * pointer will be returned in io_Device.
+     *
+     * The console.device is also a library... the returned pointer will
+     * be used to make calls to it.
+     *
+     */
+    if ( OpenDevice("console.device",-1L,(struct IORequest *)&console_IO,0L) )
+	cleanexit(21);
+    ConsoleDevice=(struct Device *)console_IO.io_Device;
+
+    for(;;)
+	{
+	WaitPort(MyWindow->UserPort);   /* Wait for one or more messages */
+	while( message=(struct IntuiMessage *)GetMsg(MyWindow->UserPort) )
+	    {
+	    switch (message->Class)
+		{
+		case RAWKEY:
+		    strcpy(&buffer,"               "); /* clear out buffer */
+		    temp=DeadKeyConvert(message,&buffer,15L,0L);
+		    Move(MyWindow->RPort,66L,22L);
+		    Text(MyWindow->RPort,&buffer,15L);
+		    break;
+
+		case CLOSEWINDOW:
+		    cleanexit(0);
+		}
+	    ReplyMsg((struct Message *)message);
+	    }
+	}
+}
+
+

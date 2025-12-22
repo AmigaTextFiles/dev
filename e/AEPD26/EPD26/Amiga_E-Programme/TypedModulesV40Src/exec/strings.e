@@ -1,0 +1,9 @@
+OPT MODULE
+OPT EXPORT
+
+OPT PREPROCESS
+
+#define EXPANSIONNAME 'expansion.library'
+
+CONST ADNB_STARTPROC=0,
+      ADNF

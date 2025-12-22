@@ -1,0 +1,123 @@
+/*
+** funcoverview.se
+**
+** Scan current source file for functions, display them in SCMSG 
+** 	thus creating a handy, clickable list
+** 
+** 31-Dec-2010 tcj 	[tim@aaack.org]
+**
+** notes:
+**  - only seems to work in first open SE instance
+**  - might not clear SCMSG queue (send SC_SCMSG the command 'CLEAR')
+**  - not tested with multiple views in SE
+**  - I came up with the regexp for functions; it may be lacking
+**  - in the constants/definitions section, change clearList to 1 
+**			if you want to clear SCMSG every time script is run
+**    		& set clearFile to 1 if you want to clear just those
+**			messages pertaining to the current file (default)
+**  - see also msgdump.se to dump a list of SCMSG entries
+**
+** installation:
+**  - copy this file to SC:REXX
+**  - assign a shortcut key in SE's configuration window
+**		( the command is RM "funcoverview.se" )
+**
+** disclaimer:
+** 	- PUBLIC DOMAIN
+**  - NO WARRANTY EXPRESSED OR IMPLIED
+**  - USE AT YOUR OWN RISK
+*/
+
+/* TRACE RESULTS */			/* for debugging */
+OPTIONS RESULTS
+
+/*
+** constants / definitions 
+*/
+
+searchFailed = 0
+numFuncs = 0
+clearList = 0
+clearFile = 1
+funcregex = "^[a-zA-Z][a-zA-Z0-9_]+[*\\s]+[a-zA-Z][a-zA-Z0-9_\\s]+[(]"
+
+/*
+** Get SCMSG ready 
+*/
+try = 0
+DO UNTIL SHOW( Ports, "SC_SCMSG" ) 			/* see if SCMSG is running  	*/
+	try = try + 1
+	IF TRY == 3 THEN RETURN					/* give up after 3 tries		*/
+	ADDRESS COMMAND							/* talk to system CLI 			*/
+	'RUN >NIL: <NIL: SCMSG'					/* try to run SCMSG 			*/
+	'WAIT 2'								/* give it two seconds to open 	*/
+	ADDRESS									/* return to talking to SE 		*/
+END
+
+/* 
+** Get current file name in editor
+*/
+
+'GF'								/* SE: get file name (NOT IN MANUAL) 	*/
+fileName = RESULT
+
+/*
+** Clear SC_MSG queue if requested
+*/
+ADDRESS "SC_SCMSG"
+IF clearList THEN 
+DO ; 'CLEAR' ; END 
+ELSE 
+IF clearFile THEN 
+DO ; 'DELFILE 'fileName ; END		/* is DELCOMP better than DELFILE? */
+'SHOW'								/* UNHIDE window */
+/* 'SHOW ACTIVATE' */				/* or UNHIDE and make active */
+ADDRESS								/* return to talking to SE */
+
+
+/* 
+** Save current cursor position and move to top of file 
+*/
+
+'GL'								/* SE: get number of current line 	*/
+oldCursor = RESULT
+'BT'								/* SE: beginning text 				*/
+
+/*
+** Search for function definitions 
+*/
+
+'SE ' || funcregex || '\n'			/* SE: go to search command 		*/
+funcFound.text = RESULT				/* result is line found; we copy it */
+'GE'								/* SE: get error from last command 	*/
+searchFailed = RESULT		/* 'GE' seems to return 10 if search failed */
+DO WHILE (searchFailed == 0)		/* successful search == 0 			*/
+
+	numFuncs = numFuncs + 1			/* let's count 'em, shall we?		*/
+
+	/* 
+	** Process result for display in SCMSG 
+	*/
+
+	'GL'							/* SE: get number of current line 	*/
+	funcFound.lineNo = RESULT
+	OPTIONS							/* turn off result passing for now  */
+	ADDRESS "SC_SCMSG"
+		'NEWBLD funcs'				/* reset SCMSG?		uhh				*/
+		'NEWMSG "funcs" "'fileName'" 'funcFound.lineNo' 0 "" 0 Info 0 'funcFound.text
+		
+	ADDRESS							/* switch back to talking to SE				*/
+
+	OPTIONS RESULTS					/* restore result passing					*/
+	'SA'							/* SE: go to next string match 				*/
+	funcFound.text = RESULT			/* save line text for display in SCMSG		*/
+	'GE'							/* SE: get error from last command			*/
+	searchFailed = RESULT			/* GE seems to return 10 if search failed 	*/
+END
+
+/* Restore original cursor position */
+'LL' oldCursor '\n'					/* SE: locate line (NOT IN MANUAL) */
+
+/* Tell me how many functions we found */
+'DM Functions found: 'numFuncs
+

@@ -1,0 +1,436 @@
+
+				By now you will probably know how
+	to start a verticalblanking interrupt. Here's how to do it.
+
+		In $6c.L is the address where the computer will jump to 
+	each time the Vblank occurs. If you want to put your own routine
+	(like a replay routine) in the Vblank interrupt, you just take the
+	address in $6c, and save it somewhere (to jump back to when your 
+	routine is ready) and put the startaddress of your own routine in it.
+
+..		...
+		MOVE.L	$6C,OLDINT+2		; SAVE JUMP-BACK ADDRESS
+		MOVE.L	#INT,$6C		; OUR OWN ROUTINE
+		...
+
+
+	INT:	....
+		....
+	OLDINT:	JMP	$00000000		; OLDINT= 'JMP'-OPCODE
+						; OLDINT+2 = JUMPBACK ADDR.
+
+		There are addresses for all interrupts (like $6c). On the
+	'!' page I sent last time are other addresses too. Now I have only
+	used the Vblank and the Keyboardinterrupt. (this is $68) It occurs
+	when you press a key AND when you release it again. Interpreting 
+	a pressed key is somewhat difficult. The code for the pressed key
+	is found in $bfec01, but first you got to do some operations on it.
+	Here's the routine:
+
+..	KEYINT:	CLR.L	D0
+		MOVE.B	$BFEC01,D0
+		NOT.B	D0
+		ROR.B	#1,D0			; bit 8 is up/donw code
+	1)	ANDI.W	#$007F,D0		; NOW, D0 = RAW KEYCODE
+		....
+	OLDKEYINT:
+		JMP	$0000000		; install as vblankint
+
+	The code you get in D0 after these operations is what is called
+	the RAW keycode. It's NOT an ascii value or something. Somewhere
+	in the pack you'll find a table with these codes. As you'll see,
+	ALL keys have a value, even the SHIFT and CTRL-keys.
+	The line with '1)' kills the leftmost bit in D0.B, this bit is 0 if
+	the key is currently PRESSED and 1 if it is RELEASED. To get the
+	code in the table you have to compare only the other bits, so in line
+	1) this bit is killed. To know if the key is pressed or released, you
+	have to check bit 8 before this line. It could be important to check
+	because when you perform a printroutine each time you get a keyboard
+	interrupt, you will get each pressed key 2 times on the screen (once
+	when you press, once when you release)
+	
+
+	LIBRARIES
+	---------
+
+	Now let's talk a bit about libraries and library-routines. You sure
+	have heard that there are several interesting (and less interesting)
+	routines stored in the libraries. Most important libraries are in
+	ROM, others are on disk (in the libraries directory)  To use routs
+	of a lib, you must first open this library, in other words, you must
+	get to know where the library is in memory (relative addressing, 
+	remember ?)  If the lib is not in memory, it will be loaded from disk
+	when you open it. There is a routine which is called 'OPENLIB', and
+	it gives you the starting address of the library you opened. Other
+	routines are located at a fixed place, relative to this starting
+	address. You got some lists of the (standard) libraries from AmigaDos
+	There are other libraries, like Explode Library, but they are not
+	'offcial' libraries, and I don't have lists of the routines in them.
+	If you want, you can create your own libraries, but you'll have to
+	find out yourself. Maybe you can learn me when you did. Anyway, let's
+	go on. Most routines have some parameters. If you know something 
+	about C-language, it could be very simple to understand:
+
+	  result = function([parameter][...])
+
+	General rule: only 1 result ! In Machinecode, this result is Always
+	stored in register D0.  The parameters differ from routine to rout.
+	See lists in previous sending. For example: the routine OPEN in 
+	the dos-library.  you'll find:
+
+		-$001e  -30   Open (name, accessmode)(d1,d2)
+
+	Which means, routine OPEN is at ofset -$001e (or -30 decimal) in the
+	doslib, and parameters are NAME in D1, and accessmode in D2. The
+	result is in D0. 
+	As said, opening a library in fact means getting the startaddress.
+	When you know that the function 'Openlib' is in a library itself,
+	you could ask the question : how would you open THIS library ?
+	 GOOD QUESTION !  The answer is: You Don't Have to !! The startaddr
+	of this library is known, you can find it in $4.  (MOVE.L $4,A6
+	will put the startaddress of the exec.library in A6, remember: it's
+	the CONTENTS of $4 and not $4 that is the startaddress !)
+	Once you got this address, you can call any routine in this library,
+	among which is OpenLib, so now you can open the other libraries, like
+	for example the doslib.
+	Here's a complete source of how to open the Dos-library:
+
+..	opendoslib:
+		move.l	$4.w,a6			; load execbase
+		lea.l	dosname,a1		; parameter for openlib
+		jsr	-408(a6)		; execute routine openlib
+		move.l	d0,dosbase		; store result
+		tst.l	d0			; something wrong ?
+		beq	error			; yep !
+		rts				; nope !
+
+	error:	....				; HELP, something wrong !
+
+	dosname:	dc.b	"dos.library",0
+			even
+	dosbase:	dc.l	0
+
+	As said, D0 is the result of the operation. In most cases, if D0 is
+	zero (tst.l d0), there was something wrong, like the library couldn't
+	be opened, etc.  However, when you can't open Doslib, not much can be
+	done I'm afraid, and it won't happen anyway, so you don't have to
+	check this really. But when you open a dozen of windows, it could 
+	happen that you run out of memory, and a D0=0 would tell you so.
+	After your source is ready to RTS to CLI, you should always close
+	opened libraries (except the EXEC, which in fact you didn't open)
+	This is done as follows:
+
+..	Closedoslib:
+		move.l	$4.w,a6			; load execbase
+		move.l	dosbase,a1		; start of lib to close
+		jsr	-414(a6)		; close it
+
+	2 notes on this:  move.l dosbase,a1     IS NOT THE SAME AS 
+			  lea.l  dosbase,a1  !!!
+	You really need the VALUE IN dosbase and not the address #dosbase.
+	(I say this coz I made this mistake often)
+	2nd note:  MOVE.L  $4.W,a6    notice the $4.W : this saves you 2
+	bytes: address $4 is in the lowest 64K of memory, and so it can be
+	addressed using only 1 word instead of 1 longword. 
+	move.l	$4,a6   is assembled something like this:  3245 00000004
+	move.l  $4.w,a6 	"	"	"	:  3265 0004
+	WOW AIN'T THAT SHOCKING !! WE SAVED 2 BYTES !!
+	(and we wasted only 7 lines)
+
+	Now here's some detailed descriptions of the parameters for the 
+	most commonly used DOSLIB routines, I can't tell'em all, 1) coz I
+	haven't used them yet and I dunno, 2) coz there are too much of'em
+	3) coz I haven't got all day 4) coz you won't be using them neither.
+
+	One very interesting routine is the EXECUTE. It makes it possible to
+	run any file on disk (like a demo) straight from an assembler program
+	(like a MENU or a LOADER...) Here's the routine, (ofcourse after
+	opening the DOSLIB)
+
+
+..	EXECUTE_IT:
+		...
+		move.l	dosbase,a6		; load dosbase
+		move.l	#command,d1		; pointer to command in d1
+		clr.l	d2
+		clr.l	d3
+		jsr	-222(a6)		; execute
+		move.l	d0,returncode		; optional, not often used
+		...
+
+	command:	dc.b	"df0:demo1",0	; filename to execute
+			even
+
+	d2 and d3 are used to redirect input and output (just set to zero
+	if you don't use them)  (like  "dir df0: > dirfile",  d2 would be
+	a pointer to "DIRFILE")
+	When you wish to use 'execute' routine, the command RUN should be in
+	the C: directory. If RUN isn't there, nothing will be executed...
+	The result of the excute is a returncode, which the finished program
+	gives back in d0. (You sometimes see badly written demos giving a
+	returncode = xxxxx  when they're finished, so now you know why: they
+	forgot to clear D0 at the end. (This is only noticable when they're
+	run from within a batchfile))  In advanced DOS-scripts, this is used
+	to give results (like 'file not found') to other doscommands.
+
+..	OPEN_FILE:
+		...
+		move.l	dosbase,a6		; load dosbase
+		move.l	#filename,d1		; ptr to filename
+		move.l	#1005,d2		; mode = read
+		jsr	-30(a6)			; open
+		move.l	d0,handle		; save result
+		...
+
+	filename:	dc.b	"df0:boringfile",0
+			even
+	handle:		dc.l	0
+
+	You can open a file in 3 ways:  read from it: mode = 1005
+	write to it: mode = 1006, and read/write: mode = 1004
+	in D0 you get the handle to that file, you need it for further 
+	operations.
+
+..	READING A FILE
+
+	the description for this routine is:
+
+	amount = Read (handle, buffer, length)
+	  d0   =  -42    d1      d2      d3
+
+	(This is a somewhat shorter notation, I'll use this in the next 
+	examples. One last time, I'll give you the source for this)
+
+		...
+		move.l	dosbase,a6
+		move.l	handle,d1		; d1 = handle (value)
+		move.l	#buffer,d2		; d2 = buffer (pointer to)
+		move.l	#length,d3		; d3 = length (value)
+		jsr	-42(a6)			; Read
+		move.l	d0,....			; optional
+
+	handle:		dc.l	0		; filled by 'lock'
+	length=		xxxxx
+	buffer:		blk.b	length,0
+			even
+
+	You can read more than one time, in fact you can read until you
+	reach the end of the file.
+	d0 is the amount of bytes read (amount <= length)
+	d0 = 0 :  end of file reached
+	d0 = -1 : error (disk removed or something, I suppose)
+
+..	WRITING A FILE
+
+	amount = Write (handle, buffer, length)
+	 d0       -48    d1       d2      d3
+
+	same param's as in read
+
+..	SEEK
+
+	move the file-pointer in a opened file
+
+	Position = SEEK (handle, distance, mode)
+	   d0       -66    d1       d2      d3
+
+	mode tells whether the distance is measured starting at the start
+	of the file (mode = -1), or from the current position (mode = 0)
+	or starting at the end (mode = 1)
+	Distance then tells the offset from the defined position:
+	Distance -20 with mode 1 puts the filepointer to 20 bytes from the
+	end of the file etc.
+
+..	IOERR
+
+	get the precise dos-error
+
+	error = IOERR ()
+	 d0       -132
+
+	Refer to DOS-manual for errorvalues & meanings: example
+
+		121: not executable ('file is not an object module')
+		221: disk full
+		...
+
+
+	OK, so much for the most important dos-routines.  Maybe you'll use
+	some of these in a menu or a bootloader or something.
+	As I know out of experience, it's best not to mess around with the
+	interrupts/DMA when using DOS routines, coz there's much chance that
+	it won't work/crash once in a while. 
+	The Readdir routine which is desacribed now, is causing me LOADS of
+	trouble, it just won't work when I want it, and the weird thig is that
+	it works sometimes. I HATE THAT ! I have to cancel all my current
+	projects coz they all need these silly diskactivities and they just
+	don't work together with my hardware-routines. (I told you before)
+
+
+		....
+		move.l	dosbase(pc),a6
+		move.l	#path,d1		; name of directory
+		moveq.l	#-2,d2			; read
+		jsr	-84(a6)			; 'lock'
+		tst.l	d0
+		beq.s	dir_error
+		move.l	d0,lock
+
+		move.l	lock(pc),d1
+		move.l	#fileinfo,d2		; ptr to fileinfo block
+		jsr	-102(a6)		; 'examine'
+		tst.l	d0			;    fills up fileinfo with
+		beq.s	dir_error		;    info about the directory 
+	
+	dir_loop:
+		move.l	lock(pc),d1
+		move.l	#fileinfo,d2
+		jsr	-108(a6)		; 'examine next'
+		tst.l	d0			;    fills up fileinfo with
+		beq	dir_error		;    info about files/subdirs
+		bsr	dir_printnames		; routine to print name
+		bra.s	dir_loop		; next, until d0 = 0
+	dir_error:
+		jsr	-132(a6)		; IOERR check which error
+		rts
+	
+	path:		dc.b	"df0:",0
+			even
+	lock:		dc.l	0
+	fileinfo:	blk.b	260,0
+
+
+	The routines 'examine' and 'exnext' will fill up a block of data
+	(fileinfo) which has the following structure:
+
+	offset:	0	drivenumber
+		4	type of entry (dir/file)
+		8	filename (108 bytes)
+		116	protection code
+		120	type of entry
+		124	size of file (bytes)
+		128	number of blocks
+		132	days	\
+		136	minutes	 |  creation time
+		140	ticks	/
+		144	comment (116 bytes filenote)
+		260
+
+	As I said, I've still got major problems with this thing, and I
+	haven't been able to test all of it. For example I think that the
+	name of a directory starts at ofset 10 instead of ofset 8, but I'm
+	not sure. This book I got isn't complete by a 100 lightyears !
+	Above all, in the whole book are several 'typing errors' as it is
+	translated from German. Ow boy.
+
+	Anyway, now we've seen nearly all of the DOS-things, it's time to
+	go to a lower level: the TRACKDISK device. Devices are something
+	between hardware and library-programming. There are several devices,
+	like 'trackdisk', 'printer', 'console',...
+	They use more 'sophisticated' stuff like nodes and messages to 
+	communicate between other tasks, and it's this stuff that I'm trying
+	to master now (but it's not working yet) Anyway, I've done some
+	experiments with trackdisk already. here's an attempt:
+
+	doio:	move.l	$4.w,a6			;
+		sub.l	a1,a1			; 
+		jsr	-294(a6)		; findtask (buerk)
+		move.l	d0,readreply+$10	; 
+		lea.l	readreply,a1		; 
+		jsr	-354(a6)		; addport (buerk)
+		lea.l	diskio,a1		;
+ 		move.l	#0,d0			; drive:  df0:
+		clr.l	d1			; no flags (?)
+		lea.l	devicename,a0		;
+		jsr	-444(a6)		; opendevice !!
+		tst.l	d0
+		bne.s	trerror
+
+		lea.l	diskio,a1
+		move.l	#readreply,14(a1)	; reply port (buerk)
+		move.w	#2,28(a1)		; instruction : read
+		move.l	#diskbuff,40(a1)	; ptr to buffer
+		move.l	#.....,36(a1)		; amount of bytes to read
+		move.l	#.....,44(a1)		; ofset on disk
+		jsr	-456(a6)		; do-I/O
+	
+		lea.l	diskio,a1
+		move.w	#9,28(a1)
+		move.l	#0,36(a1)
+		jsr	-456(a6)		;motorout
+		lea.l	readreply,a1
+		jsr	-360(a6)		;remport (buerk)
+		lea.l	diskio,a1
+		jsr	-450(a6)		;closedev
+	trerror:rts
+	
+	diskio:		blk.l	20,0
+	readreply:	blk.l	8,0
+	devicename:	dc.b	"trackdisk.device",0
+			even
+	diskerror:	dc.b	0
+			even
+	diskbuff:	dc.l	0
+
+
+	The routines with 'Buerk' are not really clear to me. They refer to
+	a structure that is used by the device, it looks like this:
+
+	ofset:	0	...		; typical node structure,
+					; don't bother
+		14	pointer to replyport (task communication)
+		18	length of structure (don't bother)
+
+		20	pointer to devicenode (don't bother)
+		24	unit (don't bother) (?)
+		28	command:  These are (some of) the possible commands
+			for the devices:
+				read:		#2
+				write:		#3
+				update:		#4 (?)
+				clear:		#5 (?)
+				motorout:	#9 (only for trackdisk)
+		30	flags (don't bother) (?)
+		31	error (example: 28 = write prot)
+			 (didn't work when I tried or I did smth wrong)
+		32	actual number of read/written bytes
+		36	number of bytes to send/recieve
+			example:    number = 2*512:  2 blocks to transfer
+		40	ptr to memory
+		44	offset (amount of bytes behind 1st byte on disk)
+			example: offset = 880*512:  read/write at block 880
+				 there are 22 blocks/track
+
+	Maybe it's now the right time to tell you the relation between the
+	different 'levels' of ROM-routines in the AMiga. At the highest
+	level you have the DOS-routines, like read, write, execute. As you
+	can imagine, there's a whole lot of programming behind these commands
+	as they handle trackread, updating of directory, detecting of errors
+	directory/file handling, checksums, free space etc.  The next level 
+	is the TRACKDISK. Dos-routines use the trackdisk-device, this is not
+	as sophisticated as DOS, as it only reads/writes tracks, there's 
+	nothing like file/directory/checksums at this level. It's therefor a
+	whole bit faster. (especially coz you can reduce the read/write-head
+	movement to a minimum by putting programs on consecutive tracks.
+	Most megademos use trackdisk, you can recognise it by a 'tack-tack-
+	tack' with constant speed. The lowest level is the DMA, like we did
+	when using blitter, for example. You can just as well put values in
+	special registers used for diskdrive, and get some things read 
+	from disk. This is the most complicated way of working, and also 
+	the fastest.Working this way you can chenge the speed of the drive-
+	head (and make the funny noise you sometimes with some hardware 
+	loader (njiiii-njiiii-retetetete / ow boy it's melting !!)
+	I've heard that you can kill your drive by messing too much with the
+	drive-hardware registers, but anyway, sounds fascinating. You can also
+	read tracks behind 79 with the hardware-method, which could make head
+	trying to read on the plastic of your disks. (aaargh)
+	These same 3 levels can be found in other parts of the amiga, but 
+	coz of a lack of decent documentation, I haven't been able to 
+	experiment on them. Until then we will go on messing with the
+	hardware and the DMA.
+
+
+	NOW. I guess you know most thing you need to know now, for more
+	detailled things you can now refer to manual, (most manuals forget
+	that there are beginners too in this world, they just are too 
+	difficult to start with)

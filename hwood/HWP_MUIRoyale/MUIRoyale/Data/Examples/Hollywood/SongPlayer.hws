@@ -1,0 +1,441 @@
+/****************************************************************
+**                                                             **
+** Name:        SongPlayer                                     **
+** Author:      Andreas Falkenhahn                             **
+** Version:     1.0                                            **
+** Date:        09.08.12                                       **
+** Interpreter: Hollywood 5.2                                  **
+** Licence:     Sample program                                 **
+** Function:    Demonstrates how to use MUI from Hollywood     **
+**                                                             **
+** History:                                                    **
+**                                                             **
+** 1.0: (09.08.12)                                             **
+**                                                             **
+** - initial release                                           **
+**                                                             **
+****************************************************************/
+
+/*
+** Make sure we have at least Hollywood 5.2!
+*/
+@VERSION 5,2
+
+
+/*
+** This script requires the MUI Royale plugin
+*/
+@REQUIRE "MUIRoyale"
+
+
+/*
+** MUI apps require this information
+*/
+@APPTITLE "SongPlayer"
+@APPVERSION "$VER: SongPlayer 1.0 (09.08.12)"
+@APPCOPYRIGHT "(C) Copyright 2012 by Andreas Falkenhahn"
+@APPAUTHOR "Andreas Falkenhahn"
+@APPDESCRIPTION "A simple music player done in Hollywood"
+
+
+/*
+** Button and list view images
+*/
+@BRUSH 1, "SongPlayer/tapestart.png", {LoadAlpha = True}
+@BRUSH 2, "SongPlayer/tapeplay.png", {LoadAlpha = True}
+@BRUSH 3, "SongPlayer/tapepause.png", {LoadAlpha = True}
+@BRUSH 4, "SongPlayer/tapestop.png", {LoadAlpha = True}
+@BRUSH 5, "SongPlayer/tapeend.png", {LoadAlpha = True}
+@BRUSH 6, "SongPlayer/add.png", {LoadAlpha = True}
+@BRUSH 7, "SongPlayer/remove.png", {LoadAlpha = True}
+@BRUSH 8, "SongPlayer/moveup.png", {LoadAlpha = True}
+@BRUSH 9, "SongPlayer/movedown.png", {LoadAlpha = True}
+@BRUSH 10, "SongPlayer/cd.png", {LoadAlpha = True}
+
+
+/*
+** We don't need our Hollywood display because we have a MUI window
+*/
+@DISPLAY {Width = 12, Height = 32, Hidden = True}
+
+
+/*
+** Change scroll text
+*/
+Function p_SetScrollText(t$)
+
+	Local w = TextWidth(t$) + 128
+
+	CreateBrush(100, w, 32)
+	SelectBrush(100)
+	TextOut(0, 0, t$, {Color = #WHITE})
+	EndSelect
+
+	sx = GetAttribute(#DISPLAY, 0, #ATTRWIDTH)
+	Cls
+
+EndFunction
+
+
+/*
+** Enable/disable buttons depending on current list selection
+*/
+Function p_SetStates(p$, ac, num)
+
+	mui.Set(p$ .. "rem", "disabled", (ac = -1))
+	mui.Set(p$ .. "mvdn", "disabled", (ac = num - 1) Or (ac = -1))
+	mui.Set(p$ .. "mvup", "disabled", (ac = 0) Or (ac = -1))
+	mui.Set(p$ .. "play", "disabled", (ac = -1))
+
+	If musstate$ <> "stopped"
+		mui.Set(p$ .. "last", "disabled", (ac = 0))
+		mui.Set(p$ .. "next", "disabled", (ac = num - 1))
+	EndIf
+
+EndFunction
+
+
+/*
+** Disable buttons that only work while playback is active
+*/
+Function p_SetStopStates(p$)
+
+	mui.Set(p$ .. "last", "disabled", True)
+	mui.Set(p$ .. "next", "disabled", True)
+	mui.Set(p$ .. "pause", "disabled", True)
+	mui.Set(p$ .. "stop", "disabled", True)
+
+EndFunction
+
+
+/*
+** Enable/disable buttons depending on current list selection
+*/
+Function p_RefreshActive()
+
+	Local ac = mui.Get("lv", "active")
+	Local num = mui.Get("lv", "entries")
+
+	If GetType(ac) = #STRING
+		If ac = "Off" Then ac = -1
+	EndIF
+
+	p_SetStates("", ac, num)
+	p_SetStates("mn_", ac, num)
+
+EndFunction
+
+
+/*
+** Convert milliseconds into a hh:mm:ss time string
+*/
+Function p_Milliseconds2Time(msg)
+
+	Local ms = msg.value
+	Local hrs = ms / (1000 * 60 * 60)
+	Local Min = (ms % (1000 * 60 * 60)) / (1000 * 60)
+	Local sec = ((ms % (1000 * 60 * 60)) % (1000 * 60)) / 1000
+
+	Return(FormatStr("%.2d:%.2d:%.2d", hrs, Min, sec))
+
+EndFunction
+
+
+/*
+** Skip to previous track
+*/
+Function p_Last()
+
+	Local ac = mui.Get("lv", "active")
+	Local num = mui.Get("lv", "entries")
+
+	If ac - 1 >= 0
+		mui.Set("lv", "active", ac - 1)
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Skip to next track
+*/
+Function p_Next()
+
+	Local ac = mui.Get("lv", "active")
+	Local num = mui.Get("lv", "entries")
+
+	If ac + 1 < num
+		mui.Set("lv", "active", ac + 1)
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Return file name of currently selected song
+*/
+Function p_GetSongSelection()
+
+	Local t$ = mui.DoMethod("lv", "getentry", "active")
+
+	; remove list image if there is one!
+	If MidStr(t$, 0, 1) = "\27"
+		Return(UnrightStr(t$, FindStr(t$, "]") + 2))
+	; for MUI 3.8
+	ElseIf MidStr(t$, 0, 1) = " "
+		Return(UnrightStr(t$, 1))
+	Else
+		Return(t$)
+	EndIf
+
+EndFunction
+
+
+/*
+** Start/resume playback
+*/
+Function p_Play()
+
+	If musstate$ = "paused"
+
+		ResumeMusic(1)
+		musstate$ = "playing"
+
+		p_SetScrollText("Resuming playback of " .. cursong$ .. "...........")
+
+	Else
+
+		Local f$ = p_GetSongSelection()
+		Local ac = mui.Get("lv", "active")
+		Local num = mui.Get("lv", "entries")
+
+		; do not fail if unknown error format
+		ExitOnError(False)
+		OpenMusic(1, f$)
+		Local err = GetLastError()
+		ExitOnError(True)
+
+		If err <> #ERR_NONE
+			mui.Request("SongPlayer", "Unrecognized song format!", "OK")
+			Return
+		EndIf
+
+		; enable buttons that can be used now
+		mui.Set("pause", "disabled", False)
+		mui.Set("stop", "disabled", False)
+		mui.Set("last", "disabled", (ac = 0))
+		mui.Set("next", "disabled", (ac = num - 1))
+
+		mui.Set("mn_pause", "disabled", False)
+		mui.Set("mn_stop", "disabled", False)
+		mui.Set("mn_last", "disabled", (ac = 0))
+		mui.Set("mn_next", "disabled", (ac = num - 1))
+
+		; prepare time slider
+		mui.Set("time", "min", 0, "max", GetAttribute(#MUSIC, 1, #ATTRDURATION), "disabled", False)
+		mui.Set("vol", "disabled", False)
+
+		; and go!
+		SetMusicVolume(1, curvol)
+		PlayMusic(1)
+
+		musstate$ = "playing"
+		lastlevel$ = ""
+
+		cursong$ = f$
+
+		p_SetScrollText("Now playing " .. f$ .. ".............")
+
+	EndIf
+
+EndFunction
+
+
+/*
+** Stop playback
+*/
+Function p_Stop(callstop)
+
+	If callstop = True
+		If musstate$ = "paused" Then ResumeMusic(1)
+		StopMusic(1)
+	EndIf
+
+	musstate$ = "stopped"
+	cursong$ = ""
+
+	mui.Set("time", "nonotify", True, "level", 0, "disabled", True)
+	mui.Set("vol", "disabled", True)
+
+	p_SetStopStates("")
+	p_SetStopStates("mn_")
+
+	p_SetScrollText("Playback is now stopped..........")
+
+EndFunction
+
+
+/*
+** Pause playback
+*/
+Function p_Pause()
+
+	If musstate$ = "playing"
+		PauseMusic(1)
+		musstate$ = "paused"
+		p_SetScrollText("Playback is now paused...........")
+	Else
+		p_Play()
+	EndIf
+
+EndFunction
+
+
+/*
+** Joint event handler for MUI buttons and menus
+*/
+Function p_MUIEvent(id)
+
+	Switch id
+	Case "add":
+		Local f$ = FileRequest("Select song", "mp3|m4a|ogg|wav|8svx|16sv")
+		If f$ <> "" Then mui.DoMethod("lv", "insert", "active", "\27A[10] " .. f$)
+	Case "mvup"
+		Local ac = mui.Get("lv", "active")
+		mui.DoMethod("lv", "move", "active", "previous")
+		mui.Set("lv", "active", ac - 1)
+	Case "mvdn"
+		Local ac = mui.Get("lv", "active")
+		mui.DoMethod("lv", "move", "active", "next")
+		mui.Set("lv", "active", ac + 1)
+	Case "play":
+		p_Play()
+	Case "stop":
+		p_Stop(True)
+	Case "pause":
+		p_Pause()
+	Case "last"
+		p_Last()
+	Case "next"
+		p_Next()
+	Case "rem":
+		If p_GetSongSelection() = cursong$ Then p_Stop(True)
+		mui.DoMethod("lv", "remove", "active")
+	Case "quit":
+		End
+	Case "about":
+		mui.Request("SongPlayer", "SongPlayer\n© 2012 by Andreas Falkenhahn", "OK")
+	Case "aboutmui":
+		mui.DoMethod("app", "aboutmui")
+	Case "aboutmuiroyale":
+		mui.DoMethod("app", "aboutmuiroyale")
+	Case "muisettings":
+		mui.DoMethod("app", "openconfigwindow")
+	Case "pl":
+		mui.Set("playlist", "open", mui.Get("mn_pl", "selected"))
+	EndSwitch
+
+EndFunction
+
+
+/*
+** Handles all incoming events
+*/
+Function p_EventFunc(msg)
+
+	Switch msg.action
+	Case "MUIRoyale":
+		;
+		; all events from MUI are passed as type "MUIRoyale"!
+		;
+		Switch msg.attribute
+		Case "CloseRequest":
+			If msg.id = "main" Then End
+			mui.Set(msg.id, "open", False)
+			mui.Set("mn_pl", "selected", False)
+		Case "Pressed":
+			p_MUIEvent(msg.id)
+		Case "Selected":
+			p_MUIEvent(UnrightStr(msg.id, 3))
+		Case "DoubleClick":
+			p_Play()
+		Case "Active":
+			p_RefreshActive()
+		Case "Level":
+			Switch msg.id
+			Case "time":
+				Local seekms = mui.Get("time", "level")
+				If seekms < GetAttribute(#MUSIC, 1, #ATTRDURATION) - 100
+					SeekMusic(1, seekms)
+				Else
+					p_Stop(True)
+				EndIf
+			Case "vol":
+				curvol = msg.triggervalue
+				If HaveObject(#MUSIC, 1) = True Then SetMusicVolume(1, curvol)
+			EndSwitch
+		EndSwitch
+
+	Case "HideWindow":
+		mui.Set("app", "iconified", True)
+
+	Case "ShowWindow":
+		mui.Set("app", "iconified", False)
+
+	Case "SizeWindow":
+		sx = GetAttribute(#DISPLAY, 0, #ATTRWIDTH)
+		Cls
+
+	Case "Interval":
+		; update time slider
+		If musstate$ = "playing"
+			Local ms = GetAttribute(#MUSIC, 1, #ATTRPOSITION)
+			Local level$ = p_Milliseconds2Time({value = ms})
+			If level$ <> lastlevel$
+				; must use "nonotify" here because otherwise the event handler that calls SeekMusic()
+				; would be triggered
+				mui.Set("time", "nonotify", True, "level", ms)
+				lastlevel$ = level$
+			EndIf
+		EndIf
+
+		; update scroll text
+		DisplayBrush(100, sx, 0)
+		sx = sx - 1
+
+		; wrap scroll text
+		If sx = -GetAttribute(#BRUSH, 100, #ATTRWIDTH) Then sx = GetAttribute(#DISPLAY, 0, #ATTRWIDTH)
+
+	Case "OnMusicEnd":
+		p_Stop(False)
+		p_Next()
+	EndSwitch
+
+EndFunction
+
+SetFont(#SANS, 32)
+SetFontStyle(#ANTIALIAS)
+SetFillStyle(#FILLCOLOR)
+
+p_SetScrollText("Hello and welcome to SongPlayer written by Andreas Falkenhahn! This script demonstrates how to write a MUI application and use the audio stream playback capabilities of Hollywood in that app!")
+
+curvol = 64
+
+; dynamically create MUI GUI from an external *.xml file definition
+mui.CreateGui(FileToString("SongPlayer.xml"))
+
+; listen to these events!
+InstallEventHandler({MUIRoyale = p_EventFunc, HideWindow = p_EventFunc, ShowWindow = p_EventFunc, SizeWindow = p_EventFunc, OnMusicEnd = p_EventFunc})
+
+; create an interval function that updates the time slider and the scroll text
+SetInterval(1, p_EventFunc, 1000\25)
+
+musstate$ = "stopped"
+
+; main loop!
+Repeat
+	WaitEvent
+Forever
+

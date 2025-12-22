@@ -1,0 +1,419 @@
+/* Scheme In One Define.
+ 
+The garbage collector, the name and other parts of this program are
+
+ *                     COPYRIGHT (c) 1989 BY                              *
+ *      PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+
+Conversion  to  full scheme standard, characters, vectors, ports, complex &
+rational numbers, and other major enhancments by
+
+ *      Scaglione Ermanno, v. Pirinoli 16 IMPERIA P.M. 18100 ITALY        * 
+
+Permission  to use, copy, modify, distribute and sell this software and its
+documentation  for  any purpose and without fee is hereby granted, provided
+that  the  above  copyright  notice appear in all copies and that both that
+copyright   notice   and   this  permission  notice  appear  in  supporting
+documentation,  and that the name of Paradigm Associates Inc not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.
+
+PARADIGM  DISCLAIMS  ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL  IMPLIED  WARRANTIES  OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+PARADIGM  BE  LIABLE  FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <math.h>
+#include <limits.h>
+
+#include "siod.h"
+
+char *checkstr(char *s)
+{char *p;
+ p=tkbuffer;
+ while(*s)
+   {if((*s=='\\')||(*s=='"'))
+        *p++='\\';
+    *p++=*s++;}
+ *p='\0';
+ return(tkbuffer);}
+
+int checksym(char *s)
+{char *p;
+ int flag;
+ p=tkbuffer;
+ flag=1;
+ while(*s)
+   {if(!(isdigit(*s)|| islower(*s) || strchr("!$%&*/:<=>?_-+~@.#^",*s)))
+      flag=0;
+    if((*s=='\\')||(*s=='|'))
+        *p++='\\';
+    *p++=*s++;}
+ *p='\0';
+ if(NULLP(lreadtk(0)))
+   flag=0;;
+ return(flag);}
+
+LISP lprin1f(LISP exp,FILE *f)
+{LISP tmp;
+ int i,size;
+ switch TYPE(exp)
+   {case tc_nil:
+      fput_st(f,"()");
+      break;
+   case tc_environment:
+      fput_st(f,"#<ENVIRONMENT>");
+      break;
+   case tc_cons:
+      fput_st(f,"(");
+      lprin1f(car(exp),f);
+      for(tmp=cdr(exp);CONSP(tmp);tmp=cdr(tmp))
+	{fput_st(f," ");lprin1f(car(tmp),f);}
+      if NNULLP(tmp) {fput_st(f," . ");lprin1f(tmp,f);}
+      fput_st(f,")");
+      break;
+    case tc_flonum:
+      sprintf(tkbuffer,"%.16g",FLONM(exp));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_compnum:
+      sprintf(tkbuffer,"%.6g%+.6gi",COMPRE(exp),COMPIM(exp));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_ratnum:
+      sprintf(tkbuffer,"%d/%u",RATNUM(exp),RATDEN(exp));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_intnum:
+      sprintf(tkbuffer,"%d",INTNM(exp));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_char:
+      if(isprint(CHARV(exp)))
+        sprintf(tkbuffer,"#\\%c",CHARV(exp));
+      else
+        sprintf(tkbuffer,"#\\(%d)",(long)CHARV(exp));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_macro:
+      if(checksym(PNAME(exp)))
+        {fput_st(f,"#<MACRO: ");
+         fput_st(f,tkbuffer);
+         fput_st(f,">");}
+      else
+        {fput_st(f,"#<MACRO: |");
+         fput_st(f,tkbuffer);
+         fput_st(f,"|>");}
+      break;
+    case tc_symbol:
+      if(EQ(exp,truth)||checksym(PNAME(exp)))
+        fput_st(f,PNAME(exp));
+      else
+        {fput_st(f,"|");
+         fput_st(f,tkbuffer);
+         fput_st(f,"|");}
+      break;
+    case tc_port:
+      fput_st(f,"#<PORT>");
+      break;
+    case tc_subr_0:
+    case tc_subr_1:
+    case tc_subr_2:
+    case tc_subr_3:
+    case tc_lsubr:
+    case tc_fsubr:
+    case tc_msubr:
+      sprintf(tkbuffer,"#<SUBR(%d) ",TYPE(exp)-4);
+      fput_st(f,tkbuffer);
+      fput_st(f,(*exp).storage_as.subr.name);
+      fput_st(f,">");
+      break;
+    case tc_closure:
+      sprintf(tkbuffer,"#<LAMBDA(%d)>",leng(car(CODE(exp))));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_fluidclosure:
+      sprintf(tkbuffer,"#<FLUID-LAMBDA(%d)>",leng(car(CODE(exp))));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_rec:
+      sprintf(tkbuffer,"#<NAMED-LAMBDA(%d)>",leng(car(CODE(exp)))-1);
+      fput_st(f,tkbuffer);
+      break;
+    case tc_vector:
+      fput_st(f,"#("); 
+      size = VECSIZE(exp);
+      if(size>=1)
+        {lprin1f(VECTOR(exp)[0],f);
+         for(i=1;i<size;i++)
+           {fput_st(f," ");
+            lprin1f(VECTOR(exp)[i],f);}}
+      fput_st(f,")");         
+      break;
+    case tc_string:
+      fput_st(f,"\"");
+      fput_st(f,checkstr(SNAME(exp)));
+      fput_st(f,"\"");
+      break;
+    default:
+      sprintf(tkbuffer,"#<UNKNOWN %d %lX>",TYPE(exp),exp);
+      fput_st(f,tkbuffer);}
+ return(NIL);}
+
+LISP lprint(LISP exp,LISP port)
+{FILE *f;
+ if(NULLP(port))
+  {f = get_cur_out();
+   fput_st(f,"\n");
+   lprin1f(exp,f);
+   fput_st(f," ");}
+ else
+  {if(NPORTP(port)) err("print",port,ERR_SECOND | ERR_NPOR);
+   f = PORTPTR(port);
+   fput_st(f,"\n");
+   lprin1f(exp,f);
+   fput_st(f," ");}
+ return(NIL);}
+
+LISP lwrite(LISP exp,LISP port)
+{FILE *f;
+ if(NULLP(port))
+  {f = get_cur_out();
+   lprin1f(exp,f);}
+ else
+  {if(NPORTP(port)) err("write",port,ERR_SECOND | ERR_NPOR);
+   f = PORTPTR(port);
+   lprin1f(exp,f);}
+ return(NIL);}
+
+LISP lprin(LISP exp,LISP port)
+{FILE *f;
+ if(NULLP(port))
+  {f = get_cur_out();
+   ldisplayf(exp,f);}
+ else
+  {if(NPORTP(port)) err("display",port,ERR_SECOND | ERR_NPOR);
+   f = PORTPTR(port);
+   ldisplayf(exp,f);}
+ return(NIL);}
+
+LISP lwritechar(LISP exp,LISP port)
+{FILE *f;
+ char st[4]=" ";
+ if(NCHARP(exp))err("write-char",exp,ERR_FIRST | ERR_NCHA);
+ st[0] = CHARV(exp);
+ if(NULLP(port))
+  put_st(st);
+ else
+  {if(NPORTP(port)) err("write-char",port,ERR_SECOND | ERR_NPOR);
+   f = PORTPTR(port);
+   fput_st(f,st);}
+ return(NIL);}
+
+LISP writeln(LISP args)
+{LISP l;
+ FILE *f;
+ f = get_cur_out();
+ for(l=args;NNULLP(l);l=cdr(l))
+   ldisplayf(car(l),f);
+ fput_st(f,"\n");
+ return(NIL);}
+
+LISP ldisplayf(LISP exp,FILE *f)
+{LISP tmp;
+ int i,size;
+ switch TYPE(exp)
+   {case tc_nil:
+      fput_st(f,"()");
+      break;
+   case tc_environment:
+      fput_st(f,"#<ENVIRONMENT>");
+      break;
+   case tc_cons:
+      fput_st(f,"(");
+      ldisplayf(car(exp),f);
+      for(tmp=cdr(exp);CONSP(tmp);tmp=cdr(tmp))
+	{fput_st(f," ");ldisplayf(car(tmp),f);}
+      if NNULLP(tmp) {fput_st(f," . ");ldisplayf(tmp,f);}
+      fput_st(f,")");
+      break;
+    case tc_flonum:
+      sprintf(tkbuffer,"%.16g",FLONM(exp));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_compnum:
+      sprintf(tkbuffer,"%.6g%+.6gi",COMPRE(exp),COMPIM(exp));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_ratnum:
+      sprintf(tkbuffer,"%d/%u",RATNUM(exp),RATDEN(exp));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_intnum:
+      sprintf(tkbuffer,"%d",INTNM(exp));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_char:
+      sprintf(tkbuffer,"%c",CHARV(exp));
+      fput_st(f,tkbuffer);
+      break;
+    case tc_macro:
+    case tc_symbol:
+      fput_st(f,PNAME(exp));
+      break;
+    case tc_port:
+      fput_st(f,"#<PORT>");
+      break;
+    case tc_subr_0:
+    case tc_subr_1:
+    case tc_subr_2:
+    case tc_subr_3:
+    case tc_lsubr:
+    case tc_fsubr:
+    case tc_msubr:
+      fput_st(f,"#<SUBR ");
+      fput_st(f,(*exp).storage_as.subr.name);
+      fput_st(f,">");
+      break;
+    case tc_closure:
+      fput_st(f,"#<LAMBDA>");
+      break;
+    case tc_fluidclosure:
+      fput_st(f,"#<FLUID-LAMBDA>");
+      break;
+    case tc_rec:
+      fput_st(f,"#<NAMED-LAMBDA ");
+      ldisplayf(car(car(CODE(exp))),f);
+      fput_st(f,">");
+      break;
+    case tc_vector:
+      fput_st(f,"#("); 
+      size = VECSIZE(exp);
+      if(size>=1)
+        {ldisplayf(VECTOR(exp)[0],f);
+         for(i=1;i<size;i++)
+           {fput_st(f," ");
+            ldisplayf(VECTOR(exp)[i],f);}}
+      fput_st(f,")");         
+      break;
+    case tc_string:
+      fput_st(f,SNAME(exp));
+      break;
+    default:
+      sprintf(tkbuffer,"#<UNKNOWN %d %lX>",TYPE(exp),exp);
+      fput_st(f,tkbuffer);}
+ return(NIL);}
+
+LISP lprintlenght(LISP exp,LISP type)
+{LISP tmp;
+ int i,size,tot;
+ switch TYPE(exp)
+   {case tc_nil:
+      tot=2;
+      break;
+   case tc_environment:
+      tot=14;
+      break;
+   case tc_cons:
+      tot=1;
+      tot+=INTNM(lprintlenght(car(exp),type));
+      for(tmp=cdr(exp);CONSP(tmp);tmp=cdr(tmp))
+	{tot+=1;tot+=INTNM(lprintlenght(car(tmp),type));}
+      if NNULLP(tmp) {tot+=3;tot+=INTNM(lprintlenght(tmp,type));}
+      tot+=1;
+      break;
+    case tc_flonum:
+      tot=sprintf(tkbuffer,"%.16g",FLONM(exp));
+      break;
+    case tc_compnum:
+      tot=sprintf(tkbuffer,"%.6g%+.6gi",COMPRE(exp),COMPIM(exp));
+      break;
+    case tc_ratnum:
+      tot=sprintf(tkbuffer,"%d/%d",RATNUM(exp),RATDEN(exp));
+      break;
+    case tc_intnum:
+      tot=sprintf(tkbuffer,"%d",INTNM(exp));
+      break;
+    case tc_char:
+      tot=1;
+      break;
+    case tc_macro:
+      if(NULLP(type))
+        tot=strlen(PNAME(exp));
+      else if(checksym(PNAME(exp)))
+        {tot=10;
+         tot+=strlen(tkbuffer);}
+      else
+        {tot=12;
+         tot+= strlen(tkbuffer);}
+    case tc_symbol:
+      if(NULLP(type))
+        tot=strlen(PNAME(exp));
+      else if(checksym(PNAME(exp))||EQ(exp,truth))
+        tot=strlen(tkbuffer);
+      else
+        {tot=2;
+         tot+=strlen(tkbuffer);}
+      break;
+    case tc_port:
+      tot=7;
+      break;
+    case tc_subr_0:
+    case tc_subr_1:
+    case tc_subr_2:
+    case tc_subr_3:
+    case tc_lsubr:
+    case tc_fsubr:
+    case tc_msubr:
+      if(NULLP(type))
+        tot=8;
+      else
+        tot=11;
+      tot+=strlen((*exp).storage_as.subr.name);
+      break;
+    case tc_closure:
+      if(NULLP(type))
+        tot=9;
+      else
+        tot=sprintf(tkbuffer,"#<LAMBDA(%d)>",leng(car(CODE(exp))));
+      break;
+    case tc_fluidclosure:
+      if(NULLP(type))
+        tot=15;
+      else
+        tot=sprintf(tkbuffer,"#<FLUID-LAMBDA(%d)>",leng(car(CODE(exp))));
+      break;
+    case tc_rec:
+      if(NULLP(type))
+        {tot=16;
+         tot+=INTNM(lprintlenght(car(car(CODE(exp))),type));}
+      else
+         tot=sprintf(tkbuffer,"#<NAMED-LAMBDA(%d)>",leng(car(CODE(exp))));
+      break;
+    case tc_vector:
+      tot=2; 
+      size = VECSIZE(exp);
+      tot+=INTNM(lprintlenght(VECTOR(exp)[0],type));
+      for(i=1;i<size;i++)
+        {tot+=1;
+         tot+=INTNM(lprintlenght(VECTOR(exp)[i],type));}
+      tot+=1;         
+      break;
+    case tc_string:
+      if(NULLP(type))
+         tot=strlen(SNAME(exp));
+      else
+         tot=strlen(checkstr(SNAME(exp)))+2;
+      break;
+    default:
+      tot=sprintf(tkbuffer,"#<UNKNOWN %d %lX>",TYPE(exp),exp);}
+ return(intcons(tot));}

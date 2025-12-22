@@ -1,0 +1,61 @@
+/* $Id: sghooks.h 12757 2001-12-08 22:23:57Z chodorowski $ */
+OPT NATIVE
+PUBLIC MODULE 'target/intuition/intuition_shared2'
+MODULE 'target/exec/types'
+MODULE 'target/graphics/text', 'target/utility/hooks', 'target/intuition/intuition', 'target/devices/inputevent'
+{#include <intuition/sghooks.h>}
+NATIVE {INTUITION_SGHOOKS_H} CONST
+
+->"OBJECT stringextend" is on-purposely missing from here (it can be found in 'intuition/intuition_shared2')
+
+NATIVE {SGWork} OBJECT sgwork
+    {Gadget}	gadget	:PTR TO gadget
+    {StringInfo}	stringinfo	:PTR TO stringinfo
+    {WorkBuffer}	workbuffer	:/*STRPTR*/ ARRAY OF CHAR
+    {PrevBuffer}	prevbuffer	:/*STRPTR*/ ARRAY OF CHAR
+    {Modes}	modes	:ULONG
+    {IEvent}	ievent	:PTR TO inputevent
+    {Code}	code	:UINT
+    {BufferPos}	bufferpos	:INT
+    {NumChars}	numchars	:INT
+    {Actions}	actions	:ULONG
+    {LongInt}	longint	:VALUE
+    {GadgetInfo}	gadgetinfo	:PTR TO gadgetinfo
+    {EditOp}	editop	:UINT
+ENDOBJECT
+
+NATIVE {EO_NOOP}		CONST EO_NOOP		= ($0001)
+NATIVE {EO_DELBACKWARD}	CONST EO_DELBACKWARD	= ($0002)
+NATIVE {EO_DELFORWARD}	CONST EO_DELFORWARD	= ($0003)
+NATIVE {EO_MOVECURSOR}	CONST EO_MOVECURSOR	= ($0004)
+NATIVE {EO_ENTER}	CONST EO_ENTER	= ($0005)
+NATIVE {EO_RESET}	CONST EO_RESET	= ($0006)
+NATIVE {EO_REPLACECHAR}	CONST EO_REPLACECHAR	= ($0007)
+NATIVE {EO_INSERTCHAR}	CONST EO_INSERTCHAR	= ($0008)
+NATIVE {EO_BADFORMAT}	CONST EO_BADFORMAT	= ($0009)
+NATIVE {EO_BIGCHANGE}	CONST EO_BIGCHANGE	= ($000A)
+NATIVE {EO_UNDO}		CONST EO_UNDO		= ($000B)
+NATIVE {EO_CLEAR}	CONST EO_CLEAR	= ($000C)
+NATIVE {EO_SPECIAL}	CONST EO_SPECIAL	= ($000D)
+
+NATIVE {SGM_REPLACE}	CONST SGM_REPLACE	= $1
+NATIVE {SGM_FIXEDFIELD}	CONST SGM_FIXEDFIELD	= $2
+NATIVE {SGM_NOFILTER}	CONST SGM_NOFILTER	= $4
+NATIVE {SGM_EXITHELP}	CONST SGM_EXITHELP	= $80
+
+/* For internal use */
+NATIVE {SGM_NOCHANGE}	CONST SGM_NOCHANGE	= $8
+NATIVE {SGM_NOWORKB}	CONST SGM_NOWORKB	= $10
+NATIVE {SGM_CONTROL}	CONST SGM_CONTROL	= $20
+NATIVE {SGM_LONGINT}	CONST SGM_LONGINT	= $40
+
+NATIVE {SGA_USE}		CONST SGA_USE		= ($1)
+NATIVE {SGA_END}		CONST SGA_END		= ($2)
+NATIVE {SGA_BEEP}	CONST SGA_BEEP	= ($4)
+NATIVE {SGA_REUSE}	CONST SGA_REUSE	= ($8)
+NATIVE {SGA_REDISPLAY}	CONST SGA_REDISPLAY	= ($10)
+NATIVE {SGA_NEXTACTIVE}	CONST SGA_NEXTACTIVE	= ($20)
+NATIVE {SGA_PREVACTIVE}	CONST SGA_PREVACTIVE	= ($40)
+
+NATIVE {SGH_KEY}		CONST SGH_KEY		= (1)
+NATIVE {SGH_CLICK}	CONST SGH_CLICK	= (2)

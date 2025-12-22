@@ -1,0 +1,218 @@
+/* Scheme In One Define.
+ 
+The garbage collector, the name and other parts of this program are
+
+ *                     COPYRIGHT (c) 1989 BY                              *
+ *      PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+
+Conversion  to  full scheme standard, characters, vectors, ports, complex &
+rational numbers, and other major enhancments by
+
+ *      Scaglione Ermanno, v. Pirinoli 16 IMPERIA P.M. 18100 ITALY        * 
+
+Permission  to use, copy, modify, distribute and sell this software and its
+documentation  for  any purpose and without fee is hereby granted, provided
+that  the  above  copyright  notice appear in all copies and that both that
+copyright   notice   and   this  permission  notice  appear  in  supporting
+documentation,  and that the name of Paradigm Associates Inc not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.
+
+PARADIGM  DISCLAIMS  ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL  IMPLIED  WARRANTIES  OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+PARADIGM  BE  LIABLE  FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <time.h>
+#include <math.h>
+
+#include "siod.h"
+
+void main(int argc, char **argv)
+{int flag;
+ flag = process_env();
+ if((argc==1) && (flag==0))
+  {printf("\fSiod, SCHEME interpreter v2.6\n");
+   printf("Options:\n");
+   printf("        -h<number>   sets the number of cons in siod's\n");
+   printf("                     fixed-size heap.\n");
+   printf("                     Minimum 1000. Default 5000.\n");
+   printf("        -o<number>   sets the number of buckets in siod's\n");
+   printf("                     symbols hash table.\n");
+   printf("                     Minimum 1. Default 100.\n");
+   printf("        -f<number>   sets the number of buckets in siod's\n");
+   printf("                     integers hash table.\n");
+   printf("                     Minimum 1. Default 100.\n");
+   printf("        -i<filename> a file to be loaded in the high-speed\n");
+   printf("                     user-global-environment.\n");
+   printf("        -q           quiet flag.\n");
+   printf("        -s           small set of predefined functions.\n");}
+ else
+   print_welcome();
+ process_cla(argc,argv);
+ init_storage();
+ print_hs_1();
+ init_subr_fond();
+ if(full_set == 1)
+   init_subrs();
+ repl_driver();
+ fprintf(stderr,"Siod terminated.\n");
+ exit(0);}
+
+int process_env(void)
+{char *envop;
+ int flag=0;
+ envop=getenv("SIOD-HEAP-SIZE");
+ if(envop)
+   {flag=1;
+    heap_size = atol(envop);
+    if(heap_size<1000)
+      heap_size = 1000;}
+ envop=getenv("SIOD-SYMTAB-SIZE");
+ if(envop)
+   {flag=1;
+    obarray_dim = atol(envop);
+    if(obarray_dim<1)
+      obarray_dim = 1;}
+ envop=getenv("SIOD-FIXTAB-SIZE");
+ if(envop)
+   {flag=1;
+    fixarray_dim = atol(envop);
+    if(fixarray_dim<1)
+      fixarray_dim = 1;}
+ envop=getenv("SIOD-INIT-FILE");
+ if(envop)
+  {flag=1;
+   init_file=envop;}
+ envop=getenv("SIOD-QUIET");
+ if(envop)
+  {flag=1;
+   quiet=(atol(envop)==1)?1:0;}
+ envop=getenv("SIOD-SMALL");
+ if(envop)
+  {flag=1;
+   full_set=(atol(envop)==1)?0:1;}
+ return(flag);}
+
+void repl_driver()
+{int k;
+ LISP stack_start;
+ LISP base_fluid_env=extend_env(cons(val_input_port,
+                                     cons(val_output_port,
+                                          cons(val_scheme_top_level,
+                                               NIL))),
+                                envcons(NIL,NIL));
+ stack_start_ptr = &stack_start;
+ k = setjmp(errjmp);
+ if (k == 2) return;
+ signal(SIGFPE,handle_sigfpe);
+ signal(SIGINT,handle_sigint);
+ signal(SIGABRT,handle_sigabort);
+ catch_framep = (struct catch_frame *) NULL;
+ errjmp_ok = 0;
+ interrupt_differed = 0;
+ nointerrupt = 0;
+ sym_fluid_environment = base_fluid_env;
+ errjmp_ok = 1;
+ if (k == 1)
+   {gc_for_newcell();
+    if(NNULLP(VCELL(sym_on_reset)))
+      apply_proc(VCELL(sym_on_reset),NIL,sym_initial_environment);}
+ else if (k == 0)
+   {if(full_set == 1) vload("siod.scm",NIL);
+    if (init_file) vload(init_file,NIL);}
+ while(1) 
+  {apply_proc(CDR(val_scheme_top_level),NIL,sym_initial_environment);}}
+
+LISP scheme_reset(void)
+{CDR(val_scheme_top_level)=subrcons(tc_subr_0,
+                                    "scheme-top-level",
+                                    scheme_top_level);
+ CDR(val_output_port)=VCELL(sym_standard_output);
+ CDR(val_input_port)=VCELL(sym_standard_input);
+ VCELL(sym_inspect) = subrcons(tc_subr_1,"inspect",inspect);
+ VCELL(sym_err_han) = subrcons(tc_subr_0,"*error*",error_han);
+ longjmp(errjmp,1);
+ return(NIL);}
+
+LISP reset_scheme_top_lev()
+{CDR(val_scheme_top_level)=subrcons(tc_subr_0,
+                                    "scheme-top-level",
+                                    scheme_top_level);
+ return(truth);}
+
+void fput_st(FILE *f, char *st)
+{long res;
+ long flag;
+ flag = no_interrupt(1);
+ res=fputs(st,f);
+ if(transfile) fputs(st,transfile);
+ if(res==EOF)
+   err("Error during I/O",NIL,ERR_GEN);
+ no_interrupt(flag);}
+
+FILE *get_cur_out()
+{LISP out;
+ out = CDR(val_output_port);
+ if(NPORTP(out))
+   err("current output must be a port",out,ERR_GEN);
+ return(PORTPTR(out));}
+
+FILE *get_cur_in()
+{LISP in;
+ in = CDR(val_input_port);
+ if(NPORTP(in))
+   err("current input must be a port",in,ERR_GEN);
+ return(PORTPTR(in));}
+
+void put_st(char *st)
+{fput_st(get_cur_out(),st);}
+
+double myruntime(void)
+{long x;
+ x = clock();
+ return((double) x);}
+
+LISP lruntime(void)
+{return flocons(myruntime());}
+
+LISP scheme_top_level(void) 
+{FILE *in,*out;
+ int ch;
+ LISP x;
+ double rt;
+ out = get_cur_out();
+ clearerr(out);
+ fput_st(out,">> ");
+ in = get_cur_in();
+ clearerr(in);
+ x = lreadf(in);
+ while(((ch=f_getc(in))!='\n')&&(ch!=EOF));
+ if EQ(x,eof_val) {clearerr(in);err("EOF",eof_val,ERR_GEN);}
+ gc_cells_allocated = 0;
+ gc_time_taken = 0.0;
+ rt = myruntime();
+ x = leval(x,sym_initial_environment);
+ rt = myruntime()-rt;
+ out = get_cur_out();
+ fput_st(out,"\n");
+ if(VCELL(sym_repl_mode)==truth)
+    {sprintf(tkbuffer,
+        "Evaluation took %g milliseconds (%g in gc) %d cons work\n",
+        rt,
+        gc_time_taken,
+        gc_cells_allocated);
+   fput_st(out,tkbuffer);}
+ if(NEQ(x,sym_the_non_printing))
+   {lprin1f(x,out);
+    fput_st(out,"\n");}
+ return(NIL);}

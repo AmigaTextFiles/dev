@@ -1,0 +1,4 @@
+
+VAR
+    AslBase : Address;
+

@@ -1,0 +1,193 @@
+<html>
+<head>
+ <title>Scroller_YUnlimited2</title>
+</head>
+<body bgcolor=#FFFFFF>
+
+For this algorithm many things which were already said for Scroller_YUnlimited
+are also true. So read by all means first this algorithm's
+<a href="yunlimited-uk.html">documentation</a>!<p>
+
+The big difference is, that the bitmap is no longer double-high. Instead the
+bitmap height is 288 pixels (256 + 32). We also no longer do double-blits and
+therefore this algorithm is twice as fast. The fact that we no longer double-blit
+is also the only big difference compared to the Scroller_YUnlimited algorithm.
+Let's assume we have scrolled down half a bitmap height. Here's how it will look
+in each of the two algorithms:<p>
+
+<center>
+ <img src="images/yunlimited2_1.gif" width=458 height=325>
+</center>
+
+<p>
+
+As you can see in the picture, in Scroller_YUnlimited2 the actual and visible
+bitmap area goes over the bitmap boundaries. Of course this cannot be, because
+there is nothing or at least nothing which "belongs" to us. When taking a closer
+look at the previous two pictures, something does or should attract our attention:<p>
+
+<center>
+ <img src="images/yunlimited2_2.gif" width=458 height=326>
+</center>
+
+<p>
+
+In our example the Scroller_YUnlimited algorithm has parts of the actual/visible
+bitmap area in both the upper and the lower bitmap half. By chance (or someting
+else) the part which belongs to the lower bitmap half (blue rectangle) is
+identical with an area of the same size at the top of the upper bitmap half (green
+rectangle). And
+this area also exists in identical form in our single-high bitmap = in
+Scroller_YUnlimited2 algorithm.<p>
+
+The solution would be to somehow tell the video chip, that, when it has arrived at
+the bottom of our bitmap, it shall jump back to the top of the bitmap and display
+the rest of the screen starting from there. Thanks to the Copper this is very easy.
+We simply use a COPWAIT instruction in the copperlist to wait to <i>that</i> raster line,
+that without our intervention would read and display the data from outside the bitmap,
+and then to reset the plane pointers to the top of the bitmap. The line for which
+we have to wait changes constantly during scrolling, because the actual-bitmap-area
+and with it the area of the bitmap which we display initially at the start of the
+copperlist by setting the plane addresses respectively is changing constantly. For example
+when the plane addresses at the start of the copperlist are set in such a way that
+they display the bitmap starting from line 32 (that is: the actual-bitmap-area starts
+at line 16) then the video chip will have reached (and jumped over) the end of our
+bitmap in rasterline 256 (32 + 256 = 288 = BITMAPHEIGHT). So to calc the line for
+which we have to wait we use the following formula:<p>
+
+<blockquote>
+ yoffset = Line, from which we start displaying the bitmap at the init of the copperlist<p>
+ line = DIWSTARTY + BITMAPHEIGHT - yoffset
+</blockquote>
+
+<p>
+
+DIWSTARTY must be added, because for the video chip the first visible rasterline
+is not 0 but the Y component of the Display Window Start Hardware register. When
+using COPWAIT instructions it's important to know that only 8 Bit (values between
+0 and 255) are at our disposal for the Y coordinate. To wait for a line greater
+or equal than 256, one must first wait for the end of line 255 and then for the
+line (LINE - 256).<p>
+
+After the COPWAIT instruction the plane addresses are all set back to the
+top of the bitmap. That is, always the same address, so we don't have to
+adjust them all the time. It's enough to put them into the copperlist
+once while the copperlist is being initialized.<p>
+
+The Copper needs 2 instructions to set one plane address - one for the HIWORD
+(upper 16 bits) and one for the LOWORD (lower 16 bits). When using many planes
+it might happen that for the Copper there's not enough time inside the horizontal
+blank to set all plane addresses in time, that is, before VideoDMA starts reading
+data from CHIP RAM again. This is likely to happen at the latest after 7 or
+8 planes. Luckily there is a trick with which only half as many copper instructions
+are needed:<p>
+
+The trick works like this: we wait for the rasterline which is before the one we
+calculated. In this line we change the bitplane modulo registers and we can do
+this at any horizontal position we want, no matter if in the visible area or not.
+By changing the bitplane moduli all plane addresses change automatically once the
+video chip jumps to the next line. We choose the value to write into the bitplane
+modulo registers in such a way that for the next line we get the correct LOWORD
+for all plane addresses. Calculation is rather simple:<p>
+
+<blockquote>
+ wantedaddress = Top of bitmap for plane 0<p>
+ oldadress = Address the plane-0-pointer will have reached at the end of LINE - 1<p>
+ modulovalue = (wantedaddress - oldaddress) & 0xFFFF 
+</blockquote>
+
+<p>
+
+There's an even easier way to do the calculation but that way is less understandable.
+For vertical-only scrolling <i>oldaddress</i> is constant and always equals the
+plane0-address of the last bitmaprow + (BITMAPWIDTH / 8). The reason is that in
+rasterline LINE - 1 always the bottommost line of the bitmap is displayed. Since
+both <i>oldaddress</i> and <i>wantedaddress</i> are constant, the result of the
+formula (<i>modulovalue</i>) has to be constant, too. Therefore in the demo source
+code the calculation is done in the InitCopperlist() function.<p>
+
+By changing the bitplane moduli we've only got the correct LOWORDs in each of the
+bitplane pointers (if one would use a correctly aligned non-interleaved bitmap
+with a maximum plane size of 32 KByte or a smaller interleaved bitmap with a
+maximum bitmap size of 32 KByte changing the bitplane moduli would also correctly
+set the HIWORDs). To set the HIWORDs we wait for the next line, that is the line
+that we have calculated = the start of rastline LINE. 1 copper instruction per
+plane is now enough. After setting the planes we reset the bitplane modulo
+registers to their real (old) value. Again it does not matter if the video beam
+is already in the visible area when we do this. All this things, except the
+COPWAIT instructions, are done in the InitCopperlist() function, because the
+respective values don't change during scrolling.<p>
+
+At the end some comments about the source code of the demo program. When the
+variable mapposy, which contains the map position Y in pixels, is 0, then the
+user sees the map area beginning at position BLOCKHEIGHT (16), because of the
+first BLOCKHEIGHT (16) pixels being always hidden. So what the user is seeing
+is the area:<p>
+
+<blockquote>
+ (0,mapposy + BLOCKHEIGHT) - (SCREENWIDTH - 1,mapposy + BLOCKHEIGHT + SCREENHEIGHT - 1)
+</blockquote>
+
+<p>
+
+This means that the first block row of the map file is never visible. If
+you want to blit something into the bitmap for example blitter objects (BOBs)
+you must do it in the actual visible bitmap area. This area is:<p>
+
+<blockquote>
+ <table border=0 cellpadding=0 cellspacing=0>
+  <tr>
+   <td nowrap>
+    (0,(videoposy + BLOCKHEIGHT) % BITMAPHEIGHT) - (SCREENWIDTH - 1,(videoposy + BLOCKHEIGHT + SCREENHEIGHT - 1) % BITMAPHEIGHT)
+   </td>
+  </tr>
+ </table>
+</blockquote>
+
+<br>
+ 
+ You are allowed to round down the start Y coordinate ((videoposy + BLOCKHEIGHT) % BITMAPHEIGHT) and
+round up the end Y coordinate ((videoposy + BLOCKHEIGHT + SCREENHEIGHT - 1)) to a
+multiple of BLOCKHEIGHT. This leads to a blitable area that is SCREENHEIGHT +
+BLOCKHEIGHT pixels high:<p>
+
+<blockquote>
+ blitarea_strty = ((videoposy + BLOCKHEIGHT) & ~(BLOCKHEIGHT - 1)) % BITMAPHEIGHT<p>
+ blitarea_endy = (blitarea_strtx + SCREENHEIGHT + BLOCKHEIGHT - 1) % BITMAPHEIGHT
+</blockquote>
+
+<p>
+
+As you can imagine when looking at the above calculations it may happen that the
+end Y coordinate is above the start Y coordinate, that is, it is lower. This is
+because of the video splitting and the only thing it means is that the area starts
+at the start coordinate and goes until the end of the bitmap, then it "wraps" to
+the top of the bitmap where it still goes until the end coordinate. For blitting
+this means that it is necessary to take a close look at the blit height and the
+calculated blit destination Y coordinate (blitarea_strty + destinationy):<p>
+
+<blockquote>
+ <b>If BLITDESTINATIONY + BLITHEIGHT &lt;= BITMAPHEIGHT then:</b>
+ <blockquote>
+  Normally blit at Y position BLITDESTINATIONY
+ </blockquote>
+ <b>else, if BLITDESTINATIONY &gt;= BITMAPHEIGHT then:</b>
+ <blockquote>
+  Normally blit at Y position (BLITDESTINATIONY - BITMAPHEIGHT)
+ </blockquote>
+ <b>else:</b>
+ <blockquote>
+  Blit the first (BITMAPHEIGHT - BLITDESTINATIONY) pixellines at Y position BLITDESTINATIONY<br>
+  Blit the last (BLITHEIGHT - (BITMAPHEIGHT - BLITDESTINATIONY) pixellines at Y-Positionen 0
+ </blockquote> 
+</blockquote>
+
+<p>
+
+In the worst case, that is when the videosplit line is within the blit-destination-area,
+the blit must be done in two steps. This is troublesome but neither very bad nor
+extremely slow - the probability that an object must be blitted in two steps is
+most of the times rather low.
+</body>
+</html>
+

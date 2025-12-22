@@ -1,0 +1,6 @@
+def PRESERVE_COLORS = 1;
+def AVOID_FLICKER = 2;
+def IGNORE_MCOMPAT = 4;
+
+def BIDTAG_COERCE = 1;
+

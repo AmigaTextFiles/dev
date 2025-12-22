@@ -1,0 +1,508 @@
+MODULE  CyberQTAudio;
+
+(* $IFNOT DEBUG *)
+  (* $StackChk- $OvflChk- $RangeChk- $CaseChk- $ReturnChk- $NilChk- $TypeChk- $OddChk- $ClearVars- *)
+(* $END *)
+
+(* /// ------------------------------- "IMPORT" -------------------------------- *)
+IMPORT  ahi:=AHI,
+        cu:=CyberQTUtils,
+        d:=Dos,
+        e:=Exec,
+        fp:=FixedPoint,
+        g:=CyberQTGlobals,
+        i:=Intuition,
+        i2m:=Intel2Mot,
+        io:=CyberQTIO,
+        o:=CyberQTOpts,
+        ol:=OberonLib,
+        s:=CyberQTSync,
+        u:=Utility,
+        y:=SYSTEM;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// -------------------------------- "TYPE" --------------------------------- *)
+TYPE    DecoderProc=PROCEDURE(from{8}: e.APTR;
+                              toL{9}: e.APTR;
+                              toR{10}: e.APTR;
+                              size{0}: LONGINT;
+                              spec{11}: e.APTR): LONGINT;
+
+        CodecHeader=STRUCT
+            decoder: DecoderProc;
+            special: e.APTR;
+            frequency: LONGINT;
+            compression: LONGINT;
+            channels: INTEGER;
+            bits: INTEGER;
+            stereo: BOOLEAN;
+            description: e.STRING;
+        END;
+
+        CodecArray=UNTRACED POINTER TO ARRAY MAX(INTEGER) OF CodecHeader;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// -------------------------------- "CONST" -------------------------------- *)
+CONST   idraw =y.VAL(LONGINT,"raw ");
+        idraw0=0;
+        idtwos=y.VAL(LONGINT,"twos");
+        idMAC3=y.VAL(LONGINT,"MAC3");
+        idMAC6=y.VAL(LONGINT,"MAC6");
+        idima4=y.VAL(LONGINT,"ima4");
+        idulaw=y.VAL(LONGINT,"µlaw");
+
+        codecSupported * =1;
+        codecUnknown * =0;
+        codecUnsupported * =-1;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// --------------------------------- "VAR" --------------------------------- *)
+VAR     mainData: e.LSTRPTR;
+        leftData: ARRAY 2 OF e.LSTRPTR;
+        rightData: ARRAY 2 OF e.LSTRPTR;
+        decoderProc: DecoderProc;
+        decoderSpec: e.APTR;
+        audioFreq: LONGINT;
+        audioBufferSize: LONGINT;
+        currSample: SHORTINT;
+        playing: BOOLEAN;
+        bufPlaying: ARRAY 2 OF BOOLEAN;
+        stereo: BOOLEAN;
+        codecs: CodecArray;
+        codecCnt: LONGINT;
+        currentCodec: LONGINT;
+        req: ahi.AHIAudioModeRequesterPtr;
+        ctrl: ahi.AHIAudioCtrlPtr;
+        mixFreq: LONGINT;
+        sampL: ARRAY 2 OF ahi.AHISampleInfo;
+        sampR: ARRAY 2 OF ahi.AHISampleInfo;
+        ahiSig - : LONGINT;
+        amrHook: u.HookPtr;
+        audioOpen - : BOOLEAN;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ---------------------- "PROCEDURE AMReqHookFunc()" ---------------------- *)
+PROCEDURE AMReqHookFunc(hook: u.HookPtr;
+                        ctrl: ahi.AHIAudioCtrlPtr;
+                        msg: ahi.AHISoundMessagePtr): LONGINT;
+BEGIN
+  IF msg.channel=0 THEN e.Signal(ctrl.userData,LONGSET{d.ctrlF}); END;
+  RETURN 0;
+END AMReqHookFunc;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ----------------------- "PROCEDURE StartSound()" ------------------------ *)
+PROCEDURE StartSound * ();
+BEGIN
+END StartSound;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ------------------------ "PROCEDURE StopSound()" ------------------------ *)
+PROCEDURE StopSound * (aborted: BOOLEAN);
+BEGIN
+  IF ahi.ControlAudio(ctrl,ahi.cPlay,e.false,u.done)=0 THEN END;
+END StopSound;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ----------------------- "PROCEDURE CloseAudio()" ------------------------ *)
+PROCEDURE CloseAudio * ();
+BEGIN
+  IF ctrl#NIL THEN ahi.FreeAudio(ctrl); ctrl:=NIL; END;
+  IF req#NIL THEN ahi.FreeAudioRequest(req); req:=NIL; END;
+END CloseAudio;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ------------------------ "PROCEDURE OpenAudio()" ------------------------ *)
+PROCEDURE OpenAudio * ();
+
+VAR     playSamples: LONGINT;
+        best: LONGINT;
+
+BEGIN
+  req:=ahi.AllocAudioRequest(ahi.rTitleText,y.ADR("Select mode and frequency"),
+                             ahi.rInitialMixFreq,audioFreq,
+                             ahi.rInitialAudioID,131084,
+                             ahi.rDoMixFreq,e.true,
+                             u.done);
+  IF req#NIL THEN
+    IF ahi.AudioRequest(req,u.done) THEN
+      d.PrintF("mode: %ld\n",req.audioID);
+      ctrl:=ahi.AllocAudio(ahi.aAudioID,req.audioID,
+                           ahi.aMixFreq,req.mixFreq,
+                           ahi.aChannels,2,
+                           ahi.aSounds,4,
+                           ahi.aSoundFunc,amrHook,
+                           ahi.aUserData,e.FindTask(NIL),
+                           u.done);
+      IF ctrl#NIL THEN
+        IF ahi.ControlAudio(ctrl,ahi.cMixFreqQuery,y.ADR(mixFreq),
+                                 u.done)=0 THEN END;
+        d.PrintF("mixfreq: %ld\n",mixFreq);
+        IF ahi.GetAudioAttrs(ahi.invalidID,ctrl,ahi.dbMaxPlaySamples,y.ADR(playSamples),
+                                                u.done) THEN END;
+        d.PrintF("calc playsamples: %ld\n",playSamples);
+        IF ahi.ControlAudio(ctrl,ahi.cMixFreqQuery,y.ADR(mixFreq),
+                                 u.done)=0 THEN END;
+        d.PrintF("mixfreq: %ld\n",mixFreq);
+        sampL[0].type:=ahi.stM8S;
+        sampL[0].address:=leftData[0];
+        sampL[0].length:=audioFreq;
+        sampL[1].type:=ahi.stM8S;
+        sampL[1].address:=leftData[1];
+        sampL[1].length:=audioFreq;
+        sampR[0].type:=ahi.stM8S;
+        sampR[0].address:=rightData[0];
+        sampR[0].length:=audioFreq;
+        sampR[1].type:=ahi.stM8S;
+        sampR[1].address:=rightData[1];
+        sampR[1].length:=audioFreq;
+        IF ahi.LoadSound(0,ahi.stDynamicSample,y.ADR(sampL[0]),ctrl)=0 THEN END;
+        IF ahi.LoadSound(1,ahi.stDynamicSample,y.ADR(sampL[1]),ctrl)=0 THEN END;
+        IF ahi.LoadSound(2,ahi.stDynamicSample,y.ADR(sampR[0]),ctrl)=0 THEN END;
+        IF ahi.LoadSound(3,ahi.stDynamicSample,y.ADR(sampR[1]),ctrl)=0 THEN END;
+        ahi.SetFreq(0,audioFreq,ctrl,ahi.sfImm);
+        ahi.SetFreq(1,audioFreq,ctrl,ahi.sfImm);
+        ahi.SetVol(0,65536,0,ctrl,ahi.sfImm);
+        ahi.SetVol(1,65536,0,ctrl,ahi.sfImm);
+        IF ahi.ControlAudio(ctrl,ahi.cPlay,e.true,u.done)=0 THEN END;
+      ELSE
+        d.PrintF("Can't alloc ctrl!\n");
+      END;
+    END;
+  ELSE
+    d.PrintF("Can't alloc ahi mode requester!\n");
+  END;
+END OpenAudio;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ---------------------------- "TYPE IMAData" ----------------------------- *)
+TYPE    IMAArray16=ARRAY 16 OF INTEGER;
+        IMAArray89=ARRAY 89 OF INTEGER;
+
+        IMADataPtr=UNTRACED POINTER TO IMAData;
+        IMAData=STRUCT
+            blockCnt: INTEGER;
+            indexTable: IMAArray16;
+            stepSizeTable: IMAArray89;
+        END;
+
+VAR     imaData: IMADataPtr;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ----------------------- "PROCEDURE DecodeIMA4()" ------------------------ *)
+PROCEDURE DecodeIMA4Mono {"_DecodeIMA4Mono"} (from{8}: e.APTR;
+                                              toL{9}: e.APTR;
+                                              toR{10}: e.APTR;
+                                              size{0}: LONGINT;
+                                              spec{11}: e.APTR): LONGINT;
+
+PROCEDURE DecodeIMA4Stereo {"_DecodeIMA4Stereo"} (from{8}: e.APTR;
+                                                  toL{9}: e.APTR;
+                                                  toR{10}: e.APTR;
+                                                  size{0}: LONGINT;
+                                                  spec{11}: e.APTR): LONGINT;
+
+PROCEDURE SetupIMA4(VAR codec: CodecHeader);
+BEGIN
+  IF imaData=NIL THEN NEW(imaData); END;
+  imaData.blockCnt:=64;
+  imaData.indexTable:=IMAArray16(-1,-1,-1,-1,2,4,6,8,
+                                 -1,-1,-1,-1,2,4,6,8);
+  imaData.stepSizeTable:=IMAArray89(    7,    8,    9,   10,   11,   12,   13,   14,   16,   17,
+                                       19,   21,   23,   25,   28,   31,   34,   37,   41,   45,
+                                       50,   55,   60,   66,   73,   80,   88,   97,  107,  118,
+                                      130,  143,  157,  173,  190,  209,  230,  253,  279,  307,
+                                      337,  371,  408,  449,  494,  544,  598,  658,  724,  796,
+                                      876,  963, 1060, 1166, 1282, 1411, 1552, 1707, 1878, 2066,
+                                     2272, 2499, 2749, 3024, 3327, 3660, 4026, 4428, 4871, 5358,
+                                     5894, 6484, 7132, 7845, 8630, 9493,10442,11487,12635,13899,
+                                    15289,16818,18500,20350,22385,24623,27086,29794,32767);
+  IF codec.stereo THEN
+    codec.decoder:=DecodeIMA4Stereo;
+  ELSE
+    codec.decoder:=DecodeIMA4Mono;
+  END;
+  codec.special:=imaData
+END SetupIMA4;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ----------------------- "PROCEDURE DecodePCM8()" ------------------------ *)
+PROCEDURE DecodePCM8Mono {"_DecodePCM8Mono"} (from{8}: e.APTR;
+                                              toL{9}: e.APTR;
+                                              toR{10}: e.APTR;
+                                              size{0}: LONGINT;
+                                              spec{11}: e.APTR): LONGINT;
+
+PROCEDURE DecodePCM8Stereo {"_DecodePCM8Stereo"} (from{8}: e.APTR;
+                                                  toL{9}: e.APTR;
+                                                  toR{10}: e.APTR;
+                                                  size{0}: LONGINT;
+                                                  spec{11}: e.APTR): LONGINT;
+
+PROCEDURE SetupPCM8(VAR codec: CodecHeader);
+BEGIN
+  IF codec.stereo THEN
+    codec.decoder:=DecodePCM8Stereo;
+  ELSE
+    codec.decoder:=DecodePCM8Mono;
+  END;
+  codec.special:=NIL;
+END SetupPCM8;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ----------------------- "PROCEDURE DecodePCM16()" ----------------------- *)
+PROCEDURE DecodePCM16Mono {"_DecodePCM16Mono"} (from{8}: e.APTR;
+                                                toL{9}: e.APTR;
+                                                toR{10}: e.APTR;
+                                                size{0}: LONGINT;
+                                                spec{11}: e.APTR): LONGINT;
+
+
+PROCEDURE DecodePCM16Stereo {"_DecodePCM16Stereo"} (from{8}: e.APTR;
+                                                    toL{9}: e.APTR;
+                                                    toR{10}: e.APTR;
+                                                    size{0}: LONGINT;
+                                                    spec{11}: e.APTR): LONGINT;
+
+PROCEDURE SetupPCM16(VAR codec: CodecHeader);
+BEGIN
+  IF codec.stereo THEN
+    codec.decoder:=DecodePCM16Stereo;
+  ELSE
+    codec.decoder:=DecodePCM16Mono;
+  END;
+  codec.special:=NIL;
+END SetupPCM16;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ----------------------- "PROCEDURE DecodeTWOS8()" ----------------------- *)
+PROCEDURE DecodeTWOS8Mono {"_DecodeTWOS8Mono"} (from{8}: e.APTR;
+                                                toL{9}: e.APTR;
+                                                toR{10}: e.APTR;
+                                                size{0}: LONGINT;
+                                                spec{11}: e.APTR): LONGINT;
+
+PROCEDURE DecodeTWOS8Stereo {"_DecodeTWOS8Stereo"} (from{8}: e.APTR;
+                                                    toL{9}: e.APTR;
+                                                    toR{10}: e.APTR;
+                                                    size{0}: LONGINT;
+                                                    spec{11}: e.APTR): LONGINT;
+
+PROCEDURE SetupTWOS8(VAR codec: CodecHeader);
+BEGIN
+  IF codec.stereo THEN
+    codec.decoder:=DecodeTWOS8Stereo;
+  ELSE
+    codec.decoder:=DecodeTWOS8Mono;
+  END;
+  codec.special:=NIL;
+END SetupTWOS8;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ---------------------- "PROCEDURE DecodeTWOS16()" ----------------------- *)
+PROCEDURE DecodeTWOS16Mono {"_DecodeTWOS16Mono"} (from{8}: e.APTR;
+                                                  toL{9}: e.APTR;
+                                                  toR{10}: e.APTR;
+                                                  size{0}: LONGINT;
+                                                  spec{11}: e.APTR): LONGINT;
+
+PROCEDURE DecodeTWOS16Stereo {"_DecodeTWOS16Stereo"} (from{8}: e.APTR;
+                                                      toL{9}: e.APTR;
+                                                      toR{10}: e.APTR;
+                                                      size{0}: LONGINT;
+                                                      spec{11}: e.APTR): LONGINT;
+
+PROCEDURE SetupTWOS16(VAR codec: CodecHeader);
+BEGIN
+  IF codec.stereo THEN
+    codec.decoder:=DecodeTWOS16Stereo;
+  ELSE
+    codec.decoder:=DecodeTWOS16Mono;
+  END;
+  codec.special:=NIL;
+END SetupTWOS16;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ----------------------- "PROCEDURE CodecQuery()" ------------------------ *)
+PROCEDURE CodecQuery * (VAR codec: CodecHeader): LONGINT;
+
+VAR     ret: LONGINT;
+
+BEGIN
+  ret:=codecSupported;
+  codec.stereo:=(codec.channels>1);
+  CASE codec.compression OF
+  | idima4:
+      codec.description:="IMA4";
+      IF codec.bits=16 THEN
+        SetupIMA4(codec);
+      ELSE
+        ret:=codecUnsupported;
+      END;
+  | idraw:
+      codec.description:="PCM";
+      IF codec.bits=8 THEN
+        SetupPCM8(codec);
+      ELSIF codec.bits=16 THEN
+        SetupPCM16(codec);
+      ELSE
+        ret:=codecUnsupported;
+      END;
+  | idtwos:
+      codec.description:="TWOS";
+      IF codec.bits=8 THEN
+        SetupTWOS8(codec);
+      ELSIF codec.bits=16 THEN
+        SetupTWOS16(codec);
+      ELSE
+        ret:=codecUnsupported;
+      END;
+  | idraw0:
+      codec.description:="PCM0";
+      ret:=codecUnsupported;
+  | idMAC3:
+      codec.description:="MAC3";
+      ret:=codecUnsupported;
+  | idMAC6:
+      codec.description:="MAC6";
+      ret:=codecUnsupported;
+  | idulaw:
+      codec.description:="µ-Law";
+      ret:=codecUnsupported;
+  ELSE
+    codec.description:="unknown";
+    ret:=codecUnknown;
+  END;
+  RETURN ret;
+END CodecQuery;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ----------------------- "PROCEDURE DecodeFrame()" ----------------------- *)
+PROCEDURE DecodeFrame * (size: LONGINT;
+                         codec: LONGINT);
+
+VAR     decSize: LONGINT;
+
+BEGIN
+  IF codec#currentCodec THEN
+    decoderProc:=codecs[codec].decoder;
+    decoderSpec:=codecs[codec].special;
+    audioFreq:=codecs[codec].frequency;
+    stereo:=codecs[codec].stereo;
+    currentCodec:=codec;
+  END;
+  IF stereo THEN size:=size*2; END;
+  IF (size>1) & (size<=audioBufferSize) THEN
+    d.PrintF("read\n");
+    io.Read(mainData,size);
+    IF bufPlaying[currSample] THEN
+      d.PrintF("wait\n");
+      IF e.Wait(LONGSET{d.ctrlC,d.ctrlF})=LONGSET{} THEN END;
+      IF e.Wait(LONGSET{d.ctrlC,d.ctrlF})=LONGSET{} THEN END;
+    END;
+    d.PrintF("decode\n");
+    decSize:=decoderProc(mainData,leftData[currSample],rightData[currSample],size,decoderSpec);
+    d.PrintF("setsound\n");
+    ahi.SetSound(0,0+currSample,0,decSize,ctrl,ahi.sfImm);
+    ahi.SetSound(1,2+currSample,0,decSize,ctrl,ahi.sfImm);
+    bufPlaying[currSample]:=TRUE;
+    currSample:=1-currSample;
+  END;
+END DecodeFrame;
+(* \\\ ------------------------------------------------------------------------- *)
+
+(* /// ---------------------- "PROCEDURE AllocBuffers()" ----------------------- *)
+PROCEDURE AllocBuffers * (): BOOLEAN;
+
+VAR     track: g.TrackPtr;
+        desc: g.SoundDescriptionPtr;
+        codec: CodecHeader;
+        cnt: LONGINT;
+        cur: LONGINT;
+        freq: LONGINT;
+        ret: BOOLEAN;
+
+BEGIN
+  ret:=TRUE;
+  freq:=0;
+  track:=g.animInfo.audioTrack;
+  IF codecs#NIL THEN DISPOSE(codecs); END;
+  ol.New(codecs,cu.CalcDescEntries(track)*SIZE(CodecHeader));
+  cur:=0;
+  REPEAT
+    FOR cnt:=0 TO track.descriptionEntries-1 DO
+      desc:=y.VAL(g.SoundDescriptionPtr,track.descriptions[cnt]);
+      codec.compression:=desc.head.dataFormat;
+      codec.bits:=desc.sampleSize;
+      codec.channels:=desc.channels;
+      codec.frequency:=fp.FP32toINT(desc.sampleRate);
+
+      CASE CodecQuery(codec) OF
+      | codecUnsupported:
+          d.PrintF("  Unsupported audio encoding: %s, %ld bits, %ld channels\n",y.ADR(codec.description),
+                                                                                codec.bits,
+                                                                                codec.channels);
+          IF ~o.noSound THEN d.PrintF("Continuing without sound\n"); END;
+          ret:=FALSE;
+      | codecUnknown:
+          d.PrintF("  Unknown audio encoding: $%08lx, %ld bits, %ld channels\n",codec.compression,
+                                                                                codec.bits,
+                                                                                codec.channels);
+          IF ~o.noSound THEN d.PrintF("Continuing without sound\n"); END;
+          ret:=FALSE;
+      ELSE
+        freq:=cu.max(freq,codec.frequency);
+        IF ~o.quiet THEN
+          IF codec.stereo THEN
+            d.PrintF("  Audio: %s %ld bit, %lu Hz, Stereo\n",y.ADR(codec.description),
+                                                             codec.bits,
+                                                             codec.frequency);
+          ELSE
+            d.PrintF("  Audio: %s %ld bit, %lu Hz, Mono\n",y.ADR(codec.description),
+                                                           codec.bits,
+                                                           codec.frequency);
+          END;
+        END;
+      END;
+      codecs[cur]:=codec;
+      INC(cur);
+    END;
+    track:=track.next;
+  UNTIL track=NIL;
+
+  IF ret & ~o.noSound THEN
+    freq:=i2m.Round(freq,e.blockSize);
+    IF mainData#NIL THEN DISPOSE(mainData); END;
+    ol.New(mainData,freq); (* Speicher für eine Sekunde allokieren *)
+    INCL(ol.MemReqs,e.chip);
+    FOR cnt:=0 TO 1 DO
+      IF leftData[cnt]#NIL THEN DISPOSE(leftData[cnt]); END;
+      IF rightData[cnt]#NIL THEN DISPOSE(rightData[cnt]); END;
+      ol.New(leftData[cnt],freq);
+      ol.New(rightData[cnt],freq);
+    END;
+    EXCL(ol.MemReqs,e.chip);
+    currentCodec:=0;
+    decoderProc:=codecs[0].decoder;
+    decoderSpec:=codecs[0].special;
+    audioFreq:=codecs[0].frequency;
+    stereo:=codecs[0].stereo;
+    audioBufferSize:=freq;
+  END;
+  RETURN ret;
+END AllocBuffers;
+(* \\\ ------------------------------------------------------------------------- *)
+
+BEGIN
+  currSample:=0;
+  IF ~ahi.OpenAHI() THEN
+    d.PrintF("Can't open ahi.device!\n");
+    HALT(0);
+  END;
+  NEW(amrHook);
+  u.InitHook(amrHook,y.VAL(u.HookFunc,AMReqHookFunc));
+  audioOpen:=TRUE;
+CLOSE
+  CloseAudio();
+  ahi.CloseAHI();
+END CyberQTAudio.

@@ -1,0 +1,376 @@
+/* Scheme In One Define.
+ 
+The garbage collector, the name and other parts of this program are
+
+ *                     COPYRIGHT (c) 1989 BY                              *
+ *      PARADIGM ASSOCIATES INCORPORATED, CAMBRIDGE, MASSACHUSETTS.       *
+
+Conversion  to  full scheme standard, characters, vectors, ports, complex &
+rational numbers, and other major enhancments by
+
+ *      Scaglione Ermanno, v. Pirinoli 16 IMPERIA P.M. 18100 ITALY        * 
+
+Permission  to use, copy, modify, distribute and sell this software and its
+documentation  for  any purpose and without fee is hereby granted, provided
+that  the  above  copyright  notice appear in all copies and that both that
+copyright   notice   and   this  permission  notice  appear  in  supporting
+documentation,  and that the name of Paradigm Associates Inc not be used in
+advertising or publicity pertaining to distribution of the software without
+specific, written prior permission.
+
+PARADIGM  DISCLAIMS  ALL WARRANTIES WITH REGARD TO THIS SOFTWARE, INCLUDING
+ALL  IMPLIED  WARRANTIES  OF MERCHANTABILITY AND FITNESS, IN NO EVENT SHALL
+PARADIGM  BE  LIABLE  FOR ANY SPECIAL, INDIRECT OR CONSEQUENTIAL DAMAGES OR
+ANY DAMAGES WHATSOEVER RESULTING FROM LOSS OF USE, DATA OR PROFITS, WHETHER
+IN  AN ACTION OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT
+OF OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
+
+*/
+
+#include <stdio.h>
+#include <string.h>
+#include <ctype.h>
+#include <setjmp.h>
+#include <signal.h>
+#include <math.h>
+
+#include "siod.h"
+
+LISP strcons(long length)
+{long flag;
+ LISP s;
+ char *p;
+ flag = no_interrupt(1);
+ if(length>4)
+   {p = must_malloc(length);
+    NEWCELL(s,tc_string);
+    SNAME(s) = p;}
+ else
+   {NEWCELL(s,tc_string);
+    SNAME(s) = SSMALL(s);}
+ no_interrupt(flag);
+ return(s);}
+
+LISP string_append(LISP args)
+{long size;
+ LISP l,s;
+ char *data;
+ size = 0;
+ for(l=args;CONSP(l);l=cdr(l))
+   {s = car(l);
+    if (NSTRINGP(s) && NSYMBOLP(s))
+      err("string-append",s,ERR_GEN_ARG | ERR_NSTR);
+    size = size + strlen(SNAME(s));}
+ s = strcons(size+1);
+ data = SNAME(s);
+ data[0] = 0;
+ for(l=args;CONSP(l);l=cdr(l))
+   strcat(data,SNAME(car(l)));
+ return(s);}
+
+LISP makestring(LISP dim,LISP init)
+{long size,i;
+ LISP s;
+ char *data,in;
+ if(NINTNUMP(dim))
+   err("make-string",dim,ERR_FIRST | ERR_NINT);
+ if(CHARP(init)) in = CHARV(init);
+ else if(NULLP(init)) in = ' ';
+ else err("make-string",init,ERR_SECOND | ERR_NCHA);
+ size = INTNM(dim);
+ s = strcons(size+1);  
+ data = SNAME(s);
+ data[size] = 0;
+ for(i=0;i<size;i++)
+   data[i] = in;
+ return(s);}
+
+LISP stringp(LISP x)
+{if STRINGP(x) 
+   return(truth);
+ return(NIL);}
+
+LISP charp(LISP x)
+{if CHARP(x) 
+   return(truth);
+ return(NIL);}
+
+LISP chartoint(LISP x)
+{LISP z;
+ if NCHARP(x) err("char->integer",x,ERR_GEN_ARG | ERR_NCHA);
+ z = intcons((long)CHARV(x));
+ return(z);}
+
+LISP charcons(long c)
+{long flag;
+ LISP z;
+ flag=no_interrupt(1);
+ if(NNULLP(chararray[c]))
+   return(chararray[c]);
+ NEWCELL(z,tc_char);
+ CHARV(z) = (char)c;
+ chararray[c]=z;
+ no_interrupt(flag);
+ return(z);}
+
+LISP inttochar(LISP x)
+{long in;
+ if NINTNUMP(x) err("integer->char",x,ERR_GEN_ARG | ERR_NINT);
+ in = INTNM(x);
+ if((in<0)||(in>255)) err("integer->char",x,ERR_IND_RAN);
+ return(charcons(in));}
+
+LISP chardowncase(LISP x)
+{int in;
+ if NCHARP(x) err("char-downcase",x,ERR_GEN_ARG | ERR_NCHA);
+ in = CHARV(x);
+ return(charcons(tolower(in)));}
+
+LISP charupcase(LISP x)
+{int in;
+ if NCHARP(x) err("char-upcase",x,ERR_GEN_ARG | ERR_NCHA);
+ in = CHARV(x);
+ return(charcons(toupper(in)));}
+
+LISP charcmp(LISP x,LISP y)
+{LISP z;
+ if NCHARP(x) err("char-cmp",x,ERR_FIRST | ERR_NCHA);
+ if NCHARP(y) err("char-cmp",y,ERR_SECOND | ERR_NCHA);
+ z = intcons((long)(CHARV(x)-CHARV(y)));
+ return(z);}
+
+LISP string_lenght(LISP x)
+{LISP z;
+ if NSTRINGP(x) err("string-length",x,ERR_GEN_ARG | ERR_NSTR);
+ z = intcons((long)strlen(SNAME(x))); 
+ return(z);}
+
+LISP string_to_symbol(LISP x)
+{if NSTRINGP(x) err("string->symbol",x,ERR_GEN_ARG | ERR_NSTR);
+ if(strlen(SNAME(x)) > TKBUFFERN) 
+    err("string->symbol buffer overflow",NIL,ERR_GEN);
+ return(rintern(SNAME(x)));}
+
+LISP symbol_to_string(LISP x)
+{LISP z;
+ char *p;
+ if ((NSYMBOLP(x) && NTYPEP(x,tc_macro))) 
+     err("symbol->string",x,ERR_GEN_ARG | ERR_NSYM); 
+ p = PNAME(x);
+ z = strcons(strlen(p)+1);
+ strcpy(SNAME(z),p);
+ return(z);}
+
+LISP string_to_un_symbol(LISP x)
+{LISP z;
+ char *p;
+ if (NSTRINGP(x)) 
+     err("string->uninterned-symbol",x,ERR_GEN_ARG | ERR_NSTR); 
+ p = PNAME(x);
+ z = strcons(strlen(p)+1);
+ strcpy(SNAME(z),p);
+ (*z).type=tc_symbol;
+ return(z);}
+
+LISP string_to_number(LISP x,LISP y,LISP z)
+{LISP tmp;
+ char *p;
+ if NSTRINGP(x) err("string->number",x,ERR_FIRST | ERR_NSTR); 
+ if NSYMBOLP(y) err("string->number",y,ERR_SECOND | ERR_NSYM); 
+ if NSYMBOLP(z) err("string->number",z,ERR_THIRD | ERR_NSYM); 
+ if(EQ(z,cintern("b")))
+  tmp=intcons(strtol(SNAME(x),&p,2));
+ else if(EQ(z,cintern("d")))
+  tmp=flocons(strtod(SNAME(x),&p));
+ else if(EQ(z,cintern("o")))
+  tmp=intcons(strtol(SNAME(x),&p,8));
+ else if(EQ(z,cintern("x")))
+  tmp=intcons(strtol(SNAME(x),&p,16));
+ else
+   err("Unknown format to string->number",z,ERR_GEN);
+ if(*p)
+   err("String to string->number must contain a number",x,ERR_GEN);
+ return(tmp);}
+
+LISP number_to_string(LISP x,LISP y)
+{LISP z;
+ int amp,prec;
+ if (NNUMBERP(x)) err("number->string",x,ERR_FIRST | ERR_NNUM);
+ if (NCONSP(y)) err("number->string",y,ERR_SECOND | ERR_NPAI);
+ if EQ(car(y),cintern("int"))
+   switch(TYPE(x))
+    {case tc_flonum:
+       sprintf(tkbuffer,"%.0f",FLONM(x));
+       break;
+     case tc_compnum:
+       sprintf(tkbuffer,"%.0f%+.0fi",COMPRE(x),COMPIM(x));
+       break;
+     case tc_ratnum:
+       sprintf(tkbuffer,"%.0f",(double)RATNUM(x)/(double)RATDEN(x));
+       break;
+     case tc_intnum:
+       sprintf(tkbuffer,"%d",INTNM(x));
+       break;}
+ if EQ(car(y),cintern("heur"))
+   switch(TYPE(x))
+    {case tc_flonum:
+       sprintf(tkbuffer,"%.16g",FLONM(x));
+       break;
+     case tc_compnum:
+       sprintf(tkbuffer,"%.6g%+.6gi",COMPRE(x),COMPIM(x));
+       break;
+     case tc_ratnum:
+       sprintf(tkbuffer,"%d/%d",RATNUM(x),RATDEN(x));
+       break;
+     case tc_intnum:
+       sprintf(tkbuffer,"%d",INTNM(x));
+       break;}
+ z = strcons(strlen(tkbuffer)+1);
+ strcpy(SNAME(z),tkbuffer);
+ return(z);}
+
+LISP integer_to_string(LISP numer,LISP base)
+{long n,i,resto;
+ LISP z;
+ double num,ba;
+ char *p;
+ n=0;
+ p=tkbuffer;
+ numer = tofloat(numer);
+ base = tofloat(base);
+ if (NFLONUMP(numer)||(modf(FLONM(numer),&ba)!=0.)) 
+      err("integer->string",numer,ERR_FIRST | ERR_NINT);
+ if (NFLONUMP(base)||(modf(FLONM(base),&ba)!=0.)) 
+      err("integer->string",base,ERR_SECOND | ERR_NINT);
+ num=FLONM(numer);
+ ba=FLONM(base);
+ while(num>0.)
+  {resto=(long)fmod(num,ba);
+   n++;
+   if(resto<10)
+    *p++='0'+(char)resto;
+   else
+    *p++='A'+(char)resto-(char)10;
+   num/=ba;
+   modf(num,&num);}
+ *p--='\0';
+ z = strcons(strlen(tkbuffer)+1);
+ for(i=0;i<n;i++)
+   *(SNAME(z)+i)=*(p-i);
+ *(SNAME(z)+i)='\0';
+ return(z);}
+
+LISP string_to_list(LISP x)
+{LISP y,*z;
+ char *p;
+ if NSTRINGP(x) err("string->list",x,ERR_GEN_ARG | ERR_NSTR);
+ y = NIL;
+ z = &y;
+ for(p=SNAME(x);*p;p++)
+  {*z = cons(charcons(*p),NIL);
+   z = &CDR(*z);}
+ return y;}
+
+LISP list_to_string(LISP x)
+{LISP s,tmp;
+ int lenght=1;
+ char *p;
+ if NCONSP(x) err("list->string",x,ERR_GEN_ARG | ERR_NPAI);
+ for(tmp=x;NNULLP(tmp);tmp=cdr(tmp))
+  {if(NCHARP(car(tmp)))err("list->string",tmp,ERR_GEN_ARG | ERR_NCHA);
+   lenght++;}
+ s = strcons(lenght);
+ p = SNAME(s);
+ for(tmp=x;NNULLP(tmp);tmp=cdr(tmp))
+  {*p = CHARV(car(tmp));
+   p++;}
+ *p = '\0';
+ return s;}
+
+LISP string_copy(LISP x)
+{LISP z;
+ if NSTRINGP(x) err("string-copy",x,ERR_GEN_ARG | ERR_NSTR);
+ z = strcons(strlen(SNAME(x))+1);
+ strcpy(SNAME(z),SNAME(x)); 
+ return(z);}
+
+LISP string_fill(LISP x,LISP y)
+{char *p,c;
+ if NSTRINGP(x) err("string-fill!",x,ERR_GEN_ARG | ERR_NSTR);
+ if NCHARP(y) err("string-fill!",y,ERR_GEN_ARG | ERR_NSTR);
+ c = CHARV(y);
+ p = SNAME(x);
+ while(*p!='\0')
+  *p++=c;
+ return(x);}
+
+LISP string_cmp(LISP x,LISP y)
+{LISP z;
+ if NSTRINGP(x) err("string-cmp",x,ERR_FIRST | ERR_NSTR);
+ if NSTRINGP(y) err("string-cmp",y,ERR_SECOND | ERR_NSTR);
+ z = intcons((long)strcmp(SNAME(x),SNAME(y))); 
+ return(z);}
+
+LISP string_cmpCI(LISP x,LISP y)
+{LISP z;
+ if NSTRINGP(x) err("string-cmp-CI",x,ERR_FIRST | ERR_NSTR);
+ if NSTRINGP(y) err("string-cmp-CI",y,ERR_SECOND | ERR_NSTR);
+ z = intcons((long)strcmpCI(SNAME(x),SNAME(y))); 
+ return(z);}
+
+int strcmpCI(char *s,char *t)
+{for(;tolower(*s) == tolower(*t);s++,t++)
+  if(*s=='\0')
+    return 0;
+ return tolower(*s)-tolower(*t);}
+
+LISP string_ref(LISP x,LISP y)
+{LISP z;
+ char *px;
+ long py;
+ if NSTRINGP(x) err("string-ref",x,ERR_FIRST | ERR_NSTR);
+ if NINTNUMP(y) err("string-ref",y,ERR_SECOND | ERR_NSTR);
+ px = SNAME(x);
+ py = (long)INTNM(y);
+ if (py < 0) err("string-ref",y,ERR_IND_RAN);
+ if (py >= strlen(px)) err("string-ref",y,ERR_IND_RAN);
+ z = charcons(*(px+py)); 
+ return(z);}
+
+LISP string_set(LISP x,LISP y,LISP z)
+{char *px;
+ long py;
+ if NSTRINGP(x) err("string-set!",x,ERR_FIRST | ERR_NSTR);
+ if NINTNUMP(y) err("string-set!",y,ERR_SECOND | ERR_NNUM);
+ if NCHARP(z) err("string-set!",z,ERR_THIRD | ERR_NCHA);
+ px = SNAME(x);
+ py = (long)INTNM(y);
+ if (py < 0) err("string-set!",y,ERR_IND_RAN);
+ if (py >= strlen(px)) err("string-set!",y,ERR_IND_RAN);
+ *(px+py) = CHARV(z); 
+ return(x);}
+
+LISP substring(LISP x,LISP y,LISP z)
+{LISP k;
+ long l,start,end;
+ char *c;
+ if NSTRINGP(x) err("substring",x,ERR_FIRST | ERR_NSTR);
+ if NINTNUMP(y) err("substring",y,ERR_SECOND | ERR_NINT);
+ if NINTNUMP(z) err("substring",z,ERR_THIRD | ERR_NINT);
+ l = strlen(SNAME(x));
+ start = INTNM(y);
+ end = INTNM(z);
+ if (l < start) err("substring",y,ERR_IND_RAN);
+ if (l < end) err("substring",z,ERR_IND_RAN);
+ if (end < start) err("substring",z,ERR_IND_RAN);
+ k = strcons(end-start+1);
+ c=SNAME(k);
+ strncpy(c,SNAME(x)+start,end-start);
+ *(c+end-start)='\0';
+ return(k);}
+
+LISP dos_call(LISP x)
+{
+ if NSTRINGP(x) err("dos-call",x,ERR_GEN_ARG | ERR_NSTR);
+ system(SNAME(x));
+ return (truth);}

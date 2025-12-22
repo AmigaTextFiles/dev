@@ -1,0 +1,166 @@
+/*****************************************************************************/
+/*                                                                           */
+/*				    mouse.h				     */
+/*                                                                           */
+/*				   Mouse API				     */
+/*                                                                           */
+/*                                                                           */
+/*                                                                           */
+/* (C) 1999-2001 Ullrich von Bassewitz                                       */
+/*               Wacholderweg 14                                             */
+/*               D-70597 Stuttgart                                           */
+/* EMail:        uz@musoftware.de                                            */
+/*                                                                           */
+/*                                                                           */
+/* This software is provided 'as-is', without any expressed or implied       */
+/* warranty.  In no event will the authors be held liable for any damages    */
+/* arising from the use of this software.                                    */
+/*                                                                           */
+/* Permission is granted to anyone to use this software for any purpose,     */
+/* including commercial applications, and to alter it and redistribute it    */
+/* freely, subject to the following restrictions:                            */
+/*                                                                           */
+/* 1. The origin of this software must not be misrepresented; you must not   */
+/*    claim that you wrote the original software. If you use this software   */
+/*    in a product, an acknowledgment in the product documentation would be  */
+/*    appreciated but is not required.                                       */
+/* 2. Altered source versions must be plainly marked as such, and must not   */
+/*    be misrepresented as being the original software.                      */
+/* 3. This notice may not be removed or altered from any source              */
+/*    distribution.                                                          */
+/*                                                                           */
+/*****************************************************************************/
+
+
+
+#ifndef _MOUSE_H
+#define _MOUSE_H
+
+
+
+/* Define __MOUSE__ for systems that support a mouse */
+#if defined(__ATARI__) || defined(__C64__) || defined(__C128__) || defined(__CBM510__) || defined(__GEOS__)
+#  define __MOUSE__
+#else
+#  error The target system does not support a mouse!
+# endif
+
+
+
+/*****************************************************************************/
+/* 	      			  Definitions	     			     */
+/*****************************************************************************/
+
+
+
+/* The different mouse types */
+#define MOUSE_TRAKBALL 		0
+#define MOUSE_ST		1
+#define MOUSE_AMIGA		2
+#define MOUSE_CBM1351  	        3      /* 1351 mouse */
+
+/* Mouse button masks */
+#define MOUSE_BTN_LEFT	     0x10
+#define MOUSE_BTN_RIGHT      0x01
+
+/* Structure containing the mouse coordinates */
+struct mouse_pos {
+    int x;
+    int y;
+};
+
+/* Structure containing information about the mouse */
+struct mouse_info {
+    struct mouse_pos    pos;           /* Mouse position */
+    unsigned char       buttons;       /* Mouse button mask */
+};
+
+
+
+/*****************************************************************************/
+/* 	      			   Functions	     			     */
+/*****************************************************************************/
+
+
+
+unsigned char __fastcall__ mouse_init (unsigned char type);
+/* Setup the mouse interrupt handler. The mouse routines will use a predefined
+ * system resource for the mouse port and mouse cursor:
+ *     C64:      Port #0, Sprite #0
+ *     C128:     Port #0, Sprite #0
+ *     GEOS:     System defined port, Sprite #0
+ *     Atari:    Port #0, PM #0
+ * However, the mouse routines will not initialize this cursor or set a
+ * specific shape - this is platform dependent and up to the user program.
+ * The mouse cursor is moved if the mouse is moved (provided that the mouse
+ * cursor is visible), and switched on and off in the show and hide functions.
+ * The type parameter is needed on some systems to determine the type of
+ * the mouse connected to the given port, on others it is ignored.
+ * After calling this function, the mouse is invisble, the cursor is placed
+ * at 0/0 (upper left corner), and the bounding box is reset to cover the
+ * whole screen. Call mouse_show once to make the mouse cursor visible.
+ * The function will return zero if a mouse was not found and a non zero
+ * value if the mouse was found and initialized (or if there is no way to
+ * detect a mouse reliably).
+ */
+
+void __fastcall__ mouse_done (void);
+/* Disable the mouse, remove the interrupt handler. This function MUST be
+ * called before terminating the program, otherwise odd things may happen.
+ * If in doubt, install an exit handler (using atexit) that calls this
+ * function.
+ */
+
+void __fastcall__ mouse_hide (void);
+/* Hide the mouse. This function doesn't do anything visible if no sprite is
+ * used. The function manages a counter and may be called more than once.
+ * For each call to mouse_hide there must be a call to mouse_show to make
+ * the mouse visible again.
+ */
+
+void __fastcall__ mouse_show (void);
+/* Show the mouse. This function doesn't do anything visible if no sprite is
+ * used. See mouse_hide for more information.
+ */
+
+void __fastcall__ mouse_box (int minx, int miny, int maxx, int maxy);
+/* Set the bounding box for the mouse pointer movement. The mouse X and Y
+ * coordinates will never go outside the given box.
+ * NOTE: The function does *not* check if the mouse is currently inside the
+ * given margins. The proper way to use this function therefore is:
+ *
+ * 	- Hide the mouse
+ * 	- Set the bounding box
+ * 	- Place the mouse at the desired position
+ * 	- Show the mouse again.
+ *
+ * NOTE2: When setting the box to something that is larger than the actual
+ * screen, the positioning of the mouse cursor will fail. If such margins
+ * are really what you want, you have to use your own cursor routines.
+ */
+
+void __fastcall__ mouse_move (int x, int y);
+/* Set the mouse cursor to the given position. If a mouse cursor is defined
+ * and currently visible, the mouse cursor is also moved.
+ * NOTE: This function does not check if the given position is valid and
+ * inside the bounding box.
+ */
+
+unsigned char __fastcall__ mouse_buttons (void);
+/* Return a bit mask encoding the states of the mouse buttons. Use the
+ * MOUSE_BTN_XXX flags to decode a specific button.
+ */
+
+void __fastcall__ mouse_pos (struct mouse_pos* pos);
+/* Return the current mouse position */
+
+void __fastcall__ mouse_info (struct mouse_info* info);
+/* Return the state of the mouse buttons and the position of the mouse */
+
+
+
+/* End of mouse.h */
+#endif
+
+
+

@@ -1,0 +1,47 @@
+OPT MODULE, PREPROCESS
+OPT EXPORT
+
+CONST SM_MAXSTRLEN=1024
+
+OBJECT sm_name
+  mon_name:PTR TO CHAR
+ENDOBJECT
+
+OBJECT my_id
+  name:PTR TO CHAR
+  prog
+  vers
+  proc
+ENDOBJECT
+
+OBJECT mon_id
+  mon_name:PTR TO CHAR
+  my_id:my_id
+ENDOBJECT
+
+OBJECT mon
+  mon_id:mon_id
+  priv[16]:ARRAY
+ENDOBJECT
+
+OBJECT sm_stat
+  state
+ENDOBJECT
+
+ENUM STAT_SUCC, STAT_FAIL
+
+OBJECT sm_stat_res
+  res_stat
+  state
+ENDOBJECT
+
+OBJECT status
+  mon_name:PTR TO CHAR
+  state
+  priv[16]:ARRAY
+ENDOBJECT
+
+CONST SM_PROG=100024,
+      SM_VERS=1
+
+ENUM SM_STAT=1, SM_MON, SM_UNMON, SM_UNMON_ALL, SM_SIMU_CRASH

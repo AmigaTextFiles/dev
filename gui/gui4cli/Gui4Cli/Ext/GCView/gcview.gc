@@ -1,0 +1,515 @@
+G4C
+
+; ******************** This is a Gui4Cli gui *********************
+; - You need Gui4Cli version 3.8 to run it 
+; - Get it from Aminet or <http://users.hol.gr/~dck/gcmain.htm>
+; ****************************************************************
+
+; TAB size is 3
+
+; This gui works fine, but it is still a long way from finished.
+; It is mostly a test-bed for gcview with various buttons and no
+; real logic behind it.. I will try to correct this sometime.
+
+; Till then however, it will make gcview easier to use.
+
+; ================================================================
+
+WINBIG 14 -10 640 95 ''  ; note -10 for top (see guide)
+wintype 00001100
+screen GCView
+usetopaz
+BOX 0 0 640 95 out button
+
+xOnLoad
+	Local scheight/winheight/barheight
+	screentog = 0				; screen2front toggle
+	start	    = 0
+	frames    = 60
+	frtotal   = 60
+	file      = ''
+	loadall   = ON
+	andir     = PINGPONG
+	dmode     = BG
+	fcount    = 0
+	scpos     = 0				; def screen position (half screen)
+	fillmode  = BRUSH			; def paste fill mode
+
+	; make a hires screen - graphics cards bye-bye..
+	makescreen GCView 640/256/3/0x8000 'Gui4Cli Gui 4 GCView by dck@hol.gr'
+
+	; Initialise stuff..
+	guiload :gcview.g					; load helper routines..
+	gosub gcview.g StartGCView		; start gcview
+	gosub gcview.g OpenGCView		; open window, adjust screen..
+	gosub gcview.g InitPalette		; init palette changer
+
+	; notify keys
+	call gcview notify RMB Gui4Cli 'gosub gcview.gc do_rmb'
+
+	guiload :gcview.g2				; load the prefs gui
+
+xOnQuit
+	guiclose gettext
+	guiquit gettext		; end of gcview.g file
+	guiquit gcview.g		; helper routines
+	guiquit gcview.g2		; prefs gui
+	guiclose #this
+	killscreen GCView
+	call gcview quit force
+
+; -----------------------------------------------------------
+;		RMB & KEY routines
+; -----------------------------------------------------------
+
+xOnRMB
+	gosub #this do_rmb
+
+xRoutine do_rmb ; flip GCView screen front/back
+	if $$sys.fsn == GCView
+		guiscreen gcview.gc back
+	else
+		guiscreen gcview.gc front
+	endif
+
+xOnKey #R
+	gosub gcview.g dorawkey
+
+xOnKey #V
+	gosub gcview.g dovankey
+
+; -----------------------------------------------------------
+;		crop & tile 
+; -----------------------------------------------------------
+
+XICON 270 0 :icn/crop
+	gadid 50
+	call gcview crop mypic
+	guiscreen gcview.gc front
+
+XICON 363 0 :icn/mtile
+	gadid 50
+	gosub gcview.g tilepic 1
+
+XICON 363 15 :icn/tile
+	gadid 50
+	gosub gcview.g tilepic 0
+
+XICON 363 30 :icn/mirror			; do 4 way mirror
+	gadid 50
+	gosub gcview.g 4waymirrtile
+
+; -----------------------------------------------------------
+;		Flip and rotate buttons
+; -----------------------------------------------------------
+
+XICON 303 0 :icn/HFlip
+	gadid 50
+	call gcview flip mypic horizontal
+
+XICON 303 15 :icn/VFlip
+	gadid 50
+	call gcview flip mypic vertical
+
+XICON 303 30 :icn/RRotate
+	gadid 50
+	call gcview rotate mypic right
+
+XICON 303 45 :icn/LRotate
+	gadid 50
+	call gcview rotate mypic left
+
+
+; -----------------------------------------------------------
+;	PAN
+; -----------------------------------------------------------
+
+; ------------- Vertical
+
+XICON 333 45 :icn/vpan
+	gadid 50
+	call gcview pan mypic MIRROR VERTICAL
+
+XICON 333 30 :icn/vpanNoMirr
+	gadid 50
+	call gcview pan mypic VERTICAL
+
+; ------------ Horizintal
+
+XICON 333 0 :icn/panNoMirr
+	gadid 50
+	call gcview pan mypic
+
+XICON 333 15 :icn/pan
+	gadid 50
+	call gcview pan mypic MIRROR
+
+
+; -----------------------------------------------------------
+;	VARIOUS - SAVE, QUIT...
+; -----------------------------------------------------------
+; ------------ normal save
+
+XICON 240 30 :icn/save
+	gosub gcview.g Save
+
+; ------------ Clear & quit
+
+XICON 240 60 :icn/clear
+	; unload all pics and anims (keep palettes)
+	call gcview unload #PIC
+	call gcview unload #ANIM
+
+XICON 240 75 :icn/quit
+	local choice
+	ezreq 'Quit GCView ?' 'Quit|CANCEL' choice
+	if $choice = 1
+		guiquit #this
+	endif
+
+; -----------------------------------------------------------
+;		The listview
+; -----------------------------------------------------------
+
+XLISTVIEW 4 0 210 92 "" file "" 10 DIR
+	gadid 1
+	gadfont #mono 8 000
+	attr lvfilter "~(#?.info)"			; set filter - no icons
+
+	lastfileloaded = $file
+
+	if $dmode = D1 	; spare dirs..
+		DIR1 = $$lv.dir
+	elseif $dmode = D2
+		DIR2 = $$lv.dir
+	elseif $dmode = D3
+		DIR3 = $$lv.dir
+	endif
+
+	gosub gcview.g showfile
+	guiscreen gcview.gc front
+	lvmulti none
+	lvmove #$$lv.line
+	lvmulti on
+
+
+xLVDirHook 1
+	lvuse #this 1
+	setscreentitle #this '$$lv.dir'
+
+	if $dmode = D1 	; spare dirs..
+		DIR1 = $$lv.dir
+	elseif $dmode = D2
+		DIR2 = $$lv.dir
+	elseif $dmode = D3
+		DIR3 = $$lv.dir
+	endif
+
+; -----------------------------------------------------------
+;	View selected files
+; -----------------------------------------------------------
+
+XICON 240 0 ":icn/View"
+	StopView = 0				; flag to abort viewing
+
+	; install notify command
+	call gcview notify V32 Gui4Cli 'gosub gcview.gc ViewNext'
+	call gcview notify V13 Gui4Cli 'gosub gcview.gc ViewNext'
+
+	lvuse #this 1
+	lvmulti first
+	gosub #this ViewRtn
+	guiscreen gcview.gc back
+
+xRoutine ViewNext
+	lvuse #this 1
+	lvmulti off
+	lvmulti next
+	gosub #this ViewRtn
+	guiscreen gcview.gc back
+
+xRoutine ViewRtn	; actually show the file, or stop
+	if $$lv.line > ''
+	and $StopView = 0
+		gosub gcview.g showfile			; same routine as the LV itself
+	else
+		call gcview unload mypic
+		call gcview unload #ANIM
+		call gcview delnotify V13
+		call gcview delnotify V32
+		guiscreen gcview.gc front
+		stop
+	endif
+
+; -----------------------------------------------------------
+;		Delete file
+; -----------------------------------------------------------
+
+XICON 240 45 ":icn/Delete"
+	lvuse #this 1
+	lvaction delete REQ
+
+; -----------------------------------------------------------
+;		listview controls
+; -----------------------------------------------------------
+
+XBUTTON 216 0 20 15 "P"
+	lvuse #this 1
+	lvdir parent
+	setscreentitle #this '$$lv.dir'
+	
+XBUTTON 216 15 20 15 "D"
+	lvuse #this 1
+	lvdir disks
+	setscreentitle #this Devices
+
+XBUTTON 216 30 20 15 "A"
+	lvuse #this 1
+	lvmulti all
+
+XBUTTON 216 45 20 15 "N"
+	lvuse #this 1
+	lvmulti none
+
+XBUTTON 216 60 20 15 "<"
+	lvuse #this 1
+	lvmove -1000
+
+XBUTTON 216 75 20 15 "R"
+	lvuse #this 1
+	lvdir refresh
+
+; ---------------------------------------------------------
+;	status box
+; ---------------------------------------------------------
+
+TEXT 411 3 225 14 "Welcome to GCView!" 100 BOX
+	gadid 10
+
+; -----------------------------------------------------------
+;		anims
+; -----------------------------------------------------------
+
+;XICON 350 20 :icn/1Anim1
+;	gadid 60
+
+;XICON 350 20 :icn/1Effects0
+;	gadid 60
+
+XCHECKBOX 606 57 30 15 "LoadAll" loadall "ON" "OFF" ON
+	gadid 2
+	if $loadall == ON
+		setgad #this 3/4 on
+	else
+		setgad #this 3/4 off
+	endif
+
+XHSLIDER 459 18 146 11 "Start" start 0 100 0 "%ld"
+	gadid 3
+	gosub #this checklength
+
+XHSLIDER 459 30 146 11 "Long" frames 0 60 60 "%ld"
+	gadid 4
+	gosub #this checklength
+
+xroutine checklength
+	remain = $($frtotal - $start)
+	if $frames > $remain
+		frames = $remain
+		update #this 4 $frames
+	endif
+
+XICON 546 42 :icn/Backward
+	call gcview set direction mypic backward
+	andir = BACKWARD
+
+XICON 576 42 :icn/forward
+	call gcview set direction mypic forward
+	andir = FORWARD
+
+XICON 606 42 :icn/pingpong
+	call gcview set direction mypic ping
+	andir = PINGPONG
+
+XICON 456 42 ":icn/AddFrame"		; add a frame
+	call gcview addframe mypic
+	gosub gcview.g showinfo
+
+XICON 486 42 ":icn/DelFrame<"		; delete frame from end
+	call gcview info anim mypic
+	info = $$call.ret
+	parsevar info
+	if $$parse.tot > 1
+		call gcview delframe mypic $($$parse.0 - 1) 1
+	endif
+	gosub gcview.g showinfo
+
+XICON 516 42 ":icn/DelFrame>"		; delete frame from start
+	call gcview delframe mypic 0 1
+	gosub gcview.g showinfo
+
+XICON 240 15 :icn/RRotate			; RELOAD with new settings
+	if $file > ''
+		gosub gcview.g playanim 1
+		gosub gcview.g showinfo
+	endif
+
+; -----------------------------------------------------------
+;		use palette
+; -----------------------------------------------------------
+ 
+XICON 333 75 :icn/palette
+	call gcview move pubscreen GCView 0 0 
+	ReqFile -1 -1 300 -40 'Choose a palette' LOAD palname ''
+	call gcview move pubscreen GCView 0 160
+	ifexists file $palname
+		call gcview unload mypal
+		call gcview load $palname mypal
+	endif
+
+XCHECKBOX 363 75 26 15 "" usepalette "ON" "" OFF
+	gadid 51
+	ifexists file ~$palname
+		ezreq 'Please choose a palette!\n' "OK" ""
+		update #this 51 0
+	endif
+
+; -----------------------------------------------------------
+;	zoom to screen
+;	- if there is an edit box, zoom the contents
+;	- otherwise fit the picture to the screen
+; -----------------------------------------------------------
+
+XICON 270 15 :icn/Zoom
+	gosub gcview.g GetBoxSize
+	guiwindow #this wait
+	call gcview zoom mypic $x $y $w $h
+	guiwindow #this resume
+	guiscreen gcview.gc front
+
+; -----------------------------------------------------------
+;	Blend, Erase
+; -----------------------------------------------------------
+
+XICON 333 60 :icn/fav      ; was ":icn/Blend"
+	; call gcview BGBlend mypic
+	guiopen gcview.g2	; open prefs gui
+
+XICON 363 60 :icn/Blend
+	call gcview BGBlend mypic
+
+XICON 270 30 ":icn/Erase"
+	gosub gcview.g GetBoxSize
+	call gcview set pens 0 0 JAM1
+	call gcview Rect mypic $x $y $($w + $x) $($h + $y)
+
+; -----------------------------------------------------------
+;	Text
+; -----------------------------------------------------------
+
+XICON 270 60 ":icn/Text"
+	local txt
+	guiopen gettext
+
+XICON 270 75 ":icn/Font"
+	local txtfont/fontsize
+	txtfont = ''
+	ReqFile -1 -1 400 -40 'Choose font size:' LOAD txtfont #FONTS:
+	if $txtfont > ''
+		extract txtfont file fontsize
+		extract txtfont path txtfont
+		extract txtfont file txtfont
+		appvar txtfont .font
+		call gcview set font $txtfont $fontsize 000
+
+		call gcview set pens 13 3 OUTLINE
+
+	endif
+
+; -----------------------------------------------------------
+;	Palette presets handling
+;	- make a list of available palettes & browse through them
+; -----------------------------------------------------------
+
+XICON 576 75 :icn/nextpal
+	gosub gcview.g NextPalette
+
+; -----------------------------------------------------------
+;  BRUSH - add brush..
+; -----------------------------------------------------------
+
+XICON 270 45 ":icn/brush"
+	gosub gcview.g pastebrush
+
+; -----------------------------------------------------------
+;  COPY & PASTE
+; -----------------------------------------------------------
+
+XICON 303 60 ":icn/Cut"
+	call gcview copy mypic myclip
+
+XICON 303 75 ":icn/Paste"
+	; paste myclip at EditBox x y as per mode
+	call gcview paste myclip mypic -1 -1 $fillmode
+	guiscreen gcview.gc front
+
+XICON 363 45 ":icn/Build"
+	gosub gcview.g buildpic
+
+; -----------------------------------------------------------
+;  MY STUFF...
+; -----------------------------------------------------------
+
+TEXT 393 75 86 15 "" 100 BOX			; Clock - refreshed from s:gui/main.gc
+	gadid 27
+	gadtxt center
+
+XICON 546 75 :icn/wbtog					; open/close bw
+	ifexists screen 'Workbench'
+		workbench close
+	else
+		workbench open
+	endif
+
+XICON 606 75 :icn/DIR					; dir.gc
+	ifexists gui dir.gc
+		guiclose dir.gc
+		guiopen dir.gc
+	else
+		guiload guis:dir/dir.gc
+	endif
+	movescreen #this 0 12
+
+XICON 516 75 :icn/DP						; dpaint
+	ifexists gui dpaintbar.gc
+		guiclose dpaintbar.gc
+		guiopen dpaintbar.gc
+	else
+		guiload s:gui/dpaintbar.gc
+	endif
+
+XICON 483 75 ":icn/Build"				; set as background (used to be de-interlace)
+	local w/h/temp
+
+	; resize to wb size..
+	call gcview info pubscreen Workbench
+	temp = $$call.ret
+	parsevar temp
+	if $$parse.total > 3
+		w = $$parse.2
+		h == $$parse.3 - $$parse.5  ; height-barheight
+	else
+		stop
+	endif
+	call gcview resize mypic $w $h
+
+	; set as bgd
+	CLI 'DH0:prefs/WBpattern FROM Hard:Prefs/Presets/WBPat.clear USE'
+	delay 2
+	call gcview save mypic ram:WBP
+	CLI 'DH0:prefs/WBpattern FROM Hard:Prefs/Presets/WBPat.set USE'
+
+	; clear..
+	call gcview unload #PIC
+	call gcview unload #ANIM
+

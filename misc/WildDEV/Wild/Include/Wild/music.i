@@ -1,0 +1,9 @@
+
+	IFND	WILMusic
+WILMusic	SET	1
+
+		STRUCTURE	WildMusicModuleBASE,wm_SIZEOF
+			LABEL	wmm_SIZEOF
+
+
+	ENDC

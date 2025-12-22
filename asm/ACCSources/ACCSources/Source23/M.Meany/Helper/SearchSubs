@@ -1,0 +1,716 @@
+
+
+; Subroutines for StructHelp
+
+****************************************************************************
+*			Open / Close Window Routines			   *
+****************************************************************************
+
+;--------------
+;--------------	Routine to open the main window
+;--------------
+
+* Entry		OldXm(a5) = x position to open at
+;		OldYm(a5) = y position to open at
+
+* Exit		d0=NULL if window failed to open
+;		window.ptr(a5) is set
+
+* Corrupt	None
+
+OpenMain	movem.l		d1-d7/a0-a6,-(sp)
+
+		lea		MainWindow,a0		  NewWindow	
+		move.w		OldXm(a5),nw_LeftEdge(a0) set x offset
+		move.w		OldYm(a5),nw_TopEdge(a0)  set y offset
+
+; Can now open the window
+
+		OPENWIN		#MainWindow,#WinText	open it
+		move.l		d0,window.ptr(a5)	save Window pointer
+		beq.s		.error			quit if error
+		
+		move.l		d0,a0
+		move.l		wd_RPort(a0),window.rp(a5)
+		move.l		wd_UserPort(a0),window.up(a5)
+
+; See if a solution exsists for us to display
+
+		tst.l		LastSoln(a5)
+		beq.s		.error
+		move.l		LastSoln(a5),a0
+		bsr		PrintSoln
+
+; and finaly, activate the string gadget.
+
+		lea		SearchGadg,a0		Gadget
+		move.l		window.ptr(a5),a1	Window
+		suba.l		a2,a2			not a requester
+		CALLINT		ActivateGadget
+
+; All done so exit
+
+.error		movem.l		(sp)+,d1-d7/a0-a6
+		rts
+
+;--------------
+;--------------	Close the main window
+;--------------
+
+;remembers windows position prior to closing
+
+;Entry,Exit,Corrupt	None
+		
+CloseMain	movem.l		d0-d2/a0-a2,-(sp)
+
+		move.l		window.ptr(a5),a0	a0->window
+		move.l		wd_LeftEdge(a0),OldXm(a5) save X pos
+		move.w		wd_TopEdge(a0),OldYm(a5)  save Y pos
+		
+		CALLINT		CloseWindow
+		
+		movem.l		(sp)+,d0-d2/a0-a2
+		rts
+
+;--------------
+;--------------	Routine to open the sleep window
+;--------------
+
+* Entry		OldXz(a5) = x position to open at
+;		OldYz(a5) = y position to open at
+
+* Exit		d0=NULL if window failed to open
+;		window.ptr(a5) is set
+
+* Corrupt	None
+
+OpenSleep	movem.l		d1-d7/a0-a6,-(sp)
+
+		lea		SleepWindow,a0		  NewWindow	
+		move.w		OldXz(a5),nw_LeftEdge(a0) set x offset
+		move.w		OldYz(a5),nw_TopEdge(a0)  set y offset
+
+; Can now open the window
+
+		OPENWIN		#SleepWindow		open it
+		move.l		d0,window.ptr(a5)	save Window pointer
+		beq.s		.error			quit if error
+		
+		move.l		d0,a0
+		move.l		wd_RPort(a0),window.rp(a5)
+		move.l		wd_UserPort(a0),window.up(a5)
+
+; All done so exit
+
+.error		movem.l		(sp)+,d1-d7/a0-a6
+		rts
+
+;--------------
+;--------------	Close the sleep window
+;--------------
+
+;remembers windows position prior to closing
+
+;Entry,Exit,Corrupt	None
+		
+CloseSleep	movem.l		d0-d2/a0-a2,-(sp)
+
+		move.l		window.ptr(a5),a0	a0->window
+		move.l		wd_LeftEdge(a0),OldXz(a5) save X pos
+		move.w		wd_TopEdge(a0),OldYz(a5)  save Y pos
+		
+		CALLINT		CloseWindow
+		
+		movem.l		(sp)+,d0-d2/a0-a2
+		rts
+
+
+****************************************************************************
+*				IDCMP Handalers				   *
+****************************************************************************
+
+;--------------
+;--------------	General purpose IDCMP handaler for main
+;--------------
+
+;this routine takes care of INTUITICKS and RMB button messages arriving at
+;the main window. RMB down will send the window to sleep. A tick-tock msg
+;prompts for the checking of scroll gadget activation, if a scroll gadget
+;is being held down, the appropriate routine is called.
+
+MainHandaler	movem.l		d0-d7/a0-a6,-(sp)
+
+		cmp.l		#MOUSEBUTTONS,d2	mouse button
+		bne.s		.check_ticks		skip if not
+		cmp.l		#MENUDOWN,d3		RMB down
+		bne.s		.check_ticks		skip if not
+		
+		bsr		DoSleep			RMB down => sleep!
+		bra.s		.done			exit
+
+.check_ticks	cmp.l		#INTUITICKS,d2		timer?
+		bne.s		.done
+		
+		move.l		GadgetSub(a5),d0
+		beq.s		.done
+		
+		move.l		d0,a0
+		jsr		(a0)
+
+.done		movem.l		(sp)+,d0-d7/a0-a6
+		rts
+
+;--------------
+;--------------	IDCMP handaler for sleep window
+;--------------
+
+DoAwaken	cmp.l		#MOUSEBUTTONS,d2	button pressed?
+		bne.s		.so_what		na, ignore it
+		cmp.w		#MENUDOWN,d3		right one?
+		bne.s		.so_what		na, ignore it
+		
+		move.l		#CLOSEWINDOW,d2		RMB's away.....
+.so_what	rts					exit
+
+
+
+****************************************************************************
+*			IDCMP Action Routines				   *
+****************************************************************************
+
+;--------------
+;--------------	Routine to display solutions given pointer to string
+;--------------
+
+DoSolution	movem.l		d0-d7/a0-a6,-(sp)
+
+		lea		SearchBuff(a5),a0
+		bsr		Search
+		tst.l		d0
+		bne.s		.ok
+		move.l		#NotFoundMsg,d0		ERROR message
+		
+.ok		move.l		d0,a0
+		move.l		d0,LastSoln(a5)		save pointer
+		bsr		PrintSoln
+		
+		move.b		#0,SearchBuff(a5)	clear entry
+		
+		lea		SearchGadg,a0		Gadget
+		move.l		window.ptr(a5),a1	Window
+		suba.l		a2,a2			not a Requester
+		CALLINT		ActivateGadget		refresh
+
+.error		movem.l		(sp)+,d0-d7/a0-a6
+		rts
+
+;--------------
+;--------------	Go to sleep
+;--------------
+
+*Entry		None
+
+*Exit		None
+
+*Corrupt	None
+
+DoSleep		movem.l		d0-d7/a0-a6,-(sp)
+
+		bsr		CloseMain		kill main window
+		
+		bsr		OpenSleep
+		
+		HANDLEIDCMP	#DoAwaken
+		
+		bsr		CloseSleep
+		
+		bsr		OpenMain
+		
+.so_what	movem.l		(sp)+,d0-d7/a0-a6
+
+		rts
+
+;--------------
+;--------------	Deal with Down gadget
+;--------------
+
+; if gadget has just been SELECTED, save address of service routine in var
+;GadgetSub(). If the gadget is being released, clear GadgetSub.
+
+DoDown		cmp.l		#GADGETUP,d2		released
+		beq.s		.DoRelease		if so skip
+		
+		move.l		#MoveOn,GadgetSub(a5)	else save sub addr
+		rts
+
+.DoRelease	move.l		#0,GadgetSub(a5)
+
+		lea		SearchGadg,a0		Gadget
+		move.l		window.ptr(a5),a1	Window
+		suba.l		a2,a2			not a requester
+		CALLINT		ActivateGadget
+
+		rts
+
+;--------------
+;--------------	Deal with Up gadget
+;--------------
+
+; if gadget has just been SELECTED, save address of service routine in var
+;GadgetSub(). If the gadget is being released, clear GadgetSub.
+
+DoUp		cmp.l		#GADGETUP,d2		released
+		beq.s		.DoRelease		if so skip
+		
+		move.l		#BackUp,GadgetSub(a5)	else save sub addr
+		rts
+
+.DoRelease	move.l		#0,GadgetSub(a5)
+
+		lea		SearchGadg,a0		Gadget
+		move.l		window.ptr(a5),a1	Window
+		suba.l		a2,a2			not a requester
+		CALLINT		ActivateGadget
+
+		rts
+
+****************************************************************************
+*			Text / Search Routines				   *
+****************************************************************************
+
+
+;--------------
+;--------------	Routine to get memory for and fill in list of pointers
+;--------------
+
+; Sets $0a to Null and assumes '*' is delimiter for an entry
+
+*Entry		None
+
+*Exit		d0=addr of list or NULL if error
+;		d1=size of list
+
+*Corrupt	d0,d1
+
+BuildList	movem.l		d2-d7/a0-a6,-(sp)
+
+		move.l		StructData(a5),a0
+		move.l		a0,a3
+		move.l		StructDataLen(a5),d0	
+		moveq.l		#0,d1			entries counter
+		moveq.l		#$0a,d2
+		moveq.l		#'*',d3
+		move.l		d1,d4
+
+.CountLines	subq.l		#1,d0			dec counter
+		beq.s		.CountDone		skip if done
+		
+		cmp.b		(a0)+,d3		new entry?
+		bne.s		.check_LF		skip if not
+		addq.l		#1,d1			bump counter
+		bra.s		.CountLines		and loop back
+
+.check_LF	cmp.b		-1(a0),d2		line feed?
+		bne.s		.CountLines		loop back if not
+		move.b		d4,-1(a0)		convert to NULL
+		bra.s		.CountLines		and loop back
+
+.CountDone	move.l		d1,d0			num of entries
+		beq		.error			quit if none?
+		
+		asl.l		#2,d0			1 LONG per entry
+		move.l		d0,d6			save size
+		move.l		#MEMF_CLEAR,d1		type
+		CALLEXEC	AllocMem		get the memory
+		move.l		d0,d7			save pointer
+		beq		.error			quit if none
+
+		move.l		StructData(a5),a0	a0->data
+		move.l		d7,a1			a1->List
+		move.l		StructDataLen(a5),d0	counter
+		moveq.l		#'*',d1			delimiter
+
+.FillLoop	subq.l		#1,d0			dec counter
+		beq.s		.TableFull		skip if done
+		
+		cmp.b		(a0)+,d1		found entry?
+		bne.s		.FillLoop		loop if not
+		move.l		a0,(a1)+		else save address
+		bra.s		.FillLoop		and loop
+
+.TableFull	move.l		d7,d0			pointer
+		move.l		d6,d1			length
+
+.error		movem.l		(sp)+,d2-d7/a0-a6
+		rts
+
+;--------------
+;--------------	Finds a specified structure
+;--------------
+
+;Entry		a0->null terminated name ( or part of ) structure
+
+; Exit		d0=address or NULL
+
+; Will only work for line lists < 65535 entries ( DBcc ! )
+
+Search		movem.l		d1-d7/a0-a6,-(sp)
+
+		bsr		StrLen			get length
+		bsr		ucase			convert to capitals
+		
+		move.l		d0,d4			save length
+		move.l		a0,a4			save addr
+		move.l		LineLen(a5),d5		table size
+		asr.l		#2,d5			div by 4
+		subq.l		#1,d5			dbra adjust
+		move.l		LineList(a5),a3		a3->table
+		
+.loop		move.l		a4,a0			User string
+		move.l		d4,d0			length
+		move.l		(a3)+,a1		next entry
+		bsr.s		CompStr			compare
+		tst.l		d0			found?
+		bne.s		.Found			exit loop if found
+		dbra		d5,.loop		for all entries
+		
+.Found		movem.l		(sp)+,d1-d7/a0-a6
+		rts
+
+;--------------
+;--------------	Compare an entry to users
+;--------------
+
+; Entry		a0->Search String
+;		d0=it's length
+;		a1->Line List Entry
+
+; Exit		d0=NULL if no match found, else = addr
+
+CompStr		movem.l		d1/d7/a0-a2,-(sp)
+
+		moveq.l		#0,d7		clear
+		subq.l		#1,d0		correct for dbra
+		move.l		a1,a2		save a copy
+.FFloop		move.b		(a1)+,d1
+		beq.s		.ComprDone
+		cmp.b		#'a',d1
+		blt.s		.fok
+		cmp.b		#'z',d1
+		bgt.s		.fok
+		sub.b		#('a'-'A'),d1
+.fok		cmp.b		(a0)+,d1	compare string elements
+		dbne		d0,.FFloop	while not end + not match
+
+		bne.s		.ComprDone	no match so quit
+		subq.l		#1,a2		correct this addr
+		move.l		a2,d7		save addr of match
+
+.ComprDone	move.l		d7,d0
+		movem.l		(sp)+,d1/d7/a0-a2
+		rts
+
+;--------------
+;--------------	Converts text string to upper case.
+;--------------
+
+;Entry		a0->start of null terminated text string
+
+;Exit		a0->end of text string ( the zero byte ).
+
+;corrupted	None
+
+ucase		move.l		a0,-(sp)
+
+		tst.b		(a0)
+		beq.s		.error
+		
+.loop		cmpi.b		#'a',(a0)+
+		blt.s		.ok
+		
+		cmp.b		#'z',-1(a0)
+		bgt.s		.ok
+		
+		subi.b		#$20,-1(a0)
+		
+.ok		tst.b		(a0)
+		bne.s		.loop
+		
+.error		move.l		(sp)+,a0
+		rts
+
+;--------------
+;--------------	Calculate the length of a null terminated string
+;--------------	
+
+; Counts all characters in a NULL terminated byte sequence, NOT including the
+;terminating NULL.
+
+* Entry		a0->string
+
+* Exit		d0=length
+
+* Corrupted	d0
+
+* Author	M.Meany
+
+StrLen		move.l		a0,-(sp)
+		moveq.l		#0,d0
+		
+.loop		tst.b		(a0)+
+		beq.s		.done
+		addq.l		#1,d0
+		bra.s		.loop
+		
+.done		move.l		(sp)+,a0
+		rts
+
+
+;--------------
+;--------------	Prints upto 10 lines of text into solution window
+;--------------
+
+;Entry		a0->1st line of text
+
+;Exit		None
+
+;Corrupt	None
+
+PrintSoln	movem.l		d0-d7/a0-a6,-(sp)
+
+		move.l		a0,a4			save
+		move.l		a0,TopLine(a5)		first printed line
+		
+; first, clear the display.
+
+		move.l		window.rp(a5),a1	RastPort
+		moveq.l		#0,d0			pen colour
+		CALLGRAF	SetAPen			and set it
+		
+		move.l		window.rp(a5),a1	RastPort
+		moveq.l		#6,d0			xMin
+		move.l		#30,d1			yMin
+		move.l		#634,d2			xMax
+		move.l		#110,d3			yMax
+		CALLSYS		RectFill		clear it
+
+; Now start printing
+
+		moveq.l		#0,d7			y print offset
+		move.l		d7,DisplayLines(a5)	clear counter
+
+.PrintLoop	move.l		a4,a0			a0->next line
+		move.l		a0,BottomLine(a5)	last printed line
+		tst.b		(a0)			NULL?
+		beq.s		.DonePrinting		exit loop if so
+		
+		bsr		ExpandLine		expand the line
+		move.l		a0,a4			save addr of next line
+		
+		addq.l		#1,DisplayLines(a5)	bump counter
+		
+		move.l		window.rp(a5),a0
+		lea		WinText,a1
+		moveq.l		#0,d0
+		move.l		d7,d1
+		CALLINT		PrintIText
+		
+		add.l		#8,d7			move down a line
+		cmp.b		#80,d7			all ten done?
+		bne.s		.PrintLoop		loop if not
+
+.DonePrinting	movem.l		(sp)+,d0-d7/a0-a6
+		rts
+
+;--------------
+;--------------	Expands a line of text ( TABS = 25 ) into a buffer
+;--------------
+
+; Entry		a0->line of text to expand
+
+; Exit		a0->start of following line
+
+; Corrupt	a0,PrintBuffer
+
+;no overflow checking done at this stage.
+
+ExpandLine	movem.l		d0-d3/a1,-(sp)
+
+		lea		PrintBuff(a5),a1	a1->expansion Buffer
+		moveq.l		#25,d1			char offset
+		moveq.l		#$09,d2			TAB char
+		moveq.l		#' ',d3			SPACE char
+
+.Outer		move.b		(a0)+,d0		get next char
+		beq.s		.Expanded		exit loop if EOL
+		
+		cmp.b		d2,d0			TAB?
+		bne.s		.NotTab			skip if not
+
+.Inner		move.b		d3,(a1)+
+		subq.l		#1,d1
+		bne.s		.Inner
+		move.b		d3,d0			set a space
+		
+.NotTab		move.b		d0,(a1)+
+		subq.l		#1,d1
+		bpl.s		.Outer
+		moveq.l		#25,d1			reset
+		bra.s		.Outer
+
+.Expanded	move.b		d0,(a1)			NULL terminate
+		movem.l		(sp)+,d0-d3/a1
+		rts
+
+;--------------
+;--------------	Move backwards through text
+;--------------
+
+; Returns same line if :	a/ At start of solution area
+;				b/ FirstLine starts with a delimiter
+
+BackUp		movem.l		d0-d7/a0-a6,-(sp)
+
+;see if there is any text displayed!
+
+		tst.l		DisplayLines(a5)	lines displayed?
+		beq		.done			skip if not
+
+;see if at start of solution area
+
+		move.l		TopLine(a5),d0		top line displayed
+		move.l		LineList(a5),a0		a0->line pointers
+		cmp.l		(a0),d0			at top?
+		beq.s		.done			skip if so
+		move.l		d0,a3			a3->TopLine
+
+;see if line starts with a delimiter		
+
+		cmp.b		#'*',(a3)		first line of soln?
+		beq.s		.done			skip if so
+
+;if we get this far, it's OK to scroll window down. Locate start of line to
+;be displayed at top of window and save it's address.
+
+		subq.l		#1,a3			step back
+.loop		tst.b		-(a3)			keep stepping back
+		bne.s		.loop			til a NULL is reached		
+		addq.l		#1,a3			step over the NULL
+		move.l		a3,TopLine(a5)		save address of line
+
+;update pointer to last line displayed. NOTE, last line may not be at the
+;bottom of the window.
+
+		cmp.l		#10,DisplayLines(a5)	full display?
+		beq.s		.MoveBack		if so step back a line
+		
+;display not full, so leave BottomLine alone and just bump counter
+
+		addq.l		#1,DisplayLines(a5)	bump
+		bra.s		.DoScroll
+
+;display was full, so adjust BottomLine accordingly
+
+.MoveBack	move.l		BottomLine(a5),a0	a0->BottomLine
+		subq.l		#1,a0			step back
+.loop1		tst.b		-(a0)			keep stepping back
+		bne.s		.loop1			til a NULL is found
+		addq.l		#1,a0			step over NULL
+		move.l		a0,BottomLine(a5)	save address of line
+
+;all vars now adjusted, so scroll the window.
+
+.DoScroll	move.l		window.rp(a5),a1	RastPort
+		moveq.l		#0,d0			pen colour
+		CALLGRAF	SetAPen			and set it
+		
+		move.l		window.rp(a5),a1	RastPort
+		moveq.l		#0,d0			dx
+		moveq.l		#-8,d1			dy
+		moveq.l		#6,d2			xMin
+		moveq.l		#30,d3			yMin
+		move.l		#634,d4			xMax
+		moveq.l		#109,d5			yMax
+		CALLSYS		ScrollRaster		scroll it		
+
+;and display the new TopLine
+
+		move.l		a3,a0			a0->line
+		bsr		ExpandLine		expand it
+		
+		move.l		window.rp(a5),a0	RastPort
+		lea		WinText,a1		IText
+		moveq.l		#0,d0			x offset
+		move.l		d0,d1			y offset
+		CALLINT		PrintIText		print it
+
+;all done so exit
+
+.done		movem.l		(sp)+,d0-d7/a0-a6
+		rts
+
+
+;--------------
+;--------------	Move forward through text
+;--------------
+
+;exits if	a/ no lines displayed.
+;		b/ BottomLine contains terminator ( NULL ) only.
+
+MoveOn		movem.l		d0-d7/a0-a6,-(sp)
+
+;see if there is text to move through
+
+		tst.l		DisplayLines(a5)	text there?
+		beq		.done			skip if not
+
+;see if already at start of solution
+
+		move.l		BottomLine(a5),a3	a3->last line
+		tst.b		(a3)			NULL?
+		beq		.done			skip if so
+
+;step BottomLine on
+
+.loop		tst.b		(a3)+			EOL?
+		bne.s		.loop			if not loop
+		move.l		a3,BottomLine(a5)	save address
+		
+;step TopLine on
+
+		move.l		TopLine(a5),a0		a0->1st line
+.loop1		tst.b		(a0)+			EOL?
+		bne.s		.loop1			loop if not
+		move.l		a0,TopLine(a5)		set new pointer
+
+;all vars now adjusted, so scroll the window.
+
+		move.l		window.rp(a5),a1	RastPort
+		moveq.l		#0,d0			pen colour
+		CALLGRAF	SetAPen			and set it
+		
+		move.l		window.rp(a5),a1	RastPort
+		moveq.l		#0,d0			dx
+		moveq.l		#8,d1			dy
+		moveq.l		#6,d2			xMin
+		moveq.l		#30,d3			yMin
+		move.l		#634,d4			xMax
+		moveq.l		#110,d5			yMax
+		CALLSYS		ScrollRaster		scroll it		
+
+;and display the new BottomLine
+
+		move.l		a3,a0			a0->line
+		bsr		ExpandLine		expand it
+		
+		move.l		window.rp(a5),a0	RastPort
+		lea		WinText,a1		IText
+		moveq.l		#0,d0			x offset
+		move.l		#72,d1			y offset
+		CALLINT		PrintIText		print it
+
+;all done so exit
+
+.done		movem.l		(sp)+,d0-d7/a0-a6
+		rts
+

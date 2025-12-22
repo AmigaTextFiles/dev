@@ -1,0 +1,92 @@
+	.SECTION	"temps",$80
+__TEMP_var0:	.DS	16
+	.SECTION	"args",$a0
+__ARGS:	.DS	16
+	.SECTION	"code",$2000
+_GI:	.DS 2
+MAIN_ARG__X:	.DS 2
+MAIN:
+	STA	MAIN_ARG__X
+	STX	MAIN_ARG__X+1
+	JMP	MAIN_Lab0
+MAIN_A:	.DS 2
+MAIN_PA:	.DS 2
+MAIN_Lab0:
+	LDA	#<MAIN_ARG__X
+	STA	__TEMP_var0+0
+	LDA	#>MAIN_ARG__X
+	STA	__TEMP_var0+1
+	LDA	__TEMP_var0+0
+	STA	MAIN_PA+0
+	LDA	__TEMP_var0+1
+	STA	MAIN_PA+1
+	LDA	#251
+	STA	MAIN_A+0
+	LDA	#255
+	STA	MAIN_A+1
+	LDA	MAIN_PA+0
+	STA	__TEMP_var0+0
+	LDA	MAIN_PA+1
+	STA	__TEMP_var0+1
+	LDA	#0
+	SEC
+	SBC	MAIN_A+0
+	STA	__TEMP_var0+0
+	LDA	#0
+	SBC	MAIN_A+1
+	STA	__TEMP_var0+1
+	LDA	__TEMP_var0+0
+	LDY	#0
+	STA	(__TEMP_var0),Y
+	LDA	__TEMP_var0+1
+	INY
+	STA	(__TEMP_var0),Y
+	LDA	MAIN_PA+0
+	STA	__TEMP_var0+0
+	LDA	MAIN_PA+1
+	STA	__TEMP_var0+1
+	DEY
+	LDA	(__TEMP_var0),Y
+	CLC
+	ADC	MAIN_A+0
+	STA	__TEMP_var0+0
+	INY
+	LDA	(__TEMP_var0),Y
+	ADC	MAIN_A+1
+	STA	__TEMP_var0+1
+	LDA	__TEMP_var0+0
+	SEC
+	SBC	MAIN_ARG__X+0
+	STA	__TEMP_var2+0
+	LDA	__TEMP_var0+1
+	SBC	MAIN_ARG__X+1
+	STA	__TEMP_var2+1
+	LDA	__TEMP_var2+0
+	STA	MAIN_A+0
+	LDA	__TEMP_var2+1
+	STA	MAIN_A+1
+	LDA	MAIN_A+0
+	CLC
+	ADC	MAIN_ARG__X+0
+	STA	__TEMP_var0+0
+	LDA	MAIN_A+1
+	ADC	MAIN_ARG__X+1
+	STA	__TEMP_var0+1
+	LDA	MAIN_PA+0
+	STA	__TEMP_var2+0
+	LDA	MAIN_PA+1
+	STA	__TEMP_var2+1
+	DEY
+	LDA	(__TEMP_var2),Y
+	CLC
+	ADC	__TEMP_var0+0
+	STA	__TEMP_var2+0
+	INY
+	LDA	(__TEMP_var2),Y
+	ADC	__TEMP_var0+1
+	STA	__TEMP_var2+1
+	LDA	__TEMP_var2+0
+	STA	_GI+0
+	LDA	__TEMP_var2+1
+	STA	_GI+1
+	RTS

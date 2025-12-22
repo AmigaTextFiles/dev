@@ -1,0 +1,789 @@
+; --------------------------------------------------------------------------------------
+;
+; This source file is part of PureBasic
+; For the latest info, see http://www.purebasic.com/
+; 
+; Copyright (c) 1998-2006 Fantaisie Software
+;
+; This program is free software; you can redistribute it and/or
+; modify it under the terms of the GNU General Public License
+; as published by the Free Software Foundation; either version 2
+; of the License, or (at your option) any later version.
+;
+; This program is distributed in the hope that it will be useful,
+; but WITHOUT ANY WARRANTY; without even the implied warranty of
+; MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+; GNU General Public License for more details.
+;
+; You should have received a copy of the GNU General Public License
+; along with this program; if not, write to the Free Software
+; Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA  02110-1301, USA.
+;
+; --------------------------------------------------------------------------------------
+;
+; Doobrey:
+;   - PB Editor keystuff...
+;   - The "enter key" routine was missing a DeleteOldCursor{}..left old cursor on screen.
+;   - CheckBasicKeyWords{} added a check to stop keyword checking if quotemarks are open, or in commenting mode!
+;   - Help system needed overhaul.. not working on async...
+
+
+Statement BlockUnTab{}
+SHARED Source(),SelectedZone,PBCursor,PBPrefs
+USEPATH Source()
+
+; Doobrey: WTF ?? a.w = PBPrefs\TabSize - (FullX - (FullX/PBPrefs\TabSize) * PBPrefs\TabSize)  ; Reduced form...
+Tab.s = LSet$("",PBPrefs\TabSize)
+
+If SelectedZone\EndY =-1
+    ; std add tab.
+
+    If Left$(\Text,PBPrefs\TabSize)=Tab
+      \Text=Right$(\Text,Len(\Text)-PBPrefs\TabSize)
+    EndIf
+
+    PBCursor\X-PBPrefs\TabSize
+    If PBCursor\X<0 Then PBCursor\X=0
+
+    DisplayLine{1}
+
+ Else
+
+    ; MultiLine Tab.. aka "Block Tab"
+    PushItem Source()
+    ResetList Source()
+
+    ;-Get first line..
+    For k.w=0 To (PBCursor\Y+PBCursor\OffsetY)
+      NextItem Source()
+    Next
+
+    For k.w=SelectedZone\Y To SelectedZone\EndY
+      ;-- \Text=Tab+\Text
+      If Left$(\Text,PBPrefs\TabSize)=Tab
+        \Text=Right$(\Text,Len(\Text)-PBPrefs\TabSize)
+
+        ;-- Now do the cursor/selected check
+        If k=SelectedZone\EndY
+          If SelectedZone\EndX Then SelectedZone\EndX-PBPrefs\TabSize
+        EndIf
+
+        If k=PBCursor\Y
+          If PBCursor\X Then PBCursor\X-PBPrefs\TabSize
+        EndIf
+      EndIf
+      NextItem Source()
+    Next
+
+    PopItem Source()
+    RefreshLines{SelectedZone\Y,1}
+
+EndIf
+
+End Statement
+;-----------------------------------------------------------------------------------------
+
+Statement CheckBasicKeyWords{}
+  SHARED BasicKeyword(),Source(),CurrentWordPosition,PBCursor
+
+  If ParseLine{\Text,PBCursor\X+PBCursor\OffsetX-1}=0
+    CurrentWord.s = LCase$(GetCurrentWord{PBCursor\X+PBCursor\OffsetX-1})
+    For k.w=0 To #BasicKeywords
+
+      If BasicKeyword(0,k) = CurrentWord
+        Command.s = BasicKeyword(1,k)
+        ;NPrint Command$, CurrentWordPosition
+        CopyMem_ &Command, &Source()\Text+CurrentWordPosition, Len(Command)
+        k = #BasicKeywords
+      EndIf
+    Next
+  Else
+  EndIf
+End Statement
+
+;-----------------------------------------------------------------------------------------
+
+Statement CheckRawKey{}
+  SHARED Source(),EditorMessage,PBCursor,PBMainWindow,PBOld_Cursor,PBScreenInfo
+  SHARED nag.NewAmigaGuide,DefSigMask,SigMask,*HelpGuide
+
+  USEPATH Source()
+
+  PBOld_Cursor\OffsetX = PBCursor\OffsetX
+
+  If PBMainWindow\CheckBasicOk
+    If (PBMainWindow\PressedKey >= 76) AND (PBMainWindow\PressedKey <= 79)
+      CheckBasicKeyWords{}
+      DisplayLine{1}
+    EndIf
+    PBMainWindow\CheckBasicOk = 0
+  EndIf
+
+  If (PBMainWindow\QualifierKey =2) AND (PBMainWindow\PressedKey=66) ; PKey is not 9 !!
+   ;!DPrint{2,"QK2>"+Str$(PBMainWindow\QualifierKey)}
+   ;!DPrint{2,"PK>"+Str$(PBMainWindow\PressedKey)}
+
+   BlockUnTab{}
+  EndIf
+
+  Select PBMainWindow\PressedKey
+
+    ; NewMouse support for mousewheels
+
+    Case #NM_WHEEL_UP
+      If PBCursor\OffsetY
+         PBCursor\OffsetY-1
+         PrevItem Source()
+         RefreshLines{0,1}
+         ChangeBoopsiTags{#BO_VerticalSlider, #PGA_Top    , PBCursor\OffsetY}
+      Else
+         If PBCursor\Y
+           PBCursor\Y-1
+           PrevItem Source()
+           UpdateCursor{}
+           ChangeBoopsiTags{#BO_VerticalSlider, #PGA_Top    , PBCursor\OffsetY}
+         EndIf
+      EndIf
+
+    Case #NM_WHEEL_DOWN
+      CurrentY.w=PBCursor\OffsetY+PBCursor\Y+1
+
+      If CurrentY<PBMainWindow\NbLines
+         ;-- Ok to scroll down
+         If (PBMainWindow\NbWindowLines+PBCursor\OffsetY)<PBMainWindow\NbLines
+            PBCursor\OffsetY+1
+            NextItem Source()
+            RefreshLines{0,1}
+         Else
+            PBCursor\Y+1
+            NextItem Source()
+            UpdateCursor{}
+         EndIf
+         ChangeBoopsiTags{#BO_VerticalSlider, #PGA_Top    , PBCursor\OffsetY}
+      EndIf
+
+    Case #NM_WHEEL_LEFT
+        PBMainWindow\PressedKey=79
+
+    Case #NM_WHEEL_RIGHT
+        PBMainWindow\PressedKey=78
+
+    ; End of mousewheel
+
+    Case 76 ; ArrowUp
+
+        If PBMainWindow\QualifierKey = 2  ; Shift
+
+          If PBCursor\OffsetY=0
+            PBCursor\Y = 0
+            FirstItem Source()
+            UpdateCursor{}
+            ChangeBoopsiTags{#BO_VerticalSlider, #PGA_Top    , PBCursor\OffsetY}
+          Else
+            PBCursor\OffsetY-PBMainWindow\NbWindowLines
+
+            If PBCursor\OffsetY < 0
+              PBCursor\OffsetY = 0
+              PBCursor\Y = 0
+              FirstItem Source()
+            EndIf
+
+            For k.w=0 To PBMainWindow\NbWindowLines-1
+              PrevItem Source()
+            Next
+
+            RefreshLines{0, 1}
+            ChangeBoopsiTags{#BO_VerticalSlider, #PGA_Top    , PBCursor\OffsetY}
+          EndIf
+        Else
+
+          !DPrint{1,"Prev call"}
+          PreviousLine{}
+
+        EndIf
+
+
+    Case 77 ; ArrowDown
+
+        If PBMainWindow\QualifierKey = 2  ; Shift
+
+          If PBMainWindow\NbLines > PBMainWindow\NbWindowLines
+
+            If PBCursor\OffsetY = PBMainWindow\NbLines-PBMainWindow\NbWindowLines
+              PBCursor\Y =PBMainWindow\NbWindowLines-1
+              LastItem Source()
+              UpdateCursor{}
+            Else
+
+              PBCursor\OffsetY+PBMainWindow\NbWindowLines
+
+              If PBCursor\OffsetY > PBMainWindow\NbLines-PBMainWindow\NbWindowLines
+                Value.w = PBMainWindow\NbLines-PBCursor\OffsetY-1
+                PBCursor\OffsetY =PBMainWindow\NbLines-PBMainWindow\NbWindowLines
+              Else
+                Value.w =PBMainWindow\NbWindowLines-1
+              EndIf
+
+              For k.w=0 To Value
+                NextItem Source()
+              Next
+
+              RefreshLines{0, 1}
+            EndIf
+
+          Else
+
+            PBCursor\Y = PBMainWindow\NbLines-1
+            LastItem Source()
+            UpdateCursor{}
+          EndIf
+
+
+        Else
+          NextLine{}
+        EndIf
+
+
+    Case 78 ; ArrowRight
+
+      If PBMainWindow\QualifierKey = 2 ; Shift
+        If Len(\Text) - PBCursor\OffsetX > PBMainWindow\NbWindowChars  ; if the last character of the
+          PBCursor\OffsetX = Len(\Text) - PBMainWindow\NbWindowChars   ; text is out of screen, then
+          PBCursor\X = PBMainWindow\NbWindowChars                              ; scroll to the right.
+        Else
+          If PBCursor\OffsetX > Len(\Text)                             ; if the text is not visible
+            PBCursor\OffsetX = Len(\Text) - PBMainWindow\NbWindowChars ; because of scrolling, then
+            PBCursor\X = PBMainWindow\NbWindowChars                            ; scroll to the left,
+            If PBCursor\OffsetX < 0                                            ; and check if the scrolling
+              PBCursor\OffsetX = 0                                             ; is out of range.
+              PBCursor\X = Len(\Text)
+            EndIf
+          Else
+            PBCursor\X = Len(\Text) - PBCursor\OffsetX                 ; set the cursor to the right position.
+          EndIf
+        EndIf
+
+      Else
+        If PBCursor\X < PBMainWindow\NbWindowChars
+          PBCursor\X+1
+        Else
+          PBCursor\OffsetX+1
+        EndIf
+      EndIf
+
+      DisplayLine{1}
+
+
+    Case 79 ; ArrowLeft
+
+      If PBMainWindow\QualifierKey = 2 ; Shift
+        PBCursor\X = 0
+        PBCursor\OffsetX = 0
+      Else
+        If PBCursor\X > 0
+          PBCursor\X-1
+        Else
+          If PBCursor\OffsetX > 0
+            PBCursor\OffsetX-1
+          EndIf
+        EndIf
+      EndIf
+
+      DisplayLine{1}
+
+
+    Case 95 ; Help
+
+      CurrentWord.s = GetCurrentWord{PBCursor\X+PBCursor\OffsetX-1}
+      If CurrentWord=""
+       CurrentWord=PBScreenInfo\HelpCommand
+      EndIf
+
+      OCW.s=CurrentWord
+      !DPrint{3,OCW}
+
+        EditorMessage\mn_Data1 = &CurrentWord
+        SendMessage{#PB_MSG_IsFunction}
+
+        *Message.PBMessage = WaitForMessage{}
+        If *Message\mn_Data1
+          HelpFile.s    = "PureBasic:Help/"+Peek$(*Message\mn_Data2)+".guide"
+          Command.s = Peek$(*Message\mn_Data3)
+        Else
+          Command.s="MAIN"
+          HelpFile.s    = "PureBasic:Help/Reference.guide"
+        EndIf
+
+        ReplyMsg_ *Message
+
+        *HelpGuide=PB_OpenHelp{HelpFile,Command}
+
+  End Select
+
+
+  If PBCursor\OffsetX <> PBOld_Cursor\OffsetX
+    RefreshLines{0, 1}
+  EndIf
+
+End Statement
+;-----------------------------------------------------------------------------
+Statement CheckVanillaKey{}
+  SHARED Source(),EditorMessage,PBMainWindow,PBPrefs,PBScreenInfo
+  SHARED PBOld_Cursor,PBCursor,PBGlobals,SelectedZone
+
+  USEPATH Source()
+
+  PBOld_Cursor\OffsetX = PBCursor\OffsetX
+
+  FullX.w = PBCursor\OffsetX+PBCursor\X
+
+
+  PBMainWindow\CheckBasicOk = 1
+  ; Debug
+  If PBMainWindow\QualifierKey
+   !DPrint{2,"QK>"+Str$(PBMainWindow\QualifierKey)}
+  EndIf
+
+  If ((PBMainWindow\PressedKey>31) AND (PBMainWindow\PressedKey<127)) OR (PBMainWindow\PressedKey>160) ; Remove all bad printed 
+racters
+
+   If PBMainWindow\QualifierKey<>128 ; Don`t add if Right-Amiga is down !!
+
+    PBGlobals\Modified  = 1
+    PBGlobals\ReCompile = 1
+
+    ; Doobrey: Nooo.. this should only happen if not in commented or quotation mode!
+    If (PBMainWindow\PressedKey = 32) OR (PBMainWindow\PressedKey = 46)
+        CheckBasicKeyWords{}
+    EndIf
+
+
+    If Len(\Text) <= FullX
+      \Text = \Text+RSet$(Chr$(PBMainWindow\PressedKey),FullX-Len(\Text)+1)
+    Else
+      \Text = Left$(\Text,FullX)+Chr$(PBMainWindow\PressedKey)+Right$(\Text,Len(\Text)-FullX)
+    EndIf
+
+    If (PBCursor\OffsetY+PBCursor\Y = SelectedZone\EndY) AND (PBCursor\OffsetX+PBCursor\X <= SelectedZone\EndX)
+      SelectedZone\EndX+1
+    EndIf
+
+    If PBCursor\X = PBMainWindow\NbWindowChars
+      PBCursor\OffsetX+1
+    Else
+      PBCursor\X+1
+    EndIf
+
+    ;- '(' ..check for cmd and display quickhelp!
+
+    If PBMainWindow\PressedKey = 40
+      *TCursor.Byte = &\Text+PBCursor\X+PBCursor\OffsetX-2
+
+      WordLen.w = 0                                            ; Routine to handle space between the name and the '(': Screen ()
+      While (*TCursor > &\Text) AND( *TCursor\b = 32)
+        *TCursor-1
+        WordLen+1
+      Wend
+
+
+      CurrentWord.s = GetCurrentWord{PBCursor\X+PBCursor\OffsetX-2-WordLen}
+      CNIF #LoadCompiler
+        EditorMessage\mn_Data1 = &CurrentWord
+        SendMessage{#PB_MSG_IsFunction}
+
+        *Message.PBMessage = WaitForMessage{}
+      CELSE
+        *Message.PBMessage=0
+      CEND
+
+      If *Message\mn_Data1
+        Command.s = Peek$(*Message\mn_Data3)
+        !DPrint{2,"CW>"+CurrentWord+" C>"+Command}
+        CopyMem_ &Command, *TCursor-Len(Command)+1, Len(Command)
+
+        PBScreenInfo\QuickHelp = " - "+Command+Peek$(*Message\mn_Data4)
+        PBScreenInfo\HelpCommand=Command           
+      Else
+        !DPrint{2,"CWN!>"+CurrentWord}
+
+      EndIf
+
+      ReplyMsg_ *Message
+    EndIf
+
+    DisplayLine{1}
+   Else
+
+    ; Add/Remove Comment!
+    If PBMainWindow\PressedKey= 91
+       ;!DPrint{2,"REMOVE"}
+       If SelectedZone\EndY =-1
+
+            ; Only remove if all preceding chars are spaces..
+            LineLen.w=Len(\Text)
+            If LineLen
+             CPos.w=1
+
+             Repeat
+
+               *Char.Byte=&\Text
+
+               If *Char\b<>32 ;-- Found start
+                 If *Char\b=59 ; ";" - Got comment..
+                   tmptext.s=Left$(\Text,CPos-1)
+                   tmptext+Right$(\Text,LineLen-CPos)
+                   \Text=tmptext
+
+                  If PBCursor\X Then PBCursor\X-1
+
+                 EndIf
+                CPos=0
+               Else
+                CPos+1
+                If CPos>LineLen
+                  CPos=0    ;-- Quit Loop.
+                EndIf
+               EndIf
+
+             Until CPos=0
+            EndIf
+
+           DisplayLine{1}
+
+          Else
+
+            ; MultiLine uncomment.. aka "Block Uncomment"
+            PushItem Source()
+            ResetList Source()
+
+            ;-Get first line..
+            For k.w=0 To (PBCursor\Y+PBCursor\OffsetY)
+              NextItem Source()
+            Next
+
+            For k.w=SelectedZone\Y To SelectedZone\EndY
+              LineLen.w=Len(\Text)
+              If LineLen
+               CPos.w=1
+
+               Repeat
+
+                 *Char.Byte=&\Text
+
+                 If *Char\b<>32 ;-- Found start
+                   If *Char\b=59 ; ";" - Got comment..
+                     tmptext.s=Left$(\Text,CPos-1)
+                     tmptext+Right$(\Text,LineLen-CPos)
+                     \Text=tmptext
+
+
+                    ; Check and update cursor/selectedzone
+                    If k=SelectedZone\EndY
+                      If SelectedZone\EndX Then SelectedZone\EndX-1
+                    EndIf
+
+                    If k=PBCursor\Y
+                      If PBCursor\X Then PBCursor\X-1
+                    EndIf
+
+                   EndIf
+                  CPos=0
+                 Else
+                  CPos+1
+                  If CPos>LineLen
+                    CPos=0    ;-- Quit Loop.
+                  EndIf
+                 EndIf
+
+               Until CPos=0
+              EndIf
+
+
+              NextItem Source()
+            Next
+
+             PopItem Source()
+             RefreshLines{SelectedZone\Y,1}
+          EndIf
+
+    EndIf
+
+
+    If PBMainWindow\PressedKey=93
+       ;!DPrint{2,"ADD"}
+       If SelectedZone\EndY =-1
+
+           ; std add comment.
+           \Text=";"+\Text
+           PBCursor\X+1
+           DisplayLine{1}
+
+          Else
+
+           ; MultiLine comment.. aka "Block Comment"
+           PushItem Source()
+           ResetList Source()
+
+           ;-Get first line..
+           For k.w=0 To (PBCursor\Y+PBCursor\OffsetY)
+             NextItem Source()
+           Next
+
+           For k.w=SelectedZone\Y To SelectedZone\EndY
+            \Text=";"+\Text
+            NextItem Source()
+           Next
+           PBCursor\X+1
+           SelectedZone\EndX+1
+
+           PopItem Source()
+           RefreshLines{SelectedZone\Y,1}
+          EndIf
+
+    EndIf
+
+   EndIf
+  Else
+
+    Select PBMainWindow\PressedKey
+
+
+
+      Case 8 ; Delete
+
+        PBGlobals\Modified  = 1
+        PBGlobals\ReCompile = 1
+
+        If FullX > 0
+
+          PBGlobals\Modified  = 1
+          PBGlobals\ReCompile = 1
+
+          If PBMainWindow\QualifierKey = 2
+            \Text = Right$(\Text,Len(\Text)-FullX)
+            PBCursor\X = 0
+            PBCursor\OffsetX = 0
+          Else
+            \Text = Left$(\Text,FullX-1)+Right$(\Text,Len(\Text)-FullX)
+            If PBCursor\X>0
+              PBCursor\X-1
+            Else
+              PBCursor\OffsetX-1
+            EndIf
+          EndIf
+
+          If (PBCursor\OffsetY+PBCursor\Y = SelectedZone\EndY) AND (PBCursor\OffsetX+PBCursor\X <= SelectedZone\EndX)
+            SelectedZone\EndX-1
+          EndIf
+
+        Else
+
+          If PBCursor\Y+PBCursor\OffsetY > 0
+            Text.s = \Text
+            PrevItem Source()
+            Position.w = Len(\Text)
+            \Text+Text
+            NextItem Source()
+
+            If PBCursor\Y+PBCursor\OffsetY+1 <= PBMainWindow\NbLines-1
+              OkPrevious.w = 1
+            Else
+              OkPrevious.w = 0
+            EndIf
+
+            DeleteLine{0}
+
+            PBCursor\OffsetX = 0
+            PBCursor\X = Position
+
+
+            If OkPrevious
+              PreviousLine{}
+            EndIf
+
+          EndIf
+
+        EndIf
+
+        DisplayLine{1}
+
+      ; - Tab handling.. needs add/remove tab.
+
+      Case 9 ; Tab
+
+        PBGlobals\Modified  = 1
+        PBGlobals\ReCompile = 1
+
+        ; Doobrey: a.w = PBPrefs\TabSize - (FullX - (FullX/PBPrefs\TabSize) * PBPrefs\TabSize)  ; Reduced form...
+        a.w=PBPrefs\TabSize
+        Tab.s = LSet$("",a)
+        If PBMainWindow\QualifierKey=0
+
+        If SelectedZone\EndY =-1
+            ; std add tab.
+            If Len(\Text) <= FullX
+              \Text = \Text+RSet$(Tab, FullX-Len(\Text)+1)
+            Else
+              \Text = Left$(\Text,FullX)+Tab+Right$(\Text,Len(\Text)-FullX)
+            EndIf
+
+            If (PBCursor\OffsetY+PBCursor\Y = SelectedZone\EndY) AND (PBCursor\OffsetX+PBCursor\X <= SelectedZone\EndX)
+              SelectedZone\EndX+a
+            EndIf
+
+            PBCursor\X+a
+            DisplayLine{1}
+
+           Else
+
+            ; MultiLine Tab.. aka "Block Tab"
+            PushItem Source()
+            ResetList Source()
+
+            ;-Get first line..
+            For k.w=0 To (PBCursor\Y+PBCursor\OffsetY)
+              NextItem Source()
+            Next
+
+            For k.w=SelectedZone\Y To SelectedZone\EndY
+             \Text=Tab+\Text
+             NextItem Source()
+            Next
+            ;PBCursor\X+a
+            SelectedZone\EndX+a
+
+            PopItem Source()
+            RefreshLines{SelectedZone\Y,1}
+           EndIf
+        Else
+          If PBMainWindow\QualifierKey=128  ;-- RAmiga  UN-TAB
+            BlockUnTab{}
+          EndIf
+
+        EndIf
+      Case 13 ; Enter
+
+        PBGlobals\Modified  = 1
+        PBGlobals\ReCompile = 1
+
+        RefreshAll.w = 0
+        PBMainWindow\EmptySpace = 0
+
+        CheckBasicKeyWords{}
+        DisplayLine{1}
+
+        If InsideSelectedZone{}
+          SelectedZone\EndY+1
+          RefreshLines{PBCursor\Y, 1}
+        EndIf
+
+        splittext.s = ""
+        If PBMainWindow\QualifierKey <> 2 ; Shift
+
+          curtext.s = \Text
+          splittext.s = Right$(curtext, Len(curtext) - PBCursor\X - PBCursor\OffsetX)
+          \Text      = Left$ (curtext, PBCursor\X + PBCursor\OffsetX)
+
+          DisplayLine{1}   ; update the splitted line
+
+          ;If PrevItem(Source())
+          ;  AddItem Source()
+          ;Else
+          ;  AddFirst Source()
+          ;EndIf
+
+        EndIf
+
+        *a.l = &\Text                      ;
+        While NPeekB(*a) = 32                    ;
+          *a+1                                   ; Little routine to set the pointer
+          PBMainWindow\EmptySpace+1                           ; correctly indeted on the new line.
+        Wend                                     ;
+                                                 ;
+        If(   NPeekB(*a) = 0 AND PBMainWindow\EmptySpace = 0) AND (PBCursor\X = PBMainWindow\Empty_CursorX)    ;
+          PBMainWindow\EmptySpace = PBMainWindow\Old_EmptySpace
+        EndIf                                    ;
+
+        AddItem Source()
+        If PBCursor\Y < PBMainWindow\NbWindowLines-1
+          PBCursor\Y+1
+        Else
+          PBCursor\OffsetY+1
+          RefreshAll = 1
+        EndIf
+
+        DeleteOldCursor{}
+
+        PBMainWindow\Old_EmptySpace = PBMainWindow\EmptySpace
+
+        PBMainWindow\NbLines+1
+
+        PBCursor\X = PBMainWindow\EmptySpace
+        PBCursor\OffsetX = 0
+
+        PBMainWindow\Empty_CursorX = PBCursor\X
+
+        \Text = String$(" ", PBCursor\X) + splittext
+
+        If RefreshAll
+          RefreshLines{0, 1}
+        Else
+          RefreshLines{PBCursor\Y, 1}
+        EndIf
+
+
+      Case 127 ; Suppress
+
+        If FullX < Len(\Text)
+
+          PBGlobals\Modified  = 1
+          PBGlobals\ReCompile = 1
+
+          If PBMainWindow\QualifierKey = 2 ; Shift
+            \Text = Left$(\Text,FullX)
+          Else
+            \Text = Left$(\Text,FullX)+Right$(\Text,Len(\Text)-FullX-1)
+          EndIf
+
+          If (PBCursor\OffsetY+PBCursor\Y = SelectedZone\EndY) AND (PBCursor\OffsetX+PBCursor\X <= SelectedZone\EndX)
+            SelectedZone\EndX-1
+          EndIf
+
+          DisplayLine{1}
+        Else
+           If PBCursor\Y+PBCursor\OffsetY+1 < PBMainWindow\NbLines
+            NextItem Source()
+            Text = \Text
+            PrevItem Source()
+            \Text = LSet$(\Text, PBCursor\X+PBCursor\OffsetX)+Text
+            DisplayLine{1}
+
+            If PBCursor\Y+PBCursor\OffsetY+1 = PBMainWindow\NbLines-1
+              OkPrevious = 0
+            Else
+              OkPrevious = 1
+            EndIf
+
+            NextLine{}
+            DeleteLine{0}
+
+            If OkPrevious
+              PreviousLine{}
+            EndIf
+          EndIf
+        EndIf
+
+    End Select
+
+  EndIf
+
+  If PBCursor\OffsetX <> PBOld_Cursor\OffsetX
+    RefreshLines{0, 1}
+  EndIf
+
+  If Len(\Text) > PBMainWindow\MaxNbChars
+    PBMainWindow\MaxNbChars = Len(\Text)
+  EndIf
+
+End Statement
+

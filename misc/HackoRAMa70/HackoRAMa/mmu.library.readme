@@ -1,0 +1,192 @@
+Supplied in here is release version 7.0 of mmu.library. (If I have remembered
+to update this text and the version file :)
+This is meant as a tool for programmers. It enables you to allocate memory
+that no other tasks can use.
+
+			*****************
+To do this you will need a 68040 with a working MMU, and Enforcer needs to be
+running. This program depends on Enforcer handling violations!
+			*****************
+
+The archive contains one example source (readonly-test.s) and an executable
+version of it. The source depends on my own macros etc. to assemble and is
+only meant as an example. You will have to disassemble it if you absolutely
+want to see every instruction it generates. The executable will first protect
+a single page(4k) of memory across all tasks against reading or writing it,
+then it will allocate a memory pool and release it (it doesn't do anything
+useful with it, I just kept it in the code. It showed that CreatePool() did
+indeed call AllocMem()), and then it will protect some pages of memory against
+being read or written by any other tasks. It is able to read the pages itself.
+The start address of the last pages will be written to the cli (after two
+sentences). To see this working I suggest you put a breakpoint at the 'Spin'
+subroutine and view the memory, and then try to view the same memory from
+another task. The program can only be used from the cli.
+
+Also in the archive are offset definitions (with register use) for the
+library functions.
+
+Previous versions contained definitions for new MEMF flags. Since version 4.0
+these have been removed. You will now have to get the bit definitions by asking
+mmu.library for them (using the GetBit_XXX functions). I suggest you OR
+together often used values. This will also make easy code by having (a)
+varible(s) set to the return value(s) and always OR'ing with the variable. If
+mmu.library wasn't able to open you should have the variables initialised to 0
+and the OR will simply be a NOP. The reason for this change was that I can
+move the definitions around if C= defines new MEMF_ bits, and if C= does their
+own memory protection I can just hang myself onto them.
+
+See the AllocExecMem() autodoc for information on the new MEMF bits.
+
+If you have memory that is not automatically added to the free pool then you
+should add this before running any program that opens mmu.library (like
+RoboCode does).
+
+The main way this should be used is by calling the normal Exec functions
+AllocMem() and FreeMem() with the new flags provided. mmu.library will patch
+these to recognise if you use the new flags. The Alloc and Free functions in
+this release will perhaps go away in a later version. None of the current
+functions are set in stone; I will probably remove them all and insert some
+with a slightly higher level API.
+The GetBit_XXX, AnalyzeEnforcerHit, and Thread functions are very certain to
+stay.
+AllocVec() and CreatePool()¹ will work if you use the new flags for KickStart
+versions up to and including V40. (Who knows what comes later.)
+**IF YOU WISH TO SET PROTECTION YOURSELF YOU _HAVE_ TO USE THE**
+**PROTECTION_AWARE FLAG**
+This library depends on AllocVec() and FreeVec() calling AllocMem() and
+FreeMem() respectively. That means you can use AllocVec()/FreeVec() with the
+new flags. CreatePool() is ok too.
+(¹ the pool header will _not_ be protected!)
+Note that the documentation lies about AllocVec(): the returned address is not
+guaranteed to be quad-word aligned. (Well... didn't the old AllocMem() doc say
+that memory was quad-word aligned?)
+Allocated memory is not guaranteed to be page aligned. See the AllocExecMem
+autodoc for more information.
+
+IMPORTANT:
+mmu.library will take over the TC_SWITCH, TC_LAUNCH, and TC_Userdata fields
+in the task struct. You can _NOT_ use these yourself. The Switch and Launch
+fields are set to the routines that change the mmu tables under a task switch,
+and the Userdata field contains the needed mmu table information for each task.
+If there was a way I could ask for having a pointer to my data attatched to the
+task struct I would have done that, but as you might know, there is no such way
+to extend the per task information.
+
+Note that mmu.library will never expunge. For each task that opens the
+library 10-20k will be allocated. This is returned on a close. If you try to
+quit Enforcer (a reset with Enforcer's reset handler has the same effect) then
+Enforcer will search the active mmu tables and try to free memory that has
+been allocated by mmu.library. This will give you a software failure 01000009.
+There is no good way around this problem. There is a workaround which involves
+adding my own reset handler and keeping the old information and putting it back,
+but I haven't bothered with it so far. I would prefer a clean reset. It might
+work if you have a reset program that does not depend on ColdReboot() - I have
+finally debugged my own reset program and now my 4000 will nicely reset (shame
+on Macro68 (and me :) for not noting that I was using illegal instuctions (030
+specific. BAsm told me, and I finally listened to it.). 
+
+'RESOURCE TRACKING':
+There are a number of issues that are implied in the use of mmu.library. Among
+these is ownership of memory: If you allocate memory then you(your task) have
+to free it and nobody else. This is problematic with the current philosophy(sp?)
+of the OS and therefore I will implement what I call 'threads'. Threads will be
+tasks that have the exact same view of what is allowed and not; they will all
+use the same mmu table. (The mmu table switching overhead will still be there
+since I do not have the possibility to control which task will be switched in
+next. If the OS had done this they would have been real lightweight processes.)
+However, there will still be one of the tasks that 'own' all the allocations
+and the data allocated when opening mmu.library. To help this I will implement
+a function that enables a task to ask to take over ownership, and a function
+that tries to give it away. Also to be implemented is functions to share memory
+allocated between two tasks (not threads), and to transfer ownership of an
+allocation to another task (not thread).
+CLOSING mmu.library IMPLIES FREEING ALL MEMORY ALLOCATED WITH THE NEW FLAGS IF
+NO OTHER TASK HAS BEEN GIVEN OWNERSHIP OF THE ALLOCATION(S)!
+
+Thread functions have not been tested. There is no communication implied in the
+thread calls, you will have to send a message to the other task to join the
+thread and wait for a reply before you can know that you share memory. However,
+once both tasks have called their respective functions the two task are
+guaranteed to share memory. Note the Forbid() requirements.
+
+The 'RebootOff' program that comes with the Enforcer distribution is not
+recommended running when mmu.library has been initialised: Enforcer depends on
+freeing memory that the mmu table uses, and when mmu.library has changed this
+Enforcer will try to free something it doesn't own and don't know how to free
+correctly.
+
+Questions and suggestions for improvements (in both operation and
+documentation) are welcome. Send to borgen@stud.cs.uit.no.
+
+There are _many_ plans for improvements of mmu.library. Stay tuned.
+TODO (no order):
+- take over the whole memory system. Then I can protect free memory
+- protect the library itself, and all allocated per task data
+- implement cookies: memory several tasks can allocate and share by knowing
+magic numbers. This can stay around after a task has died and still be found
+- make a 'Polly' program to eat(free) all cookies in the system
+- implement the cache flags. Without burstable memory (like the 4000/040 has)
+it might be a win in some situations to use writethrough(sp?) cache instead of
+copyback. It would also be possible to cache chip memory, but this needs a very
+aware use of cache clearing
+- make a 68030 compatible version of mmu.library
+- snoop out CreatePool() from the ROM and SetFunction() it with a hacked version
+(that uses some protection flags) if it can recognice it
+- patch all pool functions anyway since there is a bug in V39 and V40 (still)
+versions of KickStart
+- implement memory sharing and memory ownership change (not the same as cookie
+allocated memory)
+
+Version notes:
+1.0 First release. Only internal Alloc and Free funtions.
+2.0 Now patches Exec AllocMem() and FreeMem().
+3.0 Added some 'C' defines. Important cleanups done in FreeMem(). Now works
+with allocs larger than 4k :).
+3.1 Fixed problem with FreeMem() not removing protection for task.
+4.0 All MEMF_ definitions removed from includes (and I changed them just to
+be incompatible with earlier versions). You need to call GetBit_XXX to get
+the bit definitions now. Slightly more compatible with future definitions C=
+could make.
+5.0 Added AnalyzeEnforcerHit() for debuggers. Added .fd file. Wrote more
+documentation, and added rules for ownership.
+5.1 Started writing autodoc. Preparing structures for taking over memory system.
+5.2 Added tail page protection. All MP allocations will have an extra page at
+the end that is illegal to access. Mungwall can show you similar writes, but
+not reads.
+5.3 Speeded up code that calculated the same over again and stored it.
+6.0 Added thread functions and thread ownership change function.
+6.1 Fixed bug in Close(); memory was not being freed. Fixed RoboCode.readme.
+Am now running with RoboCode started right after Enforcer. Pseudocode for
+memory takeover written. Structures expanded to meet demands of takeover.
+6.2 Fixed bug in the mmu table switch code. Seems better now (I hate inverse
+logic dbCC which also doesn't count down). SetFunction ColdReboot() doesn't
+help you much if you run RebootOff, but at least you don't GURU (only 10s wait
+before reset).
+6.3 Fixed bugs in the use of the ROM AllocMem()/FreeMem() and my own patches.
+I was changing sizes and addresses that should not be changed.
+Fixed bug in chip mem recognization.
+Now clears memory for real if MEMF_CLEAR is used.
+Allocation is adjusted to the highest possible address to get the end of the 
+allocated data as close to an illegal page as possible. Allocation is still
+divisible by 8.
+7.0 Added 'Lone_Ranger' to map 512K memory in at address $C00000.
+
+7.0 still has problems with writeprotecting memory. Under some circumstances
+it is possible to write to memory that should have been writeprotected. This
+behaviour is very random, and I still haven't found out how to hinder it.
+It must be possible or else Motorola would have been out of business a long
+time ago. (I am trying to find out ig Enforcer can have anything to do with it.)
+
+This has been an Ymir's Thoughts production. So far we have released a patch
+(rewrite is closer to the truth) for Bubble Bobble. We also have plans to port
+XPilot, we have a game that is playable, and I am working on a game myself
+(wont be finished in a looong time). Look out for more interesting products
+from us in the future.
+Copyright 1994 by Børge Nøst. Thanks to Ralph Schmidt for documentation on
+the TC_SWITCH and TC_LAUNCH fields.
+If you find this library and archive to be useful you are requested to send
+$5 (or something of same value (like disks or shareware registrations)) to
+Børge Nøst, Boks 218, 9001 Tromsø, NORWAY. (Everybody who registers and has an
+email address will get a personal copy of mmu.library and will be included in
+an update list so that you will be informed when new versions are released. New
+personal copies will be sent on request.)

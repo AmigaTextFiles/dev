@@ -1,0 +1,148 @@
+@require "sqlite3"
+
+local width = 78
+local function line(pref, suff)
+    pref = pref or ""
+    suff = suff or ""
+    local len = width - 2 - strlen(pref) - strlen(suff)
+    debugprint(pref .. repeatstr("-", len) .. suff)
+endfunction
+
+local db, vm
+
+line(sqlite3.version())
+
+deletefile("test.db")
+db = sqlite3.open("test.db")
+
+line(nil, "db:exec")
+db:exec("CREATE TABLE t(a, b)")
+
+line(nil, "prepare")
+vm = db:prepare("insert into t values(?, :bork)")
+assert(vm)
+assert(db:errmsg())
+assert(vm:bind_parameter_count() = 2)
+assert(vm:bind_values(2, 4) = #SQLITE3_OK)
+assert(vm:dostep() = #SQLITE3_DONE)
+assert(vm:reset() = #SQLITE3_OK)
+assert(vm:bind_names({"pork", bork = "nono"}) = #SQLITE3_OK)
+assert(vm:dostep() = #SQLITE3_DONE)
+assert(vm:reset() = #SQLITE3_OK)
+assert(vm:bind_names({bork = "sisi"}) = #SQLITE3_OK)
+assert(vm:dostep() = #SQLITE3_DONE)
+assert(vm:reset() = #SQLITE3_OK)
+assert(vm:bind_names({1}) = #SQLITE3_OK)
+assert(vm:dostep() = #SQLITE3_DONE)
+assert(vm:finalize() = #SQLITE3_OK)
+
+line("select * from t", "db:exec")
+
+assert(db:exec("select * from t", function (ud, ncols, values, names)
+    DebugPrint(Unpack(values))
+    return(#SQLITE3_OK)
+endfunction) = #SQLITE3_OK)
+
+line("select * from t", "db:prepare")
+
+vm = db:prepare("select * from t")
+assert(vm)
+assert(db:errmsg())
+debugprint(vm:get_unames())
+while (vm:dostep() = #SQLITE3_ROW)
+    debugprint(vm:get_uvalues())
+wend
+assert(vm:finalize() = #SQLITE3_OK)
+
+line("udf", "scalar")
+
+local function do_query(sql)
+    local r
+    local vm = db:prepare(sql)
+    assert(vm)
+    assert(db:errmsg())
+    debugprint("====================================")
+    debugprint(vm:get_unames())
+    debugprint("------------------------------------")
+    r = vm:dostep()
+    while (r = #SQLITE3_ROW)
+	debugprint(vm:get_uvalues())
+	r = vm:dostep()
+    wend
+    assert(r = #SQLITE3_DONE)
+    assert(vm:finalize() = #SQLITE3_OK)
+    debugprint("====================================")
+endfunction
+
+local function udf1_scalar(ctx, v)
+    local ud = ctx:user_data()
+    ud.r = iif(gettype(rawget(ud, "r")) = #nil, "", rawget(ud, "r")) .. tostring(v)
+    ctx:result_text(ud.r)
+endfunction
+
+db:create_function("udf1", 1, udf1_scalar, { })
+do_query("select udf1(a) from t")
+
+line("udf", "aggregate")
+
+local function udf2_aggregate(ctx, ...)
+    local ud = ctx:get_aggregate_data()
+    if gettype(ud) = #nil
+	ud = {}
+	ctx:set_aggregate_data(ud)
+    endif
+    ud.r = iif(gettype(rawget(ud, "r")) = #nil, 0, rawget(ud, "r")) + 2
+endfunction
+
+local function udf2_aggregate_finalize(ctx, v)
+    local ud = ctx:get_aggregate_data()
+    local n = 0
+    if gettype(ud) = #table then n = iif(gettype(rawget(ud, "r")) = #nil, 0, rawget(ud, "r"))    
+    ctx:result_number(n)
+endfunction
+
+db:create_aggregate("udf2", 1, udf2_aggregate, udf2_aggregate_finalize, { })
+do_query("select udf2(a) from t")
+
+if true
+    line(nil, "100 insert exec")
+    db:exec("delete from t")
+    starttimer(1)
+    for i = 1 to 100
+	db:exec("insert into t values("..i..", "..(i * 2 * -1^i)..")")
+    next
+    debugprint("elapsed: "..gettimer(1))
+    do_query("select count(*) from t")
+
+    line(nil, "100000 insert exec T")
+    db:exec("delete from t")
+    starttimer(1)
+    db:exec("begin")
+    for i = 1 to 100000
+	db:exec("insert into t values("..i..", "..(i * 2 * -1^i)..")")
+    next
+    db:exec("commit")
+    debugprint("elapsed: "..gettimer(1))
+    do_query("select count(*) from t")
+
+    line(nil, "100000 insert prepare/bind T")
+    db:exec("delete from t")
+    starttimer(1)
+    local vm = db:prepare("insert into t values(?, ?)")
+    db:exec("begin")
+    for i = 1 to 100000
+	vm:bind_values(i, i * 2 * -1^i)
+	vm:dostep()
+	vm:reset()
+    next
+    vm:finalize()
+    db:exec("commit")
+    debugprint("elapsed: "..gettimer(1))
+    do_query("select count(*) from t")
+endif
+
+line(nil, "db:close")
+
+assert(db:close() = #SQLITE3_OK)
+
+line(sqlite3.version())

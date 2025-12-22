@@ -1,0 +1,1 @@
+#undef CXX_HAVE_CYGWIN

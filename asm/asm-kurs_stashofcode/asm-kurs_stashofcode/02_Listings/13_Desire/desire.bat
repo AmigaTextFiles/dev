@@ -1,0 +1,1 @@
+vasmm68k_mot -Fhunkexe -m68020 -nocase -quiet -o desire main_one.asm

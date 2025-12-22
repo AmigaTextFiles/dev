@@ -1,0 +1,114 @@
+Section 1.
+
+What is linux-privs?  What is the proftpd mod_linuxprivs module?
+================================================================
+
+The linux-privs project is a project aimed at providing the POSIX.1e
+security model under Linux.  Documentation on the project as a whole
+can be found at:
+
+ftp://linux.kernel.org/pub/linux/libs/security/linux-privs
+
+Without going into gory detail, POSIX.1e basically specifies an interface
+to such goodies as capabilities, capability sets, access control lists,
+mandatory access control and much, much more.  The end result of this
+security model allows compliant systems and daemons to have VERY
+fine-grained control over what operations are allowed by which services
+on the system.
+
+The best part of the whole story is that Linux development kernels (2.1)
+already have two important facets of the security model in place, namely
+capabilities and capability sets.  Using these features allows a user-land
+program to specifically drop capabilities (which can be thought of as
+"privileges") which it does not need.  Once such capabilities are
+completely dropped, neither the user-land program OR any binary it should
+spawn will be allowed to perform privileged operations, *regardless*
+of whether the program is running as root or not.  Essentially, this
+limits the power of root to only those specific functions that are
+necessary, with the end effect of making the program much more secure.
+
+A non-supported contributed module has been added in the proftpd
+distribution, named mod_linuxprivs.  It can be found in the contrib
+directory, and a symlink in modules/ points to it.  Because Linux 2.1
+is a development kernel, the module is not compiled by default.
+
+Additionally, a small library is included in contrib; libcap.  This
+library provides the interface between mod_linuxprivs and the capability
+syscalls present in Linux 2.1 kernels.  (Note that this library is simply
+a slightly modified version of the libcap library which can be found at
+linux.kernel.org).  Building proftpd with the mod_linuxprivs module
+included (see below for instructions on how to do this) will automatically
+build and link in the required libcap library.
+
+When proftpd runs with mod_linuxprivs installed, its operation changes
+slightly:
+
+1. The master proftpd process runs per normal (with full capabilities).
+
+2. Child proftpd processes (or those run from inetd) drop ALL capabilities
+   except for cap_net_bind_service (which allows a process to bind to
+   ports < 1024) *immediately* after a client has authenticated.
+   Additionally, switching back and forth between root and the
+   authenticated user is no longer necessary, so uid swapping is disabled.
+   Once the additional capabilities have been dropped, proftpd (or
+   any programs it should exec) is not capable of performing any other
+   privileged functions (including chroot, mknod or mount).  If
+   proftpd should somehow be "coerced" into exec()ing another binary,
+   the kernel will drop ALL capabilities (including cap_net_bind_service),
+   and the binary that is exec'd will be incapable of performing
+   "dangerous" syscalls, REGARDLESS of the user it runs as.  With
+   capabilities and capability sets, root isn't necessarily "all
+   powerful" any more. ;)
+
+
+Section 2.
+
+What do I need to do to run mod_linuxprivs?
+===========================================
+
+mod_linuxprivs currently requires that you be running a Linux kernel
+version 2.1.104 or newer.  It's been tested and verified to work with
+2.1.122.  Should the kernel interface change in newer versions, we'll try
+to get the libcap library updated as quickly as possible. ;)
+
+Steps to building proftpd with mod_linuxprivs:
+
+1. Verify you are running at LEAST kernel 2.1.104
+
+2. Make absolutely sure that /usr/src/linux is a symlink to your
+   2.1.* kernel source tree.  This is required by libcap.
+
+3. Run the top-level configure script using the --with-modules
+   argument to include mod_linuxprivs.  You don't need to copy
+   mod_linuxprivs.c from contrib/ to modules/, as there is already
+   a symlink in the modules/ directory.  Example:
+
+   ./configure --prefix=/usr --with-modules=mod_linuxprivs
+
+   If you're compiling in multiple modules (such as mod_ratio), you
+   would:
+
+   ./configure --prefix=/usr --with-modules=mod_ratios:mod_linuxprivs
+
+4. Run make from the top-level directory just as you normally would.
+   This will build and link the library in contrib/libcap automatically.
+
+5. "make install", etc, etc.
+
+If you want to verify that mod_linuxprivs is actually working, set
+proftpd's debug level to 1 (add the command line option: -d 1).  You
+should see a debug syslog message along the lines of "module linuxprivs:
+capabilities '= cap_net_bind_service+ep'" _after_ a client logs in.  This
+message indicates that proftpd has no capabilities except for
+cap_net_bind_service in the Effective and Permitted sets.  See the
+linux-privs documentation on linux.kernel.org for a detailed explanation
+of Effective, Permitted and Inheritable capability sets.  Normally, root
+runs with "=eip cap_setpcap-eip", meaning that all capabilities are raised
+(allowed) in each of the three sets, with the exception of cap_setpcap
+(only the pid 1 init process has this capability).  If you see the above
+log message, this indicates that proftpd has successfully dropped almost
+all of the capabilities that give root it's "power."
+
+Section 2.
+
+There is no section 2.

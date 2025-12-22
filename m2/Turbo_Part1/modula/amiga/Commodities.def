@@ -1,0 +1,240 @@
+DEFINITION FOR LIBRARY MODULE Commodities ;
+
+FROM SYSTEM	IMPORT STRING, ADDRESS, SHORTSET, LONGSET, LONGWORD ;
+FROM Exec	IMPORT MsgPortPtr, TaskPtr, LibraryPtr ;
+FROM InputEvent IMPORT InputEventPtr, IEQUALIFIER_LSHIFT, IEQUALIFIER_RSHIFT,
+		       IEQUALIFIER_CAPSLOCK, IEQUALIFIER_LALT, IEQUALIFIER_RALT;
+
+FROM KeyMap	IMPORT KeyMapPtr ;
+
+(*============================================================================*)
+
+TYPE
+  NewBroker = RECORD
+    nb_Version		: SHORTINT ;   (* Must be set to NB_VERSION *)
+    nb_Name		: STRING ;
+    nb_Title		: STRING ;
+    nb_Descr		: STRING ;
+    nb_Unique		: INTEGER ;
+    nb_Flags		: BITSET ;
+    nb_Pri		: SHORTINT ;
+    nb_Port		: MsgPortPtr ;
+    nb_ReservedChannel	: INTEGER ;
+  END ;
+  NewBrokerPtr = POINTER TO NewBroker ;
+
+(* constant for NewBroker.nb_Version *)
+CONST
+  NB_VERSION	= 5 ;	    (* Version of NewBroker structure *)
+
+(* Sizes for various buffers *)
+  CBD_NAMELEN  	= 24 ;
+  CBD_TITLELEN 	= 40 ;
+  CBD_DESCRLEN 	= 40 ;
+
+(* Flags for NewBroker.nb_Unique *)
+  NBU_DUPLICATE = 0 ;
+  NBU_UNIQUE    = 1 ; (* will not allow duplicates	     *)
+  NBU_NOTIFY    = 2 ; (* sends CXM_UNIQUE to existing broker *)
+
+(* Flags for NewBroker.nb_Flags *)
+  COF_SHOW_HIDE = 4 ;
+
+(*============================================================================*)
+
+(* Fake data types for system private objects *)
+
+TYPE
+  CxObj		= LONGINT ;
+  CxMsg		= LONGINT ;
+  CxObjPtr	= POINTER TO CxObj ;
+  CxMsgPtr	= POINTER TO CxMsg ;
+
+(* Pointer to a function returning a LONG *)
+
+  PFL		= PROCEDURE( ) : LONGINT ;
+
+(*============================================================================*)
+
+(* Commodities object types *)
+CONST
+  CX_INVALID	= 0 ;     (* not a valid object (probably null) *)
+  CX_FILTER	= 1 ;     (* input event messages only		*)
+  CX_TYPEFILTER	= 2 ;     (* obsolete, do not use		*)
+  CX_SEND	= 3 ;     (* sends a message			*)
+  CX_SIGNAL	= 4 ;     (* sends a signal			*)
+  CX_TRANSLATE	= 5 ;     (* translates input event into chain  *)
+  CX_BROKER	= 6 ;     (* application representative		*)
+  CX_DEBUG	= 7 ;     (* dumps info to serial port		*)
+  CX_CUSTOM	= 8 ;     (* application provides function	*)
+  CX_ZERO	= 9 ;	  (* system terminator node		*)
+
+(*============================================================================*)
+
+(* Commodities message types *)
+CONST
+  CXM_IEVENT  = {5} ;
+  CXM_COMMAND = {6} ;
+
+(* Only CXM_IEVENT messages are passed through the input network. Other types
+ * of messages are sent to an optional port in your broker. This means that
+ * you must test the message type in your message handling, if input messages
+ * and command messages come to the same port.
+ *
+ * CXM_IEVENT: Messages of this type rattle around the Commodities input
+ *	       network. They are sent to you by a Sender object, and passed
+ *	       to you as a synchronous function call by a Custom object.
+ *
+ *	       The message port or function entry point is stored in the
+ *	       object, and the ID field of the message will be set to what
+ *	       you arrange issuing object.
+ *
+ *	       The data section of the message will point to the input event
+ *	       triggering the message.
+ *
+ * CXM_COMMAND: These messages are sent to a port attached to your Broker.
+ *		They are sent to you when the controller program wants your
+ *		program to do something. The ID value identifies the command.
+ *)
+
+(* ID values associated with a message of type CXM_COMMAND	*)
+  CXCMD_DISABLE	  = 15 ; (* please disable yourself		*)
+  CXCMD_ENABLE	  = 17 ; (* please enable yourself		*)
+  CXCMD_APPEAR	  = 19 ; (* open your window, if you can	*)
+  CXCMD_DISAPPEAR = 21 ; (* go dormant				*)
+  CXCMD_KILL	  = 23 ; (* go away for good			*)
+  CXCMD_LIST_CHG  = 27 ; (* Someone changed the broker list	*)
+  CXCMD_UNIQUE	  = 25 ; (* someone tried to create a broker    *)
+			 (* with your name. Suggest you appear. *)
+
+(*============================================================================*)
+
+TYPE
+  InputXpression = RECORD
+    ix_Version   : SHORTINT ; (* must be set to IX_VERSION *)
+    ix_Class     : SHORTINT ; (* class must match exactly  *)
+
+    ix_Code      : BITSET ;(* Bits that we want				      *)
+    ix_CodeMask  : BITSET ;(* Set bits here to indicate which bits in ix_Code *)
+			   (* are don't care bits.			      *)
+
+    ix_Qualifier : BITSET ;(* Bits that we want				*)
+    ix_QualMask  : BITSET ;(* Set bits here to indicate which bits in   *)
+			   (* ix_Qualifier are don't care bits		*)
+
+    ix_QualSame  : BITSET ;(* synonyms in qualifier *)
+  END ;
+  IX = InputXpression ;
+
+  InputXpressionPtr = POINTER TO InputXpression ;
+  IXPtr		    = POINTER TO InputXpressionPtr ;
+
+(* constant for InputXpression.ix_Version *)
+CONST
+  IX_VERSION	= 2 ;
+
+(* constants for InputXpression.ix_QualSame *)
+  IXSYM_SHIFT = {0} ;	(* left- and right- shift are equivalent     *)
+  IXSYM_CAPS  = {1} ;	(* either shift or caps lock are equivalent  *)
+  IXSYM_ALT   = {2} ;	(* left- and right- alt are equivalent	     *)
+
+  IXSYM_SHIFTMASK = IEQUALIFIER_LSHIFT + IEQUALIFIER_RSHIFT ;
+  IXSYM_CAPSMASK  = IXSYM_SHIFTMASK + IEQUALIFIER_CAPSLOCK ;
+  IXSYM_ALTMASK	  = IEQUALIFIER_LALT + IEQUALIFIER_RALT ;
+
+(* constant for InputXpression.ix_QualMask *)
+  IX_NORMALQUALS = BITSET( 07FFFH ) ;	 (* avoid RELATIVEMOUSE *)
+
+
+(* matches nothing *)
+
+  PROCEDURE NULL_IX( ix : LONGINT ) : BOOLEAN ; (* ix->ix_Class==IECLASS_NULL *)
+
+(*============================================================================*)
+
+(* Error returns from CxBroker() *)
+CONST
+  CBERR_OK      = 0 ;  (* No error				 *)
+  CBERR_SYSERR  = 1 ;  (* System error, no memory, etc		 *)
+  CBERR_DUP     = 2 ;  (* uniqueness violation			 *)
+  CBERR_VERSION = 3 ;  (* didn't understand NewBroker.nb_Version *)
+
+(*============================================================================*)
+
+(* Return values from CxObjError() *)
+
+  COERR_ISNULL		= 1 ; (* you called CxObjError(NULL)	    *)
+  COERR_NULLATTACH	= 2 ; (* someone attached NULL to my list   *)
+  COERR_BADFILTER 	= 4 ; (* a bad filter description was given *)
+  COERR_BADTYPE		= 8 ; (* unmatched type-specific operation  *)
+
+
+(*============================================================================*)
+
+VAR
+  CxBase : LibraryPtr ;
+
+(* object creation macros *)
+
+PROCEDURE CxCustom( func : PROC (* cast it *) ; id : LONGINT ) : CxObjPtr ;
+PROCEDURE CxDebug ( id : LONGINT ) : CxObjPtr ;
+PROCEDURE CxFilter( description : STRING ) : CxObjPtr ;
+PROCEDURE CxSender( port : MsgPortPtr ; id : LONGINT ) : CxObjPtr ;
+PROCEDURE CxSignal( task : TaskPtr ; signal : LONGSET ) : CxObjPtr ;
+PROCEDURE CxTranslate( ie : InputEventPtr ) : CxObjPtr ;
+
+(*--- functions in V36 or higher (Release 2.0) ---*)
+
+(* OBJECT UTILITIES *)
+
+PROCEDURE CreateCxObj( type : LONGINT ; arg1, arg2 : LONGWORD ) : CxObjPtr ;
+PROCEDURE CxBroker( nb : NewBrokerPtr ; error : ADDRESS ) : CxObjPtr ;
+PROCEDURE ActivateCxObj( co : CxObjPtr ; true : LONGINT ) : LONGINT ;
+PROCEDURE DeleteCxObj( co : CxObjPtr );
+PROCEDURE DeleteCxObjAll( co : CxObjPtr ) ;
+PROCEDURE CxObjType( co : CxObjPtr ) : LONGINT ;
+PROCEDURE CxObjError( co : CxObjPtr ) : LONGINT ;
+PROCEDURE ClearCxObjError( co : CxObjPtr );
+PROCEDURE SetCxObjPri( co : CxObjPtr ; pri : LONGINT ) : LONGINT ;
+
+(* OBJECT ATTACHMENT *)
+
+PROCEDURE AttachCxObj( headObj, co : CxObjPtr );
+PROCEDURE EnqueueCxObj( headObj, co : CxObjPtr );
+PROCEDURE InsertCxObj( headObj , co , pred : CxObjPtr );
+PROCEDURE RemoveCxObj( co : CxObjPtr );
+
+(* TYPE SPECIFIC *)
+
+PROCEDURE SetTranslate( translator : CxObjPtr ; events : InputEventPtr ) ;
+PROCEDURE SetFilter( filter : CxObjPtr ; text : STRING ) ;
+PROCEDURE SetFilterIX( filter : CxObjPtr ; ix : IXPtr ) ;
+PROCEDURE ParseIX( description : STRING ; ix : IXPtr ) : LONGINT ;
+
+(* COMMON MESSAGE *)
+
+PROCEDURE CxMsgType( cxm : CxMsgPtr ) : LONGINT ;
+PROCEDURE CxMsgData( cxm : CxMsgPtr ) : ADDRESS ;
+PROCEDURE CxMsgID( cxm : CxMsgPtr ) : LONGINT ;
+
+(* MESSAGE ROUTING *)
+
+PROCEDURE DivertCxMsg( cxm : CxMsgPtr ; headObj , returnObj : CxObjPtr  ) ;
+PROCEDURE RouteCxMsg( cxm : CxMsgPtr ; co : CxObjPtr ) ;
+PROCEDURE DisposeCxMsg( cxm : CxMsgPtr ) ;
+
+(* INPUT EVENT HANDLING *)
+
+PROCEDURE InvertKeyMap( ansiCode : LONGINT ;
+			event	 : InputEventPtr ;
+			km	 : KeyMapPtr ) : BOOLEAN ;
+
+PROCEDURE AddIEvents( events : InputEventPtr ) ;
+
+(*--- functions in V38 or higher (Release 2.1) ---*)
+
+(* MORE INPUT EVENT HANDLING *)
+
+PROCEDURE MatchIX( event : InputEventPtr ; ix : IXPtr ) : BOOLEAN ;
+
+END Commodities.

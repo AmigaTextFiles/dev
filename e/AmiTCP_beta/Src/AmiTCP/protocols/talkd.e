@@ -1,0 +1,40 @@
+OPT MODULE
+OPT EXPORT
+
+MODULE 'amitcp/sys/socket'
+
+CONST NAME_SIZE=12,
+      TTY_SIZE=16
+
+OBJECT ctl_msg
+  vers:CHAR
+  type:CHAR
+  answer:CHAR
+  pad:CHAR
+  id_num
+  addr:osockaddr
+  ctl_addr:osockaddr
+  pid
+  l_name[NAME_SIZE]:ARRAY
+  r_name[NAME_SIZE]:ARRAY
+  r_tty[TTY_SIZE]:ARRAY
+ENDOBJECT
+
+OBJECT ctl_response
+  vers:CHAR
+  type:CHAR
+  answer:CHAR
+  pad:CHAR
+  id_num
+  addr:osockaddr
+ENDOBJECT
+
+CONST TALK_VERSION=1
+
+ENUM LEAVE_INVITE, LOOK_UP, DELETE, ANNOUNCE
+
+ENUM SUCCESS, NOT_HERE, FAILED, MACHINE_UNKNOWN, PERMISSION_DENIED,
+     UNKNOWN_REQUEST, BADVERSION, BADADDR, BADCTLADDR
+
+CONST MAX_LIFE=60,
+      RING_WAIT=30

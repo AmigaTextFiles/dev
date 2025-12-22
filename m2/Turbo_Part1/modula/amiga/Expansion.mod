@@ -1,0 +1,6 @@
+IMPLEMENTATION MODULE Expansion ;
+
+IMPORT M2Lib ;
+
+BEGIN ExpansionBase := M2Lib.OpenLib( EXPANSIONNAME , VERSION )
+END Expansion.

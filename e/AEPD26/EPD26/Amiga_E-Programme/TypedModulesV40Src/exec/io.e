@@ -1,0 +1,33 @@
+=1,
+      FRB_DRAWERSONLY=0,
+      FRF_DRAWERSONLY=1,
+      FRB_FILTERDRAWERS=1,
+      FRF_FILTERDRAWERS=2,
+      FRB_REJECTICONS=2,
+      FRF_REJECTICONS=4
+
+OBJECT fontrequester
+  reserved0[8]:ARRAY
+  attr:textattr
+  frontpen:CHAR
+  backpen:CHAR
+  drawmode:CHAR
+  reserved1:CHAR
+  userdata:LONG
+  leftedge:INT
+  topedge:INT
+  width:INT
+  height:INT
+  tattr:ttextattr
+ENDOBJECT     /* SIZEOF=NONE !!! */
+
+CONST ASLFO_WINDOW=$80080002,
+      ASLFO_SCREEN=$80080028,
+      ASLFO_PUBSCREENNAME=$80080029,
+      ASLFO_PRIVATEIDCMP=$8008002A,
+      ASLFO_INTUIMSGFUNC=$80080046,
+      ASLFO_SLEEPWINDOW=$8008002B,
+      ASLFO_USERDATA=$80080034,
+      ASLFO_TEXTATTR=$80080033,
+      ASLFO_LOCALE=$80080032,
+      ASLFO_TITLETEXT=$80080001

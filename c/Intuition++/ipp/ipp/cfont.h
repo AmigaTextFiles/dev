@@ -1,0 +1,41 @@
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+///////////////////                                        ////////////////////
+///////////////////           file : cfont.h               ////////////////////
+///////////////////                                        ////////////////////
+///////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////////////////////////////////////
+//
+//	Class CFont :
+//
+//		- Encapsulation of TextFont for C++
+//
+
+
+#ifndef __CFONT__
+#define __CFONT__
+
+#include <intuition/intuition.h>
+#include <graphics/text.h>
+
+
+class CFont
+{
+protected:
+	friend class CRastPortHdl;
+
+	struct TextAttr fontattr;
+	struct TextFont *font;
+	BOOL initlibs();
+public:
+	CFont();
+	CFont(STRPTR name, UWORD size, UBYTE style, UBYTE flags);
+	~CFont();
+
+	BOOL open(STRPTR name , UWORD size, UBYTE style, UBYTE flags);
+	void close();
+	BOOL isopen();
+};
+
+
+#endif //__CFONT__

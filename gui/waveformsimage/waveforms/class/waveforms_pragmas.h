@@ -1,0 +1,7 @@
+#ifndef PRAGMAS_WAVEFORMS_PRAGMAS_H
+#define PRAGMAS_WAVEFORMS_PRAGMAS_H
+
+#pragma libcall WFIBase dispatchWFI 1e 9A803
+
+#endif /* PRAGMAS_WAVEFORMS_PRAGMAS_H */
+

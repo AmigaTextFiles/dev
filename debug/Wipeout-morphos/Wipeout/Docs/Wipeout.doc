@@ -1,0 +1,553 @@
+Wipeout -- Traces and munges memory and detects memory trashing
+
+Written by Olaf `Olsen' Barthel <olsen@sourcery.han.de>
+Public Domain
+
+------------------------------------------------------------------------------
+
+1. What is it?
+
+Wipeout is a tool to watch and manipulate how memory is being put to use by
+the Amiga. By "put to use" I mean allocation, deallocation, invalid attempts
+to do either, forgetting to do either and memory trashing in general. In the
+right hands, Wipeout can be used to improve the quality of Amiga software by
+pointing into the direction of where a memory use problem might have
+originated.
+   Wipeout works best if used together with tools like Enforcer, SegTracker,
+Memoration, Scratch and tnt (these five are all part of the Software Toolkit,
+as distributed in the 3.1 Native Developer Kit or on the Amiga Developer CD
+v1.1). Wipeout does not work with MungWall; it is meant to be an alternative
+to MungWall.
+   Wipeout is related to the MemWall, MemMung and MungWall tools, but unlike
+these offers more and different functionality. The most prominent feature of
+Wipeout is its ability to track and watch memory pools; MungWall and its kin
+did not support this.
+
+
+2. Requirements
+
+Wipeout requires an Amiga equipped with Kickstart 2.04 or better. Aside from
+the operating system version, there are no special requirements.
+
+Since Wipeout sends its output to the built-in Amiga serial port or the
+parallel port, you should either have a terminal or a printer connected to
+your machine, or you should run a program like Sashimi or Sushi to capture its
+output.
+
+
+3. What Wipeout does
+
+ 1) Except when The Enforcer is running, memory location 0 is set to
+    0xC0DEDBAD; programs referencing location zero will not find a NULL
+    string.
+
+ 2) On startup all still unallocated (i.e. "free") memory is munged with
+    0xABADCAFE. If this number shows up, a program is referencing memory
+    in the free list.
+
+ 3) Except when MEMF_CLEAR is set as a memory allocation attribute,
+    freshly-allocated memory is pre-munged with 0xDEADF00D. When this is used
+    in an Enforcer report, the caller is allocating memory and does not
+    initialize it before using it.
+
+ 4) Memory is filled with 0xDEADBEEF before it is freed, encouraging programs
+    reusing freed memory to crash. See the configuration options REUSE and
+    NOREUSE for more information on this subject.
+
+ 5) Since memory allocations may not be done from within interrupt code,
+    all such attempts will be made to fail.
+
+ 6) Calling AllocMem()/AllocVec()/AllocPooled() with a zero length parameter
+    or NULL pool header will be made to fail.
+
+ 7) Calling FreeMem()/FreePooled() with a zero length parameter or a NULL
+    memory pointer/pool header will be registered as an error.
+
+ 8) Every memory deallocation must start on a long-word boundary (i.e. the
+    address to deallocate from must be a multiple of four); if it does not,
+    it will be registered as an error.
+
+ 9) Every memory deallocation should operate only on allocated memory and
+    should not overlap with unallocated memory; if this happens, it will be
+    registered as an error. Note that it is halfway legal to partly deallocate
+    memory. However, Wipeout does not tolerate such behaviour.
+
+10) Every memory deallocation has to match the size of the original
+    allocation; if it does not, it will be registered as an error.
+
+11) If memory is to be deallocated by a routine different from the one it was
+    allocated with (e.g. AllocVec() followed by FreePooled()), it will be
+    registered as an error.
+
+12) If memory following or preceding the allocation is trashed, it will be
+    reported.
+
+13) If a memory pool is created with the threshold size greater than the
+    puddle size, it will be reported.
+
+14) As memory pools may not be used by more than a single task at the same
+    time, any attempt to do so will be reported. In any event, Wipeout will
+    make sure that pool accesses are properly synchronized.
+
+15) Trying to deallocate memory from the wrong pool will be reported as an
+    error.
+
+16) Trying to deallocate memory from a pool if that memory has already been
+    deallocated will be reported as an error.
+
+17) If a memory allocation error is detected, the memory in question will not
+    be deallocated.
+
+18) Upon returning from a memory allocation routine, Wipeout will make sure
+    that all scratch registers (D1/A0/A1) will be scratched. These registers
+    will be set to the values D1=0xD100DEAD, A0=0xA000DEAD and A1=0xA100DEAD.
+
+19) Supposedly orphaned memory will be reported; see below for an explanation
+    of orphaned memory.
+
+
+4. How memory is being watched
+
+Wipeout places a magic cookie before each memory allocation. Along with a wall
+of bytes on either side of the allocation to keep an eye on the memory just
+before or after the allocation. If the memory wall is trashed, Wipeout
+complains and shows the damaged area. If memory is trashed so bad that the
+cookie is completely gone, Wipeout will not consider it a walled memory
+allocation and lets it go. Changes are you will be corrupting the memory list
+and/or overwriting other memory allocation and crash soon after that.
+
+
+5. Interaction with other programs
+
+Wipeout needs to know the caller's return address in order to determine the
+name of the program that tried to allocate/deallocate memory and where the
+operating system call came from. Thus, if you want to run other debugging
+tools that redirect calls to the memory management routines, you must make
+sure that Wipeout will be the last program to be started.
+
+For optimum functionality, start the SegTracker tool before Wipeout is
+launched. And once Wipeout is running, proceed to run Enforcer.
+
+
+6. Command line options
+
+Wipeout can be started only from Shell.
+
+ ********************************************
+ *                                          *
+ * TAKE GREAT CARE when running Wipeout for *
+ * the   first   time   since,  other  than *
+ * MungWall, Wipeout cannot be told to quit *
+ *                                          *
+ ********************************************
+
+If Wipeout is started for the first time, it will plant its patches in the
+operating system, modify memory location zero, munge the currently unallocated
+memory and wait for something to happen. I recommend to always run Wipeout
+in the background, like this:
+
+   run >nil: Wipeout
+
+Every other attempt to start Wipeout will only cause the running Wipeout
+configuration to be updated.
+
+The following command line options are available:
+
+PRESIZE=number     This sets the number of bytes to place in front of each
+                   allocation; minimum is 8 bytes, maximum 65536 bytes,
+                   default is 32 bytes. The size will be rounded to be a
+                   multiple of eight bytes.
+
+POSTSIZE=number    This sets the number of bytes to place behind each
+                   allocation; minimum is 8 bytes, maximum 65536 bytes,
+                   default is 32 bytes. The size will be rounded to be a
+                   multiple of eight bytes.
+
+FILLCHAR=number    The character to fill the memory walls with. This can
+                   be given either in decimal or in hexadecimal notation.
+                   Default is a rolling fill character which uses a new
+                   odd number between 0x81 and 0xFF for each new allocation.
+                   This makes it possible for Wipeout to usually catch
+                   errors where too much memory is copied from one
+                   allocation to another. Specifying a FILLCHAR disables
+                   the default rolling fill character feature.
+
+PARALLEL           This option activates parallel port output; default is
+                   serial port output through kprintf().
+
+NOBANNER           This option will cause Wipeout not to print its banner
+                   message when it is started.
+
+REMUNGE            Use this option to tell Wipeout to munge all unallocated
+                   memory again. You might want to use this periodically
+                   since deallocated memory will continue to clear out the
+                   regular free memory munge pattern over time, making it
+                   less likely for badly-written software to trip over
+                   unallocated memory.
+
+CHECK              This tells Wipeout to check all known memory allocations
+                   for defects and to report damages, orphaned memory
+                   and the list of programs being monitored.
+
+MARK               These options are for setting and clearing memory marks.
+UNMARK             A mark is used in conjunction with the SHOWUNMARKED
+                   option which will collect and display all so far unmarked
+                   memory allocations. Marks can help you tell older from
+                   newer memory allocations.
+
+SHOWUNMARKED       This tells Wipeout to collect and display all so far
+                   unmarked memory allocations. Every memory allocation
+                   starts out as being unmarked. Thus, telling Wipeout to
+                   mark all allocations, waiting a bit and then using
+                   the SHOWUNMARKED option will display all allocations
+                   done since the time you set the marks. Note that this
+                   option really makes sense only if you did mark any
+                   memory before as you will otherwise see every
+                   active memory allocation (but then again, this might
+                   be just what you wanted to see...).
+
+TASK=name          Watch only the task(s) or all but the task(s) specified
+                   with the "name" parameter. Multiple task names are
+                   indicated by placing a "|" between the names. If the names
+                   are preceeded by an exclamation mark ("!"), all tasks
+                   except for the ones indicated are tracked. "ALL" is a
+                   reserved name, indicating all tasks should be tracked;
+                   default is "ALL".
+
+                   When names are compared, case does not matter. What names
+                   are compared against the contents of the list depends upon
+                   the type of the task whose name should be tested. If the
+                   task is truly a plain Task or Process, its task node name
+                   will be compared. If the task is in fact a Shell process
+                   with a program executing in it, then the name will be
+                   the name of that program.
+
+                   Note that for a Shell program, the name will include the
+                   complete path name the program was started with. To find
+                   out which names the Shell programs are using, try the
+                   Shell "Status" command.
+
+NAMETAG            These options control whether each memory allocation will
+NONAMETAG          be tagged with the name of the allocating task's or
+                   command's name and origin of the call. This will eat up
+                   extra memory and take extra time to store, so it is not
+                   enabled by default. If you wish to look for memory leaks
+                   in your software, use the NAMETAG option as it will
+                   provide information on the creator of an orphaned memory
+                   allocation until after the creator has already exited.
+                   Default is NONAMETAG.
+
+ACTIVE             These options control whether Wipeout should track and
+INACTIVE           test memory usage; default is ACTIVE. While Wipeout is
+                   inactive, memory deallocations will still be tracked, but
+                   deallocation errors will not be reported.
+
+WAIT               These options control whether each task to cause a
+NOWAIT             Wipeout hit will be halted and wait for a [Ctrl]-C
+                   break signal. Make sure that you can actually send
+                   that signal to the task in question. Default is NOWAIT.
+
+CONSISTENCECHECK   These options control whether Wipeout will run a
+NOCONSISTENCECHECK consistency check on all its memory tracking data
+                   structures before performing memory deallocations and
+                   tracked allocations. This test may slow down the operation
+                   of the Amiga, especially on already very slow machines.
+                   Still, it is required to assure proper operation of the
+                   program; without consistent data structures, Wipeout will
+                   crash or fail to perform correctly.
+                   Default is NOCONSISTENCECHECK.
+
+REUSE              It is semi-legal to continue using memory after releasing
+NOREUSE            it through FreeMem(), etc. while you are still in Forbid()
+                   state. Wipeout will by default tolerate such behaviour
+                   (default is REUSE), but you can also make it reject this
+                   through the NOREUSE option. TAKE GREAT CARE WHEN USING THE
+                   NOREUSE OPTION as -- unfortunately -- a great number of
+                   programs will break if it is in effect.
+
+SHOWFAIL           These options control whether every failed memory
+NOSHOWFAIL         allocation will be reported; default is NOSHOWFAIL.
+
+AREGCHECK          These options tell Wipeout that you wish all the values
+NOAREGCHECK        in the address registers to be checked via SegTracker;
+                   default is NOAREGCHECK.
+
+DREGCHECK          These options tell Wipeout that you wish all the values
+NODREGCHECK        in the data registers to be checked via SegTracker;
+                   default is NODREGCHECK.
+
+STACKCHECK         These options tell Wipeout that you wish all the values
+NOSTACKCHECK       displayed in the stack to be checked against the
+                   global segment lists via SegTracker. This will tell
+                   you in what segment lists various return addresses on
+                   the stack are found, which may help in tracing the
+                   location of an offending command. Default is NOSTACKCHECK.
+
+STACKLINES=number  This option lets you pick the number of lines of stack
+                   backtrace to display. The default is 2. If set to 0,
+                   no stack backtrace will be displayed. There is NO ENFORCED
+                   LIMIT on the number of lines.
+
+CHECKDELAY=number  This option selects how much time has to pass between
+                   two automatic memory checks. A check works similar to an
+                   test initiated with the CHECK option. The delay is given
+                   in 1/10th of a second, a value of 0 disables the automatic
+                   tests. Default is 0.
+
+
+7. Signals
+
+Wipeout watches for four signals that can be sent to it either by holding down
+the [Ctrl]-C/[Ctrl]-D/[Ctrl]-E keys or through the Shell "Break" command.
+These are:
+
+[Ctrl]-C  Check and verify all active memory allocations
+
+[Ctrl]-D  Disable Wipeout
+
+[Ctrl]-E  Enable Wipeout
+
+
+8. What is orphaned memory?
+
+The Amiga does not yet know the concept of memory ownership. Memory allocated
+by one task may be passed to a different task; the original allocator may then
+safely exit. However, it sometimes happens that tasks allocate memory and exit
+before that memory is deallocated. Wipeout attempts to find out whether each
+task that allocated memory is still active. This helps to single out memory
+allocations that appear to belong to noone. Note that because allocations are
+associated with task addresses, Wipeout may not safely recognize orphaned
+allocations created by Shell programs. If you want to check whether a Shell
+program has left orphaned memory allocations behind, close the Shell window
+before entering "wipeout check" or use the Shell "Run" command to start the
+program you suspect will be losing memory.
+
+If you intend to track orphaned memory and memory pools, make sure that you
+use the NAMETAG option.
+
+
+9. How to watch for illegal memory usage?
+
+Wipeout can help you to find out about illegal memory usage, such as trying to
+read from unallocated memory, to use uninitialized allocated memory or trying
+to execute code that was recently unloaded from memory. However, it cannot do
+this all by itself: "Enforcer" and "tnt" are required to report these
+problems. I thought about adding a feature to Wipeout which would fill memory
+with a code pattern which, if accidentally executed, would cause a routine
+inside Wipeout to be called. I did not add it since memory trashing could have
+interfered with the execution of this trigger code and because nobody could
+guarantee that an accidental jump into memory areas initialized like this
+would in fact hit the jump command. Enforcer is much better at tracking such
+problems; it will report all read/write accesses to addresses caused by memory
+munged by Wipeout and it can also track execution of commands at illegal
+addresses. "tnt" on the other hand is able to report where an illegal command
+was executed, such as in an area just munged by Wipeout.
+
+
+10. What is in a Wipeout report?
+
+Here is a sample Wipeout report with a few annotations:
+
+   WIPEOUT HIT
+1) 12-Apr-98 20:21:29
+2) Front wall was stomped upon
+3) Data: 00003039 FFFFFFFF 0000FFFF 00004E28 00000001 0000002B 0000003B 00003039
+4) Addr: 0856B461 08568428 083E7714 084E58AD 084EF19C 08568428 08000848 085DC278
+5) Stck: 0854ECEE 083E66D4 084E58B0 08000848 0854EF36 00000001 084E5940 0854EED8
+   Stck: 083E6678 00F94EC6 08000848 0854EBE6 084E58A0 083E7714 00004E20 00004E28
+6) Name: "New_WShell"  CLI: "allocmemtest"  "allocmemtest" Hunk 0000 Offset 000002E2
+   ------------------------------------------------------------------------------
+7) 0x08568428 = AllocMem(12345,...)
+   Created on 12-Apr-98 20:21:29
+           by task 0x083E6678, CLI program "allocmemtest"
+           at "allocmemtest" Hunk 0000 Offset 000002B6
+   ------------------------------------------------------------------------------
+8) 1 byte(s) stomped (0x08568427..0x08568427), allocation-1 byte(s)
+9) 08568427: 61...................................... a...................                  
+
+
+1) This is the time and date of the Wipeout hit, i.e. the point of time when
+   an invalid memory management routine call was made.
+
+2) This indicates what type of problem occured; in this case memory preceding
+   the allocation was trashed.
+
+3) This is a dump of the MC68000 data registers
+
+4) This is a dump of the MC68000 address registers
+
+5) This is a dump of the stack active at the time the invalid memory
+   management routine call was made.
+
+6) This is the name of the task and the program name that made the call;
+   first the task name, then the CLI program name and the location of the
+   call in that program. In some cases, the CLI program name may be omitted
+   or the hunk/offset information may not be available.
+
+7) This is a short summary of the history of the memory allocation, stating
+   the size of the allocation, where it was allocated and who allocated it.
+
+8) This information is displayed in case memory was trashed. It tells you
+   how many bytes were trashed (in this case 1 byte), which byte is the
+   first and which is the last to take damage (in this case the first byte
+   to be damaged is located at address 0x08568427, the last one at address
+   0x08568427), and where the first trashed byte is located in relation to
+   the address of the allocation (in this case the last trashed byte
+   preceding the allocation is found one byte in front of the allocation
+   body). If the relative allocation address is positive, it indicates
+   where the first trashed byte to follow the allocation is found in
+   relation to the end of the allocation body.
+
+9) This information is displayed in case memory was trashed. It shows what
+   data the allocated memory wall was trashed with. Only trashed data will
+   be shown, both in a hexadecimal representation and, if possible, in ASCII
+   code (at the right hand side of the line).
+
+
+11. Source code
+
+For your convenience, the complete program source code is included in the
+distribution. Should you find bugs, make updates or enhancements, feel free to
+contact me. The source code was written for the SAS/C compiler.
+
+
+12. API
+
+In version 1.31 I added a humble API which allows you to control certain
+aspects of memory allocations made. In order to use it you need SAS/C or
+some glue code to make the call into the semaphore's control function
+possible (which accepts parameters in registers). The definitions are all
+in the 'pubwipeoutsemaphore.h' header file. Here is a small code snippet
+that changes the program counter associated with a memory allocation:
+
+   #include "pubwipeoutsemaphore.h"
+
+   ...
+
+   void
+   change_pc(void *mem,unsigned long pc)
+   {
+      struct WipeoutSemaphore * ws;
+
+      ws = (struct WipeoutSemaphore *)FindSemaphore(PUBWIPEOUTSEMAPHORENAME);
+      if(ws != NULL && ws->ws_Version >= PUBWIPEOUTSEMAPHOREVERSION)
+      {
+         struct TagItem tags[] =
+         {
+            { WOT_Address },
+            { WOT_SetPC },
+            { TAG_END }
+         };
+
+         tags[0].ti_Data = mem;
+         tags[1].ti_Data = pc;
+
+         (*ws->ws_ControlFunc)(tags);
+      }
+   }
+
+
+13. Why Wipeout?
+
+Too much surf music? No. I found MungWall needlessly cryptic to use; what are
+those "A: and C: addresses" anyway? And no matter what I did, MungWall always
+appeared to come up with the wrong options enabled. That and the fact that it
+could not track or detect errors in memory pool allocations made it a prime
+candidate for retirement. I had just written a program that used memory pools
+extensively and tracking possible bugs in it was no fun at all.
+
+
+13. Author information
+
+If you wish to contact me about Wipeout, you can use the following postal
+address:
+
+   Olaf Barthel
+   Brabeckstrasse 35
+   D-30559 Hannover
+   Federal Republic of Germany
+
+or you can use this e-mail address:
+
+   olsen@sourcery.han.de
+
+
+14. Release history
+
+Wipeout 1.31 (6.2.2001)
+
+	- Added a small API to the public semaphore.
+
+Wipeout 1.30 (21.12.2000)
+
+	- More fixes to the code that rounds the allocation pre- and
+	  postsizes to multiples of eight bytes [Gunther Nikl].
+
+Wipeout 1.29 (18.12.2000)
+
+	- Memory allocations tagged with names are now properly aligned
+	  to multiples of eight bytes, which helps 'Allocate()' and
+	  'Deallocate()' [Gunther Nikl].
+
+	- Allocation pre- and postsize are also rounded to be multiples
+	  of eight bytes.
+
+Wipeout 1.28 (7.10.99)
+
+	- No longer tries to track allocations larger than 0x7FFFFFFF
+	  bytes. This avoids an overflow error which can cause memory
+	  allocations to succeed which should really fail.
+
+Wipeout 1.27 (31.5.98)
+
+	- All date stamps printed by the program were missing the extra,
+	  separating space between time and date. I got caught by
+	  irregularities introduced by the locale system. Now the date
+	  and time conversion code strips off all heading/trailing spaces
+	  before composing the string into a single line [Henrik Holst].
+
+Wipeout 1.26 (31.5.98)
+
+	- Changed the default options not to enforce the consistency
+	  check. While this check does make sense, it introduces too
+	  much overhead and slows the machine down. If you really need
+	  it, better enable it manually.
+
+Wipeout 1.25 (18.4.98)
+
+	- Contrary to the documentation, the minimum number of stack lines
+	  was not 0, but 1. Fixed.
+
+Wipeout 1.24 (16.4.98)
+
+	- Memory pools created were not tagged correctly.
+
+Wipeout 1.23 (16.4.98)
+
+	- Enhanced the NAMETAG option so that orphaned pools and
+	  allocations are easier to recognize.
+
+Wipeout 1.22 (16.4.98)
+
+	- The consistency checks did not work out well due to the magic
+	  header cookie getting reset for dead allocations. The code now
+	  takes this into account.
+
+	- When memory is released, not just the allocation body will be
+	  trashed, the entire data structure including header and walls
+	  will be filled with the memory munge pattern.
+
+	- Releasing an entire memory pool now has the effect of trashing
+	  every single allocation inside.
+
+Wipeout 1.21 (14.4.98)
+
+	- The MARK/UNMARK feature did change the memory marks, but forgot
+	  to update the memory allocation checksum. Fixed.
+
+	- Added the CONSISTENCECHECK/NOCONSISTENCECHECK options and the
+	  corresponding functionality.
+
+Wipeout 1.20 (13.4.98)
+
+	- Initial public release

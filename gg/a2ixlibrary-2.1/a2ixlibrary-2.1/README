@@ -1,0 +1,489 @@
+
+
+Amiga Shared Library Developer Kit Version 2.0
+==============================================
+
+Last updated: 15 December 1996
+
+Author: Hans Verkuil (hans@wyst.hobby.nl)
+
+
+Contents:
+
+0.	Important!
+1.      Overview
+2.      How to create a shared library
+3.      How to use a shared library
+4.      How does it work
+5.      Limitations and problems
+
+
+0.	Important!
+==================
+
+Geek Gadgets snapshot 961012 contained version 1.0 of this package. Do
+not use this version! It has become obsolete and everything that was
+build using that version will have to be rebuild. The only thing that
+made use of version 1.0 was the beta version of the X port, so this
+shouldn't cause any problems.
+
+
+1.      Overview
+================
+
+This developer kit is a collection of shell scripts and utilities that allow
+you to turn a regular C library into a shared library. You do need
+ixemul-45.1, the binutils and the gcc compiler from the December or later
+Geek Gadgets snapshot.  You also need a variety of other utilities (perl,
+sed, egrep, textutils, fileutils) as the main shell script makes full use of
+the available tools. Note that your program must use ixemul (so don't
+compile it with -noixemul), otherwise it is not going to work.
+
+The shell script a2ixlibrary is the work horse that converts a C library
+(*.a) to a shared library (*.ixlibrary). I've given the resulting shared
+library the '.ixlibrary' suffix as it is an Amiga shared library (the
+'library' part of the suffix), but with special properties (the 'ix' part).
+
+The next two sections describe how to make a shared library and how to link
+a program with a shared library, respectively. Section 4 gives an in-depth
+explanation on how it all works, and section 5 describes the limitations
+and problems and how to work around them.
+
+
+
+2.      How to create a shared library
+======================================
+
+First, you should be able to make a normal C library using a Makefile.
+Also, think carefully whether you really want to turn it into a shared
+library. In general, it is worth doing this if the library is big (>32 Kb,
+your mileage may vary) and is used in several programs.
+
+Now you will have to compile all sources within the library with these
+extra gcc options:
+
+        -resident -malways-restore-a4
+
+The second option may be replaced by -mrestore-a4. But you can do that only
+if the library will never return a pointer to a static function, either by
+returning such a pointer, or by storing it in a structure and returning
+that, or by any other way. The option -malways-restore-a4 will make sure
+all functions can access the globals in the shared library, but
+-mrestore-a4 will do that only for the global (= not static) functions.
+Should your program call a static function of the library through a
+function pointer, then the necessary setup isn't done on entry of that
+function, and it will probably trash memory or just crash.
+
+So if your library is well-behaved, and doesn't return pointers to static
+functions, then please use -mrestore-a4. But when in doubt, use
+-malways-restore-a4.
+
+Next, after having built the library using 'ar' (often followed by
+'ranlib') you run the script a2ixlibrary.
+
+This script accepts a single optional argument: the name of a data file
+containing information on how to make the shared library. If a2ixlibrary is
+called without an argument, it will use the file 'a2ixlibrary.data' in the
+current directory instead.
+
+The data file has the following format:
+
+#define NAME Xaw
+#define LIBRARY_ID 24
+#define VERSION 6
+#define REVISION 1
+#define FILENAME neXtaw
+#define LIBS_LIST X11 Xt Xmu Xext
+#define LINK_DIRS dir1 dir2
+#define INTERNALS _vendorShellClassRec _vendorShellWidgetClass
+#define CONSTRUCTOR
+#define DESTRUCTOR
+
+The first four lines must be present, the other lines are optional. This
+file is also included by generated C sources, which is why I used the C
+preprocessor '#define' construct.
+
+NAME is the name of the library. A C library 'lib<NAME>.a' is converted
+into a shared library 'lib<NAME>.ixlibrary'.
+
+LIBRARY_ID is a unique ID for this library. More about this later.
+
+VERSION is the version (or major) number of the library.
+
+REVISION is the revision (or minor) number of the library.
+
+FILENAME can be used if you are compiling a replacement for another
+library. For example, there are several Xaw replacements (libXaw.a contains
+the X Athena widgets), each with another look and feel. So while the
+filename of the library is libneXtaw.a, the internal name of the library
+will be Xaw (or whatever you defined as NAME). If NAME and FILENAME are
+identical as is usually the case, you should leave out FILENAME.
+
+LIBS_LIST is a list of other libraries that this library needs to link
+with. Both static libraries and shared libraries may be specified.
+
+LINK_DIRS is a list of directories to search for libraries. It will be used
+when linking the library: 'LINK_DIRS dir1 dir2' will be transformed to
+'-Ldir1 -Ldir2' and added to the link command that links the library.
+
+INTERNALS is a list of global (external) functions or variables, that
+nevertheless, for one reason or another, should *not* be exported to the
+outside.  One of the few cases where this is useful is if variable names in
+two libraries are identical, and by keeping them internal in one library,
+you can make sure that your program links with the right variable. This is
+the only #define (besides the CONSTRUCTOR and DESTRUCTOR macros) in the
+data file where you can use the standard C preprocessor technique of using
+a backslash at the end of the line to continue the macro on a new line.
+
+Attention! The symbol names do not necessarily match the names as used in
+your C source. Most notably, gcc prefixes all C variables and functions
+with an underscore. So variable X should be specified as _X in the
+INTERNALS list.
+
+If the CONSTRUCTOR macro is defined, then the content of this define is
+executed after the library is opened in the constructor of your program.
+So you can use this to call initialization functions in your library from
+your program, without having to change your program source. The CONSTRUCTOR
+macro is placed between two curly braces, so your can start you macro with
+variable declarations. For example:
+
+#define CONSTRUCTOR extern char *dyn_libraries[]; \
+	__dld_set_dyn_libraries(dyn_libraries)
+
+This is what I used in a library that needs a pointer to an array that is
+defined in an exectable. The __dld_set_dyn_libraries() function is part
+of the shared library, and it's called from the executable with the address
+of the dyn_libraries variable that the shared library needs. So there is no
+need to explicitly call an initialize() function in your main().
+
+There is also a DESTRUCTOR macro, that is called just before your program
+closes the library.
+
+Of course, if one or both of these macros are undefined, then no action is
+taken.
+
+After you've created this data file and added the 'a2ixlibrary' line to the
+Makefile you can run 'make' and with a bit of luck you'll end up with a
+shared library.  A new libNAME_ixlibrary.a is created that contains a
+constructor that will automatically open the corresponding shared library.
+The shared library should be copied to /gg/sys/libs, and libNAME_ixlibrary.a
+should be copied to /gg/lib.
+
+If the a2ixlibrary script fails, then you should first check if you didn't
+miss any libraries in LIBS_LIST.  Otherwise, read section 5 on how to
+circumvent certain limitations.
+
+A final note on the library ID. Each shared library uses a unique ID.
+Currently, IDs run from 0 to 99 (but this can easily be increased in the
+future). IDs 0-19 are for your own private use. If you want to distribute
+your shared library, then you should register your library. A list of
+currently registered libraries can be found in the file REGISTRY that is
+part of the ixemul source distribution. You can register your library by
+sending mail to: Hans Verkuil, hans@wyst.hobby.nl. Please include the name
+of your new library, and it will be officially registered and given a
+unique ID, which will be mailed back to you.
+
+If you want to distribute your library, you should distribute the following
+files:
+
+lib<name>_ixlibrary.a
+lib<name>.ixlibrary
+/gg/include/a2ixlibrary/<name>.h
+/gg/share/a2ixlibrary/ldscripts/<name>.x
+
+See sections 4 and 5 for more information on the last two files.
+
+
+3.      How to use a shared library
+===================================
+
+Compile as usual.  You don't have to do anything at all.  The linker will
+notice that you want to link with a shared library and it will take the
+necessary actions.  You can use the option -Wl,-debug to see which actions
+the linker takes.
+
+Note, however, that it is currently not possible to compile your program
+with -resident or -fbaserel (this might change in the future).
+
+
+4.      How does it work
+========================
+
+4.1     The basics
+------------------
+
+First some basics: all programs and shared libraries consist of two or
+three hunks: the text hunk containing the actual program code, a data hunk
+which contains initialized data (initialized variables, structures, arrays,
+pointers, etc. are all stored here) and a bss hunk that just allocates
+memory for uninitialized data. In some cases, most notably shared libraries
+and resident programs, the bss hunk is merged into the data hunk and
+becomes data which is initialized to 0. Note that the term 'shared library'
+denotes the *.ixlibrary files created using the developer kit. Standard
+Amiga shared libraries can contain a bss hunk.
+
+When a program or library is loaded into memory, the hunks are placed at
+essentially random addresses.  This means that all addresses contained in
+the program/library have to be fixed so that they point to the new
+locations. This process is called 'relocation'. Addresses in the text and
+data hunks can point to locations in the text, data or bss hunks. The bss
+hunk contains no addresses, of course.
+
+4.2     Unix shared libraries
+-----------------------------
+
+BSD Unix shared libraries are implemented by runtime linking. Instead of
+linking with the libraries when the executable was build, it is done when
+you run the executable. The advantage is that you can do anything with
+shared libraries that you can do with static C libraries. The disadvantage
+is (at least on a system such as the Amiga) that each program loads its own
+copy of the libraries into memory.
+
+4.3     Instances
+-----------------
+
+The obvious solution on the Amiga is to use Amiga shared libraries.
+However, the main problem with the standard shared library is that they
+only export functions, not variables.  It is also difficult to create a
+separate data hunk per task. Normally, Amiga shared libraries have only one
+global data (and bss) hunk which is used by all tasks.  So I've made a kind
+of cross between a standard Amiga shared library and Unix runtime linking.
+
+The new shared libraries have only three functions:
+__LibSetVarsInstance(), __LibRelocateInstance() and __LibCloseInstance(),
+besides the obligatory functions to init, expunge, open and close the
+library.  The open function creates an 'instance' of the data hunk, the
+__LibRelocateInstance() function relocates all pointers in the instance,
+the __LibSetVarsInstance() function initializes several variables, and the
+__LibCloseInstance() function frees the allocated instance.
+
+An 'instance' is a copy of the data hunk (with the bss hunk merged into the
+data hunk, so the data hunk contains all data) that is created the first
+time the library is opened by a process. The pointer to this instance is
+stored in a table of instance pointers that is part of the user structure
+that ixemul.library allocates and maintains for each process. The index in
+that table is in fact the LIBRARY_ID. And whenever you enter a function in
+the shared library, that same pointer is retrieved from the table. The code
+that does that is added to each function prologue by passing the
+-mrestore-a4 or -malways-restore-a4 options to gcc.
+
+The original data hunk which was setup by dos.library when the system first
+loaded the shared library into memory is kept untouched, so it can be
+copied as many times as is needed. As you may have noticed, the same thing
+is done with resident programs.  And this is why the -resident option is
+needed when compiling a shared library.
+
+Another advantage of the -resident option is that all references in the
+text hunk to addresses in the data hunk are base-relative (relative to the
+address stored in the A4 register). So no relocations have to take place.
+The -mrestore-a4 options retrieve the instance pointer and place it in the
+A4 register, and all is set to use the instance of this process. This is
+obviously very important, since it is impossible to relocate the text hunk
+in a shared library or a resident program, because the same hunk is used by
+multiple programs.
+
+Pointers in the data hunk that point to an address in that same data hunk
+are also handled by the -resident option. A table that lists all those
+data-to-data relocs is created by the linker, and is used to fix up those
+troublesome pointers.
+
+4.4     Dynamic linking
+-----------------------
+
+In order to make the shared libraries act like Unix libraries, it would
+have to be possible to resolve references in your program to data in the
+shared library at run time. This is something no normal Amiga shared
+library can do. What is needed are tables that contain the names of the
+symbols that the program uses from each shared library. For example, if a
+program uses variables A and B and functions F and G from a shared library,
+then it should build a table [ A, B, F, G ] and pass it on to the shared
+library when it is opened. Each symbol in that table has a pointer to
+another table that contains all the places in the program that use that
+symbol. The shared library can then match each symbol with the real address
+and fix up the references to that symbol in the program. In fact, this is
+what a normal linker does.
+
+Of course, there is no way you can link a program without resolving all
+symbols, so it should be given dummy symbols to link with.
+
+The dynamic linking mechanism I've implemented does all this. The
+a2ixlibrary script determines all externally visible symbols and creates
+tables containing the symbol name and the actual address. Actually, in the
+interest of speed and compactness, all symbol names are put through a hash
+function that returns an integer, and only that integer is stored. The
+generated tables are stored in the library, and the __LibRelocateInstance()
+function receives relocation tables from your program, matches them with
+the library symbol table and relocates your program.
+
+The a2ixlibrary script also generates a special linker script that contains
+a list of all library symbols. This script is stored in
+/gg/share/a2ixlibrary/ldscripts/<name>.x.  The linker automatically
+assembles all scripts from all the shared libraries that your program uses
+and generates a 'shared.x' linker script.  The linker uses that special link
+script to resolve all symbols.  The nice thing of this script is that no
+actual space is allocated for these symbols.  It would be very bad indeed
+if each program that used shared library X would also contain the data from
+that library as if it had linked with a normal C library.
+
+Finally, the postlink tool (which is called by the linker) examines the
+linked program and searches for references to data that is part of a shared
+library, i.e., all those symbols that were defined in the shared.x linker
+script.  All these references will have to be relocated, and are assembled
+in tables.  These tables are passed to the proper shared library after it
+is opened by calling the __LibRelocateInstance() function, thus letting the
+shared library relocate all necessary pointers.
+
+This same mechanism is not only used to let an executable link with a
+shared library, but it is also used to let a shared library link with
+another shared library.
+
+
+5       Limitations and problems
+================================
+
+5.1     Limitations
+-------------------
+
+There are several limitations to this scheme, compared to a true BSD shared
+library.
+
+1.      Shared libraries cannot use functions or data from your executable.
+
+It is of course bad practice to do this, since every program that uses your
+shared library would have to have those particular functions or variables.
+But it is also impossible to implement.  Suppose your shared library sets
+the variable X that is part of your executable to 0:  'X = 0;'.  This means
+that the text hunk of the library uses the address of variable X, and
+therefore that reference should be relocated to point to the address of X
+in the executable.  But if you run another executable that uses the same
+library, it would have to do the same, and also relocate the text hunk so
+that it points to his copy of X.  Obviously, that won't work:  one address
+cannot point to two variables.
+
+Currently, only the 'errno' variable is regularly used by programs, but
+that it solved by redefining errno when compiling a shared library, and by
+passing a pointer to errno to the __LibSetVarsInstance() function.
+
+If you nevertheless have to use functions or variables from your executable
+in the library, the best way to do this is to use the CONSTRUCTOR macro and
+pass the addresses of the functions and/or variables to your shared library
+by an explicit function call as is explained in section 2.
+
+2.      Shared libraries cannot directly use data from another library.
+
+A shared library can use functions from another shared library, because the
+text hunk (once loaded into memory) of a shared library always has the same
+address. A data hunk of a shared library can also point to data from
+another shared library, since each instance has its own data space. But a
+text hunk of a shared library cannot use data from another library. As with
+executables, it is not possible to let one pointer in the text hunk point
+to multiple data instances, each at its own address.
+
+However, this is a fairly common occurence, especially when one library
+is built on top of another library. In order to make life as easy as
+possible for the programmer, the a2ixlibrary script generates a special
+C header for each library. This header is stored in
+/gg/include/a2ixlibrary/<name>.h. If a source uses variable V from library L,
+you can include the header <a2ixlibrary/L.h> after all other includes, and
+this header will redefine V to:
+
+        extern void *__V_L_shared_ptr;
+        #define V (*((__typeof__(V) *)__V_L_shared_ptr))
+
+In other words, the same 'errno' trick as before. The __V_L_shared_ptr
+variable is automatically initialized to the address of variable V by the
+a2ixlibrary script. Note that that is a reference from a data hunk to
+another data hunk, which can be relocated without problems.
+
+If you want to get rid of all the defines, you can include the header a
+second time. This header acts as a toggle.
+
+The a2ixlibrary script will report these text to data references, so you
+don't have to scan the sources for these references.
+
+On rare occasions, this may not be enough and more control is needed. For
+those situations you can add one or more special functions to your shared
+library:
+
+        void amiga_init_X(void)
+        {
+           /* special initialization */
+        }
+
+The function name must start with 'amiga_init_' and you must use '(void)'
+as the argument type.  This is important as a2ixlibrary scans all C sources
+in the directory the script is run for this pattern.  These functions are
+called after all other initializations, such as opening other shared
+libraries, are done.  I had to use this method only once, when library A
+had to override a field from a structure in library B.  The field pointed
+to another structure Y, and both libraries contained a structure Y.  A Unix
+linker would use the largest structure of the two and discard the other,
+something that did not happen in this case.  So library A replaced the
+pointer to its own copy of structure Y.  Obviously, this is pretty rare.
+
+3.      The data hunk of a shared library is limited to 64 Kb
+
+Just like a resident program, the data hunk of a shared library is limited
+to 64 Kb because base-relative instructions on a 68000 CPU cannot address
+more than that amount. If your data hunk gets too large, you can try to
+dynamically allocate memory instead of using global or static
+arrays/structures. But you can also try to split the shared library into
+two smaller shared libraries, each able to address 64 Kb.
+
+If you are compiling for the 68020 or up, then you can also specify the
+option '-32' to a2ixlibrary, and then it will use the 32 bit base-relative
+instruction modes of the 68020 and up, and thus the 64 Kb limit is no
+longer a problem in that case. Note that this is as yet untested!
+
+4.	Two symbol names hash to the same value
+
+If two symbol names hash to an identical number, then you will get a
+warning while making the shared library:
+
+  Warning: hash value <V> (<new_symbol>) already in use by <old_symbol>!
+
+<V> is the hexadecimal hash value, <new_symbol> is the symbol name that was
+just read, and <old_symbol> is the earlier symbol name that hashed to the
+same value <V>.
+
+If two or more symbol names hash to the same value, then that may cause
+problems when the library is used, since if a program used <new_symbol>,
+then the program may be incorrectly relocated to <old_symbol>. The only
+feasible solution in this case would be to rename one of these two symbols.
+However, this may not be necessary if the program is guaranteed to use one
+of the symbols that are (alphabetically ordered) in between <old_symbol>
+and <new_symbol>. Before the symbol tables are hashed, they are first
+sorted alphabetically as an optimization while relocating. Now suppose that
+the library exports symbols A, B, C, D, E and F. Also suppose that C and F
+hash to the same value. If the program will always use one of the symbols
+C, D or E, then no conflict will arise. Why? Because by the time symbol F
+needs to be relocated, the hash value will not be tested against the
+(identical) hash value of symbol C, since we are already past that symbol.
+
+In general, though, it is wise to change the name of one of the two
+symbols. That way you can be sure no unexpected problems will crop up.
+
+5.2     Problems
+----------------
+
+What to do if library A uses library B, and library B uses library A?
+
+This is possible to implement, but it requires a two-stage process.  First
+compile library A and for each unresolved external X (that is, all
+references to symbols of library B) make an entry in a new source:  'void
+*X;'.  Do not add library B to the LIBS_LIST of your data file.  You should
+also add an INTERNALS define to the data file listing the same unresolved
+symbols.  Now compile this new source and add it to library A.  Run
+a2ixlibrary again.  It should be able to link, but of course it doesn't use
+any variables of library B.  It doesn't even open library B, because the
+B.x linker scripts aren't available yet.  However, a valid A.x is now
+available.
+
+Now compile and link library B, which you should be able to do without any
+problems, since it can link with library A.  At this point you have a valid
+B.x, and you can go back to library A, delete the temporary source, rebuild
+the libB.a, add library B to the LIBS_LIST entry, delete the INTERNALS
+define, and link again.  This time you can reference the symbols of library
+B.
+
+I've tested this and it works quite well.

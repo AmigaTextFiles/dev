@@ -1,0 +1,97 @@
+' This code shows how to make a non-blocking request with
+' timeout to a remote HTTP server to retrieve a webpage
+' and print it on the screen.  
+'
+' This requires the BSD Socket Extension installed in Extension
+' Slot 18. 
+'
+' Copyright 2023 John Bintz
+' Visit theindustriousrabbit.com for more info 
+' Licensed under the MIT License   
+
+LIB=Socket Library Open
+
+If LIB<=0
+   Print "Unable to open bsdsocket.library!"
+   End 
+End If 
+
+SOCKET=Socket Create Inet Socket
+
+' A lot of functions return debugging info. Assign that to 
+' some useless variable, unless you're trying to figure out
+' an issue with the extension. 
+_=Socket Set Nonblocking(SOCKET,True)
+
+HOST$="aminet.net"
+Print "Trying to connect to "+HOST$
+IP$=Dns Get Address By Name$(HOST$)
+
+' When nonblocking sockets start to connect, they may or 
+' may not finish their connection before the function
+' returns. If the socket doesn't connect, we have to wait
+' for it to do so. 
+ALREADY_CONNECTED=Socket Connect(SOCKET To IP$,80)
+
+Reserve As Work 30,1024
+
+' Due to how AMOS takes over Ctrl-C handing, there's no way
+' for the bsdsocket code to use Exec's Ctrl-C handling.
+' This means we need to poll for network activity. 
+' However, the async functions will immediately return 
+' if they get appropriate data before the timeout ends.
+' This is somewhat more CPU efficient. 
+For I=1 To 100
+   If ALREADY_CONNECTED=-1
+      ' We can check a socket for writing if it's currently
+      ' attempting to connect. Once it connects, we can stop 
+      ' checking for that status -- we're ready to communicate 
+      ' with the remote server.
+      RESULT=Socket Wait Async Writing(SOCKET,100)
+      
+      If RESULT>0
+         ALREADY_CONNECTED=0
+      End If 
+      If RESULT=-3
+         Print "Unrecoverable error!"
+         Exit 
+      End If 
+   End If 
+   
+   If ALREADY_CONNECTED=0
+      Print "Connected to "+HOST$
+      
+      HTTPGET$="GET / HTTP/1.0"+Chr$(10)+"Host: amiga"+Chr$(10)+Chr$(10)
+      Print "Making HTTP request to "+HOST$
+      _=Socket Send(SOCKET,Varptr(HTTPGET$),Len(HTTPGET$))
+      
+      For J=1 To 100
+         RESULT=Socket Wait Async Reading(SOCKET,50)
+         
+         If RESULT>0
+            Print "Receiving data"
+            ' You can receive either to a block of memory... 
+            '
+            'OUT=Socket Recv(SOCKET To Start(30),1024) 
+            'For K=0 To OUT-1
+            '   _DATA$=_DATA$+Chr$(Peek(Start(30)+K))
+            'Next K
+            '
+            ' ...or to a string... 
+            _DATA$=Socket Recv$(SOCKET,1024)
+
+            Print _DATA$
+            ' If the amount read is less than the length of data,
+            ' assume we're done. This is fine for HTTP.
+            If Len(_DATA$)<1024
+               Exit 2
+            End If 
+         End If 
+      Next J
+      Exit 
+   End If 
+Next I
+
+Socket Library Close 
+
+

@@ -1,0 +1,5 @@
+OPT NATIVE
+->{#include <boost/preprocessor/facilities/empty.hpp>}
+ NATIVE {BOOST_PREPROCESSOR_FACILITIES_EMPTY_HPP} CONST
+
+ NATIVE {BOOST_PP_EMPTY} CONST	->BOOST_PP_EMPTY()

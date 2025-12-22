@@ -1,0 +1,171 @@
+
+OPT MODULE
+OPT EXPORT
+OPT PREPROCESS
+
+MODULE  'utility/tagitem',
+        'exec/types',
+        'exec/nodes'
+
+CONST RTG_DUMMY=            TAG_USER
+CONST RTG_BUFFERS=          RTG_DUMMY+$01
+CONST RTG_INTERLEAVED=      RTG_DUMMY+$02
+CONST RTG_DRAGGABLE=        RTG_DUMMY+$03
+CONST RTG_EXCLUSIVE=        RTG_DUMMY+$04
+CONST RTG_CHUNKYSUPPORT=    RTG_DUMMY+$05
+CONST RTG_PLANARSUPPORT=    RTG_DUMMY+$06
+CONST RTG_ZBUFFER=          RTG_DUMMY+$07
+CONST RTG_USE3D=            RTG_DUMMY+$08
+CONST RTG_WORKBENCH=        RTG_DUMMY+$09
+CONST RTG_MOUSEMOVE=        RTG_DUMMY+$0A
+CONST RTG_DELTAMOVE=        RTG_DUMMY+$0B
+CONST RTG_PUBSCREENNAME=    RTG_DUMMY+$0C
+CONST RTG_CHANGECOLORS=     RTG_DUMMY+$0D
+
+CONST ARGB32=   1
+CONST RGB24=    2
+CONST RGB16=    4
+CONST RGB15=    8
+CONST ABGR32=   16
+CONST BGR24=    32
+CONST BGR16=    64
+CONST BGR15=    128
+CONST RGBA32=   256
+CONST LUT8=     512
+CONST GRAFFITI= 1024
+CONST RGB15PC=  2048
+CONST BGR15PC=  4096
+CONST RGB16PC=  8192
+CONST BGR16PC=  16384
+CONST BGRA32=   32768
+CONST PLANAR1=  1
+CONST PLANAR2=  2
+CONST PLANAR3=  4
+CONST PLANAR4=  8
+CONST PLANAR5=  16
+CONST PLANAR6=  32
+CONST PLANAR7=  64
+CONST PLANAR8=  128
+
+#define PLANAREHB  Shl(1,15)
+#define PLANAR1I   Shl(1,16)
+#define PLANAR2I   Shl(1,17)
+#define PLANAR3I   Shl(1,18)
+#define PLANAR4I   Shl(1,19)
+#define PLANAR5I   Shl(1,20)
+#define PLANAR6I   Shl(1,21)
+#define PLANAR7I   Shl(1,22)
+#define PLANAR8I   Shl(1,23)
+#define PLANAREHBI Shl(1,31)
+
+OBJECT rtgdimensioninfo
+    width:LONG
+    height:LONG
+ENDOBJECT
+
+OBJECT screenmode
+    scrnode:PTR TO ln
+    name[31]:ARRAY
+    description[31]:ARRAY
+    graphicsboard:LONG
+    modeid:LONG
+    reserved[8]:ARRAY
+    minwidth:LONG
+    maxwidth:LONG
+    minheight:LONG
+    maxheight:LONG
+    default:PTR TO rtgdimensioninfo 
+    textoverscan:PTR TO rtgdimensioninfo 
+    standardoverscan:PTR TO rtgdimensioninfo 
+    maxoverscan:PTR TO rtgdimensioninfo 
+    chunkysupport:LONG
+    planarsupport:LONG
+    pixelaspect:LONG
+    vertscan:LONG
+    horscan:LONG
+    pixelclock:LONG
+    vertblank:LONG
+    buffers:LONG
+    bitsred:INT
+    bitsgreen:INT
+    bitsblue:INT
+ENDOBJECT
+
+CONST GRD_DUMMY=        TAG_USER
+CONST GRD_WIDTH=        GRD_DUMMY+$01
+CONST GRD_HEIGHT=       GRD_DUMMY+$02
+CONST GRD_PIXELLAYOUT=  GRD_DUMMY+$03
+CONST GRD_COLORSPACE=   GRD_DUMMY+$04
+CONST GRD_DEPTH=        GRD_DUMMY+$05
+CONST GRD_PLANESIZE=    GRD_DUMMY+$06
+CONST GRD_BYTESPERROW=  GRD_DUMMY+$07
+CONST GRD_MOUSEX=       GRD_DUMMY+$08
+CONST GRD_MOUSEY=       GRD_DUMMY+$09
+CONST GRD_BUSSYSTEM=    GRD_DUMMY+$0A
+CONST GRD_3DCHIPSET=    GRD_DUMMY+$0B
+
+CONST GRD_Z3=       1
+CONST GRD_Z2=       2
+CONST GRD_CUSTOM=   3
+CONST GRD_RGBPORT=  4
+CONST GRD_GVP=      5
+CONST GRD_DDIRECT=  6
+CONST GRD_ATEO=     7
+CONST GRD_PCI=      8
+
+CONST GRD_PLANAR=      0
+CONST GRD_PLANATI=     1
+CONST GRD_CHUNKY=      2
+CONST GRD_HICOL15=     3
+CONST GRD_HICOL16=     4
+CONST GRD_TRUECOL24=   5
+CONST GRD_TRUECOL24P=  6
+CONST GRD_TRUECOL32=   7
+CONST GRD_GRAFFITI=    8
+CONST GRD_TRUECOL32B=  9
+
+CONST GRD_PALETTE= 0
+CONST GRD_RGB=     1
+CONST GRD_BGR=     2
+CONST GRD_RGBPC=   3
+CONST GRD_BGRPC=   4
+
+OBJECT screenreq
+    screenmode:PTR TO screenmode 
+    width:LONG
+    height:LONG
+    depth:INT
+    overscan:INT
+    flags:INT
+ENDOBJECT
+
+OBJECT screenreqlist
+    srnode:PTR TO ln
+    req:PTR TO screenreq 
+ENDOBJECT
+
+#define SQ_EHB          Shl(1,0)
+#define SQ_CHUNKYMODE   Shl(1,1)
+#define SQ_DEFAULTX     Shl(1,2)
+#define SQ_DEFAULTY     Shl(1,3)
+#define SQ_WORKBENCH    Shl(1,4)
+
+CONST SQ_NOOVERSCAN=         0
+CONST SQ_TEXTOVERSCAN=       1
+CONST SQ_STANDARDOVERSCAN=   2
+CONST SQ_MAXOVERSCAN=        3
+
+OBJECT rtgscreen
+    libbase:LONG
+    libversion:INT
+    pad1:INT
+    graphicsboard:LONG
+    reserved[20]:ARRAY
+    mousex:LONG
+    mousey:LONG
+    c2pcode:INT
+    c2pdata:INT
+    c2pcurr:LONG
+    c2pname[30]:ARRAY
+ENDOBJECT
+

@@ -1,0 +1,814 @@
+////
+////  ATTN! This Class needs animtools from "RKM Libraries"
+////	    since that package is (c) by CBM, U must get
+////	    somewhere else ...
+////
+
+//
+// 17-04-94
+//  es laeuft nun anscheinend alles, beginne nun mit dem cleanup
+// oha -  etwas klappt noch nicht (bzw. nicht mehr...):
+//  2x Selection eines Gadgets laesst es in der Falschen Farbe rendern ...
+//
+// Brauche bringend ein Threshold ...
+//  - Chris mag es nicht ... naja sowas gehoert in Prefs ...
+//
+
+PRIVATE_DEFINES // intern, steuerung der codegeneration
+//	  TEST	  1
+//	  MYDEBUG 1
+
+
+CLASS	    drag
+SUPERCLASS  "gadgetclass",NULL
+
+////////////////////////////////////////
+
+FIRST_ATTR_NUM TAG_USER+1728
+FIRST_METH_NUM		1728
+
+INCLUDES // extern sichtbar
+	<intuition/gadgetclass.h>
+	<intuition/cghooks.h>
+
+PRIVATE_INCLUDES // intern
+	"animtools.h"
+//	  "animtools_proto.h"
+	<string.h>
+	<graphics/gels.h>
+	<lists.h>
+	<clib/macros.h>
+
+LIBRARIES
+	exec
+	intuition
+	utility
+	graphics
+	layers
+
+////////////////////////////////////////
+
+DEFINES // extern sichtbar
+	DRAGNAME "draggclass"
+
+PRIVATE_DEFINES // intern
+
+	IEQUALIFIER_ANYSHIFT	(IEQUALIFIER_LSHIFT | IEQUALIFIER_RSHIFT)
+
+	BORDER_WIDTH		4
+	BORDER_HEIGHT		4
+	THRESHOLD_X		4
+	THRESHOLD_Y		4
+
+	// INSTANCE FLAGS
+	FIX_WIDTH		(1 << 0) // Gadget cannot modify its Width according to Image
+	FIX_HEIGHT		(1 << 1) // Gadget cannot modify its Height according to Image
+//	VISIBLE 		(1 << 2) // Gadget BOB is Visible
+	SELECTED		(1 << 3) // Gadget is Selected (almost identical to GadgetFlag)
+	SUPPRESS_REDRAW 	(1 << 4) // Gadget cannot be rendered now
+	FREE_PLACEMENT		(1 << 5) // Gadget can be placed everywhere in the current Window (IE Left & Top are not Fixed)
+	FREE_WINDOW		(1 << 6) // Gadget can be moved to another Window -- unused for now ...
+	NEWPOS			(1 << 7)
+
+
+	GADOB	 ((struct Gadget *)o)
+	NBOB	 inst->newbob
+	TBOB	 inst->act_bob
+	GDATA	 inst->gdata
+	GGI	 inst->gdata->ginfo
+	GRP	 (&inst->gdata->rp)
+	GVP	 (&inst->gdata->screen->ViewPort)
+
+	_DO  do{
+	_OD  }while(0)
+
+	IS_SELECTED		(inst->flags & SELECTED)
+	MARK_SELECTED()         _DO inst->flags |=  SELECTED; GADOB->Flags |=  GFLG_SELECTED; _OD
+	MARK_UNSELECTED()       _DO inst->flags &= ~SELECTED; GADOB->Flags &= ~GFLG_SELECTED; _OD
+
+	IS_VISIBLE		(inst->is_shown)
+	MAKE_INVISIBLE()        _DO inst->is_shown = 0; RemBob (TBOB);      _OD
+	MAKE_VISIBLE()          _DO inst->is_shown = 1; AddBob (TBOB, GRP); _OD
+
+	INIT_GELS()             if (NULL == (GGI  = setupGelSys(GRP, 0x03))) { return GMR_NOREUSE; } else /* if */
+	MAKE_BOB()              if (NULL == (TBOB = makeBob(NBOB))) {          return GMR_NOREUSE; } else /* if */
+	KILL_BOB()              _DO if (TBOB)      freeBob      (TBOB, NBOB->nb_RasDepth); TBOB = NULL; _OD
+	EXIT_GELS(gd)           _DO if (gd->ginfo) cleanupGelSys(gd->ginfo, &gd->rp); gd->ginfo = NULL; _OD
+
+	RECALC_WIDTH()          GADOB->Width = 2*BORDER_WIDTH + NBOB->nb_WordWidth*16;
+	RECALC_HEIGHT()         GADOB->Height= 2*BORDER_HEIGHT+ NBOB->nb_LineHeight;
+	RECALC_SIZES()          if (!(inst->flags & FIX_WIDTH)) RECALC_WIDTH(); if (!(inst->flags & FIX_HEIGHT)) RECALC_HEIGHT();
+
+	SHOW_GELS(gd)           _DO SortGList (&((gd)->rp)); DrawGList (&((gd)->rp), &((gd)->screen->ViewPort)); WaitTOF (); _OD
+
+	RENDER()                do_render  (o, (struct gpRender *)msg, inst)
+	DESELECT()              do_deselect(o, (Msg)msg, inst)
+	SELECT()                do_select  (o, (Msg)msg, inst)
+
+	    HIDE_ALL_BOBS()     do_hide_all    (GDATA)
+	REL_MOVE_ALL_BOBS(x,y)  do_move_all    (GDATA,x,y)
+	    SHOW_ALL_BOBS()     do_show_all    (GDATA)
+	DESELECT_ALL_BOBS()     do_deselect_all(GDATA)
+
+	TRY_TO_DROP()           _DO DQ(bug("*** DROPPING ***\n")); DisplayBeep(NULL); _OD
+	TRY_TO_DBLCLICK()       _DO DQ(bug("*** DBLCLICK ***\n")); DisplayBeep(NULL); _OD
+
+	Forbid()
+	Permit()
+	LockLayers(li)
+	UnlockLayers(li)
+
+////////////////////////////////////////
+
+CONTENTS // internal
+	struct MinNode	 act_node;  // used to keep track of all selected drag-elements
+	Object		*act_self;  // needed to get the Objectinfo from the act_node
+	struct Bob	*act_bob;   // temp bob
+
+	BYTE		 is_shown;  // temp bob is visible
+	BYTE		 is_selected;// similar to GADOB->Flags & SELECTED
+	UWORD		 flags;     // padding flags
+
+	struct newBob	*newbob;    // attribute render-data
+	struct GlobalData*gdata;    // a shortcut to cl->cl_Dispatcher.h_SubEntry
+	struct Window	*window;    // ... no alternative
+	struct timeval	 lastclick; // to check a doubleclick
+
+////////////////////////////////////////////////////////////
+//
+//	Entry/Exit Code  for Instances
+//			(no En/Ex - Code for Class needed)
+//
+////////////////////////////////////////////////////////////
+
+OBJ_INIT	// to be: OM_NEW
+	inst->act_self	= o;
+	MARK_UNSELECTED();
+
+OBJ_EXIT	// to be: OM_DISPOSE
+	DESELECT();
+
+
+////////////////////////////////////////////////////////////
+//
+//  SUPPORT STRUCTURES
+//
+////////////////////////////////////////////////////////////
+
+STRUCTURES //external
+
+////////////////////////////////////////
+//
+//  Dies werden voraussichtlich "KompatibiliatesStrukturen"
+//  sie sind abhaengig von Bildschirm und von Art der
+//  Objecte;
+//  zB sei eine Subclass "IconClass" gegeben
+//  auf dem gleichen Bildschirm ausserdem noch eine Application
+//  die ebenfalls Dragobjecte verwendet, aber inkompatibel ist
+//  zu den Icons (zB ein GUIBuilder)
+//  wie verhindere ich nun, dass die Selektionen der Applikation
+//  mit denen der WB in einen Top geworfen werden ? - eben durch
+//  diese Struktur; alle Objecte, die solch eine STruktur teilen,
+//  koennen gemeinsam gebewgt werden, Shift-selectet werden, und
+//  sie deselectieren einander bei normaler Selection (ohne Shift)
+//  da es zB in einer Wb noch unterklassen von Icons geben kann,
+//  (was passiert wenn ich etwas auf ein anderes Volume schiebe,
+//  anstatt nur im akuellen Volume? wenn ich ein Volume auf ein
+//  anderes ziehe, dazu noch appicons ...)
+//  ist diese Teststruktur noch bei weitem nicht ausreichend;
+//  ich werde sie jedoch fuer diesen Protoypen nicht weiter ausbauen,
+//  schliesslich handelt es sich ja nur um eine "Studie"
+//
+
+struct GlobalData {
+    int 	    num_selected;
+    struct MinList  list;  // all selected drag-objects
+    struct MinList  dests; // all registered drop-targets (a tree might be better)
+    struct GelInfo* ginfo; // once mor: all selected objects - here: their bobs
+    int 	    is_shown; // ginfo is (not) empty
+    ULONG	    id; // future
+    struct Screen*  screen;
+    struct RastPort rp;     // copy of screen-rp
+
+    // --- the following entries are to manage DoubleClicks
+    struct timeval  last_selection;
+    Object	   *last_selected;
+
+    // --- we keep track of all movements in order to be able to move all
+    //	   dragged gadgets - if possible
+    WORD move_X, move_Y;
+
+    // ---- we must also keep track, where the cursor was with the last
+    //	    event, since ievent->iex/y are raw values ...
+    WORD last_X, last_Y;
+}; /* struct GlobalData */
+
+
+
+////////////////////////////////////////////////////////////
+//
+//  SUPPORT DATA AND FUNCTIONS
+//
+////////////////////////////////////////////////////////////
+
+SUPPORT // internal
+
+////////////////////////////////////////
+//
+//  ARRRRRRGHHHHHh ......
+//  Global Data ...
+//
+////////////////////////////////////////
+
+#ifdef Threshold
+static int dist_X, dist_Y;
+#endif
+
+////////////////////////////////////////
+
+static void do_clear (Object *o, struct gpRender *msg, struct _CLASS *inst) {
+} /* do_clear */
+
+
+
+
+static void do_render(Object *o, struct gpRender *msg, struct _CLASS *inst) {
+    struct RastPort *rp;
+
+ DQ(bug("  RENDER\n"));
+
+    if (inst->flags & SUPPRESS_REDRAW)
+	return;
+
+    if (msg->MethodID != GM_RENDER) {
+	if (!(msg->gpr_GInfo))
+	    return;
+
+	rp = ObtainGIRPort(msg->gpr_GInfo);
+    } else {
+	rp = msg->gpr_RPort;
+    } /* if */
+
+    if (rp) {
+	UWORD back, shine, shadow;
+	UWORD *pens = msg->gpr_GInfo->gi_DrInfo->dri_Pens;
+
+	if (!(IS_SELECTED)) { // If the gadget is selected, reverse the meanings of the pens
+	    back   = pens[BACKGROUNDPEN];
+	    shine  = pens[     SHINEPEN];
+	    shadow = pens[    SHADOWPEN];
+	} else {
+	    back   = pens[  FILLPEN];
+	    shine  = pens[SHADOWPEN];
+	    shadow = pens[ SHINEPEN];
+	} /* if */
+
+	if (inst->flags & NEWPOS) { // --- Fully Erase the old gadget.
+	    inst->flags &= ~ NEWPOS;
+	    if (inst->flags & FREE_PLACEMENT) {
+		SetDrMd(rp, JAM1);
+		SetAPen(rp, pens[BACKGROUNDPEN]);
+		RectFill(rp, GADOB->LeftEdge,
+			     GADOB->TopEdge,
+			     GADOB->LeftEdge + GADOB->Width,
+			     GADOB->TopEdge  + GADOB->Height);
+		GADOB->TopEdge	+= GDATA->move_Y;
+		GADOB->LeftEdge += GDATA->move_X;
+	    } /* if */
+	    // wir muessten nun noch einmal die ganze Liste
+	    // durchgehen und alle gadgets neuzeichnen ...
+	} else {
+	    SetDrMd(rp, JAM1);
+	    SetAPen(rp, back);     // Erase the old gadget.
+	    RectFill(rp, GADOB->LeftEdge,
+			 GADOB->TopEdge,
+			 GADOB->LeftEdge + GADOB->Width,
+			 GADOB->TopEdge  + GADOB->Height);
+
+	    SetAPen(rp, shadow);   // Draw shadow edge.
+	    Move(rp, GADOB->LeftEdge + 1, GADOB->TopEdge + GADOB->Height);
+	    Draw(rp, GADOB->LeftEdge + GADOB->Width, GADOB->TopEdge + GADOB->Height);
+	    Draw(rp, GADOB->LeftEdge + GADOB->Width, GADOB->TopEdge + 1);
+
+	    SetAPen(rp, shine);    // Draw shine edge.
+	    Move(rp, GADOB->LeftEdge, GADOB->TopEdge + GADOB->Height - 1);
+	    Draw(rp, GADOB->LeftEdge, GADOB->TopEdge);
+	    Draw(rp, GADOB->LeftEdge + GADOB->Width - 1, GADOB->TopEdge);
+
+	    if (NBOB) {
+		struct Image im={ 0,0,			    // left&top
+				  NBOB->nb_WordWidth*16,    // wid
+				  NBOB->nb_LineHeight,	    // hig
+				  NBOB->nb_RasDepth,	    // dep
+				  NBOB->nb_Image,	    // imda
+				  NBOB->nb_PlanePick,	    // ppck
+				  NBOB->nb_PlaneOnOff,	    // poo
+				  NULL };		    // next
+
+		DrawImage(rp, &im, GADOB->LeftEdge + BORDER_WIDTH, GADOB->TopEdge + BORDER_HEIGHT);
+	    } /* if  nbob */
+	} /* if dodraw */
+    } /* if rp */
+
+    if (msg->MethodID != GM_RENDER) {
+	ReleaseGIRPort(rp);
+    } /* if */
+
+} /* do_render */
+
+////////////////////////////////////////
+
+static int do_select (Object *o, Msg msg, struct _CLASS *inst) {
+
+ DQ(bug("select_self ...\n"));
+
+    if (!(IS_SELECTED)) {
+	MARK_SELECTED();
+
+	MAKE_BOB();
+
+	if (GDATA) {
+	    Forbid();
+	    GDATA->num_selected ++;
+	    AddTail((struct List*)&GDATA->list, (struct Node *)&inst->act_node);
+	    Permit();
+	} /* if */
+    } /* if */
+
+    return GMR_MEACTIVE;
+} /* do_select */
+
+////////////////////////////////////////
+
+static void do_deselect (Object *o, Msg msg, struct _CLASS *inst) {
+
+ DQ(bug("DEselect_self ...\n"));
+
+    if (IS_SELECTED) {
+	MARK_UNSELECTED();
+
+	if (IS_VISIBLE) {
+	    MAKE_INVISIBLE();
+	    if (GDATA)
+		SHOW_GELS(GDATA);
+	} /* if */
+
+	if (GDATA) {
+
+	    Forbid();
+	    Remove ((struct Node *)&inst->act_node);
+	    GDATA->num_selected --;
+	    Permit();
+
+	    if (GDATA->num_selected == 0) {
+		// ---- Nota Bene INIT/EXIT-GELS should better be put into CLASS_INIT/EXIT
+		//	but we do not have any Information 'bout Screens there;
+		//	worse - using MUI [;)] we do not have a permanent Screen.
+		EXIT_GELS(GDATA);
+	    } /* if */
+	} /* if */
+
+	KILL_BOB();
+    } /* if */
+} /* do_deselect */
+
+////////////////////////////////////////
+
+//////////////////////////////////////////////////
+//
+//  WARNING!
+//
+//  the following routines are quite time-expensive,
+//  though they are called from within InputDevice;
+//  Sorry, but I do not know any workaround for that
+//  (ok, we could use GadTools way, but that's no
+//  Solution for a BOOPSI Object)
+//
+//////////////////////////////////////////////////
+
+#define o inst->act_self
+
+static void do_hide_all (struct GlobalData *gd) {
+    struct _CLASS *inst;
+
+ DQ(bug("hide_all\n"));
+
+    if (gd && gd->ginfo) {
+	Forbid();
+	for (inst = GetHead(&gd->list); inst; inst = GetSucc(inst)) {
+	    MAKE_INVISIBLE();
+	} /* for */
+	Permit();
+
+	SHOW_GELS(gd);
+	EXIT_GELS(gd);
+    } /* if */
+} /* do_hide_all */
+
+////////////////////////////////////////
+
+static int do_show_all (struct GlobalData *gd) {
+    struct _CLASS *inst;
+
+ DQ(bug("show_all\n"));
+
+    if (!gd)
+	return GMR_NOREUSE;
+
+    if (gd->num_selected > 0) {
+	if (!(gd->ginfo)) {
+	    if (NULL == (gd->ginfo  = setupGelSys(&gd->rp, 0x03))) {
+		return GMR_NOREUSE;
+	    } /* if */
+	} /* if */
+
+	for (inst = GetHead(&gd->list); inst; inst = GetSucc(inst)) {
+	    TBOB->BobVSprite->X  = inst->window->LeftEdge + GADOB->LeftEdge + BORDER_WIDTH;
+	    TBOB->BobVSprite->Y  = inst->window->TopEdge  + GADOB->TopEdge  + BORDER_HEIGHT;
+	    MAKE_VISIBLE();
+	} /* while */
+
+// --- Immediately after ShowAll we are calling MoveAll, so there is no need
+//     to draw'em now; insted I'd rather only sort our gelslist here, and
+//     drop gelssorting in my other calls.
+//	  SHOW_GELS(gd);
+    } /* if */
+    return GMR_MEACTIVE;
+} /* do_show_all */
+
+////////////////////////////////////////
+
+static void do_move_all (struct GlobalData *gd, int x, int y) {
+    struct _CLASS *inst;
+ DQ(bug("move_all\n"));
+    if (gd && gd->ginfo) {
+	for (inst = GetHead(&gd->list); inst; inst = GetSucc(inst)) {
+	    TBOB->BobVSprite->X +=x;
+	    TBOB->BobVSprite->Y +=y;
+	} /* for */
+
+	SHOW_GELS(gd);
+    } /* if */
+} /* do_move_all */
+
+////////////////////////////////////////
+
+static void do_deselect_all (struct GlobalData *gd) {
+    struct _CLASS *inst;
+
+ DQ(bug("deselect_all\n"));
+    if (gd && (gd->num_selected > 0)) {
+	do_hide_all(gd);
+
+	for (inst = GetHead(&gd->list); inst;) {
+	    APTR next;
+	    struct TagItem tags[2] = { GA_Selected, 0, TAG_DONE };
+	    next = GetSucc(inst);
+//	      freeBob	   (TBOB, NBOB->nb_RasDepth);
+//	      TBOB = NULL;
+// SetGadgetAttrs  ((struct Gadget *)inst->act_self, inst->window, NULL, GA_Selected, FALSE, TAG_DONE);
+	    SetGadgetAttrsA ((struct Gadget *)inst->act_self, inst->window, NULL, tags);
+	    RefreshGList    ((struct Gadget *)inst->act_self, inst->window, NULL, 1);
+	    inst = next;
+	} /* for */
+    } /* if */
+} /* do_deselect_all */
+
+#undef o
+
+
+////////////////////////////////////////
+
+////////////////////////////////////////////////////////////
+//
+// NEW OR CHANGED ATTRIBUTES
+//
+////////////////////////////////////////////////////////////
+
+ATTRIBUTE GDA_NewBob
+	$I NBOB = (APTR)val; RECALC_SIZES();
+	$G val	= (ULONG)NBOB;
+	$S if (!IS_SELECTED) NBOB = (APTR)val; else { DESELECT(); NBOB = (APTR)val; SELECT(); } RECALC_SIZES(); retval = 1;
+
+ATTRIBUTE GA_Selected
+	$S if ((val) && !(IS_SELECTED)) { SELECT(); retval = 1; } else if ((!val) && (IS_SELECTED)) { DESELECT(); retval = 1; }
+	$U if ((val) && (!IS_SELECTED)) { SELECT();             } else if ((!val) && (IS_SELECTED)) { DESELECT(); }
+
+ATTRIBUTE GDA_GData
+	$I GDATA = (APTR)val;
+	$G val	 = (ULONG)GDATA;
+
+ATTRIBUTE GDA_FreePlacement // object is moveable on the Window
+	$I if (val) inst->flags |= FREE_PLACEMENT; else inst->flags &= ~FREE_PLACEMENT;
+	$G val = (inst->flags & FREE_PLACEMENT) ? 1 : 0;
+
+ATTRIBUTE GDA_NewPlacement // move, if You are free placeable
+	$S inst->flags |= NEWPOS; retval = 1;
+
+ATTRIBUTE GA_Width
+	$I if (val) inst->flags |= FIX_WIDTH;  else { inst->flags &= ~FIX_WIDTH;  RECALC_WIDTH();  }
+	$S if (val) inst->flags |= FIX_WIDTH;  else { inst->flags &= ~FIX_WIDTH;  RECALC_WIDTH();  } retval = 1;
+
+ATTRIBUTE GA_Height
+	$I if (val) inst->flags |= FIX_HEIGHT; else { inst->flags &= ~FIX_HEIGHT; RECALC_HEIGHT(); }
+	$S if (val) inst->flags |= FIX_HEIGHT; else { inst->flags &= ~FIX_HEIGHT; RECALC_HEIGHT(); } retval = 1;
+
+
+
+// GFLG_REL-RIGHT/BOTTOM in fact cannot be set;
+// we do just try to make sure here, they can't be set
+// in the basic gadget structure by resetting them as
+// soon as they are set ...
+ATTRIBUTE    GA_RelRight
+	$I GADOB->Flags &= ~GFLG_RELRIGHT;
+	$S GADOB->Flags &= ~GFLG_RELRIGHT;
+ATTRIBUTE    GA_RelBottom
+	$I GADOB->Flags &= ~GFLG_RELBOTTOM;
+	$S GADOB->Flags &= ~GFLG_RELBOTTOM;
+
+
+////////////////////////////////////////////////////////////
+//
+// NEW OR CHANGED METHODS
+//
+////////////////////////////////////////////////////////////
+
+METHOD GM_HITTEST struct gpHitTest*
+
+	return GMR_GADGETHIT;
+
+////////////////////////////////////////
+
+METHOD GM_RENDER struct gpRender*
+
+	RENDER();
+	return 1;
+
+////////////////////////////////////////
+
+METHOD GM_GOINACTIVE struct gpGoInactive*
+
+	if (GDATA) {
+	    HIDE_ALL_BOBS();
+	    UnlockLayers(&GDATA->screen->LayerInfo);
+	} /* if */
+
+	return 1;
+
+////////////////////////////////////////
+
+METHOD GM_GOACTIVE struct gpInput*
+	ULONG retval;
+	struct InputEvent *ie;
+
+	if (ie = msg->gpi_IEvent) { // only act on direct user-input
+	    int inter;
+
+	    if (!GDATA) {
+		if (!IS_SELECTED) {
+		    MARK_SELECTED();
+		    RENDER();
+		} /* if */
+		return GMR_NOREUSE;
+	    } /* if */
+
+	    // --- solange wir nix besseres wissen ...
+	    inst->window  = msg->gpi_GInfo->gi_Window;
+	    GDATA->screen = msg->gpi_GInfo->gi_Screen;
+	    *GRP	  = GDATA->screen->RastPort;
+	    LockLayers(&GDATA->screen->LayerInfo);
+	    GDATA->move_X = 0;
+	    GDATA->move_Y = 0;
+#ifdef Threshold
+	    dist_X = dist_Y = 0;
+#endif
+
+	    // --- I think, it is not necessary to free/reallocate/rerender our own data, if we are already selected
+	    if ((inter = IS_SELECTED)) {
+		MARK_UNSELECTED();
+		inst->flags |= SUPPRESS_REDRAW;
+	    } /* if */
+
+	    if (!(ie->ie_Qualifier & IEQUALIFIER_ANYSHIFT)) {
+		DESELECT_ALL_BOBS();
+	    } /* if */
+
+	    if (inter) {
+		MARK_SELECTED();
+		inst->flags &= ~SUPPRESS_REDRAW;
+	    } else {
+		SELECT();
+		RENDER();
+	    } /* if */
+
+	    // --- Check for Doubleclick; putting it into HANDLEINPUT
+	    //	   would decrease speed, since the flag is checked on
+	    //	    every IEvent, so we have to put it here 8-(
+	    if (inter && (o == GDATA->last_selected)) {
+		if (DoubleClick(GDATA->last_selection.tv_secs, GDATA->last_selection.tv_micro, ie->ie_TimeStamp.tv_secs, ie->ie_TimeStamp.tv_micro )) {
+		    GDATA->last_selected = NULL;
+
+		    TRY_TO_DBLCLICK();
+
+		    return GMR_NOREUSE;
+		} /* if */
+	    } /* if */
+	    GDATA->last_selected  = o;
+	    GDATA->last_selection = ie->ie_TimeStamp;
+
+	    GDATA->last_X = msg->gpi_Mouse.X;
+	    GDATA->last_Y = msg->gpi_Mouse.Y;
+
+	    return GMR_MEACTIVE;
+	} else {
+	    return GMR_NOREUSE;
+	} /* if */
+	return retval;
+
+////////////////////////////////////////
+
+METHOD GM_HANDLEINPUT struct gpInput*
+	ULONG retval = GMR_MEACTIVE;
+	struct InputEvent *ie = msg->gpi_IEvent;
+	WORD deltaX, deltaY;
+
+// extern char *class_name    (ULONG);
+// DQ(bug(" gpinfo: gi=%08lx ie=$%08lx te=$%08lx->%ld ms=(%3ld,%3ld)\n", msg->gpi_GInfo, ie, msg->gpi_Termination, *(msg->gpi_Termination), msg->gpi_Mouse.X, msg->gpi_Mouse.Y));
+// DQ(bug(" ie:  cl=$%02lx sc=$%02lx cd=$%04lx ql=$%04lx ea=$%08lx tv=(%d.%010ld)\n", ie->ie_Class, ie->ie_SubClass, ie->ie_Code, ie->ie_Qualifier, ie->ie_EventAddress, ie->ie_TimeStamp.tv_secs, ie->ie_TimeStamp.tv_micro));
+// DQ(bug(" %s\n", class_name(ie->ie_Class)));
+
+
+//	// --- Check for Doubleclick; putting it here would decrease
+//	//     speed, since the flag is checked on every IEvent ...
+//	//     pity, but can't help
+//	if (IS_CHECK_DBLCLICK) {
+//	    MAKE_UNCHECKDBLCLICK();
+//	    if (o == GDATA->last_selected) {
+//		if (DoubleClick(GDATA->last_selection.tv_secs, GDATA->last_selection.tv_micro, msg->gpi_InputEvent->ie_TimeStamp.tv_secs, msg->gpi_InputEvent->ie_TimeStamp.tv_micro )) {
+//		    TRY_TO_DBLCLICK();
+//		    return GMR_NOREUSE;
+//		} /* if */
+//	    } /* if */
+//	    GDATA->last_selected  = o;
+//	    GDATA->last_selection = ie->ie_TimeStamp;
+//	} /* if */
+
+
+	if (ie->ie_Class != IECLASS_RAWMOUSE) {
+	    return GMR_MEACTIVE;
+	} /* if */
+
+	switch (ie->ie_Code) {
+	case SELECTUP: // --- drop! ... where ?
+	    if (IS_VISIBLE) {
+		TRY_TO_DROP();
+	    } /* if */
+	    return GMR_NOREUSE;
+
+	case MENUDOWN:	    // --- abort or deselect all or only this one
+	    if (!(ie->ie_Qualifier & IEQUALIFIER_ANYSHIFT))
+		DESELECT_ALL_BOBS();
+	    else
+		if (!IS_VISIBLE) {
+		    DESELECT();
+		    RENDER();
+		} /* if */
+	    return GMR_NOREUSE;
+
+	default:
+	    // --- securitycheck: haben wir ein selectup verpasst? ...
+	    //	   solange die Maus gedrueckt ist, weitermachen ...
+	    if (!(ie->ie_Qualifier & IEQUALIFIER_LEFTBUTTON)) {
+		return GMR_NOREUSE;
+	    } /* if */
+
+	    deltaX = msg->gpi_Mouse.X - GDATA->last_X;
+	    deltaY = msg->gpi_Mouse.Y - GDATA->last_Y;
+	    GDATA->last_X = msg->gpi_Mouse.X;
+	    GDATA->last_Y = msg->gpi_Mouse.Y;
+
+	    // --- lass ihn hidden solange es geht, dann zecihnen,
+	    //	   ansonsten Position nachhalten ...
+	    // --- ich wuerde gerne eine Minimale Bewegung einbauen,
+	    //	   einen Schwellenwert, unter dem keine Bobs dargestellt
+	    //	   werden.
+	    if ((ie->ie_Qualifier & IEQUALIFIER_RELATIVEMOUSE)) {
+#ifdef Threshold
+		if (!IS_VISIBLE) {
+		    // --- Primitiver Threshold ...
+		    //	   die Routine Versagt, wenn
+		    //	   die Eingabe irgendwo zwischen 0 und THRESHOLD_?
+		    //	   endet ... (zB Selection,1 Pixel Movement,Release)
+		    //	   der naechste Bob wird falsch dargestellt 8-(
+		    //	   um das zu umgehen muessten wir die Weite in
+		    //	   GM_GO[IN]ACTIVE resetten, das geht aber nur mit
+		    //	   globalen daten ... (na gut, auch nicht schlechter
+		    //	   als statics)
+		    //	   da hat mir die alte version ja fast noch besser gefallen
+		    // static int dist_X, dist_Y;
+		    // static int rel_X, rel_Y;
+		    dist_X += ABS(deltaX);
+		    dist_Y += ABS(deltaY);
+		    GDATA->move_X += deltaX;
+		    GDATA->move_Y += deltaY;
+		    if ((dist_X > THRESHOLD_X) || (dist_Y > THRESHOLD_Y)) {
+			SHOW_ALL_BOBS();
+			REL_MOVE_ALL_BOBS(GDATA->move_X, GDATA->move_Y);
+			dist_X = dist_Y = 0;
+		    } /* if */
+		} else {
+		    if ((deltaX || deltaY)) {
+			REL_MOVE_ALL_BOBS(deltaX, deltaY);
+			GDATA->move_X += deltaX;
+			GDATA->move_Y += deltaY;
+		    } /* if */
+		} /* if */
+#else
+		if ((deltaX || deltaY)) {
+		    if (!IS_VISIBLE)
+			SHOW_ALL_BOBS();
+		    REL_MOVE_ALL_BOBS(deltaX, deltaY);
+		    GDATA->move_X += deltaX;
+		    GDATA->move_Y += deltaY;
+		} /* if */
+#endif
+	    } else {
+		// --- hierfuer muesste ich die mauspos zwischenspeichern,
+		//     und die rel-werte jetzt bestimmen .... BWRRRRRRR
+		//     (bei jedem relmove aufaddieren)
+ DQ(bug("WARNING: **ABSMOUSE SKIPPED** \n", *(char*)0L));
+// reicht in ENFORCERHIT als Warnung ????????? 8^)
+	    } /* if */
+
+	    return GMR_MEACTIVE;
+	} /* switch */
+
+	return retval;
+
+
+
+
+////////////////////////////////////////////////////////////
+//
+//  Minimal Test-Environment
+//
+////////////////////////////////////////////////////////////
+
+TEST_SUPPORT
+
+#   define GEL_SIZE  4			/* number of lines in the bob	 */
+
+    /* data is 2 planes by 2 words by GEL_SIZE lines			 */
+    WORD __chip bob_data[2 * 2 * GEL_SIZE] = {
+	/* plane 1 */
+	0xc000, 0xffff, 0xc000, 0x0fff, 0xc000, 0x0fff, 0xc000, 0xffff,
+	/* plane 2 */
+	0x3fff, 0xfffc, 0x3ff0, 0x0ffc, 0x3ff0, 0x0ffc, 0x3fff, 0xfffc
+    };
+    NEWBOB myNewBob = {
+	bob_data, 2,  GEL_SIZE,
+	2, 3, 0, SAVEBACK | OVERLAY,
+	0, 8, 160, 100,  0,0,
+    };
+
+struct GlobalData *gimme_gdata (int cls) {
+    static struct GlobalData gdata;
+    if (cls) {
+	memset	(&gdata, sizeof (gdata), 0);
+	NewList ((struct List *)&gdata.list);
+    } /* if */
+    return &gdata;
+} /* gimme_gdata */
+
+
+
+TEST_WINDOW
+    WA_IDCMP, IDCMP_CLOSEWINDOW,
+    WA_Title, "DragClass TestWindow",
+    WA_Width, 300,
+    WA_Height, 100,
+
+TEST_OBJECT test_ob
+    GA_Top,	50,
+    GA_Left,	50,
+    GDA_NewBob, &myNewBob,
+    GDA_GData,	gimme_gdata(1),
+    GDA_FreePlacement, 1,
+
+TEST_OBJECT test_ob2
+    GA_Previous,test_ob,
+    GA_Top,	50,
+    GA_Left,   120,
+    GDA_NewBob, &myNewBob,
+    GDA_GData,	gimme_gdata(0),
+    GDA_FreePlacement, 1,
+
+TEST_OBJECT test_ob3
+    GA_Previous,test_ob2,
+    GA_Top,	50,
+    GA_Left,   190,
+    GDA_NewBob, &myNewBob,
+    GDA_GData,	gimme_gdata(0),
+
+
+

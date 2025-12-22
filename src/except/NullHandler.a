@@ -1,0 +1,101 @@
+*********************************************************************************
+*										*
+*	NullHandler -- Exception handler for taking care of division by zero	*
+*										*
+*	$VER: NullHandler.a 37.1 (12.8.92) -- An exception handler example	*
+*										*
+*	Copyright (C) 1992 Compos Mentis Software Systems -- Jesper Kehlet	*
+*										*
+*********************************************************************************
+
+		include		'exec/execbase.i'
+		include		'dos/dos.i'
+		include		'lvo/exec_lvo.i'
+
+IDENT		equ		'NULL'			; Identifier for checking existence
+
+		section		NullHandler,code
+
+*********************************************************************************
+*										*
+*	This is the main stuff -- the handler installation			*
+*										*
+*********************************************************************************
+
+		moveq		#RETURN_FAIL,d0		; FAIL if not V37+
+		movea.l		(4).w,a6		; Get ExecBase
+		cmpi.w		#37,LIB_VERSION(a6)	; We want V37+ for AllocVec
+		blt.b		NotV37			; Bail out
+
+		suba.l		a5,a5			; VBR is NULL per default
+		btst.b		#AFB_68010,AttnFlags+1(a6)	; Get MC type
+		beq.b		Plain68000
+
+		lea		GetVBR(pc),a5		; Address of GetVBR
+		jsr		_LVOSupervisor(a6)	; Get that VBR base
+		movea.l		d0,a5			; and save it
+
+Plain68000	movea.l		$14(a5),a1		; Is there a handler already
+		cmpi.l		#IDENT,2(a1)		; Check for identifier
+		beq.b		RemoveUs		; Yup, remove us
+
+		move.l		a1,OrigHandler		; Store original handler address
+
+		moveq		#HandlerEnd-Handler,d0	; We want some memory for handler
+		moveq		#1,d1			; Clear it for us
+		jsr		_LVOAllocVec(a6)	; Now, get it!
+
+		move.l		d0,$14(a5)		; Install vector #5
+
+		movea.l		d0,a1			; Destination
+		lea		Handler(pc),a0		; Our code
+		moveq		#HandlerEnd-Handler,d0	; Length for copying
+		jsr		_LVOCopyMem(a6)		; Throw us up in allocated memory
+
+		moveq		#RETURN_OK,d0		; Return OK
+NotV37		rts					; And get out
+
+RemoveUs	move.l		6(a1),$14(a5)		; Restore old pointer
+		jsr		_LVOFreeVec(a6)		; Free it
+		moveq		#RETURN_WARN,d0		; Return WARN when removed
+		rts					; And get out
+
+*********************************************************************************
+*										*
+*	This is for getting address of VBR on 68010+				*
+*	The MOVEC.L VBR,D0 instruction is restricted to Supervisor state, so...	*
+*										*
+*********************************************************************************
+
+GetVBR		movec.l		vbr,d0			; Get VBR
+		rte					; Return
+
+*********************************************************************************
+*										*
+*	This is the handler itself, the meat					*
+*										*
+*********************************************************************************
+
+Handler		bra.b		RealHandler		; Skip identifier -- it's not code
+
+		dc.l		IDENT			; Identifier
+OrigHandler	dc.l		0			; Original handler address
+
+RealHandler	movem.l		d0-d1/a0,-(sp)		; Save a couple of registers
+
+		movea.l		$e(sp),a0		; Get address of data
+		move.w		-2(a0),d0		; Get numerator
+		move.l		#$ffff,d1		; Largest negative number for denominator
+		btst		#8,d0			; Is it <0 ?
+		beq.b		Negative		; Yup, jump...
+		move.l		#$7fff,d1		; Use largest positive instead
+
+Negative	lsr.w		#7,d0			; Put the denominator
+		andi.l		#$1c,d0			; back on the stack
+		move.l		d1,0(sp,d0.l)		; instead of the zero
+
+		movem.l		(sp)+,d0-d1/a0		; Restore registers
+		rte					; Back to normal execution
+HandlerEnd
+
+		end

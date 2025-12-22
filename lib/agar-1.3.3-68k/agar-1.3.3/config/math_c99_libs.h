@@ -1,0 +1,1 @@
+#undef MATH_C99_LIBS

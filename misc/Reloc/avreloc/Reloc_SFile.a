@@ -1,0 +1,454 @@
+********************************************************************************
+*
+*	Program:	Relocate
+*	Filename:	Reloc_SFile.a
+*
+*	Contents:	Examines SFile, allocates memory for DFile and
+*			relocates SFile to DFile
+*
+*	Language:	68000 Assembler
+*
+*	Author:		Johannes R. Geiss
+*
+*	Copyright:	Amigavisions
+*
+********************************************************************************
+
+
+*------ Includes
+	include 'exec/types.i'
+	include 'libraries/dos.i'
+	include 'xref.i'
+	include 'call.i'
+
+
+*------ Equates
+hunk_unit	equ	$3e7
+hunk_name	equ	$3e8
+hunk_code	equ	$3e9
+hunk_data	equ	$3ea
+hunk_bss	equ	$3eb
+hunk_reloc32	equ	$3ec
+hunk_reloc16	equ	$3ed
+hunk_reloc8	equ	$3ee
+hunk_ext	equ	$3ef
+hunk_symbol	equ	$3f0
+hunk_debug	equ	$3f1
+hunk_end	equ	$3f2
+hunk_header	equ	$3f3
+hunk_overlay	equ	$3f5
+hunk_break	equ	$3f6
+
+
+*------ Imports
+	XLIB	Write
+	XLIB	AllocMem
+	XLIB	FreeMem
+	XLIB	Open
+	XLIB	Close
+	XLIB	IoErr
+	xref	Print
+	xref	DOSError
+	xref	Exit_Am
+	xref	_DOSBase
+	xref	_SysBase
+	xref	SFMem
+	xref	SFSize
+	xref	Loc
+	xref	DFname
+
+
+*------ Exports
+	xdef	Reloc_SFile
+	xdef	FreeDMem
+
+
+********************************************************************************
+
+	SECTION Reloc_SFile
+
+*------ Reloc_SFile procedure
+Reloc_SFile
+	moveq.l #0,d5			; init.
+	moveq.l #0,d6
+	moveq.l #0,d7
+	movea.l SFMem,a0
+	movea.l a0,a1
+	adda.l	SFSize,a1
+
+Loop1	cmpa.l	a1,a0			; 1st scan
+	bcc	h_fin
+	move.l	(a0)+,d0
+	andi.l	#$3fffffff,d0
+	cmpi.l	#hunk_unit,d0		; hunk_unit
+	bne.s	h_name
+h_unit1 move.l	(a0)+,d1
+h_unit3 lsl.l	#2,d1
+h_unit2 adda.l	d1,a0
+	bra.s	Loop1
+h_name	cmpi.l	#hunk_name,d0		; hunk_name
+	beq.s	h_unit1
+h_code	cmpi.l	#hunk_code,d0		; hunk_code
+	bne.s	h_data
+	move.l	(a0)+,d1
+	lsl.l	#2,d1
+	add.l	d1,d5
+	bra.s	h_unit2
+h_data	cmpi.l	#hunk_data,d0		; hunk_data
+	bne.s	h_bss
+	move.l	(a0)+,d1
+	lsl.l	#2,d1
+	add.l	d1,d6
+	bra.s	h_unit2
+h_bss	cmpi.l	#hunk_bss,d0		; hunk_bss
+	bne.s	h_rel32
+	move.l	(a0)+,d1
+	lsl.l	#2,d1
+	add.l	d1,d7
+	bra.s	Loop1
+h_rel32 cmpi.l	#hunk_reloc32,d0	; hunk_reloc32
+	bne.s	h_rel16
+Loop2	move.l	(a0)+,d1
+	beq.s	Loop1
+	addq.l	#1,d1
+	lsl.l	#2,d1
+	adda.l	d1,a0
+	bra.s	Loop2
+h_rel16 cmpi.l	#hunk_reloc16,d0	; hunk_reloc16
+	beq.s	Loop2
+	cmpi.l	#hunk_reloc8,d0		; hunk_reloc8
+	beq.s	Loop2
+	cmpi.l	#hunk_ext,d0		; hunk_ext
+	bne.s	h_symb
+	movea.l #he,a0
+h_ext1	bsr	Print
+	move.l	#RETURN_ERROR,d0
+	bra	Exit_Am
+h_symb	cmpi.l	#hunk_symbol,d0		; hunk_symbol
+	bne.s	h_debug
+Loop3	tst.l	(a0)+
+	bne.s	Loop3
+	bra	Loop1
+h_debug cmpi.l	#hunk_debug,d0		; hunk_debug
+	beq	h_unit1
+	cmpi.l	#hunk_end,d0		; hunk_end
+	beq	Loop1
+	cmpi.l	#hunk_header,d0		; hunk_header
+	bne.s	h_ovl
+Loop4	move.l	(a0)+,d1
+	beq.s	h_head1
+	lsl.l	#2,d1
+	adda.l	d1,a0
+	bra.s	Loop4
+h_head1 addq.l	#8,a0
+	move.l	(a0)+,d1
+	addq.l	#1,d1
+	bra	h_unit3
+h_ovl	cmpi.l	#hunk_overlay,d0	; hunk_overlay
+	bne.s	h_break
+h_ovl1	movea.l #ho,a0
+	bra.s	h_ext1
+h_break cmpi.l	#hunk_break,d0		; hunk_break
+	beq.s	h_ovl1
+Corr	movea.l #co,a0			; output: corrupt object module!
+	bra	h_ext1
+
+h_fin	move.l	d5,CodeSize		; end of 1st scan
+	move.l	d6,DataSize
+	move.l	d7,BssSize
+	add.l	d5,d6
+	add.l	d6,d7
+	move.l	d7,DFSize
+
+	move.l	d7,d0			; allocate memory for DFile
+	moveq.l #0,d1
+	CALLEXE AllocMem
+	move.l	d0,DFMem
+	bne.s	MemOK
+	moveq.l #ERROR_NO_FREE_STORE,d0 ; output: no memory!
+Err1	move.l	d0,d2
+	bsr	DOSError
+	move.l	d2,d0
+	bra	Exit_Am
+
+MemOK	move.l	d0,CodeMem		; init.
+	add.l	CodeSize,d0
+	move.l	d0,DataMem
+	add.l	DataSize,d0
+	move.l	d0,BssMem
+	movea.l SFMem,a0
+	movea.l a0,a1
+	adda.l	SFSize,a1
+	movea.l CodeMem,a2
+	movea.l DataMem,a3
+	movea.l BssMem,a4
+	movea.l #HunkTab,a5
+
+Loop5	cmpa.l	a1,a0			; 2nd scan
+	bcc	k_fin
+	move.l	(a0)+,d0
+	andi.l	#$3fffffff,d0
+	cmpi.l	#hunk_unit,d0		; hunk_unit
+	bne.s	k_name
+k_unit1 move.l	(a0)+,d1
+k_unit3 lsl.l	#2,d1
+k_unit2 adda.l	d1,a0
+	bra.s	Loop5
+k_name	cmpi.l	#hunk_name,d0		; hunk_name
+	beq.s	k_unit1
+k_code	cmpi.l	#hunk_code,d0		; hunk_code
+	bne.s	k_data
+	move.l	(a0)+,d1
+	beq.s	Loop5
+	subq.l	#1,d1
+	move.l	a2,(a5)+
+Loop6	move.l	(a0)+,(a2)+
+	dbf	d1,Loop6
+	bra.s	Loop5
+k_data	cmpi.l	#hunk_data,d0		; hunk_data
+	bne.s	k_bss
+	move.l	(a0)+,d1
+	beq.s	Loop5
+	subq.l	#1,d1
+	move.l	a3,(a5)+
+Loop7	move.l	(a0)+,(a3)+
+	dbf	d1,Loop7
+	bra.s	Loop5
+k_bss	cmpi.l	#hunk_bss,d0		; hunk_bss
+	bne.s	k_rel32
+	move.l	(a0)+,d1
+	beq.s	Loop5
+	subq.l	#1,d1
+	move.l	a4,(a5)+
+Loop8	clr.l	(a4)+
+	dbf	d1,Loop8
+	bra.s	Loop5
+k_rel32 cmpi.l	#hunk_reloc32,d0	; hunk_reloc32
+	bne.s	k_rel16
+Loop9	move.l	(a0)+,d1
+	beq.s	Loop5
+	addq.l	#1,d1
+	lsl.l	#2,d1
+	adda.l	d1,a0
+	bra.s	Loop9
+k_rel16 cmpi.l	#hunk_reloc16,d0	; hunk_reloc16
+	beq.s	Loop9
+	cmpi.l	#hunk_reloc8,d0		; hunk_reloc8
+	beq.s	Loop9
+k_symb	cmpi.l	#hunk_symbol,d0		; hunk_symbol
+	bne.s	k_debug
+Loop16	tst.l	(a0)+
+	bne.s	Loop16
+	bra	Loop5
+k_debug cmpi.l	#hunk_debug,d0		; hunk_debug
+	beq	k_unit1
+	cmpi.l	#hunk_end,d0		; hunk_end
+	beq	Loop5
+	cmpi.l	#hunk_header,d0		; hunk_header
+	bne	Corr
+Loop17	move.l	(a0)+,d1
+	beq.s	k_head1
+	lsl.l	#2,d1
+	adda.l	d1,a0
+	bra.s	Loop17
+k_head1 addq.l	#8,a0
+	move.l	(a0)+,d1
+	addq.l	#1,d1
+	bra	k_unit3
+
+k_fin	movea.l SFMem,a0		; init
+	movea.l a0,a1
+	adda.l	SFSize,a1
+	moveq.l #0,d2
+
+Loop18	cmpa.l	a1,a0			; 3rd scan
+	bcc	u_fin
+	move.l	(a0)+,d0
+	andi.l	#$3fffffff,d0
+	cmpi.l	#hunk_unit,d0		; hunk_unit
+	bne.s	u_name
+u_unit1 move.l	(a0)+,d1
+u_unit3 lsl.l	#2,d1
+u_unit2 adda.l	d1,a0
+	bra.s	Loop18
+u_name	cmpi.l	#hunk_name,d0		; hunk_name
+	beq.s	u_unit1
+	cmpi.l	#hunk_code,d0		; hunk_code
+	bne.s	u_data
+u_code1 addq.l	#1,d2
+	bra.s	u_unit1
+u_data	cmpi.l	#hunk_data,d0		; hunk_data
+	beq.s	u_code1
+	cmpi.l	#hunk_bss,d0		; hunk_bss
+	beq.s	u_bss1			; bugfix by JOTD
+	cmpi.l	#hunk_reloc32,d0	; hunk_reloc32
+	bne.s	u_rel16
+	move.l	a3,d5
+	move.l	d2,d3
+	subq.l	#1,d3
+	bsr	Seek_HunkAdr
+	movea.l a3,a6
+	move.l	a6,d6
+Loop19	move.l	(a0)+,d1
+	beq.s	u_r321
+	subq.l	#1,d1
+	move.l	(a0)+,d3
+	bsr	Seek_HunkAdr
+Loop11	movea.l d6,a6
+	adda.l	(a0)+,a6
+	move.l	(a6),d3
+	add.l	a3,d3
+	sub.l	DFMem,d3
+	add.l	Loc,d3
+	move.l	d3,(a6)
+	dbf	d1,Loop11
+	bra.s	Loop19
+u_r321	move.l	d5,a3
+	bra	Loop18
+u_rel16 cmpi.l	#hunk_reloc16,d0	; hunk_reloc16
+	bne.s	u_rel8
+	move.l	a3,d5
+	move.l	d2,d3
+	subq.l	#1,d3
+	bsr	Seek_HunkAdr
+	movea.l a3,a6
+	move.l	a6,d6
+Loop12	move.l	(a0)+,d1
+	beq.s	u_r161
+	subq.l	#1,d1
+	move.l	(a0)+,d3
+	bsr	Seek_HunkAdr
+Loop13	movea.l d6,a6
+	adda.l	(a0)+,a6
+	move.w	(a6),d3
+	add.w	a3,d3
+	sub.w	DFMem+2,d3
+	sub.w	a6,d3
+	add.w	d6,d3
+	move.w	d3,(a6)
+	dbf	d1,Loop13
+	bra.s	Loop12
+u_r161	move.l	d5,a3
+	bra	Loop18
+u_rel8	cmpi.l	#hunk_reloc8,d0		; hunk_reloc8
+	bne.s	u_symb
+	move.l	a3,d5
+	move.l	d2,d3
+	subq.l	#1,d3
+	bsr	Seek_HunkAdr
+	movea.l a3,a6
+	move.l	a6,d6
+Loop14	move.l	(a0)+,d1
+	beq.s	u_r81
+	subq.l	#1,d1
+	move.l	(a0)+,d3
+	bsr	Seek_HunkAdr
+Loop15	movea.l d6,a6
+	adda.l	(a0)+,a6
+	move.b	(a6),d3
+	add.w	a3,d3
+	sub.w	DFMem+2,d3
+	sub.w	a6,d3
+	add.w	d6,d3
+	move.b	d3,(a6)
+	dbf	d1,Loop15
+	bra.s	Loop14
+u_r81	move.l	d5,a3
+	bra	Loop18
+
+u_bss1	; added by Jeff
+	addq.l	#1,D2
+	addq.l	#4,a0		; skip BSS size
+	bra	Loop18
+
+u_symb	cmpi.l	#hunk_symbol,d0		; hunk_symbol
+	bne.s	u_debug
+Loop20	tst.l	(a0)+
+	bne.s	Loop20
+	bra	Loop18
+u_debug cmpi.l	#hunk_debug,d0		; hunk_debug
+	beq	u_unit1
+	cmpi.l	#hunk_end,d0		; hunk_end
+	beq	Loop18
+	cmpi.l	#hunk_header,d0		; hunk_header
+	bne	Corr
+Loop21	move.l	(a0)+,d1
+	beq.s	u_head1
+	lsl.l	#2,d1
+	adda.l	d1,a0
+	bra.s	Loop21
+u_head1 addq.l	#8,a0
+	move.l	(a0)+,d1
+	addq.l	#1,d1
+	bra	u_unit3
+
+u_fin	move.l	DFname,d1		; save DFile
+	move.l	#MODE_NEWFILE,d2
+	CALLDOS Open
+	move.l	d0,DFhand
+	bne.s	OpenOK
+	CALLSYS IoErr
+	bra	Err1
+OpenOK	move.l	d0,d1
+	move.l	DFMem,d2
+	move.l	DFSize,d3
+	CALLSYS Write
+	cmp.l	DFSize,d0
+	beq.s	WrtOK
+	CALLSYS IoErr
+	move.l	d0,d2
+	move.l	DFhand,d1
+	CALLSYS Close
+	move.l	d2,d0
+	bra	Err1
+WrtOK	move.l	DFhand,d1
+	CALLSYS Close
+	rts
+
+
+*------ Seek HunkAddr
+Seek_HunkAdr
+	movea.l #HunkTab,a3
+	lsl.l	#2,d3
+	movea.l 0(a3,d3.l),a3
+	rts
+
+
+*------ Free detination file memory
+FreeDMem
+	move.l	DFMem,d0		; free destination file memory
+	beq.s	NoFree
+	move.l	d0,a1
+	move.l	DFSize,d0
+	CALLEXE FreeMem
+	clr.l	DFMem
+NoFree	rts
+
+
+********************************************************************************
+
+	section DATA
+
+*------ Datafield
+he		dc.b	'hunk_ext found: link file first!',$0a,0
+ho		dc.b	'hunk_overlay/break found!',$0a,0
+co		dc.b	'Corrupt object module!',$0a,0
+
+
+********************************************************************************
+
+	section BSS
+
+*------ BSSfield
+DFMem		ds.l	1
+DFSize		ds.l	1
+CodeMem		ds.l	1
+CodeSize	ds.l	1
+DataMem		ds.l	1
+DataSize	ds.l	1
+BssMem		ds.l	1
+BssSize		ds.l	1
+HunkTab		ds.l	64
+DFhand		ds.l	1
+
+	END

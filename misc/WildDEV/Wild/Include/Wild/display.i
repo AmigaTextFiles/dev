@@ -1,0 +1,11 @@
+
+	IFND	WILDISPLAY
+WILDISPLAY	SET	1
+
+		STRUCTURE	WildDisplayModuleBASE,wm_SIZEOF
+			LABEL	wdm_SIZEOF
+
+_LVODISDisplayFrame	EQU	-60		; A0:App
+_LVODISInitFrame	EQU	-66		; A0:App
+
+	ENDC

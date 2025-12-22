@@ -1,0 +1,1028 @@
+;CONVERTERS MAKE SEPERATE MODULE WHEN FINISHED
+initbitmap	equ	-390
+
+new_twi_toiff
+	;buffsize buffmem = ilbm
+	;colours = cmap
+	
+	;this will take the converted twi (into ilbm) and make it a proper 
+	;iff file (hopefully!)
+
+	;This is an IFF piccy.
+	;We want a bitmap one please so lets use the iff library to load
+	
+	lea	file,a0	
+	move.l	#IFFL_MODE_WRITE,d0
+	CALLIFF	OpenIFF
+	move.l	d0,handle		;open for writing
+	
+	lea	bitmap,a0
+	move.l	#$05,d0		;depth
+	move.l	#320*5,d1		;width
+	move.l	#256,d2		;height
+	CALLGRAF	InitBitMap
+
+	;now copy the pointer into the bitmap structure
+	move.l	#5-1,d7
+	move.l	buffmem,a0
+	lea	bitmap,a1
+.back	move.l	a0,bm_Planes(a1)
+	add.l	#40,a0
+	add.l	#4,a1	;next long please
+	dbra	d7,.back
+	
+	
+	
+;	result = IFFL_SaveBitMap( filename, bitmap, colortable, flags )
+;	D0                        A0        A1      A2          D0
+
+	lea	file,a0	;filename
+	lea	bitmap,a1	;ilbm
+	lea	colours,a2	;cmap
+	move.l	#IFFL_COMPR_BYTERUN1,d0	;crunch method!
+	CALLIFF	SaveBitMap
+	
+	move.l	handle,a1
+	CALLIFF	CloseIFF	
+
+	rts
+
+blit_to_twi4
+	move.l	iffmem,a3	;get source
+	move.l	charmem,a1	;get dest
+;	add.l	#16*5*2,a1	;get past blank first char!
+	
+	;source is 40*5 for bit1
+	;dest is 2*5 for bit1
+	clr.l	d7
+	move.w	#13,d5		;do 13*20 = 260!
+.loop3
+	clr.l	d6
+	move.l	a3,a2
+.loop
+	move.l	a2,a0
+	move.w	#16-1,d4
+.loop2
+	move.w	(a0),(a1)		;copy 1 plane
+	move.w	40(a0),2(a1)	;copy 1 plane
+	move.w	80(a0),4(a1)	;copy 1 plane
+	move.w	120(a0),6(a1)	;copy 1 plane
+	move.w	160(a0),8(a1)	;copy 1 plane
+	
+	add.l	#40*5,a0	;next line please
+	add.l	#2*5,a1	;next line please
+	dbra	d4,.loop2
+	
+	add.w	#1,d7	;char counter
+	cmp.w	#255,d7
+	beq	.out	;finish when 256
+		
+	add.l	#2,a2
+	add.w	#1,d6
+	cmp.w	#20,d6
+	bne	.loop	;do a line of chars
+	add.l	#16*40*5,a3
+	dbra	d5,.loop3
+	
+.out
+	;now free up the iff mem...
+	;free up the memory!
+	move.l	iffsize,d0
+	move.l	iffmem,a1
+	CALLEXEC	FreeMem
+
+
+	rts
+
+new_ifftoblit	
+
+
+	;This is an IFF piccy.
+	;We want a bitmap one please so lets use the iff library to load
+	
+	lea	file,a0	
+	move.l	#IFFL_MODE_READ,d0
+	CALLIFF	OpenIFF
+	move.l	d0,handle
+	
+	lea	bitmap,a0
+	move.l	#$05,d0		;depth
+	move.l	#320*5,d1		;width
+	move.l	#256,d2		;height
+	CALLGRAF	InitBitMap
+	
+
+	;allocate some memory for the picture
+	clr.l	d0		;allocate some memory for it!
+	move.l	#42*256*5,d0	;320*256 5 bitplanes
+	move.l	d0,iffsize		
+	move.l	#MEMF_CLEAR,d1
+	CALLEXEC	AllocMem
+	move.l	d0,iffmem
+	
+	
+	;now copy the pointer into the bitmap structure
+	move.l	#5-1,d7
+	move.l	iffmem,a0
+	lea	bitmap,a1
+.back	move.l	a0,bm_Planes(a1)
+	add.l	#40,a0
+	add.l	#4,a1	;next long please
+	dbra	d7,.back
+	
+
+	move.l	handle,a1
+	lea	bitmap,a0
+	CALLIFF	DecodePic
+
+	;**** store the colour in colours ****
+	move.l	handle,a1		;iff handle ??
+	lea	colours,a0
+	CALLIFF	GetColorTab
+
+	
+	move.l	handle,a1
+	CALLIFF	CloseIFF	
+		
+	rts
+
+iff_norm_to_blit
+
+	;is it a proper iff file
+	move.l	buffmem,a0
+	cmp.l	#$464f524d,(a0)		;has it got FORM at the start
+	bne	notiffpix
+	
+	;is is an ilbm file (picture)
+	cmp.l	#$494c424d,8(a0)	;has is got ILBM in it
+	bne	notiffpix
+
+	;it seems to be a valid iff picture
+	
+	bsr	godobmhd
+	bsr	godocol
+	bsr	godopic
+	
+	
+	;that has converted the file to a big ilbm file
+	;now we have to go through it grabbing 16*16 blocks
+	rts
+notiffpix
+	move.b	#1,err
+	rts
+
+	cnop	0,4
+memsize	dc.l	0	;where to bit map version
+mempos	dc.l	0
+heighti	dc.w	0
+widthi	dc.w	0
+planes	dc.b	0
+	cnop	0,4
+
+godobmhd
+	move.l	buffmem,a0
+gdb1
+	cmp.l	#"BMHD",(a0)+	;Guess
+	bne	gdb1
+	add.l	#4,a0		;skip length of bmhd
+
+	clr.l	d0
+	clr.l	d1
+	clr.l	d2
+	move.b	8(a0),d0	;no. of planes
+	move.b	d0,planes	;no of bitplanes
+	move.b	d0,d1
+
+	clr.l	d0
+	move.w	(a0),d0		;get x width
+	move.w	2(a0),heighti	;get y height
+	asr.w	#3,d0		;get down to bytes
+	move.w	d0,widthi	;store in variable
+	move.w	d0,d2
+
+	mulu.w	d1,d0		;times no. bplanes
+
+	;***** how much mem do we need *****
+
+	movem.l	d0-d7/a0-a6,-(sp)	;push shit to stack
+	moveq.l	#0,d0
+	move.l	d2,d0		;width
+	mulu.w	d1,d0		;whop it wide
+	mulu.w	heighti,d0	;and heigh
+	move.l	d0,memsize
+	move.l	#$10002,d1		;public chip mem
+		
+	CALLEXEC	AllocMem
+	move.l	d0,mempos
+	movem.l	(sp)+,d0-d7/a0-a6
+	rts
+
+
+godocol
+	move.l	buffmem,a0
+	lea	colours,a1
+gdc1
+	cmp.l	#"CMAP",(a0)+	;Guess
+	bne	gdc1
+
+	move.l	(a0)+,d6	;get no. colours
+	divu.w	#3,d6
+	sub.l	#1,d6
+
+gdc2
+	;data is 1111XXXX	;colour is in top
+	clr.l	d0
+	clr.l	d1		;the colour
+	move.b	(a0)+,d0	;get the red colour
+	rol.l	#4,d0
+	move.w	d0,d1		;got red
+
+	or.b	(a0)+,d1	;got green
+
+	clr.l	d0
+	move.b	(a0)+,d0	;get blue
+	ror.w	#4,d0
+	or.w	d0,d1		;got blue & whole colour!
+	move.w	d1,(a1)+	;save colour....
+		
+	dbra	d6,gdc2
+	rts
+
+godopic
+	;find Body in the file
+
+	move.l	mempos,a2	;allocated memry
+	move.l	buffmem,a1	;iff pic to convert
+find_body
+	cmp.w	#$424f,(a1)+	;search for long BODY
+	bne	find_body
+	;is the 2nd word 4459?
+	cmp.w	#$4459,(a1)+
+	bne	find_body
+
+	move.l	(a1)+,d7		;get body length
+loop	
+	tst.b	(a1)			;is the byte neg or pos
+	bpl	itsnotcrunched
+	;its crunched so neg the byte
+	neg.b	(a1)
+	clr.l	d6
+	move.b	(a1),d6
+inc1
+	move.b	1(a1),(a2)+
+
+	dbra	d6,inc1
+
+	sub.l	#2,d7
+	add.l	#2,a1
+
+skippy	cmp.l	#0,d7
+	bgt	loop
+	rts
+
+itsnotcrunched
+	clr.l	d6
+	move.b	(a1)+,d6
+inc2
+	move.b	(a1)+,(a2)+
+	sub.l	#1,d7
+	dbra	d6,inc2
+	sub.l	#1,d7
+	bra	skippy
+
+
+
+	rts
+planes6_to_twi4
+	move.l	buffmem,a0	;6plane file data
+	move.l	charmem,a1	;twilite4 char mem
+	move.l	maskmem,a2	;twilite4 mask mem
+	clr.l	d7
+	clr.l	d6
+	clr.l	d5
+	move.w	#256-1,d7	;no. of chars
+.loop
+	move.w	#16-1,d6	;no. of lines
+.loop2
+	move.w	#5-1,d5	;no. of bitplanes
+.loop3
+	move.w	(a0)+,(a1)+	;copy gfx line
+	dbra	d5,.loop3
+	move.w	(a0)+,(a2)+	;copy mask line
+	dbra	d6,.loop2
+	dbra	d7,.loop
+	rts
+Twi4_to_6_planes
+	;first make some work space
+	move.l	charsize,d0
+	add.l	masksize,d0	;got proper size now
+	move.l	d0,worksize	;save size
+
+	move.l	#$10000,d1	;Mem Requirements ANYWHERE
+	move.l	worksize,d0	;Mem size
+	CALLEXEC	AllocMem
+	beq	.failed	;failed to get the memory!
+	move.l	d0,workmem
+	
+	clr.l	d7
+	clr.l	d6
+	clr.l	d5
+	move.l	charmem,a0	;chars
+	move.l	maskmem,a1	;mask
+	move.l	workmem,a2	;dest
+	move.w	#256-1,d7	;no. chars to convert
+.loop
+	move.w	#16-1,d5	;no. of lines
+.loop3
+	move.w	#5-1,d6	;no. bitplanes of char
+.loop2
+	move.w	(a0)+,(a2)+	;copy a line of gfx
+	dbra	d6,.loop2
+	move.w	(a1)+,(a2)+	;copy mask line in
+	dbra	d5,.loop3	;do next line
+	dbra	d7,.loop	;do next char
+	move.l	#$0,d0
+	rts
+.failed
+	move.l	#$1,d0
+	rts
+foreground_to_twi4	;3 bitplanes & mask!
+	move.l	buffmem,a0	;foreground file data
+	move.l	charmem,a1	;twilite4 char mem
+	move.l	maskmem,a2	;twilite4 mask mem
+	clr.l	d7
+	clr.l	d6
+	clr.l	d5
+	move.w	#256-1,d7	;no. of chars
+.loop
+	move.w	#16-1,d6	;no. of lines
+.loop2
+	move.w	#3-1,d5	;no. of bitplanes
+.loop3
+	move.w	(a0)+,(a1)+	;copy gfx line
+	dbra	d5,.loop3
+	move.w	#0,(a1)+	;clear next plane
+	move.w	#0,(a1)+	;clear next plane
+	move.w	(a0)+,(a2)+	;copy mask line
+	dbra	d6,.loop2
+	dbra	d7,.loop
+	rts
+Twi4_to_foreground
+	;first make some work space
+	move.l	charsize,d0
+	sub.l	#256*2*16*1,d0	;sub 1(2) bitplanes from it
+	move.l	d0,worksize	;save size
+
+	move.l	#$10000,d1	;Mem Requirements ANYWHERE
+	move.l	worksize,d0	;Mem size
+	CALLEXEC	AllocMem
+	beq	.failed	;failed to get the memory!
+	move.l	d0,workmem
+	
+	clr.l	d7
+	clr.l	d6
+	clr.l	d5
+	move.l	charmem,a0	;chars
+	move.l	maskmem,a1	;mask
+	move.l	workmem,a2	;dest
+	move.w	#256-1,d7	;no. chars to convert
+.loop
+	move.w	#16-1,d5	;no. of lines
+.loop3
+	move.w	#3-1,d6	;no. bitplanes of char
+.loop2
+	move.w	(a0)+,(a2)+	;copy a line of gfx
+	dbra	d6,.loop2
+	add.l	#2*2,a0	;skip the other 2 planes
+	move.w	(a1)+,(a2)+	;copy mask line in
+	dbra	d5,.loop3	;do next line
+	dbra	d7,.loop	;do next char
+	move.l	#$0,d0
+	rts
+.failed
+	move.l	#$1,d0
+	rts
+background_to_twi4	;3 bitplanes NO mask!
+	move.l	buffmem,a0	;foreground file data
+	move.l	charmem,a1	;twilite4 char mem
+	clr.l	d7
+	clr.l	d6
+	clr.l	d5
+	move.w	#256-1,d7	;no. of chars
+.loop
+	move.w	#16-1,d6	;no. of lines
+.loop2
+	move.w	#3-1,d5	;no. of bitplanes
+.loop3
+	move.w	(a0)+,(a1)+	;copy gfx line
+	dbra	d5,.loop3
+	move.w	#0,(a1)+	;clear next plane
+	move.w	#0,(a1)+	;clear next plane
+	dbra	d6,.loop2
+	dbra	d7,.loop
+	rts
+Twi4_to_background
+	;first make some work space
+	move.l	charsize,d0
+	sub.l	#256*2*16*2,d0	;sub 2 bitplanes from it
+	move.l	d0,worksize	;save size
+
+	move.l	#$10000,d1	;Mem Requirements ANYWHERE
+	move.l	worksize,d0	;Mem size
+	CALLEXEC	AllocMem
+	beq	.failed	;failed to get the memory!
+	move.l	d0,workmem
+	
+	clr.l	d7
+	clr.l	d6
+	clr.l	d5
+	move.l	charmem,a0	;chars
+	move.l	workmem,a2	;dest
+	move.w	#256-1,d7	;no. chars to convert
+.loop
+	move.w	#16-1,d5	;no. of lines
+.loop3
+	move.w	#3-1,d6	;no. bitplanes of char
+.loop2
+	move.w	(a0)+,(a2)+	;copy a line of gfx
+	dbra	d6,.loop2
+	add.l	#2*2,a0	;skip the other 2 planes
+	dbra	d5,.loop3	;do next line
+	dbra	d7,.loop	;do next char
+	move.l	#$0,d0
+	rts
+.failed
+	move.l	#$1,d0
+	rts
+parallax_to_twi4	;1 bitplane 
+	move.l	buffmem,a0	;parallax file data
+	move.l	charmem,a1	;twilite4 char mem
+	clr.l	d7
+	clr.l	d6
+	clr.l	d5
+	move.w	#256-1,d7	;no. of chars
+.loop
+	move.w	#16-1,d6	;no. of lines
+.loop2
+	move.w	#1-1,d5	;no. of bitplanes
+.loop3
+	move.w	(a0)+,(a1)+	;copy gfx line
+	dbra	d5,.loop3
+	move.w	#0,(a1)+	;clear next plane
+	move.w	#0,(a1)+	;clear next plane
+	move.w	#0,(a1)+	;clear next plane
+	move.w	#0,(a1)+	;clear next plane
+	dbra	d6,.loop2
+	dbra	d7,.loop
+	rts
+Twi4_to_parallax
+	;first make some work space
+	move.l	charsize,d0
+	sub.l	#256*2*16*4,d0	;sub 4 bitplanes from it
+	move.l	d0,worksize	;save size
+
+	move.l	#$10000,d1	;Mem Requirements ANYWHERE
+	move.l	worksize,d0	;Mem size
+	CALLEXEC	AllocMem
+	beq	.failed	;failed to get the memory!
+	move.l	d0,workmem
+	
+	clr.l	d7
+	clr.l	d6
+	clr.l	d5
+	move.l	charmem,a0	;chars
+	move.l	workmem,a2	;dest
+	move.w	#256-1,d7	;no. chars to convert
+.loop
+	move.w	#16-1,d5	;no. of lines
+.loop3
+	move.w	#1-1,d6	;no. bitplanes of char
+.loop2
+	move.w	(a0)+,(a2)+	;copy a line of gfx
+	dbra	d6,.loop2
+	add.l	#4*2,a0	;skip the other 2 planes
+	dbra	d5,.loop3	;do next line
+	dbra	d7,.loop	;do next char
+	move.l	#$0,d0
+	rts
+.failed
+	move.l	#$1,d0
+	rts
+gfked2_to_twi4
+;	rts
+	;source = buffmem (limited by buffsize)
+	;dest   = charmem (limited by charsize)
+
+	move.l	buffmem,a0	;src
+	move.l	charmem,a1	;dst
+
+;	add.l	#2,a0
+	move.l	#255,d6	;no. of chars to convert!
+.loop2
+	move.l	a0,a2
+	move.l	a1,a3
+
+	bsr	waitblit
+	move.w	#$ffff,$dff044	;fwm
+	move.w	#$ffff,$dff046	;lwm
+
+	move.w	#(256*2)-2,$dff064	;mod A src
+	move.w	#(5*2)-2,$dff066	;mod D
+
+	move.w	#$09f0,$dff040
+	move.w	#$00,$dff042
+
+	move.l	#4,d7
+.loop
+	move.l	a2,$dff050	;sorc A
+	move.l	a3,$dff054	;dest D	
+	move.w	#(16*64)+1,$dff058
+
+	add.l	#2,a3
+	add.l	#(256*2)*16,a2
+	dbra	d7,.loop
+	add.l	#2,a0
+	add.l	#(16*2*5),a1
+	dbra	d6,.loop2
+	rts
+
+
+
+
+gfked2_to_twi4_col
+	;ed2 color set out like this..
+
+	;0000,cop,0000,cop etc
+
+	move.l	buffmem,a0	;src
+	lea	colours,a1	;dst
+
+	move.l	#32-1,d7
+.loop
+	move.w	(a0)+,(a1)+	;copy colour
+	add.l	#2,a0	;skip the next word (copper command)
+	dbra	d7,.loop
+	rts
+Twi4_to_ilbm
+	move.l	#$10000,d1	;Mem Requirements ANYWHERE
+	move.l	#55000,d0	;Mem size
+	move.l	d0,buffsize
+	CALLEXEC	AllocMem
+	move.l	d0,buffmem
+
+	move.l	charmem,a0
+	move.l	buffmem,a2
+
+
+	clr.l	d5
+	move.w	#13-1,d5
+.loop3
+	move.l	a2,a3
+	clr.l	d7
+	move.w	#20-1,d7	;chars across
+.loop
+	move.l	a3,a1
+	move.w	#16-1,d6	;no. pixels
+.loop2
+	move.w	(a0),(a1)
+	move.w	2(a0),40(a1)
+	move.w	4(a0),80(a1)
+	move.w	6(a0),120(a1)
+	move.w	8(a0),160(a1)
+	add.l	#5*2,a0
+	add.l	#5*40,a1
+	dbra	d6,.loop2
+
+	add.l	#2,a3	
+	dbra	d7,.loop
+	
+	add.l	#40*5*16,a2
+	dbra	d5,.loop3
+	rts
+ilbm_to_iff
+
+	;bitmap to iff converter v1.4 does crunch data!
+	;ilbm file called player.ilbm
+	;colour called iff.gfx.cmap (nicked from editor)
+	
+*
+*	ALIGN DATA ONTO LONGWORD BOUNDAIRES
+*	OR IT WONT WORK 
+
+	move.l	#$10000,d1	;Mem Requirements ANYWHERE
+	move.l	#55000,d0	;Mem size
+	CALLEXEC	AllocMem
+	beq	.failed	;failed to get the memory!
+	move.l	d0,workmem
+
+
+	lea	iff_file,a0		;dest iff file
+	move.l	a0,startaddress
+	move.l	buffmem,a1		;source grafix file
+	lea	colours,a2		;source colour file
+
+	;convert colours and bung in iff_file
+	bsr	colours_to_iff
+	lea	colours,a2		;source colour file
+
+	bsr	ilbm_to_iffy
+
+	move.l	a3,d0
+	add.l	#3,d0
+	lsr.l	#2,d0
+	lsl.l	#2,d0
+	move.l	d0,a3
+
+	move.l	a3,endaddress
+	move.l	workmem,a1
+	move.l	a3,a2
+	sub.l	a1,a2
+	
+	sub.l	workmem,a3
+	move.l	a3,body_length
+	lea	body,a0
+	sub.l	#iff_file,a0
+	add.l	#(body-ilbmstart),a3
+	move.l	a3,iff_length
+
+	lea	iff_file,a0
+	move.l	workmem,a1
+	move.l	#(body-iff_file)-1,d7
+.loop	move.b	(a0)+,(a1)+
+	dbra	d7,.loop
+
+.failed	
+out	rts
+ilbm_to_iffy
+fred
+	move.l	buffmem,a1			;source address in a1
+	move.l	a1,a2
+	add.l	#40960,a2			;end of source  in a2 	
+	move.l	workmem,a3
+	add.l	#(body-iff_file),a3
+					;dest address   in a3
+					;temp dest add  in a4
+					;d0 & d1 ilbm data regs
+					;d2 = length of crunched data
+	move.b	#40,d4		;d4 = length of rasta line
+	
+st	moveq.l	#0,d3			;reset crunch char
+	cmp.l	a2,a1
+	blt	.over
+
+
+	rts
+
+.over	move.b	(a1)+,d0		;first 	bit of data
+	move.b	(a1)+,d1		;second bit of data
+	cmp.b	d0,d1			;1 & 2 crunchable
+	beq	same			;branch crunch
+			;** not crunch **
+nocrn	move.l	a3,a4			;temp store where crunch counter is
+	addq.l	#1,a4			;after crunch value
+	moveq.l	#0,d3			;1 bit of not the same data
+	
+crnlop	move.b	d0,(a4)+		;store first byte
+
+	move.b	d1,d0			;sec is now first
+	move.b	(a1)+,d1		;second bit of data
+	cmp.l	a2,a1			;end of list yet
+	bge	end3
+	sub.b	#1,d4			;dec rasta line counter
+	cmp.b	#0,d4
+	bgt	.lopovr
+	move.b	#40,d4		;reset rasta line counter
+	bra	end2
+	
+.lopovr	cmp.b	#$80,d3			;hit limit
+	beq	end1	
+	cmp.b	d0,d1			;is it crunchable
+	bne	ovr
+	cmp.b	#2,d4			;*** new 2 lines
+	ble	ovr			;if 1 byte left crunch
+	cmp.b	(a1),d1
+	beq	end2
+ovr	add.b	#1,d3			;update crunch
+	bra	crnlop			;loop until at limit	
+	
+	
+	;***** non crunchable data ends *****
+end1		;*** store crunch char and 2 bytes
+	move.b	d3,(a3)			;set crunch char
+	move.b	d0,(a4)+		;store first byte
+	move.b	d1,(a4)+		;store second byte
+	move.l	a4,a3			;update dest pointer
+	bra	st			;loop
+end2		;*** store crunch char and set source 2 bytes back ***	
+	move.b	d3,(a3)			;set crunch char
+	move.l	a4,a3			;update dest pointer
+	cmp.l	a2,a1
+	bgt	.nosub
+	subq.l	#2,a1			;point back to crunchable data
+.nosub
+	bra	st
+end3		;*** store crunch char and 2 bytes and rts
+	add.b	#2,d3
+	move.b	d3,(a3)			;set crunch char
+	move.b	d0,(a4)+		;store first byte
+	move.b	d1,(a4)+		;store second byte
+	move.l	a4,a3			;update dest pointer
+	rts				;end crunch
+
+	;***** crunchable data ends *****
+end4		;*** store crunch char & data,reloop ***
+	move.b	d3,(a3)+		;crunch char
+	move.b	d0,(a3)+		;data
+	subq.l	#1,a1			;point to last bit of data
+	bra	st
+	
+end5		;*** end of crunch char limit ***
+	move.b	d3,(a3)+		;crunch char
+	move.b	d0,(a3)+		;data
+	bra	st
+	
+end6		;*** end of data, rts time ***
+	move.b	d3,(a3)+
+	move.b	d0,(a3)+
+	rts
+same		;*** crunchable data? ***
+	cmp.b	(a1),d1			;is 3rd data = 2nd
+	bne	nocrn			;if no not crunchable
+	moveq.l	#-1,d3			;set crunch char to 1
+	sub.b	#2,d4			;dec rasta line counter
+samlop	move.b	(a1)+,d1		;read next bit of data
+	cmp.b	d0,d1
+	bne	end4			;if not same quit
+	sub.b	#1,d3			;inc crunch char
+	sub.b	#1,d4			;dec rastaline counter
+	cmp.b	#0,d4
+	bgt	.lopovr
+	beq	.ov
+	cmp.b	#-2,d4			;was ras counter =1 at start
+	bne	.ovr
+	subq.l	#1,a1
+	move.b	#0,d3
+	
+.ovr	subq.l	#1,a1
+.ov	move.b	#40,d4
+	bra	end5
+.lopovr	cmp.b	#$7f,d3
+	beq	end5			;hit end of crunch limit
+	cmp.l	a2,a1
+	bge	end6			;end of data
+	bra	samlop
+
+colours_to_iff
+	move.w	#32-1,d7
+	lea	cmap,a4		;pos for cmap in iff
+.loop	clr.l	d0
+	clr.l	d1
+	move.w	(a2)+,d0	;get proper colour
+	move.w	d0,d1
+	and.w	#$f00,d1	;kill all but red
+	ror.w	#4,d1	;move to upper of lowest byte!
+	move.b	d1,(a4)+	;copy to map
+
+	move.w	d0,d1
+	and.w	#$0f0,d1	;kill all but green
+	move.b	d1,(a4)+	;copy to map
+
+	move.w	d0,d1
+	and.w	#$00f,d1	;kill all but blue
+	rol.w	#4,d1	;move to upper of lowest byte!
+	move.b	d1,(a4)+	;copy to map
+	
+	dbra	d7,.loop
+	rts
+	
+	even
+startaddress	dc.l	0
+endaddress	dc.l	0
+
+	
+iff_file	dc.b	"FORM"
+iff_length	dc.l	0	;length of whole iff file
+ilbmstart	dc.b	"ILBM"
+
+		dc.b	"BMHD"
+bmhd_length	dc.l	20	;length of bmhd file
+iff_width		dc.w	320
+iff_height		dc.w	256
+posxy		dc.w	0,0
+bitplanes	dc.b	5
+stencil		dc.b	0
+crunch		dc.b	1	;what cruncher 0 is none 1 is byterun1
+		dc.b	0	;clear for future
+transparent	dc.w	0	;whats the transparent colour 0 is def
+		dc.b	10,11	;aspect ratio
+page_width	dc.w	320
+page_height	dc.w	256
+
+		dc.l	"CMAP"
+cmap_length	dc.l	3*32	;length of cmap
+cmap		dcb.b	3*32
+		dc.l	"CAMG"
+		dc.w	0,4,0,0
+		dc.b	"BODY"
+body_length	dc.l	0	;length of body
+body		dc.l	0
+
+
+
+	
+;****These are for converting the level data formats
+twilite_to_bytenorm	;longs to bytes
+
+	
+	move.l	levmem,a0	;source LONG
+	move.l	buffmem,a1	;dest   BYTE
+	clr.l	d7
+	move.w	width,d7
+	mulu.w	height,d7
+	rol.w	#2,d7	;got loop counter
+	sub.w	#1,d7	;for dbra
+.loop
+	move.b	3(a0),(a1)	;2nd word of each long is the gfk (1st byte is attr)
+	add.l	#4,a0	;next long please
+	add.l	#1,a1	;next byte please
+	dbra	d7,.loop
+	rts
+
+twilite_to_words
+
+	;twilite = attr attr data data
+	;words   =      attr      data
+	move.l	levmem,a0	;source LONG
+	move.l	buffmem,a1	;dest   WORD
+	clr.l	d7
+	move.w	width,d7
+	mulu.w	height,d7
+	rol.w	#2,d7	;got loop counter
+	sub.w	#1,d7	;for dbra
+.loop
+	move.b	1(a0),(a1)	;grab lower byte of attr
+	move.b	3(a0),1(a1)	;grab lower byte of data
+	add.l	#4,a0	;next long please
+	add.l	#2,a1	;next byte please
+	dbra	d7,.loop
+
+	rts
+
+normbyte_to_twilite	
+	clr.l	d7
+	move.l	filelength,d7
+	
+	clr.l	d0
+	move.w	d7,d0
+	rol.l	#2,d0	;get length for work file!
+	move.l	d0,worksize	;save size
+
+	move.l	#$10000,d1	;Mem Requirements ANYWHERE
+	move.l	worksize,d0	;Mem size
+	CALLEXEC	AllocMem
+	beq	.failed	;failed to get the memory!
+	move.l	d0,workmem
+
+	
+	;allocate some memory for a work file!
+	move.l	filelength,d7
+	sub.l	#1,d7	;for dbra
+	move.l	levmem,a0	;source BYTE
+	move.l	workmem,a1	;dest   LONG
+.loop
+	move.b	#0,0(a1)
+	move.b	#0,1(a1)
+	move.b	#0,2(a1)
+	move.b	(a0),3(a1)	;copy to last byte
+	add.l	#1,a0	;next byte please
+	add.l	#4,a1	;next long please
+	dbra	d7,.loop
+	
+	;free up levmem
+	bsr	freelevmem
+	;now copy the pointers from workmem to levmem and carry on!
+	move.l	workmem,levmem
+	move.l	worksize,levsize
+.failed
+	rts
+normword_to_twilite	
+	clr.l	d7
+	move.l	filelength,d7
+	
+	clr.l	d0
+	move.w	d7,d0
+	rol.l	#1,d0	;get length for work file!
+	move.l	d0,worksize	;save size
+
+	move.l	#$10000,d1	;Mem Requirements ANYWHERE
+	move.l	worksize,d0	;Mem size
+	CALLEXEC	AllocMem
+	beq	.failed	;failed to get the memory!
+	move.l	d0,workmem
+
+	
+	;allocate some memory for a work file!
+	move.l	filelength,d7
+	sub.l	#1,d7	;for dbra
+	move.l	levmem,a0	;source word
+	move.l	workmem,a1	;dest   LONG
+.loop
+	move.b	#0,0(a1)	;clear this just incase
+	move.b	0(a0),1(a1)	;copy attr to attr
+	move.b	#0,2(a1)	;clear this just incase
+	move.b	1(a0),3(a1)	;copy data to data
+	add.l	#2,a0	;next word please
+	add.l	#4,a1	;next long please
+	dbra	d7,.loop
+	
+	;free up levmem
+	bsr	freelevmem
+	;now copy the pointers from workmem to levmem and carry on!
+	move.l	workmem,levmem
+	move.l	worksize,levsize
+.failed
+	rts
+	
+gfked2byte_to_twilite	
+	clr.l	d7
+	move.l	filelength,d7
+	
+	clr.l	d0
+	move.w	d7,d0
+	rol.l	#2,d0	;get length for work file!
+	move.l	d0,worksize	;save size
+
+	move.l	#$10000,d1	;Mem Requirements ANYWHERE
+	move.l	worksize,d0	;Mem size
+	CALLEXEC	AllocMem
+	beq	.failed	;failed to get the memory!
+	move.l	d0,workmem
+
+	
+	;allocate some memory for a work file!
+	move.l	filelength,d7
+	sub.l	#1,d7	;for dbra
+	move.l	levmem,a0	;source BYTE
+	move.l	workmem,a1	;dest   LONG
+.loop
+	move.b	(a0),2(a1)	;copy to 2nd word of each long
+	sub.b	#1,2(a1)	;correct for level editor
+	add.l	#1,a0	;next byte please
+	add.l	#4,a1	;next long please
+	dbra	d7,.loop
+	
+	;free up levmem
+	bsr	freelevmem
+	;now copy the pointers from workmem to levmem and carry on!
+	move.l	workmem,levmem
+	move.l	worksize,levsize
+.failed
+	rts
+
+
+;****These are for converting other formats
+
+char_to_byte:
+	;takes a standard gfk and converts it into a mapgrid
+	;of bytes 0-31 for colour of easch pixel
+
+	;convert a char into a byte grid (16*16) (range 0-31)
+	move.l	charmem,a0
+	clr.l	d0
+	move.w	charnum,d0
+	mulu.w	#16*5*2,d0
+	add.l	d0,a0	;got char starting pos.
+	
+	clr.l	d7
+	move.w	#16-1,d7
+	lea	grid,a1
+	
+.loop3	clr.l	d6	;bitplane no. (*2)
+	clr.l	d5	;mask
+	move.w	#%1000000000000000,d5
+	move.w	#16-1,d4	;how many bits across
+.loop2
+	clr.l	d0
+	move.w	#4*2,d6
+.loop
+	clr.l	d1
+	move.w	(a0,d6),d1	;got plane5
+	and.w	d5,d1	;kill useless bits
+	ror.w	d4,d1
+	or.w	d1,d0	;or into colour
+	rol.w	#1,d0	;shift it for next plane
+	sub.w	#2,d6	;next bitplane please
+	bpl	.loop
+	;hopefully d0 should have the colour
+	ror.w	#1,d0	;shift for luck
+	move.b	d0,(a1)+
+	ror.w	#1,d5	;shift mask
+	dbra	d4,.loop2
+	
+	add.l	#5*2,a0
+	dbra	d7,.loop3
+	rts
+
+
+
+

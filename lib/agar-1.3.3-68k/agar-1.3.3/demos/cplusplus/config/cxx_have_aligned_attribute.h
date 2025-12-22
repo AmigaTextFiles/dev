@@ -1,0 +1,3 @@
+#ifndef CXX_HAVE_ALIGNED_ATTRIBUTE
+#define CXX_HAVE_ALIGNED_ATTRIBUTE "yes"
+#endif

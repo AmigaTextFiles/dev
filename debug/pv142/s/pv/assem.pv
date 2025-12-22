@@ -1,0 +1,1442 @@
+/*=======================================================*/
+/*																			*/
+/* Simple assembler for PowerVisor		V1.4					*/
+/*																			*/
+/* © Jorrit Tyberghein  18 Sep 1991	V1.0						*/
+/*								31 Oct 1991 V1.1						*/
+/*								16 Jul 1992 V1.2						*/
+/*								20 Jul 1992 V1.3						*/
+/*								30 Sep 1992 V1.4						*/
+/*																			*/
+/*=======================================================*/
+
+/* Usage : execute this script with the address to start the assembler
+			  as the first argument (use 'rx' to call this script)
+			  Press enter to stop the assembler
+
+	This assembler assembles the following commands :
+
+		move (with movea)
+		moveq
+		movem
+		tst
+		add
+		sub
+		or
+		eor
+		and
+		addi
+		subi
+		eori
+		ori
+		andi
+		addq
+		subq
+		not
+		nop
+		neg
+		swap
+		illegal
+		reset
+		rts
+		bra
+		bsr
+		jmp
+		jsr
+		b<condition>
+		negx
+		clr
+		cmp
+		cmpi
+		cmpa
+		cmpm
+		db<condition>
+		dbra
+		lea
+		pea
+		dc (only .W and .L)
+
+
+	Almost all 68030 addressing modes are supported. Note that you can
+	use PowerVisor expressions almost everywhere where a number is
+	expected. But don't make these expressions to complex or the parser
+	in this assembler will get confused.
+				xxx	number
+				d16	16 bit displacement
+				d8		8 bit displacement
+				bd		base displacement
+				od		outer displacement
+				An		address register
+				Dn		data register
+				Xn		data or address register
+				PC		program counter
+
+				Note that you can append a size specifier (.W or .L) to Xn
+				and a scale factor (*1 2 4 8)
+
+		#<data>
+		(xxx).W
+		(xxx).L
+		(d16,PC)
+		(d8,PC,Xn)
+		(bd,PC,Xn)
+		([bd,PC,Xn],od)
+		([bd,PC],Xn,od)
+		(d16,An)
+		(d8,An,Xn)
+		(bd,An,Xn)
+		([bd,An,Xn],od)
+		([bd,An],Xn,od)
+		(An)+
+		-(An)
+		(An)
+		An
+		Dn
+
+
+	Instead of a machinelanguage command you can also use dot commands. Start
+	the following commands with a dot :
+
+		b			goto previous instruction
+		pc			set new program counter
+		q			quit assembler (same as empty line)
+		h			for dot command help
+		to			toggle old mode
+		tc			toggle commandline mode
+		c			copy current instruction to cmdline
+		s			skip the current instruction (only in old or cmd mode)
+		cc			copy current instruction to buffer
+		gc			copy buffer to cmdline
+
+
+	Warning ! This assembler also assembles instructions even if there is
+	no meaningfull interpretation. For example, you can assemble :
+
+		move.l #1,#2
+
+
+	Warning ! When the assembler is stopped because of an internal error
+	(this can occur when your expressions are too complex), it looks as
+	if PowerVisor hangs. Type the following command on the CLI to get
+	PowerVisor back in control :
+
+		rx "address rexx_powervisor async"
+
+*/
+
+options results
+parse arg pc
+'eval "'pc'"'
+if rc~=0 then
+	do
+		'print "\02Bad argument!\n"'
+		exit
+	end
+pc=result	/* 'pc' always contains the current program counter */
+
+/* The following assignments are the default modes. You can change the defaults */
+/* if you want */
+oldmode=1	/* Old mode, when true we display old instruction on screen */
+cmdmode=0	/* Cmd mode, when true we copy old instruction to string gadget */
+
+'unhide'
+'sync'		/* Disable the PowerVisor commandline. We take control */
+oldpc=0		/* The previous program counter (used by the .B command) */
+
+tmpcmd=0		/* Used by the .C command to temporary set cmdmode to true */
+buffer=''	/* Empty buffer */
+
+'void getcol(getlwin())'
+col=result	/* Number of columns on PowerVisor default logical window */
+
+
+/*-----------*/
+/* Main loop */
+/*-----------*/
+
+do forever
+	'print "\('pc',%08lx) : "'		/* Print current address (program counter) */
+	'getx'								/* Get coordinates on screen after address */
+	x=result
+	'gety'
+	y=result
+
+	/*** If oldmode or cmdmode =1 we need the disassembly of the old instruction ***/
+	if (oldmode=1) | (cmdmode=1) | (tmpcmd>=1) then
+		do
+			'assign _mem=alloc(n,120)'
+			'pvcall 64 _mem' pc '0'	/* Disassemble */
+			isize=result				/* Result is size of old instruction */
+			'string _mem'				/* Copy string to ARexx */
+			oldasmstr=result
+			'free _mem'
+		end
+
+	if oldmode=1 then					/* We must show the old instruction */
+		do
+			'locate' x y
+			'print "'oldasmstr
+		end
+
+	if tmpcmd=2 then 'void {pv 10 "'buffer'";scan *"INST"}'
+	else if (cmdmode=1) | (tmpcmd=1) then 'void {pv 10 "'oldasmstr'";scan *"INST"}'
+	else 'void {scan *"INST"}'
+	tmpcmd=0
+
+	'string input'						/* Get new instruction string (or dot command) */
+	asmstr=result
+
+	'locate' x y						/* Clear line after program counter */
+	'print "'copies(' ',col-x-1)'"'
+	'locate' x y						/* Print instruction or dot command */
+	'print "'asmstr
+
+	/*** First check if it is a dot command ***/
+	if substr(asmstr,1,1)='.' then
+		do
+			parse upper var asmstr '.' dotcmd args
+			if dotcmd='Q' then
+				do
+					'print \n'
+					'async'
+					exit
+				end
+			else if dotcmd='PC' then
+				do
+					'void' args
+					if rc~=0 then 'print "\n\02Bad expression for programcounter !"'
+					else
+						do
+							if (result=0) | (result%1=1) then
+								'print "\n\02Bad expression for programcounter !"'
+							else pc=result
+						end
+				end
+			else if dotcmd='B' then
+				do
+					if oldpc=0 then
+						'print "\n\02No previous program counter !"'
+					else
+						do
+							pc=oldpc
+							oldpc=0
+						end
+				end
+			else if dotcmd='GC' then tmpcmd=2
+			else if dotcmd='CC' then
+				do
+					'assign _mem=alloc(n,120)'
+					'pvcall 64 _mem' pc '0'	/* Disassemble */
+					isize=result				/* Result is size of old instruction */
+					'string _mem'				/* Copy string to ARexx */
+					buffer=result
+					'free _mem'
+				end
+			else if dotcmd='TO' then oldmode=1-oldmode
+			else if dotcmd='TC' then cmdmode=1-cmdmode
+			else if dotcmd='C' then tmpcmd=1
+			else if dotcmd='S' then
+				do
+					if (oldmode=1) | (cmdmode=1) then
+						do
+							pc=pc+isize
+							'locate' x y
+							'print "'oldasmstr
+						end
+					else 'print "\n\02Only use .s in <old mode> or <cmd mode> !"'
+				end
+			else if dotcmd='H' then
+				do
+					'print "\n\02Mini Assembler V1.3\n\n"'
+					'print ".b    goto previous instruction (only once)\n"'
+					'print ".pc   set new program counter\n"'
+					'print ".to   toggle <old mode> (ON/off)\n"'
+					'print ".tc   toggle <cmdline mode> (on/OFF)\n"'
+					'print ".c    copy current instruction to commandline\n"'
+					'print ".s    skip this instruction (in old or cmd mode)\n"'
+					'print ".cc   copy current instruction to buffer\n"'
+					'print ".gc   copy buffer to commandline\n"'
+					'print ".q    quit assembler (same as empty line)\n"'
+					'print ".h    this help\n"'
+				end
+			else 'print "\n\02Unknown dot command (type .H for help) !"'
+			'print \n'
+		end
+	/*** Else it could be an empty string (equivalent to .Q) ***/
+	else if asmstr='' then
+		do
+			'print \n'
+			'async'
+			exit
+		end
+	/*** Else it should be a valid instruction ***/
+	else
+		do
+			'print \n'
+			oldpc=pc
+			a=Assemble(asmstr)
+		end
+end
+
+
+
+/*-----------------------------*/
+/* Assemble a string to memory */
+/*										 */
+/* Input   : string				 */
+/* Uses    : pc					 */
+/* Changes : pc					 */
+/* Returns : 0 if error or 1	 */
+/*-----------------------------*/
+
+Assemble: procedure expose pc
+parse upper arg asmstr
+
+parse var asmstr cmd arg
+cmd=strip(cmd)
+arg=strip(arg)
+
+parse var cmd opcode '.' size
+
+extra=0
+
+if opcode='MOVE' then
+	do
+		call SplitArgs arg
+
+		if source='CCR' then
+			do
+				mdest=ModeBits(dest)
+				if mdest=-1 then return 0
+				code=x2d('42c0')
+				arb=ArgRegBits(mdest'|'dest)
+				if arb=-1 then return 0
+				code=code+mdest*8+arb
+				call PushWord code
+				extwrd=extra
+				if GetArg(mdest'|'dest'|W')=-1 then return 0
+			end
+		else if dest='CCR' then
+			do
+				msource=ModeBits(source)
+				if msource=-1 then return 0
+				code=x2d('44c0')
+				arb=ArgRegBits(msource'|'source)
+				if arb=-1 then return 0
+				code=code+msource*8+arb
+				call PushWord code
+				extwrd=extra
+				if GetArg(msource'|'source'|W')=-1 then return 0
+			end
+		else if source='SR' then
+			do
+				mdest=ModeBits(dest)
+				if mdest=-1 then return 0
+				code=x2d('40c0')
+				arb=ArgRegBits(mdest'|'dest)
+				if arb=-1 then return 0
+				code=code+mdest*8+arb
+				call PushWord code
+				extwrd=extra
+				if GetArg(mdest'|'dest'|W')=-1 then return 0
+			end
+		else if dest='SR' then
+			do
+				msource=ModeBits(source)
+				if msource=-1 then return 0
+				code=x2d('46c0')
+				arb=ArgRegBits(msource'|'source)
+				if arb=-1 then return 0
+				code=code+msource*8+arb
+				call PushWord code
+				extwrd=extra
+				if GetArg(msource'|'source'|W')=-1 then return 0
+			end
+		else if source='USP' then
+			do
+				if substr(dest,1,1)~='A' then
+					do
+						'print "\02Only address register allowed !\n"'
+						return 0
+					end
+				rb=RegBits(dest)
+				if rb=-1 then return 0
+				code=x2d('4e68')+rb
+				call PushWord code
+			end
+		else if dest='USP' then
+			do
+				if substr(source,1,1)~='A' then
+					do
+						'print "\02Only address register allowed !\n"'
+						return 0
+					end
+				rb=RegBits(source)
+				if rb=-1 then return 0
+				code=x2d('4e60')+rb
+				call PushWord code
+			end
+		else
+			do
+				mdest=ModeBits(dest)
+				if mdest=-1 then return 0
+				msource=ModeBits(source)
+				if msource=-1 then return 0
+				msb=MoveSizeBits(size)
+				if msb=-1 then return 0
+				code=msb*4096+mdest*64+msource*8
+				arb=ArgRegBits(mdest'|'dest)
+				if arb=-1 then return 0
+				code=code+arb*512
+				arb=ArgRegBits(msource'|'source)
+				if arb=-1 then return 0
+				code=code+arb
+				call PushWord code
+				extwrd=extra
+				if GetArg(msource'|'source'|'size)=-1 then return 0
+				extwrd=extwrd+extwrd-extra
+				if GetArg(mdest'|'dest'|'size)=-1 then return 0
+			end
+	end
+else if (substr(opcode,1,1)='B') & (length(opcode)=3) then
+	do
+		'void' arg
+		if rc~=0 then
+			do
+				'print "\02Bad integer !\n"'
+				return 0
+			end
+		arg=result
+		arg=arg-pc-2
+
+		if opcode='BRA' then code=x2d('6000')
+		else if opcode='BSR' then code=x2d('6100')
+		else
+			do
+				p=pos(substr(opcode,2,2),'HI LS CC CS NE EQ VC VS PL MI GE LT GT LE')
+				if p=0 then
+					do
+						'print "\02Unknown opcode !\n"'
+						return 0
+					end
+				else code=x2d('6000')+((p-1)/3+2)*256
+			end
+
+		if (size='B') | (size='S') then call PushWord code+MakeByte(arg)
+		else if (size='W') | (size='') then
+			do
+				call PushWord code
+				call PushWord arg
+			end
+		else if size='L' then
+			do
+				call PushWord code+255
+				call PushLong arg
+			end
+	end
+else if opcode='RTS' then call PushWord x2d('4e75')
+else if opcode='NOP' then call PushWord x2d('4e71')
+else if (opcode='TST') | (opcode='CLR') | (opcode='NEG') | (opcode='NEGX') | (opcode='NOT') then
+	do
+		msource=ModeBits(arg)
+		if msource=-1 then return 0
+		sb=SizeBits(size)
+		if sb=-1 then return 0
+		sb=sb*64
+		if opcode='TST' then code=x2d('4a00')+sb
+		else if opcode='NEG' then code=x2d('4400')+sb
+		else if opcode='NEGX' then code=x2d('4000')+sb
+		else if opcode='NOT' then code=x2d('4600')+sb
+		else code=x2d('4200')+sb
+		arb=ArgRegBits(msource'|'arg)
+		if arb=-1 then return 0
+		code=code+msource*8+arb
+		call PushWord code
+		extwrd=extra
+		if GetArg(msource'|'arg'|'size)=-1 then return 0
+	end
+else if (opcode='ADD') | (opcode='SUB') | (opcode='AND') | (opcode='OR') then
+	do
+		call SplitArgs arg
+		if opcode='ADD' then firstnib=x2d('d000')
+		else if opcode='SUB' then firstnib=x2d('9000')
+		else if opcode='OR' then firstnib=x2d('8000')
+		else firstnib=x2d('c000')
+
+		if substr(dest,1,1)='D' then
+			do
+				sb=SizeBits(size)
+				if sb=-1 then return 0
+				rb=RegBits(dest)
+				if rb=-1 then return 0
+				code=firstnib+rb*512+sb*64
+				dest=source
+			end
+		else if substr(source,1,1)='D' then
+			do
+				sb=SizeBits(size)
+				if sb=-1 then return 0
+				rb=RegBits(source)
+				if rb=-1 then return 0
+				code=firstnib+x2d('0100')+rb*512+sb*64
+			end
+		else
+			do
+				'print "\02Must have at least one data register !\n"'
+				return 0
+			end
+		mdest=ModeBits(dest)
+		if mdest=-1 then return 0
+		arb=ArgRegBits(mdest'|'dest)
+		if arb=-1 then return 0
+		code=code+mdest*8+arb
+		call PushWord code
+		extwrd=extra
+		if GetArg(mdest'|'dest'|'size)=-1 then return 0
+	end
+else if (opcode='ADDA') | (opcode='SUBA') then
+	do
+		call SplitArgs arg
+		if substr(dest,1,1)='A' then
+			do
+				s=AddressSizeBits(size)
+				if s=-1 then return 0
+				if opcode='ADD' then firstnib=x2d('d000')
+				else firstnib=x2d('9000')
+				rb=RegBits(dest)
+				if rb=-1 then return 0
+				code=firstnib+rb*512+s*64
+				msource=ModeBits(source)
+				if msource=-1 then return 0
+				arb=ArgRegBits(msource'|'source)
+				if arb=-1 then return 0
+				code=code+msource*8+arb
+				call PushWord code
+				extwrd=extra
+				if GetArg(msource'|'source'|'size)=-1 then return 0
+			end
+		else
+			do
+				'print "\02ADDA must have a destination address register !\n"'
+				return 0
+			end
+	end
+else if (opcode='ADDI') | (opcode='SUBI') | (opcode='ADDQ') | (opcode='SUBQ') | (opcode='ANDI') | (opcode='CMPI') | (opcode='EORI') | (opcode='ORI') then
+	do
+		call SplitArgs arg
+		if substr(source,1,1)~='#' then
+			do
+				'print "\02Bad immediate value !\n"'
+				return 0
+			end
+
+		parse var source '#' imm
+		'void' imm
+		if rc~=0 then
+			do
+				'print "\02Bad integer !\n"'
+				return 0
+			end
+		imm=result
+
+		mdest=ModeBits(dest)
+		if mdest=-1 then return 0
+		sb=SizeBits(size)
+		if sb=-1 then return 0
+		arb=ArgRegBits(mdest'|'dest)
+		if arb=-1 then return 0
+		sb=sb*64+mdest*8+arb
+		if opcode='ADDI' then code=x2d('0600')+sb
+		else if opcode='SUBI' then code=x2d('0400')+sb
+		else if opcode='ANDI' then code=x2d('0200')+sb
+		else if opcode='ORI' then code=x2d('0000')+sb
+		else if opcode='CMPI' then code=x2d('0c00')+sb
+		else if opcode='EORI' then code=x2d('0a00')+sb
+		else if opcode='SUBQ' then code=x2d('5100')+sb+imm*512
+		else code=x2d('5000')+sb+imm*512
+
+		call PushWord code
+
+		if substr(opcode,4,1)~='Q' then
+			do
+				if size='B' then call PushWord imm
+				else if (size='W') | (size='') then call PushWord imm
+				else call PushLong imm
+			end
+
+		extwrd=extra
+		if GetArg(mdest'|'dest'|'size)=-1 then return 0
+	end
+else if opcode='CMP' then
+	do
+		call SplitArgs arg
+
+		if substr(dest,1,1)='D' then
+			do
+				sb=SizeBits(size)
+				if sb=-1 then return 0
+				rb=RegBits(dest)
+				if rb=-1 then return 0
+				code=x2d('b000')+rb*512+sb*64
+			end
+		else
+			do
+				'print "\02Destination must be a data register !\n"'
+				return 0
+			end
+		msource=ModeBits(source)
+		if msource=-1 then return 0
+		arb=ArgRegBits(msource'|'source)
+		if arb=-1 then return 0
+		code=code+msource*8+arb
+		call PushWord code
+		extwrd=extra
+		if GetArg(msource'|'source'|'size)=-1 then return 0
+	end
+else if opcode='CMPA' then
+	do
+		call SplitArgs arg
+
+		if substr(dest,1,1)='A' then
+			do
+				asb=AddressSizeBits(size)
+				if asb=-1 then return 0
+				rb=RegBits(dest)
+				if rb=-1 then return 0
+				code=x2d('b000')+rb*512+asb*64
+			end
+		else
+			do
+				'print "\02Destination must be an address register !\n"'
+				return 0
+			end
+		msource=ModeBits(source)
+		if msource=-1 then return 0
+		arb=ArgRegBits(msource'|'source)
+		if arb=-1 then return 0
+		code=code+msource*8+arb
+		call PushWord code
+		extwrd=extra
+		if GetArg(msource'|'source'|'size)=-1 then return 0
+	end
+else if opcode='CMPM' then
+	do
+		call SplitArgs arg
+
+		parse var source '(A' sreg ')+'
+		parse var dest '(A' dreg ')+'
+		sreg='A'sreg
+		dreg='A'dreg
+
+		sb=SizeBits(size)
+		if sb=-1 then return 0
+		rb=RegBits(sreg)
+		if rb=-1 then return 0
+		rbd=RegBits(dreg)
+		if rbd=-1 then return 0
+		code=x2d('b108')+sb*64+rb*512+rbd
+		call PushWord code
+	end
+else if ((substr(opcode,1,2)='DB') & (length(opcode)=4)) | (opcode='DBT') | (opcode='DBF') then
+	do
+		if opcode='DBT' then code=x2d('50c8')
+		else if (opcode='DBF') | (opcode='DBRA') then code=x2d('51c8')
+		else
+			do
+				p=pos(substr(opcode,3,2),'HI LS CC CS NE EQ VC VS PL MI GE LT GT LE')
+				if p=0 then
+					do
+						'print "\02Unknown opcode !\n"'
+						return 0
+					end
+				else code=x2d('50c8')+((p-1)/3+2)*256
+			end
+
+		call SplitArgs arg
+		if substr(source,1,1)~='D' then
+			do
+				'print "\02Count register must be a data register !\n"'
+				return 0
+			end
+		rb=RegBits(source)
+		if rb=-1 then return 0
+		code=code+rb
+		call PushWord code
+		'void' dest
+		if rc~=0 then
+			do
+				'print "\02Bad integer !\n"'
+				return 0
+			end
+		dest=result
+		dest=dest-pc-2
+		call PushWord dest
+	end
+else if opcode='EOR' then
+	do
+		call SplitArgs arg
+
+		if substr(source,1,1)='D' then
+			do
+				sb=SizeBits(size)
+				if sb=-1 then return 0
+				rb=RegBits(source)
+				if rb=-1 then return 0
+				code=x2d('b100')+rb*512+sb*64
+			end
+		else
+			do
+				'print "\02Source must be a data register !\n"'
+				return 0
+			end
+		mdest=ModeBits(dest)
+		if mdest=-1 then return 0
+		arb=ArgRegBits(mdest'|'dest)
+		if arb=-1 then return 0
+		code=code+mdest*8+arb
+		call PushWord code
+		extwrd=extra
+		if GetArg(mdest'|'dest'|'size)=-1 then return 0
+	end
+else if opcode='ILLEGAL' then call PushWord x2d('4afc')
+else if opcode='RESET' then call PushWord x2d('4e70')
+else if (opcode='JMP') | (opcode='JSR') then
+	do
+		if opcode='JMP' then code=x2d('4ec0')
+		else code=x2d('4e80')
+		marg=ModeBits(arg)
+		if marg=-1 then return 0
+		arb=ArgRegBits(marg'|'arg)
+		if arb=-1 then return 0
+		code=code+marg*8+arb
+		call PushWord code
+		extwrd=extra
+		if GetArg(marg'|'arg'|W')=-1 then return 0
+	end
+else if opcode='LEA' then
+	do
+		call SplitArgs arg
+
+		if substr(dest,1,1)='A' then
+			do
+				rb=RegBits(dest)
+				if rb=-1 then return 0
+				code=x2d('41c0')+rb*512
+			end
+		else
+			do
+				'print "\02Destination must be an address register !\n"'
+				return 0
+			end
+		msource=ModeBits(source)
+		if msource=-1 then return 0
+		arb=ArgRegBits(msource'|'source)
+		if arb=-1 then return 0
+		code=code+msource*8+arb
+		call PushWord code
+		extwrd=extra
+		if GetArg(msource'|'source'|L')=-1 then return 0
+	end
+else if opcode='MOVEM' then
+	do
+		call SplitArgs arg
+
+		if (pos('-',source)~=0) | (pos('/',source)~=0) | ((length(source)=2) & (pos(substr(source,1,1),'DA')~=0)) then
+			do
+				list=source
+				arg=dest
+				code=x2d('4880')
+			end
+		else
+			do
+				list=dest
+				arg=source
+				code=x2d('4c80')
+			end
+
+		bits=RegListBits(list)
+		if bits=-1 then return 0
+		if substr(arg,1,2)~='-(' then bits=reverse(bits)
+		rlbits=c2d(b2c(bits))
+
+		asb=AddressSizeBits(size)
+		if asb=-1 then return 0
+		code=code+(asb%4)*64
+
+		marg=ModeBits(arg)
+		if marg=-1 then return 0
+		arb=ArgRegBits(marg'|'arg)
+		if arb=-1 then return 0
+		code=code+marg*8+arb
+		call PushWord code
+		call PushWord rlbits
+		extwrd=extra
+		if GetArg(marg'|'arg'|'size)=-1 then return 0
+	end
+else if opcode='MOVEQ' then
+	do
+		call SplitArgs arg
+		if substr(source,1,1)~='#' then
+			do
+				'print "\02Bad immediate value !\n"'
+				return 0
+			end
+		if substr(dest,1,1)~='D' then
+			do
+				'print "\02Destination must be a data register !\n"'
+				return 0
+			end
+
+		parse var source '#' imm
+		'void' imm
+		if rc~=0 then
+			do
+				'print "\02Bad integer !\n"'
+				return 0
+			end
+		imm=result
+
+		rb=RegBits(dest)
+		if rb=-1 then return 0
+		code=x2d('7000')+rb*512+MakeByte(imm)
+		call PushWord code
+	end
+else if opcode='PEA' then
+	do
+		msource=ModeBits(arg)
+		if msource=-1 then return 0
+		code=x2d('4840')
+		arb=ArgRegBits(msource'|'arg)
+		if arb=-1 then return 0
+		code=code+msource*8+arb
+		call PushWord code
+		extwrd=extra
+		if GetArg(msource'|'arg'|L')=-1 then return 0
+	end
+else if opcode='SWAP' then
+	do
+		if substr(arg,1,1)~='D' then
+			do
+				'print "\02Argument must be a data register !\n"'
+				return 0
+			end
+		rb=RegBits(arg)
+		if rb=-1 then return 0
+		code=x2d('4840')+rb
+		call PushWord code
+	end
+else if opcode='DC' then
+	do
+		'void' arg
+		if rc~=0 then
+			do
+				'print "\02Bad integer !\n"'
+				return 0
+			end
+		arg=result
+		if size='B' then
+			do
+				'print "\02Sorry DC.B not supported !\n"'
+				return 0
+			end
+		if (size='W') | (size='') then call PushWord arg
+		else if size='L' then call PushLong arg
+		else
+			do
+				'print "\02Bad size specifier !\n"'
+				return 0
+			end
+	end
+else
+	do
+		'print "\02Unknown opcode !\n"'
+		return 0
+	end
+
+'assign _m='pc
+do j=0 to extra-1
+	'assign *(_m+'j'*2).w='c.j
+end
+pc=pc+extra*2
+return 1
+
+
+/*-------------------------------*/
+/* Convert size specifier for 	*/
+/* MOVE to bits						*/
+/*											*/
+/* Input   : size .B, .W, .L		*/
+/* Uses    : 							*/
+/* Changes : 							*/
+/* Returns : -1 if error or bits	*/
+/*-------------------------------*/
+
+MoveSizeBits: procedure
+parse arg size
+
+	if size='B' then return 1
+	else if (size='W') | (size='') then return 3
+	else if size='L' then return 2
+	else
+		do
+			'print "\02Bad size specifier !\n"'
+			return -1
+		end
+
+
+/*-------------------------------*/
+/* Convert size specifier for 	*/
+/* address registers to bits		*/
+/*											*/
+/* Input   : size .W, .L			*/
+/* Uses    : 							*/
+/* Changes : 							*/
+/* Returns : -1 if error or bits	*/
+/*-------------------------------*/
+
+AddressSizeBits: procedure
+parse arg size
+
+	if (size='W') | (size='') then return 3
+	else if size='L' then return 7
+	else
+		do
+			'print "\02Bad size specifier !\n"'
+			return -1
+		end
+
+
+/*-------------------------------*/
+/* Convert size specifier			*/
+/* to bits								*/
+/*											*/
+/* Input   : size .B, .W, .L		*/
+/* Uses    : 							*/
+/* Changes : 							*/
+/* Returns : -1 if error or bits	*/
+/*-------------------------------*/
+
+SizeBits: procedure
+parse arg size
+
+	if size='B' then return 0
+	else if (size='W') | (size='') then return 1
+	else if size='L' then return 2
+	else
+		do
+			'print "\02Bad size specifier !\n"'
+			return -1
+		end
+
+
+/*-------------------------------*/
+/* Convert register to bits		*/
+/*											*/
+/* Input   : reg A0..A7 D0..D7	*/
+/* Uses    : 							*/
+/* Changes : 							*/
+/* Returns : -1 if error or bits	*/
+/*-------------------------------*/
+
+RegBits: procedure
+parse arg reg
+
+	l=substr(reg,1,1)
+	if ((l='D') | (l='A')) & (length(reg)=2) then return substr(reg,2,1)
+	else
+		do
+			'print "\02Bad register name !\n"'
+			return -1
+		end
+
+
+/*-------------------------------*/
+/* Convert parameter to bits		*/
+/* corresponding with mode field	*/
+/* in most instructions				*/
+/*											*/
+/* Input   : addressing arg		*/
+/* Uses    : 							*/
+/* Changes : 							*/
+/* Returns : -1 if error or bits	*/
+/*-------------------------------*/
+
+ModeBits: procedure
+parse arg argum
+
+	l=substr(argum,1,1)
+	if l='(' then
+		do
+			if pos('PC',argum) ~= 0 then return 7
+			l=substr(argum,2,1)
+			if (l='A') & (datatype(substr(argum,3,1),NUM)==1) then
+				do
+					if substr(argum,5,1)='+' then return 3
+					else return 2
+				end
+			else
+				do
+					if pos(',',argum)=0 then return 7
+					parse var argum left ',' right
+					if pos(',',right)=0 then return 5
+					else return 6
+				end
+		end
+	else if l='A' then return 1
+	else if l='D' then return 0
+	else if l='-' then return 4
+	else if l='#' then return 7
+	else
+		do
+			'print "\02Bad argument format !\n"'
+			return -1
+		end
+
+
+/*-------------------------------------*/
+/* Convert parameter to bits				*/
+/* corresponding with register			*/
+/* field in most instructions				*/
+/* ('mode' in Input is the value			*/
+/* returned by 'ModeBits')					*/
+/*													*/
+/* Input   : mode '|' addressing arg	*/
+/* Uses    : 									*/
+/* Changes : 									*/
+/* Returns : -1 if error or bits			*/
+/*-------------------------------------*/
+
+ArgRegBits: procedure
+parse arg mode '|' argum
+
+	if (mode=0) | (mode=1) then return RegBits(argum)
+	else if (mode=2) | (mode=3) | (mode=4) then
+		do
+			parse var argum '(A' reg
+			reg=substr(reg,1,1)
+			return RegBits('A'reg)
+		end
+	else if mode~=7 then    /* 5 and 6 */
+		do
+			parse var argum ',A' reg
+			reg=substr(reg,1,1)
+			return RegBits('A'reg)
+		end
+	else
+		do
+			l=substr(argum,1,1)
+			if l='#' then return 4
+			else
+				do
+					parse var argum '(' xxx ')' yyy
+					if yyy='.W' then return 0
+					else if yyy='.L' then return 1
+
+					parse var argum '(' xxx ',' yyy
+					if yyy='PC)' then return 2
+					else if index(argum,'PC') ~= 0 then return 3
+					else return 1
+				end
+		end
+
+
+/*-------------------------*/
+/* Push a word to memory	*/
+/*									*/
+/* Input   : word to push	*/
+/* Uses    : c. extra		*/
+/* Changes : c. extra		*/
+/* Returns :					*/
+/*-------------------------*/
+
+PushWord: procedure expose c. extra
+parse arg word
+
+	c.extra=MakeWord(word)
+	extra=extra+1
+	return
+
+
+/*-------------------------*/
+/* Push a long to memory	*/
+/*									*/
+/* Input   : long to push	*/
+/* Uses    : c. extra		*/
+/* Changes : c. extra		*/
+/* Returns :					*/
+/*-------------------------*/
+
+PushLong: procedure expose c. extra
+parse arg long
+
+	c.extra=MakeWord(x2d(left(d2x(long,8),4)))
+	extra=extra+1
+	c.extra=MakeWord(x2d(d2x(long,4)))
+	extra=extra+1
+	return
+
+
+/*----------------------------------------------*/
+/* Parse a normal addressing argument				*/
+/* and push words to memory							*/
+/*																*/
+/* Input   : mode '|' addressing arg '|' size	*/
+/* Uses    : c. extra pc extwrd						*/
+/* Changes : c. extra									*/
+/* Returns : -1 if error or 0							*/
+/*----------------------------------------------*/
+
+GetArg: procedure expose c. extra pc extwrd
+parse arg mode '|' argum '|' size
+
+	if (mode=0) | (mode=1) | (mode=2) | (mode=3) | (mode=4) then
+		return 0
+	else if mode=5 then
+		do
+			parse var argum '(' xxx ','
+			'void' xxx
+			if rc~=0 then
+				do
+					'print "\02Bad integer !\n"'
+					return -1
+				end
+			xxx=result
+			if (xxx<=32767) & (xxx>=-32768) then call PushWord xxx
+			else if (xxx<=65535) & (xxx>=0) then call PushWord xxx
+			else
+				do
+					'print "\02Sorry, longword Ax relative not supported !\n"'
+					return -1
+				end
+			return 0
+		end
+	else if mode=7 then
+		do
+			reg=ArgRegBits(mode'|'argum)
+			if reg=-1 then return -1
+			else if reg=0 then
+				do
+					parse var argum '(' xxx ')'
+					'void' xxx
+					if rc~=0 then
+						do
+							'print "\02Bad integer !\n"'
+							return -1
+						end
+					call PushWord result
+					return 0
+				end
+			else if reg=1 then
+				do
+					parse var argum '(' xxx ')'
+					'void' xxx
+					if rc~=0 then
+						do
+							'print "\02Bad integer !\n"'
+							return -1
+						end
+					call PushLong result
+					return 0
+				end
+			else if reg=4 then
+				do
+					s=MoveSizeBits(size)
+					if s=-1 then return -1
+					parse var argum '#' xxx
+					'void' xxx
+					if rc~=0 then
+						do
+							'print "\02Bad integer !\n"'
+							return -1
+						end
+					xxx=result
+					if s=2 then call PushLong xxx
+					else call PushWord xxx
+					return 0
+				end
+			else if reg=2 then
+				do
+					parse var argum '(' xxx ','
+					'void' xxx
+					if rc~=0 then
+						do
+							'print "\02Bad integer !\n"'
+							return -1
+						end
+					xxx=result
+					xxx=xxx-pc+extwrd*2-4
+
+					if (xxx<=32767) & (xxx>=-32768) then call PushWord xxx
+					else
+						do
+							'print "\02Sorry, longword PC relative not supported !\n"'
+							return -1
+						end
+					return 0
+				end
+			else
+				do
+					if pos('PC',argum)=0 then
+						do
+							'print "\02Illegal base register !\n"'
+							return -1
+						end
+					return ParseComplexArg(argum'|PC')
+				end
+		end
+	else
+		do
+			parse var argum ',A' reg
+			return ParseComplexArg(argum'|A'substr(reg,1,1))
+		end
+	return 0
+
+
+/*----------------------------------------------*/
+/* Parse a complex addressing argument				*/
+/* and push words to memory							*/
+/*																*/
+/* Input   : addressing arg '|' base register	*/
+/* Uses    : c. extra pc extwrd						*/
+/* Changes : c. extra									*/
+/* Returns : -1 if error or 0							*/
+/*----------------------------------------------*/
+
+ParseComplexArg: procedure expose c. extra pc extwrd
+parse arg argum '|' basereg
+
+	if substr(argum,2,1)='[' then
+		do
+			parse var argum '([' bd ',' (basereg) rest
+
+			if substr(rest,1,1)=']' then
+				do
+					postidx=4
+					parse var rest '],' reg ',' od ')'
+				end
+			else
+				do
+					postidx=0
+					parse var rest ',' reg '],' od ')'
+				end
+			parse var reg reg '.' idxsize '*' multi
+			'void' bd
+			if rc~=0 then
+				do
+					'print "\02Bad integer !\n"'
+					return -1
+				end
+			bd=result
+			if basereg='PC' then bd=bd-pc+extwrd*2-4
+			'void' od
+			if rc~=0 then
+				do
+					'print "\02Bad integer !\n"'
+					return -1
+				end
+			od=result
+
+			if (idxsize='W') | (idxsize='') then idxsize=0
+			else if idxsize='L' then idxsize=1
+			else
+				do
+					'print "\02Bad index size specifier !\n"'
+					return -1
+				end
+
+			idxreg=regbits(reg)
+			if idxreg=-1 then return -1
+			if substr(reg,1,1)='A' then idxdata=1
+			else idxdata=0
+
+			if (multi='') | (multi='1') then multi=0
+			else if multi='2' then multi=1
+			else if multi='4' then multi=2
+			else if multi='8' then multi=3
+			else
+				do
+					'print "\02Bad index scale !\n"'
+					return -1
+				end
+
+			if (od>32767) | (od<-32768) then postidx=postidx+3
+			else postidx=postidx+2
+
+			if (bd>32767) | (bd<-32768) then baseidx=3
+			else baseidx=2
+
+			call PushWord idxdata*32768+idxreg*4096+idxsize*2048+multi*512+256+baseidx*16+postidx
+
+			if (bd>32767) | (bd<-32768) then call PushLong bd
+			else call PushWord bd
+
+			if (od>32767) | (od<-32768) then call PushLong od
+			else call PushWord od
+
+			return 0
+		end
+	else
+		do
+			parse var argum '(' bd ',' (basereg) ',' reg ')'
+
+			parse var reg reg '.' idxsize '*' multi
+			'void' bd
+			if rc~=0 then
+				do
+					'print "\02Bad integer !\n"'
+					return -1
+				end
+			bd=result
+			if basereg='PC' then bd=bd-pc+extwrd*2-4
+
+			if (idxsize='W') | (idxsize='') then idxsize=0
+			else if idxsize='L' then idxsize=1
+			else
+				do
+					'print "\02Bad index size specifier !\n"'
+					return -1
+				end
+
+			idxreg=regbits(reg)
+			if idxreg=-1 then return -1
+			if substr(reg,1,1)='A' then idxdata=1
+			else idxdata=0
+
+			if (multi='') | (multi='1') then multi=0
+			else if multi='2' then multi=1
+			else if multi='4' then multi=2
+			else if multi='8' then multi=3
+			else
+				do
+					'print "\02Bad index scale !\n"'
+					return -1
+				end
+
+			if (bd>127) | (bd<-128) then
+				do
+					last9=256+32
+					if (bd>32767) | (bd<-32768) then
+						do
+							last9=last9+16
+						end
+				end
+			else last9=bd
+
+			call PushWord idxdata*32768+idxreg*4096+idxsize*2048+multi*512+last9
+
+			if (bd>127) | (bd<-128)then
+				do
+					if (bd>32767) | (bd<-32768) then call PushLong bd
+					else call PushWord bd
+				end
+			return 0
+		end
+
+
+/*-------------------------------*/
+/* Split argument in two parts	*/
+/* source and destination			*/
+/*											*/
+/* Input   : argument				*/
+/* Uses    :							*/
+/* Changes : source dest			*/
+/* Returns :							*/
+/*-------------------------------*/
+
+SplitArgs: procedure expose source dest
+parse arg arg
+
+	parse var arg lsrc '(' source ')' rsrc ',' dest
+	if source='' then
+		do
+			parse var arg source ',' dest
+		end
+	else if dest='' then
+		do
+			parse var arg source ',' dest
+		end
+	else source=lsrc'('source')'rsrc
+	return
+
+
+/*-------------------------------------*/
+/* Convert register list to bit string	*/
+/*													*/
+/* Input   : register list					*/
+/* Uses    :									*/
+/* Changes : 									*/
+/* Returns : bit string or -1 if error	*/
+/*-------------------------------------*/
+
+RegListBits: procedure
+parse arg list
+
+	bits='0000000000000000'
+	regs='D0D1D2D3D4D5D6D7A0A1A2A3A4A5A6A7'
+	rest=list
+	do until rest=''
+		parse var rest one '/' rest
+		parse var one left '-' right
+		l=pos(left,regs)
+		if l=0 then
+			do
+				'print "\02Bad register !\n"'
+				return -1
+			end
+		l=(l-1)/2+1
+		if right='' then
+			bits=overlay('1',bits,l,1)
+		else
+			do
+				r=pos(right,regs)
+				if r=0 then
+					do
+						'print "\02Bad register !\n"'
+						return -1
+					end
+				r=(r-1)/2+1
+				if ((l<=8) & (r>8)) | ((l>8) & (r<=8)) then
+					do
+						'print "\02Bad register pair !\n"'
+						return -1
+					end
+				do i=l to r
+					bits=overlay('1',bits,i,1)
+				end
+			end
+	end
+	return bits
+
+
+/*----------------------------*/
+/* Convert integer to a byte	*/
+/*										*/
+/* Input   : integer				*/
+/* Uses    :						*/
+/* Changes : 						*/
+/* Returns : byte					*/
+/*----------------------------*/
+
+MakeByte: procedure
+parse arg int
+
+	'void' int'&255'
+	return result
+
+
+/*----------------------------*/
+/* Convert integer to a word	*/
+/*										*/
+/* Input   : integer				*/
+/* Uses    :						*/
+/* Changes : 						*/
+/* Returns : word					*/
+/*----------------------------*/
+
+MakeWord: procedure
+parse arg int
+
+	'void' int'&65535'
+	return result
+
+

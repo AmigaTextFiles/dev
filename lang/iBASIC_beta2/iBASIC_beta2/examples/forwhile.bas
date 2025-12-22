@@ -1,0 +1,21 @@
+
+SUB TESTESCAPE				#
+	FOR	I=0 TO 10
+        	FORMAT "BLA!"			
+	END FOR					# NORMALY POPPED AFTER HERE
+END SUB	
+
+#testscape
+
+FOR I = 1 TO 15
+    FORMAT "Gassi!"
+END FOR
+
+I = 0
+WHILE I < 15
+    FORMAT "Wann?"
+    I = I + 1
+END WHILE
+
+#TESTSCAPE
+

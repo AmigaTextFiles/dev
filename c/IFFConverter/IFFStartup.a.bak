@@ -1,0 +1,137 @@
+****
+		INCLUDE	exec_lib.i
+		INCLUDE	dos_lib.i
+		INCLUDE	exec/macros.i
+		INCLUDE	exec/execbase.i
+		INCLUDE	dos/dos.i
+		INCLUDE	dos/dosextens.i
+		INCLUDE	workbench/startup.i
+
+IFF_LIB_VERSION	equ	0
+		
+;-- Defining Macros -------------------------------------------------
+
+*--------------------------------------------------------------------
+*
+*  To call a library function use LIBCALL. If A6 is correct, just
+*  use LIBCALL with the functionname only. If A6 isn't correct,
+*  than use LIBCALL with the functionname AND the library offset.
+*
+*--------------------------------------------------------------------
+
+LIBCALL		MACRO
+		IFGT	NARG-2		More Then Two Arguments?
+		FAIL			Too many Arguments!!!
+		ENDC
+		IFEQ	NARG-2		Two Arguments exactly.
+		move.l	(\2),a6
+		ENDC
+		jsr	(_LVO\1,a6)
+		ENDM
+		
+;-- Defining Constants ----------------------------------------------
+
+SysBase		equ	4
+
+
+		XDEF	_exit
+
+;-- Start of Program ------------------------------------------------
+		
+		SECTION	Startup,code
+
+		XREF	_main
+				
+		movem.l	d1-d6/a0-a6,-(SP)
+
+		lea	(__BSSSection),a0
+		move.w	#__BSSLength/4,d0
+		CLEAR	D1
+		bra.s	ZeroLength
+ClearBSSsection		
+		move.l	d1,(a0)+
+ZeroLength
+		dbf	d0,ClearBSSsection
+
+		move.l	SP,(__StoredStack)	Save Stack pointer.
+		
+		lea	(DosName,PC),a1
+		moveq	#IFF_LIB_VERSION,d0
+		LIBCALL	OpenLibrary,SysBase.W
+		move.l	d0,(DosBase)
+		beq	NoDosLib
+		
+		CLEARA	A1
+		LIBCALL	FindTask			Get our own task.
+		move.l	d0,a4
+		
+		tst.l	(pr_CLI,a4)		Are we called from Workbench?
+		bne.s	FromCLI			No, it was CLI.
+		
+*---- So we were called from Workbench.
+*---- This means a message is waiting for us and we have to answer it!
+		move.l	(pr_CurrentDir,a4),d1
+		LIBCALL	CurrentDir,DosBase
+		
+		lea	(pr_MsgPort,a4),a0
+		LIBCALL	WaitPort,SysBase.W
+		lea	(pr_MsgPort,a4),a0
+		LIBCALL	GetMsg
+		move.l	d0,(__WBMessage)
+
+		move.l	d0,(_argv)
+		clr.l	(_argc)
+		
+		move.l	d0,a0
+		move.l	(sm_ArgList,a0),a0
+		move.l	(wa_Lock,a0),d1
+		LIBCALL	CurrentDir,DosBase
+		
+		bra.s	DoMain
+		
+FromCLI
+		move.l	#1,_argc
+DoMain
+		jsr	(_main,PC)
+		moveq	#0,d0
+		
+_exit
+		move.l	d0,-(SP)			Save Return Code
+
+		tst	(__WBMessage)
+		beq.s	NoWBMessage
+		
+		LIBCALL	Forbid,SysBase.W
+		
+		move.l	(__WBMessage),a1
+		LIBCALL	ReplyMsg
+NoWBMessage		
+		move.l	(DosBase),a1
+		LIBCALL	CloseLibrary,SysBase.W
+		move.l	(SP),d0			Retrive Return Code
+Quit
+		move.l	(__StoredStack),SP	Restore Stack Pointer to its original state
+		movem.l	(SP)+,d1-d6/a0-a6
+		rts
+
+NoDosLib
+		bra.s	Quit
+		
+DosName		DOSNAME
+DosBase		dc.l	0
+
+		SECTION	__MERGED,data
+		XDEF	_argc,_argv
+_argc		dc.l	0
+_argv		dc.l	0
+
+;-- Start of BSS Section --------------------------------------------
+
+		SECTION	bss,bss
+__BSSSection
+
+__StoredStack	ds.l	1
+__WBMessage	ds.l	1
+		CNOP	0,4
+
+__BSSLength	equ	*-__BSSSection	Length of BSS Section.

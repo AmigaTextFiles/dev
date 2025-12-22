@@ -1,0 +1,148 @@
+; IRA V1.02  (Sep  6 1993)  (c)1993  Tim Ruehsen
+
+
+ABSEXECBASE	EQU	$4
+CIAA_TBLO	EQU	$BFE601
+VPOSR		EQU	$DFF004
+VHPOSR		EQU	$DFF006
+JOY0DAT		EQU	$DFF00A
+INTENA		EQU	$DFF09A
+
+*SNIP*
+
+	MOVE	#$00FF,D0
+	MOVE	D0,-32752(A5)    // b.w=255
+
+	MOVE.L	-32760(A5),D0
+	MOVE	#$0004,D1
+	MOVE.L	-32750(A5),D2
+	SWAP	D1
+	CLR	D1
+	MOVEM.L	D0,-(A7)
+	MOVE.L	D1,D0
+	MOVE.L	D2,D1
+	JSR	LAB_0083
+	MOVE.L	D0,D1
+	MOVEM.L	(A7)+,D0
+	CLR	D1
+	SWAP	D1
+	JSR	LAB_0044    //SortList array(),SizeOf .thing/fred
+
+
+	MOVE	#$00FF,D0
+	MOVE	D0,-32752(A5)   //b.w=255
+
+
+//First call to LAB_0083...seems harmless
+
+LAB_0083:
+	MOVE.L	D5,-(A7)
+	MOVEQ	#47,D5
+LAB_0084:
+	MOVEM.L	D2-D4,-(A7)
+	MOVEQ	#0,D2
+	TST.L	D1
+	BEQ	LAB_008D
+	BPL	LAB_0085
+	NEG.L	D1
+	MOVEQ	#-1,D2
+LAB_0085:
+	TST.L	D0
+	BPL	LAB_0086
+	NEG.L	D0
+	NOT	D2
+LAB_0086:
+	MOVEQ	#0,D3
+	MOVEQ	#0,D4
+LAB_0087:
+	LSL.L	#1,D4
+	LSR.L	#1,D1
+	BEQ	LAB_0088
+	ROXR.L	#1,D3
+	DBF	D5,LAB_0087
+	BRA	LAB_008A
+LAB_0088:
+	ROXR.L	#1,D3
+	BEQ	LAB_0089
+	CMP.L	D3,D0
+	BCS	LAB_0089
+	SUB.L	D3,D0
+	ADDQ	#1,D4
+LAB_0089:
+	DBF	D5,LAB_0087
+LAB_008A:
+	TST	D2
+	BEQ	LAB_008B
+	NEG.L	D4
+LAB_008B:
+	MOVE.L	D4,D0
+LAB_008C:
+	MOVEM.L	(A7)+,D2-D4
+	MOVE.L	(A7)+,D5
+	RTS
+LAB_008D:
+	MOVE.L	#$7FFFFFFF,D0
+	BRA	LAB_008C
+	MOVEQ	#0,D0
+	RTS
+
+
+//Last call, must do the work
+
+LAB_0044:
+	MOVE	#$4000,INTENA              // BADC0DE - all interrupts off instantly
+	MOVE	D1,D6
+	MOVEM.L	A4-A6,-(A7)
+	MOVEA.L	D0,A0
+	SUBI.L	#$00000018,D0
+	LEA	-28(A0),A0
+	CMP.L	(A0),D0
+	BEQ	LAB_0049
+LAB_0045:
+	MOVEA.L	(A0),A1
+	MOVEM.L	(A1),A2-A3
+	CMP.L	A2,D0
+	BEQ	LAB_0049
+	MOVEA.L	(A2),A4
+	MOVE.L	8(A1,D6.W),D1
+	MOVEQ	#0,D3
+	CMPA.L	D3,A3
+	BNE	LAB_0046
+	TRAP	#0					//fall through for problems probably
+LAB_0046:
+	MOVE.L	8(A2,D6.W),D2
+	CMP.L	D1,D2
+	BMI	LAB_004A
+	MOVE.L	D2,D1
+LAB_0047:
+	CMPA.L	D0,A4
+	BEQ	LAB_0048
+	MOVEA.L	A1,A3
+	MOVEA.L	A2,A1
+	MOVEA.L	A4,A2
+	MOVEA.L	(A2),A4
+	BRA	LAB_0046
+LAB_0048:
+	MOVE.L	A2,D0
+	TST	D3
+	BNE	LAB_0045
+LAB_0049:
+	MOVE	#$C000,INTENA			//and we have interrupts back again..few
+							//glad I wasn't using miami or something
+							//else that doesn't like being turn off
+							//for any length of time :)
+	MOVEM.L	(A7)+,A4-A6
+	RTS
+LAB_004A:
+	MOVE.L	A2,(A3)
+	MOVEM.L	A1/A3,(A2)
+	MOVE.L	A2,4(A1)
+	MOVE.L	A4,(A1)
+	MOVE.L	A1,4(A4)
+	EXG	A1,A2
+	MOVEQ	#1,D3
+	BRA	LAB_0047
+
+
+
+

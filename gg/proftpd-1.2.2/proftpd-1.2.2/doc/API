@@ -1,0 +1,260 @@
+ProFTPD Application Programmer Interface
+-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+
+NOTE: This API documentation ONLY applies to proftpd versions 1.1.5 and
+greater, wherein the module interface was significantly enhanced.
+
+ProFTPD modules are designed to handle and respond to configuration
+directives (at startup), FTP commands sent over the control connection by
+FTP clients, and authentication requests.
+
+Module are prioritized in the *inverse* order of which they were loaded.
+In other words, the last loaded module is the FIRST to receive calls for a
+particular configuration directive, ftp command or authentication request.
+This can be used to allow later loaded modules (higher priority) to
+(optionally) "override" lower priority modules.  Thus, load order of the
+modules can be VERY important.
+
+Module handler functions are _always_ declared as:
+
+MODRET	my_handler_func(cmd_rec *cmd);
+
+In include/modules.h, MODRET is defined as 'static modret_t *'.  cmd_rec
+is a structure created by the engine and passed to the handler which
+contains all information regarding the command, etc.  modret_t is a
+special structure that is created by the handler and returned to the
+engine in order to tell the engine how to proceed.  There are a few macros
+in include/modules.h which allow the module programmer to easily create
+return structures.  The `cmd' argument to each macro is a pointer to
+the current module function's cmd_rec structure.
+
+HANDLED(cmd)
+ - indicates that the handler properly handled the command, and that the
+engine should consider the command completed and continue processing.
+Note that if a module handler returns HANDLED, POST_CMD handlers
+will be called for the command (see below for handler types).
+
+DECLINED(cmd)
+ - indicates that the engine should act as though the handler was never
+called and continue processing.  POST_CMD type handlers will NOT
+be called in this case.
+
+ERROR(cmd)
+ - A protocol error occured.  POST_CMD type handlers are NOT
+called.
+
+ERROR_MSG(cmd,numeric,message)
+ - Same as above, however the string composed of "numeric message" is sent
+to the client.  In the case of directive configuration handlers, the
+"numeric" argument is ignored, "message" is displayed to the user (or
+logged via syslog), and proftpd terminates.
+
+ERROR_INT(cmd,n)
+ - Same as above, however this indicates a single integer numeric error.
+(Used only in authentication/mapping handlers [see mod_unixpw.c])
+
+Handler Tables
+--------------
+
+Each module can define up to three different handler tables (which are
+registered via the module structure).  These need not all be supplied.
+They are grouped by handler class:
+
+  conftable[]:	For configuration directive handlers.
+  cmdtable[]:	For command handlers, including POST_CMD and PRE_CMD
+                (see below)
+  authtable[]:	For authentication handlers.
+
+The "conftable" is a structure which lists all configuration directive
+handlers for the module.
+
+The "cmdtable" is a structure which lists all FTP command handlers for the
+module.  Each entry in this table contains a special "command type" field
+which determines the general 'type' of handler.  There are currently four
+types: CMD, PRE_CMD, and POST_CMD and LOG_CMD.  When proftpd receives a
+command for a client, it enters a five (eight?) step command->module
+cascading delivery process: 
+
+  1. Call any PRE_CMD type handlers which match the special "*"
+      command wildcard
+  1a. Call any PRE_CMD type handlers which match the command.
+  2. Call any CMD type handlers which match the special "*"
+      command wildcard
+  2a. Call any CMD type handlers which match the command.
+  3. Call any POST_CMD type handlers which match the special "*"
+      command wildcard
+  3a. Call any POST_CMD type handlers which match the command.
+  4. Call any LOG_CMD type handlers which match the special "*" wildcard.
+  5. Call any LOG_CMD type handlers which match the command.
+
+Further more, the return type of a particular command can allow or
+disallow further dispatching.  Rules:
+
+  PRE_CMD:
+    1. If DECLINED is returned, all other PRE_CMD handlers are called.
+    2. If ERROR is returned, command handler dispatching stops completely.
+  CMD:
+    1. If DECLINED is returned, all other CMD handlers are called.
+    2. If ERROR is returned, command handler dispatching stops completely.
+  POST_CMD:
+    1. If ERROR is returned, the message (if any) is sent to syslog,
+       however because the CMD handler already executed, nothing further
+       can be done.
+    
+As you can no doubt see, this allows a higher priority module to
+"overload" a PRE_CMD handler for a particular command and allow/disallow
+the command as desired.
+
+As a general rule of thumb, PRE_CMD handlers should check syntax/basic
+applicability of the command, while CMD type handlers should actually
+do the 'work'.  POST_CMD handlers generally handle any kind of cleanup,
+while LOG_CMD handlers handle logging successful completion of the
+command.
+
+Responding to client requests in command handlers
+=================================================
+
+There are two main ways to respond to a client command inside a command
+handler.  The first way is incompatible with other other handlers, and
+should only be used if the handler is about to terminate the current
+connection (and thus kill the child, usually with end_login()).  This
+first method, using one of the core functions outlined below, must be used
+because in the event that a handler is about to terminate proftpd, the
+internal response lists will never be processed by the proftpd engine.
+
+  Method 1 (Use only in conjunction with end_login() or similar
+            termination)
+
+    send_response(char *numeric, char *format, ...);
+      -- immediately sends the given response with the indicated numeric
+         to the client
+
+    send_response_ml_start(char *numeric, char *format, ...);
+      -- starts a multiline ftp protocol with the given numeric
+
+    send_response_ml(char *format, ...);
+      -- continues a multiline response using the numeric specified
+         in send_response_ml_start();
+
+    send_response_ml_end(char *format, ...);
+      -- completes a multiline response
+
+    send_response_async(char *numeric, char *format, ...);
+      -- send an asyncronous message to the client, this function is
+         suitable for use inside signal handlers
+
+The second, and prefered, method of transmitting numeric + text message
+responses to clients is via the internal response chain.  Using this
+allows all handlers to add their own individual responses which will all
+be sent en masse after the command successfully completes (or fails).
+
+Proftpd maintains two such chains, one response chain for success
+messages, and one for error messages.  However, when all handlers for a
+given command have been called, proftpd evaluates the final condition of
+the command.  If it has failed (caused by a handler returning one of the
+available ERROR* macros), all responses pending in the error response
+chain are sent.  If the command has successfully completed, the normal
+(success) response chain is sent.  If a command has neither completed
+successfully nor resulted in an error, proftpd assumes the command is
+invalid and informs the client appropriately.  Either way, once the
+"lifetime" of the command is over, and one (or none) of the response
+chains has been sent, BOTH chains are destroyed.
+
+  Method 2 (using response chains)
+
+    add_response(char *numeric, char *format, ...);
+      -- adds the given numeric + message to the end of the _success_
+         chain, to be sent if the command successfully completes.
+
+    add_response_err(char *numeric, char *format, ...);
+      -- adds the given numeric + message to the end of the _error_
+         chain, to be sent if the command results in a final error.
+
+As you can see, with method 2, there is no corresponding _ml* functions
+for multiline replies.  This is because proftpd automatically generates a
+multiline format reply if it detects that there are two or more responses
+with the same numeric waiting to be sent to the client.  In many cases,
+you may be writing a handler (post_cmd, for example) that neither cares
+nor specifically knows what numerics other handlers are using during their
+responses.  In this case, you can use the special R_DUP response numeric,
+which tells proftpd that your response should be _assumed_ to be part of a
+multiline response started by another handler.  For example, if the
+following add_response() calls were made from different modules:
+
+module a:
+  add_response(R_200,"Command successfully completed.");
+
+module b:
+  add_response(R_DUP,"Statistics for command '%s': none.",cmd->argv[0]);
+
+module c:
+  add_response(R_DUP,"XFOO post_cmd handler ran.");
+
+The final output sent to the client (assuming the command was successfully
+handled) would be (assuming your command is named 'XFOO'):
+
+200-Command successfully completed.
+ Statistics for command 'XFOO': none.
+200 XFOO post_cmd handler ran.
+
+Authentication Handlers
+=======================
+
+Authentication handlers allow a module to provide (or overload)
+authentication, uid/gid to name and name to uid/gid mappings.
+
+In order for a module to provide this functionality, it must export an
+authtable (via the module structure), and define one or more of the
+following handler "names" (authtable.name).
+
+Each handler accepts data in the cmd structure and should return it's
+data in the modret->data field.  The core function mod_create_data()
+can create this data structure properly for return to the caller.
+
+Defined 'names' are:
+
+"setpwent"	: low-level emulation of setpwent libc function
+"setgrent"	: low-level emulation of setgrent libc function
+"endpwent"	: low-level emulation of endpwent libc function
+"endgrent"	: low-level emulation of endgrent libc function
+"getpwent"	: low-level emulation of getpwent libc function
+"getgrent"	: low-level emulation of getgrent libc function
+"getpwnam"	: low-level emulation of getpwnam libc function
+"getgrnam"	: low-level emulation of getgrnam libc function
+"getpwuid"	: low-level emulation of getpwuid libc function
+"getgrgid"	: low-level emulation of getgrgid libc function
+"auth"		: authenticate user
+                  (cmd->argv[0] = user,
+                   cmd->argv[1] = cleartext password)
+"check"		: compare supplied passwords
+		  (cmd->argv[0] = hashed password,
+                   cmd->argv[1] = user,
+		   cmd->argv[2] = cleartext password)
+"uid_name"	: map uid to name
+		  (cmd->argv[0] = (char*)uid)
+"gid_name"	: map gid to group
+                  (cmd->argv[0] = (char*)gid)
+"name_uid"      : map name to uid
+                  (cmd->argv[0] = name)
+"name_gid"      : map group to gid
+                  (cmd->argv[0] = name)
+
+The cascaded order of authentication handlers is similar to command
+handlers, but slightly different.  Rules:
+
+  1. If an authentication handler returns DECLINED, handlers in other
+     modules are called (in priority load order, just as with command
+     handlers).  If ALL handlers for a particular function return
+     DECLINED, proftpd will assume that the operation failed.
+
+  2. If an authentication handler returns HANDLED, proftpd assumes
+     that the operation completed successfully, and will stop calling
+     auth handlers.  Most auth handlers MUST return data if they complete
+     successfully (note that some void-style handlers do not have this
+     requirement; i.e. "setpwent" and friends).
+
+  3. If an authentication handler returns ERROR, proftpd assumes an
+     error has occured and discontinues calling other handlers.  Some
+     functions ("auth", for example), should use the ERROR_INT macro
+     to return a numeric error code (one of the AUTH_* macros in
+     include/modules.h) indicating the reason for failure.

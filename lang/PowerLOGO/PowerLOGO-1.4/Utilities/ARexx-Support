@@ -1,0 +1,364 @@
+
+unbury "arexx-names
+make "arexx-names [ arexx-names
+   host-port-demon reply-port-demon
+   add-function-host remove-function-host
+   command command-async command-op
+   command-string command-string-async command-string-op
+   function function-async function-op
+   clean-quit send-sync send-operation mp-error
+   create-message delete-message ]
+unbury :arexx-names
+
+pprop "startup-data "keepers se  [ async-message-list
+                                 ] gprop "startup-data "keepers
+
+
+;  ***************************************************************
+;  ***   ARexx support
+;  ***************************************************************
+
+;  This allows LOGO to act as a command host and function host for ARexx.
+;  LOGO gets a list from the message and 'run's it.
+
+make "host-port-demon [
+   procedure [ [ ] [ ]
+      [  :m-packet :m-action :m-text :rc1 :rc2 :m-cc :m-cf :i ] ]
+   make "m-packet getmessage
+   make "m-action ( peek 4 :m-packet 7 )
+   make "m-text convertstring ( peek 0 :m-packet 10 )
+   make "rc1 0
+   make "rc2 0
+   make "m-cc  if and   >= :m-action 16777216         ; *** command code
+                        < :m-action 33554432
+               [  make "m-action - :m-action 16777216
+                  "COMM ]                                ; command
+               [  if and   >= :m-action 33554432
+                           < :m-action 50331648
+                  [  make "m-action - :m-action 33554432
+                     "FUNC ]                             ; function
+                  [  "ERROR ] ]                          ; ???????
+   if >= :m-action 262144 [ make "m-action - :m-action 262144 ] [ ]
+   make "m-cf  if and   >= :m-action 131072           ; *** command flag
+                        < :m-action 262144
+               [  make "m-action - :m-action 131072
+                  "RESULT ]                              ; result
+               [  0 ]                                    ; no result
+   if >= :m-action 65536 [ make "m-action - :m-action 65536 ] [ ]
+   if ( and    >= :m-action 0
+               < :m-action 16
+               not = :m-cc "ERROR )
+   [  if = :m-cc "FUNC           ; *** if function process argstrings
+      [  make "i 11
+         repeat :m-action
+         [  make "m-text   se    :m-text
+                                 convertstring ( peek 0 :m-packet :i )
+            make "i + 1 :i ]
+         make "m-text lput ") :m-text
+         make "m-text fput "( :m-text ] [ ]
+      repeat 1
+      [  catch "error
+         [  if = :m-cf "RESULT   ; *** run the message
+            [  make "rc2 ( allocstring run :m-text false ) ]
+            [  run :m-text ]
+            break ]
+         make "rc1 10            ; *** process errors?
+         make "rc2 first error ] ]
+   [  make "rc1 10
+      make "rc2 100 ]
+   if =0 :rc1 [ ]
+   [  mp-error    [ *** WARNING! Incoming message error! *** ]
+                  hostport :m-text :rc1 :rc2
+      ( pr [ Action code: ] ( peek 4 :m-packet 7 ) )
+      if = :rc2 100 [ pr [ ] ] [ poerror ] ]
+   ( poke 4 :m-packet :rc1 8 )   ; *** send reply 
+   ( poke 4 :m-packet :rc2 9 )
+   replymessage :m-packet ]
+
+
+;  reply-port-demon cleans up after asynchronous messages.
+
+make "reply-port-demon [
+   procedure [ [ :m-packet ] [ ] [ :temp ] ]
+   if memberp :m-packet :async-message-list
+   [  while [ not emptyp :async-message-list ]
+      [  if = :m-packet first :async-message-list
+            [ ]
+            [ make "temp fput first :async-message-list :temp ]
+         make "async-message-list bf :async-message-list ]
+      make "async-message-list :temp
+      delete-message :m-packet ]
+   [  pr [ ]
+      pr [ *** WARNING! Unrecognized asyncronous reply! *** ]
+      pr [ ] ] ]
+
+
+;  ***************************************************************
+
+;  Tell ARexx that we are a function host.
+
+make "add-function-host [
+   procedure [ [ ] [ :pri ] [ :m-packet :r ] ]
+   if = @0 findport "REXX
+      [ pr [ ] pr [ ERROR! ARexx is not active! ] pr [ ] stop ] [ ]
+   if emptyp :pri [ make "pri -50 ] [ ]
+   make "m-packet create-message hostport se [ ] :pri [ ] [ ] 117440512
+   send-sync "REXX :m-packet
+   make "r ( peek 4 :m-packet 8 )
+   if >0 :r [ pr [ ] pr [ ERROR! Can't add function host! ] pr [ ] ] [ ]
+   delete-message :m-packet ]
+
+;  Tell ARexx that we are no longer a function host.
+
+make "remove-function-host [
+   procedure [ [ ] [ ] [ :m-packet :r ] ]
+   if = @0 findport "REXX [ stop ] [ ]
+   make "m-packet create-message hostport [ ] [ ] [ ] 150994944
+   send-sync "REXX :m-packet
+   make "r ( peek 4 :m-packet 8 )
+   if >0 :r [ pr [ ] pr [ ERROR! function host not found! ] pr [ ] ] [ ]
+   delete-message :m-packet ]
+
+
+;  ***************************************************************
+
+;  Procedures to communicate with ARexx, or any other program with
+;  an ARexx compatible message port.
+
+;  LOGO command to send an ARexx command.
+
+;  command        text ( port-name host-name file-ext )
+;           text =   Word or list containing instruction to be run
+;                    by the command destination.
+;           port-name = Name of destination port, default 'REXX'.
+;           host-name = Name of port to get commands back from ARexx,
+;                       default output of 'hostport'.
+;           file-ext =  File name extension ARexx will use to find
+;                       command, default 'LOGO'.
+
+make "command [
+   procedure [    [ :m-text ]
+                  [ :port-name :host-name :file-ext ]
+                  [ :m-packet ] ]
+   make "m-packet create-message :m-text [ ] :host-name :file-ext 16777216
+   if emptyp :port-name [ make "port-name "REXX ] [ ]
+   send-sync :port-name :m-packet
+   make "result1 ( peek 4 :m-packet 8 )
+   make "result2 ( peek 4 :m-packet 9 )
+   delete-message :m-packet ]
+
+
+;  LOGO command to send an ARexx string command.
+
+make "command-string [
+   procedure [    [ :m-text ]
+                  [ :port-name :host-name :file-ext ]
+                  [ :m-packet ] ]
+   make "m-packet create-message :m-text [ ] :host-name :file-ext 17039360
+   if emptyp :port-name [ make "port-name "REXX ] [ ]
+   send-sync :port-name :m-packet
+   make "result1 ( peek 4 :m-packet 8 )
+   make "result2 ( peek 4 :m-packet 9 )
+   delete-message :m-packet ]
+
+
+;  LOGO command to send an ARexx command asynchronously.
+
+make "command-async [
+   procedure [    [ :m-text ]
+                  [ :port-name :host-name :file-ext ]
+                  [ :m-packet ] ]
+   make "m-packet create-message :m-text [ ] :host-name :file-ext 16777216
+   make "async-message-list fput :m-packet :async-message-list
+   if emptyp :port-name [ make "port-name "REXX ] [ ]
+   sendmessage :port-name :m-packet ]
+
+
+;  LOGO command to send an ARexx string command asynchronously.
+
+make "command-string-async [
+   procedure [    [ :m-text ]
+                  [ :port-name :host-name :file-ext ]
+                  [ :m-packet ] ]
+   make "m-packet create-message :m-text [ ] :host-name :file-ext 17039360
+   make "async-message-list fput :m-packet :async-message-list
+   if emptyp :port-name [ make "port-name "REXX ] [ ]
+   sendmessage :port-name :m-packet ]
+
+
+;  LOGO operation to send an ARexx command, and output a result.
+
+make "command-op [
+   procedure [    [ :m-text ]
+                  [ :port-name :host-name :file-ext ]
+                  [ :m-packet :out ] ]
+   make "m-packet create-message :m-text [ ] :host-name :file-ext 16908288
+   send-operation
+   if =0 :result1
+   [  output :out ]
+   [  mp-error    [ *** Error at command destination! *** ]
+                  :port-name :m-text :result1 :result2 ] ]
+
+
+;  LOGO operation to send an ARexx string command, and output a result.
+
+make "command-string-op [
+   procedure [    [ :m-text ]
+                  [ :port-name :host-name :file-ext ]
+                  [ :m-packet :out ] ]
+   make "m-packet create-message :m-text [ ] :host-name :file-ext 17170432
+   send-operation
+   if =0 :result1
+   [  output :out ]
+   [  mp-error    [ *** Error at command destination! *** ]
+                  :port-name :m-text :result1 :result2 ] ]
+
+
+;  LOGO command to send an ARexx function.
+
+;  function       text args ( port-name host-name file-ext )
+;           text =   Word or list containing instruction to be run
+;                    by the command destination.
+;           args =   List containing function inputs.
+;           port-name = Name of destination port, default 'REXX'.
+;           host-name = Name of port to get commands back from ARexx,
+;                       default output of 'hostport'.
+;           file-ext =  File name extension ARexx will use to find
+;                       command, default 'LOGO'.
+
+make "function [
+   procedure [    [ :m-text :m-args ]
+                  [ :port-name :host-name :file-ext ]
+                  [ :m-packet ] ]
+   make "m-packet create-message
+                     :m-text :m-args :host-name :file-ext 33554432
+   if emptyp :port-name [ make "port-name "REXX ] [ ]
+   send-sync :port-name :m-packet
+   make "result1 ( peek 4 :m-packet 8 )
+   make "result2 ( peek 4 :m-packet 9 )
+   delete-message :m-packet ]
+
+
+;  LOGO command to send an ARexx function asynchronously.
+
+make "function-async [
+   procedure [    [ :m-text :m-args ]
+                  [ :port-name :host-name :file-ext ]
+                  [ :m-packet ] ]
+   make "m-packet create-message
+                     :m-text :m-args :host-name :file-ext 33554432
+   make "async-message-list fput :m-packet :async-message-list
+   if emptyp :port-name [ make "port-name "REXX ] [ ]
+   sendmessage :port-name :m-packet ]
+
+
+;  LOGO operation to send an ARexx function, and output a result.
+
+make "function-op [
+   procedure [    [ :m-text :m-args ]
+                  [ :port-name :host-name :file-ext ]
+                  [ :m-packet :out ] ]
+   make "m-packet create-message
+                     :m-text :m-args :host-name :file-ext 33685504
+   send-operation
+   if =0 :result1
+   [  output :out ]
+   [  mp-error    [ *** Error at function destination! *** ]
+                  :port-name :m-text :result1 :result2 ] ]
+
+
+;  ***************************************************************
+
+
+make "clean-quit [
+   procedure [ ]
+   while [ messagep ] [ replymessage getmessage ]
+   while [ replyp ] [ pr getreply ]
+   remove-function-host
+   quit ]
+
+
+make "send-sync [
+   procedure [ [ :port-name :m-packet ] [ ] [ :r-packet ] ]
+   whenreply [ ]
+   sendmessage :port-name :m-packet
+   while [ true ]
+   [  sleep
+      if replyp
+      [  make "r-packet getreply
+         if = :r-packet :m-packet [ ]
+         [  reply-port-demon :m-packet ]
+         break ] [ ] ] ]
+   whenreply [ reply-port-demon getreply ]
+
+
+make "send-operation [
+   procedure [ ]
+   if emptyp :port-name [ make "port-name "REXX ] [ ]
+   send-sync :port-name :m-packet
+   make "result1 ( peek 4 :m-packet 8 )
+   if =0 :result1
+   [  make "result2 ( peek 0 :m-packet 9 )
+      make "out convertstring :result2
+      ( freemem :result2 false )
+      make "result2 0 ]
+   [  make "result2 ( peek 4 :m-packet 9 ) ]
+   delete-message :m-packet ]
+
+
+make "mp-error [
+   procedure [ [ :e :port-name :m-text :r1 :r2 ] ]
+   pr [ ]
+   pr :e
+   ( pr [ Port:\  \  \  \   ] :port-name )
+   ( pr [ Message: \  \  ] :m-text )
+   ( pr [ Error level: ] :r1 )
+   ( pr [ Error code:\  ] :r2 ) ]
+
+
+make "create-message [
+   procedure [    [ :m-text :m-args
+                    :host-name :file-ext :action ] [ ]
+                  [ :m-packet :i ] ]
+   if emptyp :host-name [ make "host-name hostport ] [ ]
+   if emptyp :file-ext [ make "file-ext "LOGO ] [ ]
+   make "m-packet allocmem 128
+   ( poke 2 :m-packet 128 9 )
+   make "i 0
+   while [ and    not emptyp :m-args
+                  < :i 15 ]
+   [  ( poke 4 :m-packet allocstring first :m-args + 11 :i )
+      make "m-args bf :m-args
+      make "i + 1 :i ]
+   ( poke 4 :m-packet ( + :action :i ) 7 )
+   ( poke 4 :m-packet allocstring :m-text 10 )
+   ( poke 4 :m-packet allocstring :host-name 27 )
+   ( poke 4 :m-packet allocstring :file-ext 28 )
+   make "result1 0
+   make "result2 0
+   output :m-packet ]
+
+
+make "delete-message [
+   procedure [ [ :m-packet ] [ ] [ :i ] ]
+   make "i 10
+   repeat 16
+   [  freemem ( peek 0 :m-packet :i )
+      make "i + 1 :i ]
+   freemem ( peek 0 :m-packet 27 )
+   freemem ( peek 0 :m-packet 28 )
+   freemem :m-packet ]
+
+
+
+; *********************************************************************
+
+bury :arexx-names
+whenmessage [ host-port-demon ]
+whenreply [ reply-port-demon getreply ]
+make "result1 0
+make "result2 0
+make "async-message-list [ ]
+add-function-host
+
+

@@ -1,0 +1,263 @@
+LibTool:
+
+ This is a program which takes an fd file (the calling specifications for a
+shared library) and outputs PRAGMA statements for the Manx or Lattice C
+compilers, the C glue code (instead of PRAGMAS), BMAP files for Basic
+programs, an asm or C INCLUDE file, and an asm module which can turn any C or
+asm code into a shared library. It allows you to develop and test functions in
+a stand alone program, and then easily and quickly convert the functions into
+a shared library, plus make all support files for your library.
+
+  It is written entirely in 68000 for speed and small size (about 9K). It's a
+necessary tool for anyone writing a shared library as it generates code
+necessary to make the library, as well as all support files needed by
+applications using the library.
+
+
+ллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллл
+1) Usage:
+
+ LibTool is meant to be used from the CLI. The args are as follows:
+
+LibTool [-ibpschalm] [-e extension] [-o out] fdname1...
+
+ -i = include ##private functions within the fd file
+ -b = generate a Basic BMAP file instead of Glue, PRAGMAS, or INCLUDE files
+ -p = generate PRAGMAS instead of the C glue modules or BMAP
+ -s = scratch reg a6 in the C glue code (default = SAVE reg a6)
+ -c = setup glue, PRAGMAS, and libstartup code for a lib made of C functions
+ -l = generate Lattice style pragmas (default = MANX Pragmas)
+ -o = PRAGMA, BMAP, or combined glue filename
+ -m = generate lib startup code (.src asm module)
+ -a = generate asm INCLUDE file instead of PRAGMAS, glue, or BMAP
+ -h = generate C INCLUDE file
+ -e = use an extension other than ".asm" for the C glue modules
+
+
+ллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллл
+2). Glue Modules
+
+  By default, LibTool generates the C glue modules with which a C application
+must be linked in order to access functions in a shared library. It generates
+a 68000 asm code file for each function in the library. These files should each
+be assembled (with your C compiler's assembler), and the resulting objects
+should be linked with your C application. You only need link with those files
+with the same name as functions that you intend to call within the library.
+For example, if you made the glue modules from an fd file for Exec, you would
+end up with several dozen 68000 asm files. Among them would be such files as
+AllocMem.asm, FreeMem.asm, WaitPort.asm, etc. You need assemble and link only
+those Exec functions which you call in your application. The -e option allows
+you to specify a different extension than ".asm". For example,
+
+LibTool -e 68K exec_lib.fd
+
+would take the fd file, exec_lib.fd, and create files with such names as
+AllocMem.68K, FreeMem.68K, etc.
+  By default, register a6 is saved upon entry to the glue code, and restored
+upon exit. If your compiler generates code where a6 is not considered scratch,
+you'll want this feature. The later versions of both Manx and Lattice treat
+a6 as scratch across calls, so you can make for more efficient and smaller C
+glue code by using the -s option. For example, the glue code for AllocMem.asm
+without the -s option is:
+
+_AllocMem
+    move.l   a6,-(sp)
+    movea.l  _SysBase,a6
+    movem.l  4(sp),d0/d1
+    jsr      _LVOAllocMem(a6)
+    movea.l  (sp)+,a6
+    rts
+
+With the -s option:
+
+_AllocMem
+    movea.l  _SysBase,a6
+    movem.l  4(sp),d0/d1
+    jmp      _LVOAllocMem(a6)
+
+
+  Besides eliminating 3 of the 6 instructions, it eliminates 1 level of rts
+(which otherwise incurs some processor overhead). You should experiment to
+see if your compiler won't choke on glue code made with the -s option.
+  The -o option should be followed by a filename. If you supply this filename,
+then instead of making separate files for each function in the library, one
+complete file will be made. If you intend upon using all the functions in a
+library, then this option can save you from dealing with dozens of separate
+modules. The separate modules are always written to the current directory,
+whereas the -o option allows for choosing the directory to write the glue file.
+
+
+ллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллл
+3). Pragmas
+
+  LibTool will make PRAGMAS for Manx or Lattice compilers. Specifying the -p
+option causes the compiler to make one file with all the Pragma statements
+instead of any glue modules. The default style is for Manx PRAGMAS. Specifying
+the -l option causes Lattice style Pragmas to be output instead. This file
+should be INCLUDED in any C source that references functions in the library.
+  The -o option allows you to specify a filename for the Pragma file.
+Otherwise, a default filename is made from stripping the .fd extension from the
+source fd filename and appending ".pragma". For example,
+
+LibTool -plo df0:MyPragmas exec_lib.fd
+
+will make a Lattice Pragma file for the Exec library and place it on df0: as
+"MyPragmas".
+
+
+лллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллл
+4). ##private functions
+
+  The -i option allows glue modules and PRAGMA statements for any library
+functions that are flagged as private in the fd file. Otherwise, private
+functions are ignored (as they should be).
+
+
+лллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллл
+5). Bmap files
+
+  BMAP files allow basic programmers to use the library. Specifying the -b
+option causes LibTool to generate a BMAP file instead of PRAGMAS or glue
+modules. For example,
+
+LibTool -b -o MyBmap exec_lib.fd
+
+will generate a BMAP file of Exec called "MyBmap" in the current directory.
+  The program checks for the following known collisions between library names
+and AmigaBasic keywords:
+
+abs, Close, Exit, Input, Open, Output, Read, tan, Translate, Wait, Write
+
+If found, it prepends an x to the function name (i.e. "xRead" instead of
+"Read"), and posts a msg to the CLI.
+  Since AmigaBasic labels cannot have underscores, any underscores in a
+library function name are replaced by a period. An error msg will appear if
+this is the case, indicating the change.
+  Since AmigaBasic also cannot support a function which needs an argument
+passed in a5, an error msg will appear if this is the case. There is no way
+to call such a function from AmigaBasic.
+  The BMAP file always includes any ##private functions in the fd file.
+  The -o option allows the bmap file to be saved under any name. Otherwise,
+the .fd will be stripped from the source fd filename and ".bmap" appended.
+  Note that AmigaBasic requires the name of a BMAP file to be the name of the
+shared library minus its ".library" extension.
+  Also note that a library written in C (where args are expected on the stack)
+cannot be used by AmigaBasic.
+
+
+лллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллл
+6). Calling a C shared library
+
+  If you are developing a library whose functions are written in C, then your
+functions normally expect arguments on the stack. You have 2 choices for
+interfacing between a C application and such a library.
+
+ 1). Make reverse glue functions inside of your library that push args back
+     onto the stack and call the "real" C functions.
+
+ 2). Make glue routines for your application which do not pull args off of
+     the stack. (i.e. args are left on the stack and the lib function is
+     called).
+
+  By specifying the -c option, LibTool will make pragmas or glue modules
+which implement the second method. Therefore, you can develop libraries
+written in C and not have to worry about passing args in registers at all.
+Your fd file will simply contain the names of the functions as they appear
+in the lib's function table. For example, assume we made a C library called
+"mylib.library" which has 2 functions in its function table:
+
+void Func1();
+BYTE Func2();
+
+Func2() expects 2 args.
+
+An excerpt of your my_lib.fd file looks like this:
+
+##base MyBase  * this is the name of our lib base returned by OpenLibrary()
+##bias 30
+##public
+##ret void
+Func1()
+##ret BYTE
+Func2()
+
+These would be C functions in your library which expect their arguments as
+usual (on the stack). 
+
+You would create your c glue module as so:
+
+LibTool -c -o mylib.asm my_lib.fd
+
+Assemble the resulting file, mylib.asm and link this with your C application.
+Your C application would open the lib as so:
+
+ MyBase = OpenLibrary("mylib.library",0L);
+
+And you might call Func2() as so:
+
+  returnval = Func2( arg1, arg2 );
+
+Please note that the glue routines treat a6 as a scratch register.
+
+The -h option makes a C INCLUDE file for an application which simplifies
+opening and closing the library as well as declaring the returns of the lib
+functions. See the CSimple.DOC file for an explanation of how to make a C
+library and use these features. A default filename is made from stripping the
+.fd extension from the source fd filename and appending ".h".
+
+
+ллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллл
+7). Generating a library startup
+
+ The -m option will generate an assembly module which when assembled and linked
+with any C or asm routines, will turn those routines into a shared library.
+You need to make an fd file describing the functions which you wish to make
+callable by any application. See the example library and instructions.
+  A default filename is made from stripping the .fd extension from the
+source fd filename and appending ".src".
+
+
+ллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллл
+8). Making an Asm INCLUDE file
+
+ The -a option will make an INCLUDE file for asm language applications which
+wish to use the library. This file will contain _LVO labels for all of the
+callable functions in the library. Also, it will make an equate for the
+version number. The name of this symbol will be the library name (minus
+.library extention) plus the string VERSION. For example, if you had the
+following fd file, test.fd
+
+##name test.library
+##bias 30
+##vers 2
+Func1()
+##end
+
+and invoked LibTool as so
+
+LibTool -a test.fd
+
+then a file called "test.i" would be produced and it would contain
+
+_LVOFunc1   equ -30
+testVERSION equ  2
+
+A default filename is made from stripping the .fd extension from the
+source fd filename and appending ".i".
+
+
+ллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллллл
+Final Notes
+
+  You can do multiple fd conversions with LibTool at one invocation. Simply
+place the options before each filename. For example:
+
+LibTool -po myPragma exec_lib.fd  -b dos_lib.fd  -a exec_lib.fd
+
+will make a PRAGMA file from the Exec fd file called "MyPragma", then it will
+make a bmap file for the DOS fd file called "dos_lib.bmap", and finally make
+an asm INCLUDE file from the Exec fd file called "exec_lib.i"
+
+  There has been a bug fix to this version. A previous version allowed the
+library to be opened if you installed an Init() function which returned
+FALSE (0).

@@ -1,0 +1,230 @@
+G4C
+
+; A File Reader.
+; USE: GUILOAD guis:tools/read.gc FileName
+
+; ======================================================================
+;               Globals & system events
+; ======================================================================
+
+WinBig 0 11 0 -13 "Loading..."    ; you may want to change the position
+WinType 11110001
+resinfo 8 640 256
+Varpath 'read.pop/read.srch'      ; use private vars & 2 other guis vars
+
+xOnLoad filename
+	filepath = ''
+	gosub read.gc startup
+
+xOnReload filename
+	filepath = ''
+	gosub read.gc startup
+
+xROUTINE startup
+	guiopen read.gc
+	if $filename > ' '
+	   ; OK file was passed
+	elseif $*FILENAME > ' '         ; Global *FILENAME is for compatibility
+	andifexists file $*FILENAME     ; with older versions.
+	   filename  = $*FILENAME
+	   delvar *FILENAME
+	else
+	   gosub read.gc getfile
+	endif
+	gosub read.gc filechange
+	extract filename path filepath
+
+
+;-------> Upon closing, we quit so as not to use-up memory
+
+xOnClose
+	guiquit read.gc
+
+;------> on RMB we open our pop-up command window
+
+xOnRMB 
+	guiopen Read.pop
+
+;------> on quitting we also quit our other 2 guis
+
+xonquit
+	guiquit  read.srch
+	guiquit  read.pop
+
+; ======================================================================
+;               The listview
+; ======================================================================
+
+xListview 0 0 0 0 "" var "" 20 MULTI
+	GadID  1
+	GadFont #mono 8 000
+	; ATTR lvstyle 2031   ; uncomment this to get 3D letters
+	ATTR lvlinedist 2     ; This will set the distance between lines
+
+; ======================================================================
+;               Routines
+; ======================================================================
+
+;------> Routine to load & show file
+
+xRoutine filechange filename            ; routine to load & show file
+	if $filename > ' '
+	   guiscreen read.gc front
+	   SetWinTitle read.gc "Loading...."
+	   lvuse read.gc 1                      ; choose our display listview
+	   LVChange $filename
+	   SetWinTitle read.gc '$filename'
+	endif
+	stop
+
+;------------> open a requester and get a file
+
+xroutine getfile
+	newname = ""
+	ReqFile -1 -1 250 200 "Choose file" LOAD newname $filepath
+	if $newname > ""
+	   filename = $newname
+	   extract filename path filepath
+	   gosub read.gc filechange
+	endif
+
+
+;######################################################################
+                NEWFILE read.pop
+;               Popup on RMB gui
+;######################################################################
+
+WINBIG 341 87 80 90 ""
+WinType 00001000
+resinfo 8 640 256
+winonmouse 30 7 
+varpath read.gc         ; use our main gui's vars
+box 0 0 0 0 out button
+
+xOnRMB 
+	guiclose Read.pop
+
+xOnInactive
+	guiclose Read.pop
+
+xOnFail
+	ezreq "Error during operation" OK ""
+
+xOnOpen
+	; set the current tab size
+	tab = $$g4c.tab
+	update #this 10 $tab
+	changetab = 0
+
+xOnClose
+	; if tab size was changed, reload the file
+	if $changetab = 1
+		lvuse read.gc 1      ; reload listview
+		LVChange $filename
+		changetab = 0
+	endif
+
+;---------------> the Buttons
+
+XBUTTON 0 0 80 15 Open
+	guiclose Read.pop
+	extract filename path read.gc/filepath
+	; use new filereq gui
+	guiload guis:tools/filereq.gc read.gc filechange $read.gc/filepath 
+	; gosub read.gc getfile
+
+XBUTTON 0 15 80 15 Edit
+	guiclose Read.pop
+	ifexists gui cedbar.gc                  ; This is for CEd (long story..)
+	   guiscreen cedbar.gc front
+	   sendrexx rexx_ced 'open new'
+	   sendrexx rexx_ced 'open $filename'
+	   sendrexx rexx_ced 'expand view'
+	elseifexists variable *DEF.EDITOR
+	   run '$*DEF.EDITOR $filename'         ; if called from a file manager
+	else
+	   run 'c:ed $filename'                 ; use ed if nothing defined
+	endif
+
+XBUTTON 0 30 80 15 Search
+	guiclose read.pop
+	guiopen  read.srch
+
+XBUTTON 0 45 80 15 'Delete'
+	action delete $filename req
+
+XBUTTON 0 60 80 15 Quit
+	changetab = 0			; don't reload file
+	guiclose read.pop
+	guiquit  read.gc
+
+	; set tb size..
+
+XHSLIDER 1 75 37 14 "" tab 0 10 8 "%ld"
+	gadid 10
+	set tab $tab
+	changetab = 1			; flag to reload file on closing
+
+XBUTTON 58 75 22 14 "T"
+	set tab $tab
+	guiclose read.pop
+	lvuse read.gc 1      ; reload listview
+	LVChange $filename
+	changedtab = 0
+
+
+;######################################################################
+                NEWFILE read.srch
+;               Gui to Search the file
+;######################################################################
+
+
+WINBIG -1 -1 300 32 'Enter Search string :'
+wintype 11110001
+resinfo 8 640 256
+
+xonopen         ; reset variables on opening
+	mode = CI
+	flag = 0
+
+xTextIn  0 0 0 15 '' str '' 128
+	gosub read.srch search
+
+xCycler  0 17 150 14 '' mode    ; choose case sensitive/insen..
+	cstr 'Ignore case' CI
+	cstr 'Same case'   CS
+
+
+xButton 150 17 100 14 'Top'     ; go to top of lv
+	flag = 0                        
+	lvgo #0
+	update read.gc 1 0
+	setwintitle read.srch 'Enter search string :'
+
+
+xButton  250 17 50 14 >>
+	gosub read.srch search
+
+
+xroutine search
+	if $str = ''            ; no string entered 
+	   stop
+	endif
+	lvuse read.gc 1         ; use the reader's listview
+	if $flag = 0            ; flag=0 means this is the first time
+	   flag = 1
+	   lvsearch $str $mode first    ; Keywords such as mode (CI or CS), do
+	                                ; not get translated, but in lvsearch
+	                                ; it's an exception, so we can say $mode
+	else
+	   lvsearch $str $mode next
+	endif
+	if $$lv.line > ''               ; update to line found
+	   update read.gc 1 $$lv.line
+	   setwintitle read.srch 'Line $$lv.line'
+	else
+	   lvgo #0                      ; or else go top again
+	   flag = 0
+	   setwintitle read.srch 'Search Finished'
+	endif
+

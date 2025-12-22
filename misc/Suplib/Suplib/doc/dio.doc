@@ -1,0 +1,181 @@
+
+				    DIO
+
+    EXEC device driver IO support routines... makes everything easy.
+
+    dfd = dio_open(name, unit, flags, req/NULL)
+
+      open an IO device.  Note: in some cases you might have to provide a
+      request structure with some fields initialized (example, the console
+      device requires certain fields to be initialized).  For instance, if
+      openning the SERIAL.DEVICE, you would want to give an IOExtSer
+      structure which is completely blank execept for the io_SerFlags
+      field.
+
+      The request structure's message and reply ports need not be
+      initialized.  The request structure is no longer needed after
+      the dio_open().
+
+      returns NULL = error, else DIO descriptor (a pointer) returned.
+
+
+  dio_close(dfd)
+
+      close an IO device.  Any pending asyncronous requests are
+      AbortIO()'d and then Wait'ed on for completion.
+
+
+  dio_closegrp(dfd)
+
+      close EVERY DIO DESCRIPTOR ASSOCIATED WITH THE dio_open() call
+      that was the parent for this descriptor.	That is, you can get
+      a descriptor using dio_open(), dio_dup() it a couple of times,
+      then use dio_closegrp() on any ONE of the resulting descriptors
+      to close ALL of them.
+
+
+  dio_cact(dfd,bool)
+
+      If an error occurs (io_Error field), the io_Actual field is usually
+      not modified by the device driver, and thus contains garbage.  To
+      provide a cleaner interface, you can have the DIO_CTL() and
+      DIO_CTL_TO() calls automatically pre-clear this field so if an
+      io_Error does occur, the field is a definate 0 instead of garbage.
+
+      In most cases you will want to do this.  An exception is the
+      TIMER.DEVICE, which uses the io_Actual field for part of the timeout
+      structure.
+
+      This flags the particular dio descriptor to do the pre-clear, and any
+      new descriptors obtained by DIO_DUP()ing this one will also have the
+      pre-clear flag set.
+
+
+  dio_dup(dfd)
+
+      Returns a new channel descriptor referencing the same device. The new
+      descriptor has it's own signal and IO request structure. For
+      instance, if you openned the serial device, you might want to dup the
+      descriptor so you can use one channel to pend an asyncronous read,
+      and the other channel to write out to the device and do other things
+      without disturbing the asyncronous read.
+
+
+  sig = dio_signal(dfd)
+
+      get the signal number (0..31) used for a DIO descriptor. This allows
+      you to Wait() for asyncronous requests.  Note that if your Wait()
+      returns, you should double check using dio_isdone()
+
+
+  req = dio_ctl_to(dfd, command, buf, len, to)
+
+      Same as DIO_CTL() below, but (A) is always syncronous, and (B) will
+      attempt to AbortIO()+WaitIO() the request if the timeout occurs
+      before the IO completes.
+
+      the 'to' argument is in microseconds.
+
+      If timeout occurs before request completes, and DIO aborts the
+      request, some devices, such as the SERIAL.DEVICE do not have the
+      io_Actual field set properly.  Always check the io_Error field for
+      an abort before using io_Actual.
+
+
+  req = dio_ctl(dfd, command, buf, len)
+
+      DIO_CTL() is the basis for the entire library.  It works as follows:
+
+      (1) If the channel isn't clear (there is an asyncronous IO request
+	  still pending), DIO_CTL() waits for it to complete
+
+      (2) If the command is 0, simply return a pointer to the io
+	  request structure.
+
+      (3) If the DIO_CACT() flag is TRUE, the io_Actual field of the
+	  request is cleared.
+
+      (4) Set the io_Data field to 'buf', and io_Length field to 'len'
+	  If the command is positive, use DoIO().  If the command
+	  negative, take it's absolute value and then do a SendIO().
+	  (The command is placed in the io_Command field, of course).
+
+      (5) return the IO request structure
+
+
+  bool= dio_isdone(dfd)
+
+      return 1 if current channel is clear (done processing), else 0. e.g.
+      if you did, say, an asyncronous read, and dio_isdone() returns true,
+      you can now use the data buffer returned and look at the io_Actual
+      field.
+
+      You need not do a dio_wait() after dio_isdone() returns 1.
+
+
+  req = dio_wait(dfd)
+
+      Wait on the current channel for the request to complete and then
+      return the request structure. (nop if channel is clear)
+
+
+  req = dio_abort(dfd)
+
+      Abort the request on the current channel (nop if channel is
+      clear).  Sends an AbortIO() if the channel is active and then
+      WaitIO()'s the request.
+
+    ------ MACROS ------
+
+    dio_simple() and related macros return the !io_Error field. That
+    is, 0=ERROR, 1=OK
+
+    dio_actual() returns the io_Actual field instead of !io_Error.
+
+    NOTE: the io_Actual field may not be set by the device if an
+    error condition exists.  To make the io_ctl() and io_ctl_to()
+    call automatically clear the io_Actual field before doing the
+    io operation, use the DIO_CACT() call.  The reason this isn't
+    done automatically by default is that some devices require
+    parameters to be passed in the io_Actual field (like the
+    timer.device).
+
+    Remember, Asyncronous IO is done by sending -com instead of com.
+    (that is, negative command).
+
+      CALL			  Syncronous IO   Asyncronous IO
+
+  dio_simple(dfd,com)             0=ERROR, 1=OK   undefined
+  dio_actual(dfd,com)             io_Actual       undefined
+  dio_reset(dfd)                  0=ERROR, 1=OK   n/a
+  dio_update(dfd)                 0=ERROR, 1=OK   n/a
+  dio_clear(dfd)                  0=ERROR, 1=OK   n/a
+  dio_stop(dfd)                   0=ERROR, 1=OK   n/a
+  dio_start(dfd)                  0=ERROR, 1=OK   n/a
+  dio_flush(dfd)                  0=ERROR, 1=OK   n/a
+  dio_getreq(dfd)                 returns a ptr to the IO
+				  request structure
+
+      NOTE: If you use the following, you probably want to have the device
+      library automatically clear the io_Actual field before sending the
+      request so you get 0 if an error occurs.	That is: dio_cact(dfd,1):
+
+  dio_read(dfd,buf,len)           returns actual bytes read
+  dio_write(dfd,buf,len)          returns actual bytes written
+
+	The timeout argument for dio_readto() and dio_writeto()
+	is in MICROSECONDS, up to 2^31uS.
+
+  dio_readto(dfd,buf,len,to)      returns actual bytes read
+  dio_writeto(dfd,buf,len,to)     returns actual bytes written
+
+	The asyncronous dio_reada() and dio_writea() do not
+	return anything.
+
+  dio_reada(dfd,buf,len)          begin asyncronous read
+  dio_writea(dfd,buf,len)         begin asyncronous write
+
+
+
+
+

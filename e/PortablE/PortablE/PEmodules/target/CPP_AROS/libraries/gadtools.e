@@ -1,0 +1,253 @@
+OPT NATIVE, PREPROCESS, POINTER
+MODULE 'target/exec/types', 'target/intuition/gadgetclass', 'target/intuition/intuition', 'target/utility/tagitem'
+MODULE 'target/graphics/text', 'target/intuition/screens', 'target/graphics/gfx'
+{#include <libraries/gadtools.h>}
+NATIVE {LIBRARIES_GADTOOLS_H} CONST
+
+/* Name of the gadtools.library as constant. This is an AROS extension. */
+NATIVE {GADTOOLSNAME} CONST
+#define GADTOOLSNAME gadtoolsname
+STATIC gadtoolsname = 'gadtools.library'
+
+                               /* Gadgets */
+
+/* Kinds for CreateGadgetA() */
+NATIVE {GENERIC_KIND}  CONST GENERIC_KIND  = 0
+/* normal button */
+NATIVE {BUTTON_KIND}   CONST BUTTON_KIND   = 1
+/* boolean gadget */
+NATIVE {CHECKBOX_KIND} CONST CHECKBOX_KIND = 2
+/* to enter numbers */
+NATIVE {INTEGER_KIND}  CONST INTEGER_KIND  = 3
+/* to list a bunch of entries */
+NATIVE {LISTVIEW_KIND} CONST LISTVIEW_KIND = 4
+/* mutually exclusive entry gadget */
+NATIVE {MX_KIND}       CONST MX_KIND       = 5
+/* to show numbers */
+NATIVE {NUMBER_KIND}   CONST NUMBER_KIND   = 6
+/* like MX_KIND, but rendered differently */
+NATIVE {CYCLE_KIND}    CONST CYCLE_KIND    = 7
+/* to choose a color */
+NATIVE {PALETTE_KIND}  CONST PALETTE_KIND  = 8
+/* to select a value of a range of values */
+NATIVE {SCROLLER_KIND} CONST SCROLLER_KIND = 9
+/* like SCROLLER_KIND, but with a fixed range */
+NATIVE {SLIDER_KIND}   CONST SLIDER_KIND   = 11
+/* to enter texts */
+NATIVE {STRING_KIND}   CONST STRING_KIND   = 12
+/* to show texts */
+NATIVE {TEXT_KIND}     CONST TEXT_KIND     = 13
+NATIVE {NUM_KINDS}     CONST NUM_KINDS     = 14
+
+NATIVE {NewGadget} OBJECT newgadget
+    {ng_LeftEdge}	leftedge	:INT
+    {ng_TopEdge}	topedge	:INT
+    {ng_Width}	width	:INT
+    {ng_Height}	height	:INT
+
+    {ng_GadgetText}	gadgettext	:CONST_STRPTR
+    {ng_TextAttr}	textattr	:PTR TO textattr
+
+    {ng_GadgetID}	gadgetid	:UINT
+    {ng_Flags}	flags	:ULONG      /* see below */
+    {ng_VisualInfo}	visualinfo	:APTR
+    {ng_UserData}	userdata	:APTR
+ENDOBJECT
+
+/* ng_Flags
+   The PLACETEXT flags (specified in <intuition/gadgetclass.h>) specify where
+   to put the label(s) of the gadget
+*/
+NATIVE {PLACETEXT_LEFT}  CONST PLACETEXT_LEFT  = $1
+NATIVE {PLACETEXT_RIGHT} CONST PLACETEXT_RIGHT = $2
+NATIVE {PLACETEXT_ABOVE} CONST PLACETEXT_ABOVE = $4
+NATIVE {PLACETEXT_BELOW} CONST PLACETEXT_BELOW = $8
+NATIVE {PLACETEXT_IN}    CONST PLACETEXT_IN    = $10
+NATIVE {NG_HIGHLABEL}    CONST NG_HIGHLABEL    = $20
+
+/* IDCMP-Flags necessary for certain gadgets */
+NATIVE {ARROWIDCMP}    CONST ARROWIDCMP    = (IDCMP_GADGETUP OR IDCMP_GADGETDOWN OR IDCMP_MOUSEBUTTONS OR IDCMP_INTUITICKS)
+NATIVE {BUTTONIDCMP}   CONST BUTTONIDCMP   = (IDCMP_GADGETUP)
+NATIVE {CHECKBOXIDCMP} CONST CHECKBOXIDCMP = (IDCMP_GADGETUP)
+NATIVE {INTEGERIDCMP}  CONST INTEGERIDCMP  = (IDCMP_GADGETUP)
+NATIVE {LISTVIEWIDCMP} CONST LISTVIEWIDCMP = (ARROWIDCMP OR IDCMP_GADGETUP OR IDCMP_GADGETDOWN OR IDCMP_MOUSEMOVE)
+NATIVE {MXIDCMP}       CONST MXIDCMP       = (IDCMP_GADGETDOWN)
+NATIVE {NUMBERIDCMP}   CONST NUMBERIDCMP   = (0)
+NATIVE {CYCLEIDCMP}    CONST CYCLEIDCMP    = (IDCMP_GADGETUP)
+NATIVE {PALETTEIDCMP}  CONST PALETTEIDCMP  = (IDCMP_GADGETUP)
+NATIVE {SCROLLERIDCMP} CONST SCROLLERIDCMP = (IDCMP_GADGETUP OR IDCMP_GADGETDOWN OR IDCMP_MOUSEMOVE)
+NATIVE {SLIDERIDCMP}   CONST SLIDERIDCMP   = (IDCMP_GADGETUP OR IDCMP_GADGETDOWN OR IDCMP_MOUSEMOVE)
+NATIVE {STRINGIDCMP}   CONST STRINGIDCMP   = (IDCMP_GADGETUP)
+NATIVE {TEXTIDCMP}     CONST TEXTIDCMP     = (0)
+
+NATIVE {MX_WIDTH}  CONST MX_WIDTH  = 17
+NATIVE {MX_HEIGHT} CONST MX_HEIGHT = 9
+NATIVE {CHECKBOX_WIDTH}  CONST CHECKBOX_WIDTH  = 26
+NATIVE {CHECKBOX_HEIGHT} CONST CHECKBOX_HEIGHT = 11
+
+/* Indicate that gadget is an gadtools-gadget (PRIVATE) */
+NATIVE {GTYP_GADTOOLS} CONST GTYP_GADTOOLS = $0100
+
+                               /* Menus */
+
+NATIVE {NewMenu} OBJECT newmenu
+    {nm_Type}	type	:UBYTE          /* see below */
+->    BYTE         nm_Pad;
+    {nm_Label } pad:NATIVE {CONST_STRPTR} VALUE	->hack to fix typed lists
+    {nm_Label}	label	:CONST_STRPTR         /* may be a STRPTR or NM_BARLABEL (see below) */
+    {nm_CommKey}	commkey	:CONST_STRPTR
+    {nm_Flags}	flags	:UINT         /* see below */
+    {nm_MutualExclude}	mutualexclude	:VALUE
+    {nm_UserData}	userdata	:APTR
+ENDOBJECT
+
+/* nm_Type */
+NATIVE {NM_END}    CONST NM_END    = $0000
+NATIVE {NM_TITLE}  CONST NM_TITLE  = $0001
+NATIVE {NM_ITEM}   CONST NM_ITEM   = $0002
+NATIVE {NM_SUB}    CONST NM_SUB    = $0003
+NATIVE {NM_IGNORE} CONST NM_IGNORE = $0040
+NATIVE {IM_ITEM}   CONST IM_ITEM   = $0082
+NATIVE {IM_SUB}    CONST IM_SUB    = $0083
+
+/* nm_Label */
+NATIVE {NM_BARLABEL} CONST NM_BARLABEL = -1 !!VALUE!!/*STRPTR*/ ARRAY OF CHAR
+
+/* nm_Flags */
+NATIVE {NM_MENUDISABLED}  CONST NM_MENUDISABLED  = MENUENABLED
+NATIVE {NM_ITEMDISABLED}  CONST NM_ITEMDISABLED  = ITEMENABLED
+NATIVE {NM_COMMANDSTRING} CONST NM_COMMANDSTRING = COMMSEQ
+
+NATIVE {NM_FLAGMASK}     CONST NM_FLAGMASK     = (NOT (ITEMTEXT OR HIGHFLAGS OR COMMSEQ))
+NATIVE {NM_FLAGMASK_V39} CONST NM_FLAGMASK_V39 = (NOT (ITEMTEXT OR HIGHFLAGS))
+
+/* Macros */
+NATIVE {GTMENU_USERDATA} CONST	->GTMENU_USERDATA(menu)     (*((APTR *)(((struct Menu     *)menu)+1)))
+->#define GTMENU_USERDATA(m)      (GetLong((m)+SIZEOF menu !!PTR!!PTR TO LONG))
+#define GTMENU_USERDATA(m) Gtmenu_userdata(m)
+PROC Gtmenu_userdata(m) IS GetLong(m+SIZEOF menu !!PTR TO LONG)
+
+NATIVE {GTMENUITEM_USERDATA} CONST	->GTMENUITEM_USERDATA(item) (*((APTR *)(((struct MenuItem *)item)+1)))
+->#define GTMENUITEM_USERDATA(mi) (GetLong((mi)+SIZEOF menuitem !!PTR!!PTR!!PTR TO LONG))
+#define GTMENUITEM_USERDATA(mi) Gtmenuitem_userdata(mi)
+PROC Gtmenuitem_userdata(mi) IS GetLong((mi)+SIZEOF menuitem !!PTR TO LONG)
+
+#define MENU_USERDATA(mi)       (GTMENUITEM_USERDATA(mi))
+
+NATIVE {GTMENU_TRIMMED} CONST GTMENU_TRIMMED = $00000001
+NATIVE {GTMENU_INVALID} CONST GTMENU_INVALID = $00000002
+NATIVE {GTMENU_NOMEM}   CONST GTMENU_NOMEM   = $00000003
+
+                               /* Tags */
+
+NATIVE {GT_TagBase} CONST GT_TAGBASE = TAG_USER+$00080000
+NATIVE {GTCB_Checked}         CONST GTCB_CHECKED         = (GT_TAGBASE + 4)
+NATIVE {GTLV_Top}             CONST GTLV_TOP             = (GT_TAGBASE + 5)
+NATIVE {GTLV_Labels}          CONST GTLV_LABELS          = (GT_TAGBASE + 6)
+NATIVE {GTLV_ReadOnly}        CONST GTLV_READONLY        = (GT_TAGBASE + 7)
+NATIVE {GTLV_ScrollWidth}     CONST GTLV_SCROLLWIDTH     = (GT_TAGBASE + 8)
+NATIVE {GTMX_Labels}          CONST GTMX_LABELS          = (GT_TAGBASE + 9)
+NATIVE {GTMX_Active}          CONST GTMX_ACTIVE          = (GT_TAGBASE + 10)
+NATIVE {GTTX_Text}            CONST GTTX_TEXT            = (GT_TAGBASE + 11)
+NATIVE {GTTX_CopyText}        CONST GTTX_COPYTEXT        = (GT_TAGBASE + 12)
+NATIVE {GTNM_Number}          CONST GTNM_NUMBER          = (GT_TAGBASE + 13)
+NATIVE {GTCY_Labels}          CONST GTCY_LABELS          = (GT_TAGBASE + 14)
+NATIVE {GTCY_Active}          CONST GTCY_ACTIVE          = (GT_TAGBASE + 15)
+NATIVE {GTPA_Depth}           CONST GTPA_DEPTH           = (GT_TAGBASE + 16)
+NATIVE {GTPA_Color}           CONST GTPA_COLOR           = (GT_TAGBASE + 17)
+NATIVE {GTPA_ColorOffset}     CONST GTPA_COLOROFFSET     = (GT_TAGBASE + 18)
+NATIVE {GTPA_IndicatorWidth}  CONST GTPA_INDICATORWIDTH  = (GT_TAGBASE + 19)
+NATIVE {GTPA_IndicatorHeight} CONST GTPA_INDICATORHEIGHT = (GT_TAGBASE + 20)
+NATIVE {GTSC_Top}             CONST GTSC_TOP             = (GT_TAGBASE + 21)
+NATIVE {GTSC_Total}           CONST GTSC_TOTAL           = (GT_TAGBASE + 22)
+NATIVE {GTSC_Visible}         CONST GTSC_VISIBLE         = (GT_TAGBASE + 23)
+NATIVE {GTSC_Overlap}         CONST GTSC_OVERLAP         = (GT_TAGBASE + 24)
+NATIVE {GTSL_Min}             CONST GTSL_MIN             = (GT_TAGBASE + 38)
+NATIVE {GTSL_Max}             CONST GTSL_MAX             = (GT_TAGBASE + 39)
+NATIVE {GTSL_Level}           CONST GTSL_LEVEL           = (GT_TAGBASE + 40)
+NATIVE {GTSL_MaxLevelLen}     CONST GTSL_MAXLEVELLEN     = (GT_TAGBASE + 41)
+NATIVE {GTSL_LevelFormat}     CONST GTSL_LEVELFORMAT     = (GT_TAGBASE + 42)
+NATIVE {GTSL_LevelPlace}      CONST GTSL_LEVELPLACE      = (GT_TAGBASE + 43)
+NATIVE {GTSL_DispFunc}        CONST GTSL_DISPFUNC        = (GT_TAGBASE + 44)
+NATIVE {GTST_String}          CONST GTST_STRING          = (GT_TAGBASE + 45)
+NATIVE {GTST_MaxChars}        CONST GTST_MAXCHARS        = (GT_TAGBASE + 46)
+NATIVE {GTIN_Number}          CONST GTIN_NUMBER          = (GT_TAGBASE + 47)
+NATIVE {GTIN_MaxChars}        CONST GTIN_MAXCHARS        = (GT_TAGBASE + 48)
+NATIVE {GTMN_TextAttr}        CONST GTMN_TEXTATTR        = (GT_TAGBASE + 49)
+NATIVE {GTMN_FrontPen}        CONST GTMN_FRONTPEN        = (GT_TAGBASE + 50)
+NATIVE {GTBB_Recessed}        CONST GTBB_RECESSED        = (GT_TAGBASE + 51)
+NATIVE {GT_VisualInfo}        CONST GT_VISUALINFO        = (GT_TAGBASE + 52)
+NATIVE {GTLV_ShowSelected}    CONST GTLV_SHOWSELECTED    = (GT_TAGBASE + 53)
+NATIVE {GTLV_Selected}        CONST GTLV_SELECTED        = (GT_TAGBASE + 54)
+NATIVE {GTST_EditHook}        CONST GTST_EDITHOOK        = (GT_TAGBASE + 55)
+NATIVE {GTIN_EditHook}        CONST GTIN_EDITHOOK        = (GT_TAGBASE + 55)
+NATIVE {GTTX_Border}          CONST GTTX_BORDER          = (GT_TAGBASE + 57)
+NATIVE {GTNM_Border}          CONST GTNM_BORDER          = (GT_TAGBASE + 58)
+NATIVE {GTSC_Arrows}          CONST GTSC_ARROWS          = (GT_TAGBASE + 59)
+NATIVE {GTMN_Menu}            CONST GTMN_MENU            = (GT_TAGBASE + 60)
+NATIVE {GTMX_Spacing}         CONST GTMX_SPACING         = (GT_TAGBASE + 61)
+NATIVE {GTMN_FullMenu}        CONST GTMN_FULLMENU        = (GT_TAGBASE + 62)
+NATIVE {GTMN_SecondaryError}  CONST GTMN_SECONDARYERROR  = (GT_TAGBASE + 63)
+NATIVE {GT_Underscore}        CONST GT_UNDERSCORE        = (GT_TAGBASE + 64)
+NATIVE {GTMN_Checkmark}       CONST GTMN_CHECKMARK       = (GT_TAGBASE + 65)
+NATIVE {GTMN_AmigaKey}        CONST GTMN_AMIGAKEY        = (GT_TAGBASE + 66)
+NATIVE {GTMN_NewLookMenus}    CONST GTMN_NEWLOOKMENUS    = (GT_TAGBASE + 67)
+NATIVE {GTCB_Scaled}          CONST GTCB_SCALED          = (GT_TAGBASE + 68)
+NATIVE {GTMX_Scaled}          CONST GTMX_SCALED          = (GT_TAGBASE + 69)
+NATIVE {GTPA_NumColors}       CONST GTPA_NUMCOLORS       = (GT_TAGBASE + 70)
+NATIVE {GTMX_TitlePlace}      CONST GTMX_TITLEPLACE      = (GT_TAGBASE + 71)
+NATIVE {GTTX_FrontPen}        CONST GTTX_FRONTPEN        = (GT_TAGBASE + 72)
+NATIVE {GTNM_FrontPen}        CONST GTNM_FRONTPEN        = (GT_TAGBASE + 72)
+NATIVE {GTTX_BackPen}         CONST GTTX_BACKPEN         = (GT_TAGBASE + 73)
+NATIVE {GTNM_BackPen}         CONST GTNM_BACKPEN         = (GT_TAGBASE + 73)
+NATIVE {GTTX_Justification}   CONST GTTX_JUSTIFICATION   = (GT_TAGBASE + 74)
+NATIVE {GTNM_Justification}   CONST GTNM_JUSTIFICATION   = (GT_TAGBASE + 74)
+NATIVE {GTNM_Format}          CONST GTNM_FORMAT          = (GT_TAGBASE + 75)
+NATIVE {GTNM_MaxNumberLen}    CONST GTNM_MAXNUMBERLEN    = (GT_TAGBASE + 76)
+NATIVE {GTBB_FrameType}       CONST GTBB_FRAMETYPE       = (GT_TAGBASE + 77)
+NATIVE {GTLV_MakeVisible}     CONST GTLV_MAKEVISIBLE     = (GT_TAGBASE + 78)
+NATIVE {GTLV_ItemHeight}      CONST GTLV_ITEMHEIGHT      = (GT_TAGBASE + 79)
+NATIVE {GTSL_MaxPixelLen}     CONST GTSL_MAXPIXELLEN     = (GT_TAGBASE + 80)
+NATIVE {GTSL_Justification}   CONST GTSL_JUSTIFICATION   = (GT_TAGBASE + 81)
+NATIVE {GTPA_ColorTable}      CONST GTPA_COLORTABLE      = (GT_TAGBASE + 82)
+NATIVE {GTLV_CallBack}        CONST GTLV_CALLBACK        = (GT_TAGBASE + 83)
+NATIVE {GTLV_MaxPen}          CONST GTLV_MAXPEN          = (GT_TAGBASE + 84)
+NATIVE {GTTX_Clipped}         CONST GTTX_CLIPPED         = (GT_TAGBASE + 85)
+NATIVE {GTNM_Clipped}         CONST GTNM_CLIPPED         = (GT_TAGBASE + 85)
+
+/* AROS Extensions */
+NATIVE {GTLV_Total}  	     CONST GTLV_TOTAL  	     = (GT_TAGBASE + 150) /* OM_GET */
+NATIVE {GTLV_Visible}	     CONST GTLV_VISIBLE	     = (GT_TAGBASE + 151) /* OM_GET */
+
+/* GTTX_Justification and GTNM_Justification */
+NATIVE {GTJ_LEFT}   CONST GTJ_LEFT   = 0
+NATIVE {GTJ_RIGHT}  CONST GTJ_RIGHT  = 1
+NATIVE {GTJ_CENTER} CONST GTJ_CENTER = 2
+
+/* GTBB_FrameType */
+NATIVE {BBFT_BUTTON}      CONST BBFT_BUTTON      = 1
+NATIVE {BBFT_RIDGE}       CONST BBFT_RIDGE       = 2
+NATIVE {BBFT_ICONDROPBOX} CONST BBFT_ICONDROPBOX = 3
+
+/* GTLV_CallBack */
+NATIVE {LV_DRAW} CONST LV_DRAW = $202
+/* return values from these hooks */
+NATIVE {LVCB_OK}      CONST LVCB_OK      = 0
+NATIVE {LVCB_UNKNOWN} CONST LVCB_UNKNOWN = 1
+
+NATIVE {INTERWIDTH}  CONST INTERWIDTH  = 8
+NATIVE {INTERHEIGHT} CONST INTERHEIGHT = 4
+
+NATIVE {LVDrawMsg} OBJECT lvdrawmsg
+    {lvdm_MethodID}	methodid	:ULONG /* LV_DRAW */
+    {lvdm_RastPort}	rastport	:PTR TO rastport
+    {lvdm_DrawInfo}	drawinfo	:PTR TO drawinfo
+    {lvdm_Bounds}	bounds	:rectangle
+    {lvdm_State}	state	:ULONG
+ENDOBJECT
+
+/* lvdm_State */
+NATIVE {LVR_NORMAL}           CONST LVR_NORMAL           = 0
+NATIVE {LVR_SELECTED}         CONST LVR_SELECTED         = 1
+NATIVE {LVR_NORMALDISABLED}   CONST LVR_NORMALDISABLED   = 2
+NATIVE {LVR_SELECTEDDISABLED} CONST LVR_SELECTEDDISABLED = 8

@@ -1,0 +1,20 @@
+MODULE '*interval','*qstringf'
+PROC main()
+DEF s[80]:STRING, a = 3, len, sptr, i
+sptr,len:=stringf(s,'a = %ld %ld %ld',[a,5,a])
+WriteF('\s \d\n',s,len)
+WriteF('\s\n',IF sptr=s THEN 'SAME' ELSE 'DIFFERENT')
+stringf(s,'a = \d \d \d %lb\n',[a,5,a,17])
+WriteF(s)
+stringf(s,'abcd')
+WriteF('\s\n',s)
+WriteF('Starting to time StringF\n')
+interval(TRUE)
+FOR i:=1 TO 5000 DO StringF(s,'\s \d \c \h\n','abcd',65,65,65)
+WriteF('string is \s',s)
+interval()
+WriteF('Starting to time stringf\n')
+FOR i:=1 TO 5000 DO stringf(s,'\s \d \c \h\n',['abcd',65,65,65])
+WriteF('string is \s',s)
+interval()
+ENDPROC

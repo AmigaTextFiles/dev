@@ -1,0 +1,69 @@
+        IFND M68k_EXCEPTIONS_I
+M68k_EXCEPTIONS_I        SET     1
+
+M68k_BusError = $8						;This exception is activated by a co-processor when, for instance, a reserved or non-existant memory range is accessed.
+M68k_AddressError = $c					;This error occurs when a word or long word access is atempted at an odd address.
+M68k_IllegalInstruction = $10			;Unknown Instruction occured
+M68k_DivisionByZero = $14				;Tried to divide by Zero
+M68k_CHKinstruction = $18				;This exception only occurs with the CHK instruction. This instruction tests that a data registers contents are within a certain limit. If this is not the case, the exception is activated.
+M68k_TRAPVinstruction = $1c				;If the TRAPV instruction is executed and the V bit (bit 1) in the status word is set, this exception is prompted.
+M68k_PrivilegeViolation = $20			;If a privileged instruction is called from the user mode, this exception is activated.
+M68k_Trace = $24							;If the trace bit (bit 15) in the status word is set, this exception is activated after each instruction that is executed. This method allows you to employ a step by step execution of machine programs.
+M68k_Axxx_instruction = $28				;These two vectors can be used for a quite interesting trick. If an instruction beginning with $A or $F (such as $A010 or $F200) is called the, the routine to which the corresponding vector is pointing is accessed. In these routines you can create chains of other M68k_instructions, in effect expanding the processors instruction vocabulary!
+M68k_Fxxx_instruction = $2c
+M68k_Reserved1 = $30
+M68k_Reserved2 = $34
+M68k_Reserved3 = $38
+M68k_Uninitialized_interrupt = $3c		;This exception is activated when a peripheral component that was not initialized sends an interrupt.
+M68k_Reserved4 = $40
+M68k_Reserved5 = $44
+M68k_Reserved6 = $48
+M68k_Reserved7 = $4c
+M68k_Reserved8 = $50
+M68k_Reserved9 = $54
+M68k_ReservedA = $58
+M68k_ReservedB = $5c
+M68k_Unjustified_interrupt = $60			;Is activated when a BUS error occurs during the interrupt verification of the activating component. However, the interrupt is usually only by some type of disturbance. 
+M68k_level1_interrupt = $64				;These seven vectors point to the interrupt routines of the corresponding priority levels. If the level indicated in the status word is higher than the level of the occuring interrupt, the interrupt is simply ignored.
+M68k_level2_interrupt = $68
+M68k_level3_interrupt = $6c
+M68k_level4_interrupt = $70
+M68k_level5_interrupt = $74
+M68k_level6_interrupt = $78
+M68k_level7_interrupt = $7c
+M68k_TRAP0_instructions = $80			;These 16 vectors are used when a corresponding TRAP instruction occurs. Thus, TRAP instructions from TRAP #0 to TRAP #15 are possible.
+M68k_TRAP1_instructions = $84
+M68k_TRAP2_instructions = $88
+M68k_TRAP3_instructions = $8c
+M68k_TRAP4_instructions = $90
+M68k_TRAP5_instructions = $94
+M68k_TRAP6_instructions = $98
+M68k_TRAP7_instructions = $9c
+M68k_TRAP8_instructions = $a0
+M68k_TRAP9_instructions = $a4
+M68k_TRAPA_instructions = $a8
+M68k_TRAPB_instructions = $ac
+M68k_TRAPC_instructions = $b0
+M68k_TRAPD_instructions = $b4
+M68k_TRAPE_instructions = $b8
+M68k_TRAPF_instructions = $bc
+M68k_ReservedC = $c0
+M68k_ReservedD = $c4
+M68k_ReservedE = $c8
+M68k_ReservedF = $cc
+M68k_ReservedG = $d0
+M68k_ReservedH = $d4
+M68k_ReservedI = $d8
+M68k_ReservedJ = $dc
+M68k_ReservedK = $e0
+M68k_ReservedL = $e4
+M68k_ReservedM = $e8
+M68k_ReservedN = $ec
+M68k_ReservedO = $f0
+M68k_ReservedP = $f4
+M68k_ReservedQ = $f8
+M68k_ReservedR = $fc
+M68k_UserInterrupt_vectors = $100	;$100-$3ff 	;These vectors are used for interrupts which are activated by several peripheral components that generate their own vector number.
+
+	ENDC
+	

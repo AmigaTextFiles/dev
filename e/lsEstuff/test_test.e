@@ -1,0 +1,9 @@
+OPT PREPROCESS
+MODULE '*macros'
+
+PROC main()
+   DEF a:REG, b[2]:ARRAY OF CHAR
+   FOR a := 0 TO 5000000
+      PUTCHAR(b, 9)
+   ENDFOR
+ENDPROC

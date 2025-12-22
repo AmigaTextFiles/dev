@@ -1,0 +1,191 @@
+// $Id: gadgetlist.cc 1.4 1997/09/17 08:16:09 dlorre Exp dlorre $
+#define INTUI_V36_NAMES_ONLY
+
+#include <exec/types.h>
+#include <exec/memory.h>
+
+#include <graphics/gfxbase.h>
+#include <libraries/gadtools.h>
+
+#include <devices/timer.h>
+
+#include <string.h>
+#include <stdio.h>
+#include <ctype.h>
+#include <mydebug.h>
+
+#include <proto/exec.h>
+#include <proto/dos.h>
+#include <proto/graphics.h>
+#include <proto/intuition.h>
+#include <proto/gadtools.h>
+
+#include "screen.h"
+#include "window.h"
+#include "gadgetlist.h"
+#include "gadgets/gadget.h"
+
+static struct EasyStruct GadgetListES = {
+    sizeof(struct EasyStruct),
+    0,
+    (UBYTE *)"GadgetList Corrupted",
+    (UBYTE *)"A window is in closing process.\n This window use %ld gadgets but %ld are declared.\nSorry, system will crash",
+    (UBYTE *)"Ok"
+} ;
+
+
+// ========================================================================
+// ==========================  GADGETLIST CLASS ===========================
+// ========================================================================
+
+gadgetlist::gadgetlist(window *w,
+                      WORD gmax) :  rectangle(0, 0, 0, 0),
+                                    count(0),
+                                    max(gmax),
+                                    win(w),
+                                    bfont(NULL),
+                                    initok(FALSE),
+                                    glist(NULL)
+{
+
+    if (gtab = new gadget *[max]) {
+        if (ng = new NewGadget) {
+            if (it = new IntuiText) {
+                gpen = win->ws->drawinfo->dri_Pens[TEXTPEN] ;     // Front pen
+                ng->ng_VisualInfo = win->ws->vi ;
+                setfont((TTextAttr *)win->ws->scr->Font) ;
+                if (bfont) {
+                    ng->ng_GadgetText = NULL ;
+                    ng->ng_Width = width ;
+                    ng->ng_Height = height ;
+                    ng->ng_LeftEdge = left ;
+                    ng->ng_TopEdge = top ;
+
+                    if (gad = (Gadget *)CreateContext(&glist)) {
+                        wp = win->win ;
+                        initok = TRUE ;
+                    }
+                }
+
+            }
+        }
+
+    }
+}
+
+gadgetlist::~gadgetlist() {
+
+    if (max < count) {
+        EasyRequest(NULL, &GadgetListES, NULL, count, max) ;
+    }
+    if (bfont) CloseFont(bfont) ;
+    if (initok) FreeGadgets(glist) ;
+    if (gtab) {
+    int i ;
+        for (i=0; i<count; i++) {
+// uncomment the following if your window crashes on exit...
+//            D(bug("freeing gtab[%ld] %lx\n", i, gtab[i])) ;
+            if (gtab[i]) delete gtab[i] ;
+        }
+        delete gtab ;
+    }
+    if (ng) delete ng ;
+    if (it) delete it ;
+}
+
+void gadgetlist::processgadget(LONG id, unsigned long classe, unsigned short code)
+{
+    gtab[id]->action(classe, code) ;
+}
+
+void gadgetlist::addgadgets()
+{
+    if (gad) {
+        AddGList(wp, glist, -1, -1, NULL);
+        RefreshGList(glist, wp, NULL, -1);
+        GT_RefreshWindow(wp, NULL) ;
+        win->hasgadgets = TRUE ;
+    }
+    else
+        win->initok = FALSE ;
+}
+
+void gadgetlist::updategadgets()
+{
+int i ;
+    wp = win->win ;
+    for (i=0; i<count; i++)
+        if (gtab[i])
+            gtab[i]->w = wp ;
+    GT_RefreshWindow(wp, NULL) ;
+    win->hasgadgets = TRUE ;
+}
+
+void gadgetlist::setfont(TTextAttr *tta)
+{
+    CopyMem(tta, &PlainAttr, sizeof(TTextAttr)) ;
+    BoldAttr = PlainAttr ;
+    BoldAttr.tta_Style |= FSF_BOLD ;
+    fontheight = PlainAttr.tta_YSize ;
+    if (bfont) CloseFont(bfont) ;
+    bfont = OpenFont((TextAttr *)&BoldAttr) ;
+    setdefault(FALSE) ;
+}
+
+void gadgetlist::setdefault(BOOL bolden)
+{
+    it->ITextFont = ng->ng_TextAttr =
+            bolden ?(TextAttr *)&BoldAttr: (TextAttr *)&PlainAttr ;
+}
+
+long gadgetlist::ltext(const char *s)
+{
+    it->IText = (UBYTE *)s ;
+    return IntuiTextLength(it) ;
+}
+
+long gadgetlist::lmax(const char **ms)
+{
+long max=0, l ;
+
+    while (*ms)
+        if ((l = ltext(*ms++)) > max) max = l ;
+
+    return max ;
+}
+
+long gadgetlist::lmax(const char *s, ...)
+{
+const char **ms = &s ;
+    return lmax(ms) ;
+}
+
+
+void gadgetlist::selectgadget(LONG id, BOOL shifted)
+{
+    if (id < count) gtab[id]->keystroke(shifted) ;
+}
+
+void gadgetlist::parsegadgets(USHORT code)
+{
+int     i ;
+BOOL    shifted ;
+
+    if (code > 0x20) {
+        shifted = BOOL(isupper(code)) ;
+        code = tolower(code) ;
+    }
+    else
+        shifted = FALSE ;
+
+    for (i=0; i<count; i++) {
+        if (gtab[i]->key == code) {
+            gtab[i]->keystroke(shifted) ;
+        }
+    }
+}
+
+gadget *gadgetlist::getgadget(LONG id)
+{
+    return gtab[id] ;
+}

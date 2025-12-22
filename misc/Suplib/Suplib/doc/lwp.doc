@@ -1,0 +1,356 @@
+
+			     LWP.DOC V1.00
+			   18 December 1988
+
+			LIGHT WEIGHT PROCESSES
+
+    Light weight processes are a useful tool when you need modularity but
+cannot afford the overhead (in memory and efficiency) of running each
+module as a separate task or process.  Specifically, the idea is to
+implement a domain such that one could place several dozen functional
+modules each in its own LWP.  Further, the whole idea to LWPs is that
+the context switch between them take a minimal amount of time.
+
+    LWPs as implemented here can do a synchronous context switch in 10
+instructions (includes 2 MOVEM instructions).  No asynchronous mechanism
+(preemption) exists.  This makes programming much easier and allows one to
+utilize the non-reentrant c.lib and other link libraries from LWPs.
+
+    Implementation and usage is also incredibly simple.  Starting up an
+LWP is about the same as calling a procedure.
+
+			       FEATURES
+
+    * LWP startup is a function performed by the subroutine rather than
+      the routine that calls the subroutine (the subroutine makes itself
+      into an LWP).  Usage is very simple.  Recursive and dynamic creation
+      of LWPs is inherent in the system.
+
+    * Thus, one can call a subroutine several times to create several LWPs
+      running the same code, but with different stack contexts.
+
+    * The LWP is automatically removed and the stack and descriptors freed
+      when an LWP process return()s.
+
+    * An alerter and waiter function exists for each LWP.  Any LWP may
+      alert any other, and any LWP may WaitLWP() to be alerted.  Non LWP's
+      may alert LWPs.
+
+      V1.03 and beyond:  AlertLWP() may now be called by another task or
+      any kind of interrupt.
+
+    * You can dynamically change the stack size of an LWP.  As this
+      reallocates the stack one must be careful about throwing around
+      addresses of local variables.  The contents of local variables are
+      not lost.  This is done by ForkLWP()ing a child then deleting the
+      parent, so the LWP descriptor will change too.
+
+    * No restrictions on register variables (the Alpha version had
+      restrictions).
+
+		      LIMITATIONS & RESTRICTIONS
+
+    * These calls are implemented for C compilers which always have a
+      link/unlk pair in their procedures, and use A5 for the link register.
+      As far as I know, Aztec C and Lattice C fall into this category if
+      you do not use the optimization options.
+
+    * Each LWP gets its own stack.  Those LWPs which make no external calls
+      may specify a stack size of 0 (assuming the compiler does not use
+      the stack for temporary variable space).	Those LWPs which make
+      stdio / DOS calls required at least a 2K stack.  Otherwise, the
+      stack size depends on the subroutines an LWP calls.
+
+
+      NOTE: IF EXCEPTIONS ARE ALLOWED FOR THE EXEC TASK, ALL LWPs MUST
+      HAVE ENOUGH STACK TO BE ABLE TO BE INTERRUPTED BY ONE OR MORE OF
+      THEM.
+
+      SPECIFICALLY, Lattice C uses exceptions to handle ^C (I think)...
+      this would have to be disabled.
+
+				USAGE
+
+	    Please refer to the example program lwptest.c
+
+    Here is an example:
+
+    main()
+    {
+	void lwp();
+
+	lwp("#A", 4L);
+	lwp("#B", 6L);
+	lwp("#C", 8L);
+	puts("main: beginning run");
+	RunLWP();
+    }
+
+    void
+    lwp(str, n)
+    char *str;
+    long n;
+    {
+	extern long ThisLWP;	/*  'current' LWP   */
+	long i;
+		    /*
+		     *	a 2K stack (because we are calling printf), and 8
+		     *	bytes (two longwords) of arguments.  Warning:
+		     *	interpretation of char and word arguments depends
+		     *	on integer size ... they are 4 bytes on the stack
+		     *	when using 32 bit ints, 2 bytes when using 16 bit
+		     *	ints.  Best to pass longs, but it is up to you.
+		     *
+		     *	If you specify 0 for the second argument (instead
+		     *	of 8), then no access to arguments passed to this
+		     *	subroutine exists after the InitLWP() call.  Since
+		     *	you are running in the initial stack context before
+		     *	the InitLWP() call, you *can* use the arguments.
+		     *	Note thus that before the InitLWP() call you *do*
+		     *	have access to the main stack and can thus make
+		     *	calls which use a lot of stack.
+		     *
+		     *	If you specify 0 for the stack size, only enough
+		     *	stack for this subroutine will be allocated (local
+		     *	variables and such).  Other values specify the
+		     *	excess stack beyond this minimum that you want.
+		     */
+
+	if (ForkLWP(2048, 8)) {
+	    printf("Parent's LWP = %08lx (should be 0)\n", ThisLWP);
+	    printf("child %s queued\n", str);
+	    return;		   /* parent returns, child is queued  */
+	}
+	printf("Child's LWP = %08lx (should be non-zero)\n", ThisLWP);
+	printf("child %s running\n", str);
+
+	for (i = 0; i <= n; ++i) {
+	    printf("lwp %s %ld/%ld\n", str, i, n);
+	    SwitchLWP();           /* let other LWPs run */
+	}
+	/* return automatically unlinks and frees memory associated with the
+	 * lwp descriptor and stack
+	 */
+    }
+
+    1> main
+    Parent's LWP = 00000000 (should be 0)
+    child #A queued
+    Parent's LWP = 00000000 (should be 0)
+    child #B queued
+    Parent's LWP = 00000000 (should be 0)
+    child #C queued
+    main: beginning run
+    Child's LWP = <someadr> (should be non-zero)
+    child #C running
+    lwp #C 0/8
+    Child's LWP = <someadr> (should be non-zero)
+    child #B running
+    lwp #B 0/6
+    Child's LWP = <someadr> (should be non-zero)
+    child #A running
+    lwp #A 0/4
+    lwp #C 1/8
+    lwp #B 1/6
+    lwp #A 1/4
+    lwp #C 2/8
+    lwp #B 2/6
+    lwp #A 2/4
+    lwp #C 3/8
+    lwp #B 3/6
+    lwp #A 3/4
+    lwp #C 4/8
+    lwp #B 4/6
+    lwp #A 4/4
+    lwp #C 5/8
+    lwp #B 5/6
+    lwp #C 6/8
+    lwp #B 6/6
+    lwp #C 7/8
+    lwp #C 8/8
+
+
+    Operation works like this:	main() calls the subroutine to be made
+    into an LWP process.  At some point in the beginning the subroutine
+    will make a call to ForkLWP(), which allocates and copies its context,
+    then returns 0 to the child and non-zero to the 'parent'.  Normally,
+    the 'parent' returns back to main().
+
+    ForkLWP() allocates a stack large enough to handle the child's
+    local variables, arguments, and the extra stack space specified.  If
+    you were to specify a stack size of 0 then the subroutine would have
+    only enough stack for its local variables and would not be able to
+    make other subroutine calls.
+
+    ForkLWP() saves the subroutine's stack context and registers onto
+    the newly allocated stack and LWP descriptor, then returns a non-zero
+    (the LWP descriptor which may be used to AlertLWP() the child) to the
+    parent, and 0 to the child.  main() then RunLWP()s
+
+    RunLWP() returns whenever there are no LWPs ready to run... either
+    when they have all been deleted or all the remaining ones are waiting
+    for an event.
+
+    Note that new light weight processes may be added at any time, even
+    by other LWPs.
+
+		       WaitLWP()/AlertLWP()/SwitchLWP()
+
+
+    When an LWP gets CPU, it must relinquish it to allow the next LWP
+    to run.  Calling SwitchLWP() will accomplish this.  SwitchLWP() is
+    a fast nop if no other LWPs are ready to run.  Calling WaitLWP() will
+    cause the LWP to be removed from the list of LWPs ready to run and
+    cause a context switch to the next ready LWP.  (Remember that the
+    highlevel call RunLWP() will return whenever there are no LWPs ready
+    to run).
+
+    The global variable ThisLWP identifies the LWP descriptor (longword)
+    for the currently running LWP.  Be very careful about LWP descriptors..
+    they become invalid whenever that particular LWP exits.  Also be
+    careful about passing pointers around ... when an LWP exits, its
+    stack goes away.
+
+    extern long ThisLWP;
+
+    main()
+    {
+	master();
+	RunLWP();
+    }
+
+    master()
+    {
+	long slave();
+	long slave_id;
+
+	if (ForkLWP(2048, 0))
+	    return;
+	slave_id = slave(ThisLWP);
+	puts("master: Waiting for Slave to signal me");
+	WaitLWP();
+	puts("master: Master Signalling slave to exit & Master exiting");
+	AlertLWP(slave_id);
+    }
+
+    long
+    slave(master_id)
+    long master_id;
+    {
+	long slave_id;
+	if (slave_id = ForkLWP(2048, 4))
+	    return(slave_id);
+	AlertLWP(master_id);
+	puts("slave: alerting master & waiting for master to signal me");
+	WaitLWP();
+		    /* master_id now invalid because it exited */
+	puts("slave: master signalled me, exiting");
+    }
+
+    1> main
+    master: Waiting for Slave to signal me
+    slave: alerting master & waiting for master to signal me
+    master: Master Signalling slave to exit & Master exiting
+    slave: master signalled me, exiting
+
+
+				TECHNICAL
+
+	As you have seen, one LWP may startup another.	You might ask,
+    what happens if an LWP calls ForkLWP() more than once?  The answer
+    is that it forks off the subroutine again:
+
+    main()
+    {
+	lwp();
+	RunLWP();
+    }
+
+    lwp()
+    {
+	short i = 23;
+	short j = 0;
+
+	if (ForkLWP(2048, 0))
+	    return;
+			    /* when child is initially run by RunLWP */
+	ForkLWP(2048, 0);
+			    /* there are now TWO LWPs at this pt */
+	++j;
+	printf("j had better be one both times, is %d\n", j);
+    }
+
+    1> main
+    j had better be one both times, is 1
+    j had better be one both times, is 1
+
+			  VERY ADVANCED TOPICS
+
+    A new function (1.03 and beyond) has been added called AutoAlertLWP().
+    The format is:
+
+	AutoAlertLWP(port, lwp/NULL)
+
+    This function turns on or off automatic alerting of LWPs when a message
+    is sent to an EXEC message port.  The port must have mp_SigBit setup
+    initially.	Calling with a valid LWP descriptor sets pa_Flags to 3 and
+    pa_SigTask to a special handler routine (3 is an undocumented direct
+    call feature of ports).  Calling with a NULL LWP descriptor sets
+    pa_Flags to 2 (PA_SIGNAL) and ps_SigTask to your task.
+
+    While a port is setup for AutoAlert, it will do one of two things:
+
+	(1) If LWPs are not running (not within a RunLWP() call), sending
+	    a message to the port causes the task to get signaled AMD the
+	    lwp to be alerted to be put on the ready list.
+
+	(2) If LWPs are running, sending a message to the port causes the
+	    LWP to be alerted to be put on the ready list.
+
+    AutoAlertLWP() allows one to have a single Wait() call in his main()
+    loop, something like:
+
+	SetSignal(Mask,Mask);   /*  force first Wait to fall through */
+	while (Mask) {
+	    Wait(Mask);     /*  all signals that are being autoAlerted   */
+	    RunLWP();       /*  run LWPs until all processing has completed */
+	}
+
+    Where there is an LWP for every signal in question which does a WaitLWP()
+    and then processes all the messages on the port in an endless loop.  Note
+    that in the above example, the main loop actually occurs ONLY when the
+    program has no processing to do, for if a waiting LWP gets messaged while
+    RunLWP() is running, it gets linked into the ready list and RunLWP()
+    inherently runs it again.
+
+    RESTRICTIONS:   Only one LWP may be applied to a specific signal bit
+    at a time.	While you can AutoAlertLWP() several ports to the same LWP,
+    you cannot AutoAlertLWP() several ports with the same signal bit to
+    different LWPs.  You can AutoAlert() several ports with different
+    signal bits to different LWPs.  Understand?
+
+    void
+    somelwp(port)
+    PORT *port;
+    {
+	long lwp;
+	if (lwp = ForkLWP(2048, 4)) {   /*  initialization */
+	    AutoAlertLWP(port, lwp);
+	    return;
+	}
+	for (;;) {
+	    WaitLWP();
+	    while (msg = GetMsg(port)) {
+		/* optional SwitchLWP() in here if you want a finer
+		 * illusion of multiple processes.
+		 */
+	    }
+	    /* else you don't need a SwitchLWP() at all w/ the WaitLWP() above */
+	}
+    }
+
+    Note that if unread messages exist on the port when AutoAlertLWP() is
+    called, the LWP is immediately alerted (and the task signaled if LWPs
+    are not running yet).  If unread messages exist on the port when
+    AutoAlertLWP(port, NULL) is called, the task is immediately signaled.
+

@@ -1,0 +1,544 @@
+
+
+*************************************************************************
+*                                                                       *
+*       dreg.a   v1.21   -   A68k Data Register Processor               *
+*                                                                       *
+*       started:    24-jun-93                                           *
+*       updates:    26-jul-93   iconize gadget added                    *
+*                   22-mar-93   AutoStartup code added                  *
+*                    1-feb-99   Corrected Enforcer hit                  *
+*                               (as suggested by Thomas Bieg)           *
+*                                                                       *
+*       Assembled using Devpac v3.02 and system.gs                      *
+*                                                                       *
+*                                                                       *
+*************************************************************************
+*
+
+            opt     d-,s-,o+,w+
+
+*            include     graphics/graphics_lib.i
+*            include     intuition/intuition.i
+*            include     intuition/intuition_lib.i
+*            include     exec/exec.i
+            include     exec/execbase.i
+*            include     exec/exec_lib.i
+*            include     libraries/dosextens.i
+*            include     libraries/dos_lib.i
+*            include     libraries/arpbase.i
+            include     launch.i
+
+
+*       Open the graphics & intuition libraries,
+*           then open a window and change it's title and colours
+
+
+regi_main:  move.l  _SysBase,a6
+            lea.l   gfxname,a1              graphics library
+            moveq.l #0,d0
+            jsr     _LVOOpenLibrary(a6)
+            move.l  d0,gfxBase              store the pointer
+            beq     .NoGfx                  if library found, else exit
+
+            lea.l   intuiname,a1            try for intuition library
+            moveq.l #0,d0
+            jsr     _LVOOpenLibrary(a6)
+            move.l  d0,intuitionBase        store the pointer
+            beq.s   .NoInt                      if library found, else exit
+
+            movea.l gfxBase,a6              a6 <- is grafixbase
+            lea.l   RegFntFont,a1           the included small font
+            jsr     _LVOAddFont(a6)         set up the small font
+
+            move.l  _SysBase,a6
+            move.w  SoftVer(a6),d0          pick up KS version from exec
+            cmpi.w  #34,d0
+            ble.s   .sho_up                 pass if old WB...
+            bsr     mod_colrs               Set up colours for WB 2.xx
+.sho_up:    bsr     put_windo
+            tst.l   d0
+            beq.s   .NoWin
+
+*       All ready to roll...
+
+            bsr     put_panel               first put up the panel
+            bsr     bit_proc           <--  DO THE MAIN JOB...
+            cmpi.w  #300,d7                 until the ICONIZE gadget or
+            bne.s   .quits                  CLOSE gadget was pressed
+
+.iconize:   bsr     wndw_icon               change window -> icon
+            tst.l   d0                      if not possible...
+            beq.s   .sho_up                     ...then replace window
+            bsr.s   icon_proc               wait for icon messages
+            bsr     icon_close                  close icon
+            bra.s   .sho_up                        and replace window
+
+
+*       when we get here, the 'CLOSE GADGET' was pressed...
+
+.quits:     movea.l intuitionBase,a6        a6 <- is intuibase
+            move.l  regwindow,a0            ...we can quit now, but
+            beq.s   .NoWin
+            jsr     _LVOCloseWindow(a6)         first close the window
+.NoWin:     movea.l gfxBase,a6              a6 <- is grafixbase
+            lea.l   RegFntFont,a1
+            jsr     _LVORemFont(a6)
+            move.l  _SysBase,a6
+            move.l  intuitionBase,a1
+            jsr     _LVOCloseLibrary(a6)    close the intuition library...
+.NoInt:     move.l  gfxBase,a1
+            jsr     _LVOCloseLibrary(a6)        and the graphics library...
+.NoGfx:     clr.l   d0
+            rts                                     ...byeeee
+
+
+
+*****************************************************************************
+*
+*               S U B R O U T I N E S
+*
+*****************************************************************************
+*
+*       Wait for the iconized DReg to be activated
+*       Inputs:     a4 <- pointer to window structure
+
+
+icon_proc:  bsr.s   wait_sig
+.button:    cmpi.l  #MOUSEBUTTONS,d6        was a button pressed ?
+            bne.s   .nxt_mesg               either get next message
+            cmpi.w  #MENUUP,d5              or was it right button ?
+            beq.s   .ip_ex                     YES - so un-iconize!
+.nxt_mesg:  bsr.s   get_mesg
+            bra.s   .button
+.ip_ex:     rts                                     and go back
+
+
+*****************************************************************************
+*
+*       Wait for a signal and return any messages
+*       Inputs:     a4 <- pointer to window structure
+
+
+wait_sig:   move.l  wd_UserPort(a4),a0      find window's user port address
+            move.b  MP_SIGBIT(a0),d7        d7<-number of message signal
+            moveq.l #1,d0
+            lsl.l   d7,d0                   d0<-calculate signal value
+            jsr     _LVOWait(a6)            and wait until signal occurs
+
+get_mesg:   move.l  wd_UserPort(a4),a0      find window's user port address
+            jsr     _LVOGetMsg(a6)
+            tst.l   d0
+            beq.s   wait_sig                no messages, wait for next sig
+
+            move.l  d0,a1                       else store it...
+            move.l  im_Class(a1),d6         d6<-IDCMPFlags
+            move.w  im_Code(a1),d5          d5<-IDCMPCodes
+            movea.l im_IAddress(a1),a3      a3<-pointer to gadget struct
+            jsr     _LVOReplyMsg(a6)              ...and reply to it
+            rts
+
+
+*****************************************************************************
+*
+*       This is the main event polling routine
+*       Inputs:     a4 <- pointer to window structure
+*       Outputs:    d7 <- gadget id - exit only for ICONIZE or CLOSE gads
+
+
+bit_proc:   movem.l a6,-(sp)
+            bsr.s   wait_sig
+
+.button:    cmpi.l  #CLOSEWINDOW,d6
+            beq.s   .bp_ex                 finished for now, close...
+            cmpi.l  #GADGETDOWN,d6
+            beq.s   .gad_dwn
+            cmpi.l  #GADGETUP,d6            check for nw_IDCMPFlags
+            beq.s   .gad_up
+.get_mesg:  bsr.s   get_mesg
+            bra.s   .button
+
+
+*       check out the relverify gadgets
+
+.gad_up:    move.w  gg_GadgetID(a3),d7      d7<-which gadget ?
+            cmpi.w  #80,d7
+            blt.s   .get_mesg
+            cmpi.w  #81,d7                  the register select gadgets
+            bgt.s   .filter
+            move.w  #numregs-1,d6           d6<- cycling d0-d4 (d7)
+            bsr     reg_cycle               dealing with 80 - 81
+.filter:    cmpi.w  #900,d7
+            bmi.s   .chk_icg
+            bsr     do_about                ABOUT gadget - do the thing
+.chk_icg:   cmpi.w  #300,d7                 the Iconize gadget
+            beq.s   .bp_ex                     so exit
+            cmpi.w  #200,d7
+            bmi.s   .get_mesg
+            cmpi.w  #223,d7                 filter out 200 - 223
+            beq.s   .dec_hex                     223 is HEX/DEC toggle !!
+            bpl.s   .get_mesg
+            bsr     processit               they are the ops gadgets
+            bra.s   .get_mesg                           and carry on...
+.dec_hex:   bsr.s   tog_disp                switch between displays
+            bra.s   .get_mesg                           and carry on...
+
+
+*       got an immediate gadget,  0 to 71, 90 to 92, 200 to 250
+
+.gad_dwn:   move.w  gg_GadgetID(a3),d7      d7<-which gadget ?
+            cmpi.w  #90,d7                  filter out 90 to 92
+            bmi.s   .modbits
+            cmpi.w  #92,d7
+            bgt.s   .modbits
+            bsr     one_only                opsize specifier selected
+.modbits:   cmpi.w  #72,d7
+            bgt.s   .get_mesg                   and carry on...
+            bsr     dat_disp                deal with data & display
+            bra.s   .get_mesg                   and carry on...
+
+.bp_ex:     movem.l (sp)+,a6
+            rts
+
+
+*****************************************************************************
+*
+*       Cycle through HEX or DECimal display
+
+
+tog_disp:   movea.l intuitionBase,a6        a6<-using intuition library
+            lea.l   TxtINPUT,a0
+            lea.l   HexDec,a1
+            move.w  dispsel,d1
+            eori.w  #$0004,d1               toggle HEX or DECimal display
+            move.w  d1,dispsel
+            move.l  (a1,d1),d0              pick up the HEX or DEC string
+            move.l  d0,(a0)                     tie it to the gadget
+            moveq.l #1,d0                       ...and refresh it
+            bsr     gad_refrsh
+            bsr     displ_val
+.td_ex:     move.l  _SysBase,a6             a6 <- SysBase for Mesg
+            rts
+
+
+*****************************************************************************
+*
+*       It's Workbench 2.xx - so change the colours
+*       input:      none
+
+
+bar_gadg:   move.w  d0,gg_LeftEdge(a3)
+            move.w  d1,gg_Height(a3)
+            move.l  d2,gg_GadgetRender(a3)
+            move.l  d3,gg_SelectRender(a3)
+            rts
+
+mod_colrs:  movem.l a3-a4,-(sp)
+            lea.l   ImageBit0,a0
+            move.l  #ImageDat2Bit0,d0       the new zero image
+            move.l  d0,ig_ImageData(a0)
+            add.w   #36,d0                      and the new one image
+            adda.w  #20,a0
+            move.l  d0,ig_ImageData(a0)     this re-maps the bit colours
+            moveq.w #0,d0                   colour for backgroundfill
+            move.w  d0,wflood
+
+            lea.l   Iconizer,a3
+            move.w  gg_LeftEdge(a3),d0
+            addi.w  #29,d0                  reposition the iconize gadget
+            moveq.w #11,d1                      the new height
+            move.l  #ImageIcon2a,d2
+            move.l  #ImageIcon2b,d3         supply the new gadget image
+            bsr.s   bar_gadg
+
+            lea.l   Icondumm,a3                 plus the dummy...
+            bsr.s   bar_gadg
+
+            lea.l   BordrHexpx,a3           deal with border structures
+            moveq.w #nrBs,d3                d3<-number of structures -1
+            moveq.l #bd_FrontPen,d4         d4<-structure offset
+            moveq.l #bd_BackPen,d5          d5<-ditto
+            moveq.l #BsLen,d6               d6<-structure size
+            bsr.s   scan_struc
+            lea.l   ITxtLng,a3              do the text structures
+            moveq.w #nrIs,d3
+            moveq.l #it_FrontPen,d4             regs as above
+            moveq.l #it_BackPen,d5
+            moveq.l #IsLen,d6
+            bsr.s   scan_struc
+.mc_ex:     movem.l (sp)+,a3-a4
+            rts
+
+
+scan_struc: lea.l   col_tab,a4              a4<-address of colour tab
+            move.w  d3,d7
+.nxtpen:    movea.l a3,a0
+.nxtstr:    movea.l a4,a1
+            moveq.w #3,d2                   d2<-number of colours
+.penloop:   move.w  (a1)+,d1
+            cmp.b   (a0,d4),d1
+            beq.s   .pen_found
+            dbra    d2,.penloop
+.pen_found: lsr.w   #8,d1
+            move.b  d1,(a0,d4)
+.bloop:     adda.w  d6,a0                   go to next structure
+            dbra    d3,.nxtstr
+            move.w  d5,d4                   change to bg pen
+            exg     d7,d3
+            cmp.w   d7,d3
+            bne.s   .nxtpen
+.bs_ex:     rts
+
+
+*****************************************************************************
+*
+*       Go and open a window in any case
+*           then iconize or de-iconize it
+
+
+put_windo:  movem.l a6,-(sp)
+            movea.l intuitionBase,a6        a6<-using intuition library
+            lea.l   RegNWindo,a0            a0<-holds newwindow address
+            bsr.s   copy_nw                 returns with windowptr in a4
+            move.l  d0,regwindow            store the window pointer
+.pw_ex:     movem.l (sp)+,a6
+            rts
+
+copy_nw:    lea.l   newwin,a1               this is our newwindow struct
+            move.l  a1,a2
+            moveq.w #wstrucsz-1,d3          window structure size
+.copy:      move.b  (a0)+,(a1)+
+            dbra    d3,.copy
+            exg.l   a2,a0
+            jsr     _LVOOpenWindow(a6)
+            move.l  d0,a4                   a4<-from now holds windowptr
+            rts
+
+wndw_icon:  movem.l a6,-(sp)
+            movea.l intuitionBase,a6        a6<-using intuition library
+            lea.l   RegNWindo,a0
+            bsr.s   close_win               close the window
+            moveq.l #0,d0
+            move.l  d0,regwindow                and clear it's pointer
+            lea.l   OpSizLong,a1            don't want feedback loops !!
+            move.l  d0,(a1)                 last gadget points to 0
+            lea.l   IconNWindo,a0           now open the icon window
+            bsr.s   copy_nw                 returns with windowptr in a4
+            move.l  d0,iconwindow           store the window pointer
+.iw_ex:     movem.l (sp)+,a6
+            rts
+
+close_win:  move.w  wd_LeftEdge(a4),(a0)
+            move.w  wd_TopEdge(a4),nw_TopEdge(a0)   remember last pos
+            movea.l a4,a0
+            jsr     _LVOCloseWindow(a6)         close the window
+            rts
+
+icon_close: movem.l a6,-(sp)
+            movea.l intuitionBase,a6        a6<-using intuition library
+            lea.l   IconNWindo,a0
+            bsr.s   close_win               close the window
+            clr.l   iconwindow
+.wi_ex:     movem.l (sp)+,a6
+            rts
+
+
+*****************************************************************************
+*
+*       Fill the window and draw a border
+*       input:      a4 <-window structure pointer
+
+win_gfx:    movea.l gfxBase,a6              a6<-using grafix library
+            movea.l wd_RPort(a4),a1         get the window's rastport
+            move.w  wflood,d0
+            jsr     _LVOSetAPen(a6)         set fgpen
+            movea.l wd_RPort(a4),a1         get the window's rastport
+            moveq.l #4,d0
+            moveq.l #11,d1
+            move.l  #445,d2
+            moveq.l #71,d3
+            jsr     _LVORectFill(a6)        fill the window with colour 2
+            movea.l intuitionBase,a6        a6<-using intuition library
+            move.l  a4,a0                   get the window pointer
+            moveq.l #-1,d0
+            move.l  d0,a2                   leave Screen title, but
+            lea.l   regwindowtitle,a1           change the Window title
+            jsr     _LVOSetWindowTitles(a6)
+            movea.l wd_RPort(a4),a0         get the window's rastport
+            lea.l   ITxSStBit,a1            pick up the Status Bits text
+            moveq.l #0,d0                   relative X pos in window
+            moveq.l #0,d1                      "     Y pos
+            jsr     _LVOPrintIText(a6)
+.wg_ex:     rts
+
+
+*****************************************************************************
+*
+*       Put some graphics into the window
+*       inputs:     a4 <-window structure pointer or zero
+
+
+put_panel:  movem.l a6,-(sp)
+            bsr.s   win_gfx                 returns with intuiBase in a6
+            bsr     displ_val               put up hex and
+            bsr     disp_flag                              flags display
+
+
+*       add gadgets to window and make them visible
+
+            lea.l   Icondumm,a1             remove dummy icon first
+            movea.l a4,a0
+            jsr     _LVORemoveGadget(a6)
+            move.l  wd_FirstGadget(a4),d6   d6<-address of window gads
+            movea.l a4,a0                   the window's pointer
+            lea.l   OpAbout,a1              pointer to gadget struct
+            lea.l   OpSizWord,a3
+            moveq.l #0,d2
+            add.b   op_size,d2              default = 0 = .W
+            neg.w   d2
+            muls.w  #gadstsiz,d2
+            adda.l  d2,a3
+            ori.w   #SELECTED,gg_Flags(a3)      word size on
+            moveq.l #0,d0                   start with first in list
+            moveq.l #-1,d1                          add all...
+            moveq.l #0,d2
+            move.l  d2,a2                   no requester...
+            jsr     _LVOAddGList(a6)        add all our updated gadgets
+            lea.l   OpSizLong,a1
+            move.l  d6,(a1)
+            lea.l   OpAbout,a3              pointer to gadget struct
+            moveq.l #-1,d0                      all gadgets...
+            bsr     gad_refrsh
+.gfx_ex:    movem.l (sp)+,a6
+            rts
+
+
+*****************************************************************************
+
+                include     regsub.s
+                include     reggds.s
+                include     reggfx.s
+
+*****************************************************************************
+
+                even
+
+                section     regivars,DATA
+
+RegNWindo:      dc.w    9                   nw_LeftEdge
+                dc.w    66                  nw_TopEdge
+                dc.w    448                 nw_Width
+                dc.w    73                  nw_Height
+                dc.b    -1                  nw_DetailPen
+                dc.b    -1                  nw_BlockPen
+                dc.l    regwinflgs          nw_IDCMPFlags
+                dc.l    regiflags           nw_Flags
+                dc.l    Icondumm            nw_FirstGadget
+                dc.l    0
+                dc.l    regwindowtitle      nw_Title
+                dc.l    0                   nw_Screen
+                dc.l    0                   nw_BitMap
+                dc.w    0                   nw_MinWidth
+                dc.w    0                   nw_MinHeight
+                dc.w    0                   nw_MaxWidth
+                dc.w    0                   nw_MaxHeight
+                dc.w    WBENCHSCREEN        nw_Type
+                even
+regwindowtitle: dc.b    'A68k Data Register Processor',0
+                even
+
+IconNWindo:     dc.w    0,0,56,10
+                dc.b    1,2
+                dc.l    MOUSEBUTTONS
+                dc.l    iconflags
+                dc.l    0,0
+                dc.l    ic_Title
+                dc.l    0,0
+                dc.w    0,0,0,0,WBENCHSCREEN
+                even
+ic_Title:       dc.b    '_DReg_',0
+                even
+
+wflood:         dc.w    2
+gadsw:          dc.w    0
+col_tab:        dc.b    1,0,2,1,0,2,3,3
+                dc.b    0,0
+                even
+
+gfxBase:        dc.l    0                   library pointers
+intuitionBase:  dc.l    0
+
+regwindow:      dc.l    0                   pointers to Window structures
+iconwindow:     dc.l    0
+regRequest:     dc.l    0                   Requester structure pointer
+
+registerd0:     dc.l    0
+registerd1:     dc.l    0                   register contents
+registerd2:     dc.l    0
+registerd3:     dc.l    0
+oldsrcreg:      dc.l    0
+rawstuff:       dc.l    0
+
+regselect:      dc.l    TxtRd0
+                dc.l    TxtRd1              register select list
+                dc.l    TxtRd2
+                dc.l    TxtRd3
+regend:         dc.l    registerd0
+                dc.l    registerd1
+                dc.l    registerd2
+                dc.l    registerd3
+
+sourcinput:     dc.l    registerd0          the active source and
+destinput:      dc.l    registerd1               destination registers
+condcodes:      dc.w    0
+                dc.w    0
+dispsel:        dc.w    0                   display switch
+HexDec:         dc.b    'HEX',0,'DEC',0         strings for HEX or DEC
+hex_array:      dc.b    '0123456789ABCDEF',0
+op_size:        dc.b    0,0
+
+                even
+gfxname:        dc.b    'graphics.library',0
+                even
+intuiname:      dc.b    'intuition.library',0
+                even
+newwin:         ds.b    128
+
+verstring:      dc.b    '$VER: DReg 1.21 (01/02/1999) Copyright © stranded ufo',0
+				dc.b	0,0
+sajt:           dc.b    'B-Q',0
+                even
+
+
+*****************************************************************************
+*
+*           E Q U A T E S
+
+
+_SysBase        equ     $00000004
+
+reqsize         equ     rq_SIZEOF
+wstrucsz        equ     IconNWindo-RegNWindo
+regoff          equ     regend-regselect
+numregs         equ     regoff/4
+
+regiflags1      equ     WINDOWDRAG+SMART_REFRESH+RMBTRAP+NOCAREREFRESH
+regiflags2      equ     WINDOWDEPTH+WINDOWCLOSE
+regiflags3      equ     WBENCHWINDOW                      +ACTIVATE
+regiflags       equ     regiflags1+regiflags2+regiflags3
+regwinflgs      equ     CLOSEWINDOW+GADGETDOWN+GADGETUP+REQVERIFY
+
+iconflags       equ     regiflags1
+
+bitflags        equ     GADGIMAGE+GADGHIMAGE
+bitactiv        equ     TOGGLESELECT+GADGIMMEDIATE
+opactiv         equ     RELVERIFY
+
+                END
+
+
+*****************************************************************************
+
+
+
+
