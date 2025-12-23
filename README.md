@@ -1,6 +1,5 @@
-[https://aminet.net/tree?path=dev
+https://aminet.net/tree?path=dev
 
-](https://aminet.net/tree?path=dev)
 
 dev/amos - AMOS BASIC compiler (351 packages)
 
